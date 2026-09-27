@@ -1,0 +1,6 @@
+{
+  "name": "Photon Camera",
+  "description": "A professional digital mirrorless camera app with RAW demosaicing, HDRNet processing, and manual controls",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
