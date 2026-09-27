@@ -1302,4 +1302,28 @@
     <string name="settings_accent_color_reset">恢复默认</string>
     <string name="settings_accent_color_hex_hint">输入 #RRGGBB 格式的六位颜色值。</string>
     <string name="settings_accent_color_hex_error">请输入六位十六进制字符（0–9、A–F）。</string>
+
+    <string name="camera_parameter_auto">AUTO</string>
+    <string name="camera_parameter_exposure">EV</string>
+    <string name="camera_parameter_shutter">快门</string>
+    <string name="camera_parameter_iso">ISO</string>
+    <string name="camera_parameter_focus">对焦</string>
+    <string name="camera_parameter_white_balance">白平衡</string>
+    <string name="ok">确定</string>
+    <string name="dng_format">DNG</string>
+    <string name="settings_language_chinese_simplified">简体中文</string>
+    <string name="settings_language_chinese_traditional">繁體中文</string>
+    <string name="settings_language_chinese_hong_kong">繁體中文（香港）</string>
+    <string name="settings_language_english">English</string>
+    <string name="settings_language_japanese">日本語</string>
+    <string name="settings_language_korean">한국어</string>
+    <string name="settings_language_german">Deutsch</string>
+    <string name="settings_language_french">Français</string>
+    <string name="settings_language_portuguese_brazil">Português (Brasil)</string>
+    <string name="settings_language_indonesian">Bahasa Indonesia</string>
+    <string name="settings_language_thai">ไทย</string>
+    <string name="raw_noise_profile_galaxy_m51">Galaxy M51</string>
+    <string name="raw_noise_profile_lgv50">LG V50</string>
+    <string name="raw_noise_profile_agc26">AGC26</string>
+    <string name="export_video_resolution_dimensions">%1 × %2</string>
 </resources>
