@@ -1728,8 +1728,8 @@ fun CameraScreen(
             meteringMode = state.meteringMode,
             onMeteringModeChange = { viewModel.setMeteringMode(it) },
             onFilterManageClick = {
+                // LUT management has been removed.
                 activePanel = ActivePanel.NONE
-                onFilterManagementClick(null)
             },
             onFrameManageClick = {
                 activePanel = ActivePanel.NONE
@@ -1859,19 +1859,6 @@ fun CameraScreen(
                         .padding(start = 6.dp, top = 10.dp, end = 6.dp)
                 )
             }
-        }
-
-        if (activePanel == ActivePanel.EDIT) {
-            LutEditBottomSheet(
-                lutId = currentLutId,
-                initialParams = previewRecipeParamsOverride ?: currentRecipeParams,
-                onParamsPreviewChange = { previewRecipeParamsOverride = it },
-                showEffects = true,
-                onDismiss = {
-                    previewRecipeParamsOverride = null
-                    activePanel = ActivePanel.FILTERS
-                }
-            )
         }
 
         captureAnimationSnapshot?.let { snapshot ->
