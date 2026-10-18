@@ -2164,6 +2164,7 @@ object GalleryManager {
             PLog.i(TAG, "Saved device ISP JPEG directly: $photoId (${targetFile.length()} bytes)")
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to save device ISP JPEG for $photoId", e)
+            throw e
         }
     }
 
