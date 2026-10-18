@@ -3578,98 +3578,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun processCapturedPhoto(photo: CapturedPhoto, settings: CaptureSettingsSnapshot) {
-        val first = photo.frames.first()
-        val captureInfo = first.captureInfo
-        val characteristics = first.characteristics
-        val captureResult = first.captureResult
-        if (settings.multipleExposure) {
-            handleMultipleExposureFrameCaptured(first.image, captureInfo, settings)
-        } else if (photo.state.hdrBracketCapturing) {
-            processHdrBracket(
-                images = photo.frames.map { it.image },
-                captureResults = photo.frames.map { it.captureResult },
-                zeroEvFrameCount = photo.frames.size - 2,
-                expectedFrameCount = photo.frames.size,
-                captureInfo = captureInfo,
-                characteristics = characteristics,
-                captureResult = captureResult,
-                settings = settings,
-            )
-        } else if (photo.state.isMultiFrameEnabled) {
-            val burstPlanningStartedAtMs = SystemClock.elapsedRealtime()
-            val chronologicalFrames = photo.frames.map {
-                PendingRawStackFrame(rawStackFrame(it.image, it.captureResult, it.frameMetadata), it.captureInfo, it.captureResult)
-            }.sortedBy { it.frame.sensorTimestampNs }
-            val rawMaxMode = photo.state.hdrPlusMergeMode
-            val rawMaxHdrFusionEnabled = photo.state.isHdrPlusBracketExposureEnabled
-            val exposurePlan = RawmaxExposurePlanner.plan(
-                exposureProducts = chronologicalFrames.map { it.frame.exposureProduct },
-                frameRoles = chronologicalFrames.map { it.frame.role },
-                enableHdrFusion = rawMaxHdrFusionEnabled,
-            )
-            val normalFrames = exposurePlan.normalIndices.map(chronologicalFrames::get)
-            val auxiliaryIndices = buildList {
-                exposurePlan.shortIndex?.let(::add)
-                addAll(exposurePlan.longIndices.toList())
-            }
-            val auxiliaryFrames = auxiliaryIndices.map(chronologicalFrames::get)
-            exposurePlan.excludedIndices.forEach { excludedIndex ->
-                chronologicalFrames[excludedIndex].frame.image.close()
-            }
-            val isRawStack = normalFrames.firstOrNull()?.frame?.image?.format
-                ?.let(::isRawCaptureFormat) == true
-            // Geometry is planned by the Radiance stacker's coarse temporal-flow graph.
-            // Running a second exhaustive RAW proxy registration here blocks the
-            // post-capture path on CPU and duplicates the GLES registration work.
-            val orderedNormalFrames = normalFrames
-            val orderedFrames = orderedNormalFrames + auxiliaryFrames
-            val referencePlanLog = if (isRawStack) {
-                "deferred_mgc_gles, reference=pending, "
-            } else {
-                "chronological, reference=0, "
-            }
-            PLog.i(
-                TAG,
-                "RAW burst plan: referenceSource=$referencePlanLog" +
-                    "accepted=${orderedFrames.size}, " +
-                    "normal=${orderedNormalFrames.size}, " +
-                    "short=${if (exposurePlan.shortIndex != null) 1 else 0}, " +
-                    "long=${exposurePlan.longIndices.size}, " +
-                    "exposureRejected=${exposurePlan.excludedIndices.joinToString()}, " +
-                    "geometry=GLES_TEMPORAL_GRAPH, " +
-                    "costMs=${SystemClock.elapsedRealtime() - burstPlanningStartedAtMs}",
-            )
-            val processingFrames = if (isRawStack) {
-                orderedFrames
-            } else {
-                auxiliaryFrames.forEach { it.frame.image.close() }
-                if (auxiliaryFrames.isNotEmpty()) {
-                    PLog.i(
-                        TAG,
-                        "Excluded ${auxiliaryFrames.size} short/auxiliary frames from " +
-                            "non-RAW multi-frame accumulation",
-                    )
-                }
-                orderedNormalFrames
-            }
-            val framesToProcess = processingFrames.map { it.frame }
-            val referenceCaptureInfo = orderedNormalFrames.firstOrNull()?.captureInfo
-                ?: captureInfo
-            val referenceCaptureResult = orderedNormalFrames.firstOrNull()?.captureResult
-                ?: captureResult
-            processStacking(
-                frames = framesToProcess,
-                captureInfo = referenceCaptureInfo,
-                characteristics = characteristics,
-                captureResult = referenceCaptureResult,
-                rawMaxHdrFusionEnabled = rawMaxHdrFusionEnabled,
-                rawMaxMode = rawMaxMode,
-                capturePortraitMask = settings.portraitMask,
-                settings = settings,
-            )
-        } else {
-            saveImage(first.image, captureInfo, characteristics, captureResult, settings.portraitMask, settings)
+        // Still capture is intentionally single-frame: the JPEG already contains the device ISP output.
+        val first = photo.frames.firstOrNull() ?: return
+        photo.frames.drop(1).forEach { frame ->
+            frame.image.close()
         }
+        saveImage(
+            image = first.image,
+            captureInfo = first.captureInfo,
+            characteristics = first.characteristics,
+            captureResult = first.captureResult,
+            capturePortraitMask = null,
+            settings = settings,
+        )
     }
 
     fun captureVideoFrame() {
@@ -5918,9 +5839,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val context = getApplication<Application>()
 
             // 保存当前配置信息
-            val lutIdToSave = settings.lutId
+            val lutIdToSave: String? = null
             val aspectRatio = settings.state.aspectRatio
-            val frameIdToSave = settings.frameId
+            val frameIdToSave: String? = null
             val shouldAutoSave = settings.preferences.autoSaveAfterCapture
             val userPrefs: UserPreferences? = settings.preferences
             val isRawCapture = isRawCaptureFormat(image.format)
@@ -5968,10 +5889,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 null
             }
             val rawToneMappingParameters = resolveCaptureRawToneMappingParameters(userPrefs)
-            val defaultHdrEffectEnabled = defaultHdrEffectEnabled(
-                hasEmbeddedGainmap = false,
-                userPrefs = userPrefs,
-            )
             val baselineMetadata = resolveBaselineMetadata(baselineTarget, userPrefs)
             val effectiveRawAutoExposure = resolveEffectiveRawAutoExposure()
             val spectralFilmSettings = resolveRawSpectralFilmSettings(userPrefs)
@@ -5982,10 +5899,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val metadata = MediaMetadata(
                 lutId = lutIdToSave,
                 frameId = frameIdToSave,
-                colorRecipeParams = settings.recipe,
-                baselineTarget = baselineMetadata?.first,
-                baselineLutId = baselineMetadata?.second,
-                baselineColorRecipeParams = baselineMetadata?.third,
+                colorRecipeParams = null,
+                baselineTarget = null,
+                baselineLutId = null,
+                baselineColorRecipeParams = null,
                 sharpening = sharpeningValue,
                 noiseReduction = noiseReductionValue,
                 chromaNoiseReduction = chromaNoiseReductionValue,
@@ -6049,7 +5966,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 computationalAperture = aperture,
                 focusPointX = settings.state.focusPoint?.first,
                 focusPointY = settings.state.focusPoint?.second,
-                manualHdrEffectEnabled = defaultHdrEffectEnabled,
+                manualHdrEffectEnabled = false,
             )
 
             val livePhotoVideoDeferred = settings.livePhotoVideo
@@ -6095,7 +6012,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     exposureBias = captureExposureBias,
                     captureExposureCompensationEv = captureExposureCompensationEv,
                     exportDngWithRawExport = settings.preferences.exportDngWithRawExport,
-                    capturePortraitMask = capturePortraitMask,
+                    capturePortraitMask = null,
                 )
             }
             PLog.d(TAG, "Image saved: $photoId, LUT: $lutIdToSave, Frame: $frameIdToSave")
