@@ -1647,7 +1647,12 @@ fun CameraScreen(
                 },
                 parameterBar = {
                     // Manual EV / shutter / ISO / focus / WB controls belong to Pro mode only.
-                    if (!isXpan && shootingMode == CameraShootingMode.PROFESSIONAL) {
+                    if (
+                        !isXpan &&
+                        state.captureMode == CaptureMode.PHOTO &&
+                        state.useRaw &&
+                        state.isRawSupported
+                    ) {
                         parameterBar(selectedParameter.takeIf { showParameterRuler }, onParameterClick)
                     }
                 },
