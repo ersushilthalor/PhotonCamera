@@ -222,50 +222,6 @@ class LutManager(private val context: Context) {
      */
     fun loadLut(id: String): LutConfig? = null
 
-    /*
-    private fun legacyLoadLut(id: String): LutConfig? {
-        // 先从缓存查找
-        lutCache.get(id)?.let {
-            //PLog.d(TAG, "LUT loaded from cache: $id")
-            return it
-        }
-
-        // 查找 LUT 信息
-        val lutInfo = getLutInfo(id) ?: run {
-//            PLog.w(TAG, "LUT not found: $id")
-            return null
-        }
-
-        // 从文件加载
-        return try {
-            val lutConfig = if (lutInfo.isBuiltIn) {
-                if (lutInfo.fileName.isBlank()) {
-                    return null
-                }
-                // 内置 LUT 从 assets 加载
-                LutParser.parseFromAssets(context, lutInfo.fileName)
-            } else {
-                // 自定义 LUT 从文件系统加载
-                java.io.File(lutInfo.fileName).inputStream().use { inputStream ->
-                    LutParser.parse(inputStream, lutInfo.getName())
-                }
-            }
-
-            if (lutConfig.isValid()) {
-                // 添加到缓存
-                lutCache.put(id, lutConfig)
-//                PLog.d(TAG, "LUT loaded: $id, size: ${lutConfig.size}")
-                lutConfig
-            } else {
-                PLog.e(TAG, "Invalid LUT data: $id")
-                null
-            }
-        } catch (e: Exception) {
-            PLog.w(TAG, "Failed to load LUT: $id", e)
-            null
-        }
-    }
-    */
 
     /**
      * 清除缓存中的特定 LUT
