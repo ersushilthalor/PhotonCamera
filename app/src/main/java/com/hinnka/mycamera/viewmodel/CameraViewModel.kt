@@ -2199,6 +2199,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 // 同步锐化等级到相机控制器
                 cameraController.setEdgeLevel(it.edgeLevel)
+                cameraController.setPhotoQuality(it.photoQuality)
                 cameraController.setVideoImageQualitySettings(it.videoNrLevel, it.videoEdgeLevel)
                 if (currentCameraState.vendorCaptureSettingsByLens != it.vendorCaptureSettingsByLens) {
                     cameraController.setVendorCaptureSettingsByLens(it.vendorCaptureSettingsByLens)
