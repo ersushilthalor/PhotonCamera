@@ -261,10 +261,15 @@ fun LutSelector(
     val activeLutId = currentLutId
     val supportsFrames = onFrameSelected != null
     val supportsPresets = presetModeEnabled
+    // LUT styles are disabled. Keep frame and camera-preset controls available.
     val actualMode = when (selectedMode) {
-        LutSelectorMode.Style -> LutSelectorMode.Style
-        LutSelectorMode.Frame -> if (supportsFrames) LutSelectorMode.Frame else LutSelectorMode.Style
-        LutSelectorMode.Presets -> if (supportsPresets) LutSelectorMode.Presets else LutSelectorMode.Style
+        LutSelectorMode.Style -> when {
+            supportsPresets -> LutSelectorMode.Presets
+            supportsFrames -> LutSelectorMode.Frame
+            else -> LutSelectorMode.Style
+        }
+        LutSelectorMode.Frame -> if (supportsFrames) LutSelectorMode.Frame else if (supportsPresets) LutSelectorMode.Presets else LutSelectorMode.Style
+        LutSelectorMode.Presets -> if (supportsPresets) LutSelectorMode.Presets else if (supportsFrames) LutSelectorMode.Frame else LutSelectorMode.Style
     }
 
     LaunchedEffect(activeLutId, availableLuts, categoryTabs) {
@@ -458,11 +463,6 @@ fun LutSelector(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    LutSelectorModeTab(
-                        text = styleText,
-                        isSelected = actualMode == LutSelectorMode.Style,
-                        onClick = { onModeSelected(LutSelectorMode.Style) }
-                    )
                     if (supportsFrames) {
                         LutSelectorModeTab(
                             text = frameText,
