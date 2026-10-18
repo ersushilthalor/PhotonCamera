@@ -324,6 +324,9 @@ class Camera2Controller(private val context: Context) {
     private var lastWhiteBalanceResult: WhiteBalanceResultSnapshot? = null
     private var manualWhiteBalanceAnchor: ManualWhiteBalanceAnchor? = null
     @Volatile
+    private var jpegCaptureQuality: Byte = 95.toByte()
+
+    @Volatile
     private var requestedRawCaptureEnabled = false
     private var isRawSupported = false
     private var isP010Supported = false
@@ -8214,7 +8217,7 @@ class Camera2Controller(private val context: Context) {
             val captureBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                 addTarget(reader.surface)
                 if (reader.imageFormat == ImageFormat.JPEG) {
-                    set(CaptureRequest.JPEG_QUALITY, 95.toByte())
+                    set(CaptureRequest.JPEG_QUALITY, jpegCaptureQuality)
                     val sensorOrientation = cachedSensorOrientation
                     val deviceOrientation = OrientationObserver.captureRotationDegrees.toInt()
                     val lensFacing = currentState.getCurrentCameraInfo()?.lensFacing
@@ -8991,6 +8994,10 @@ class Camera2Controller(private val context: Context) {
         } else {
             livePhotoRecorder.stopRecording()
         }
+    }
+
+    fun setPhotoQuality(quality: Int) {
+        jpegCaptureQuality = quality.coerceIn(1, 100).toByte()
     }
 
     fun setUseP010(enabled: Boolean) {
