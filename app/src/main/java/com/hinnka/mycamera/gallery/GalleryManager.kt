@@ -878,22 +878,15 @@ object GalleryManager {
         bitmap: Bitmap,
         outputStream: FileOutputStream,
         quality: Int,
-        gainmapResult: GainmapResult? = null,
+        @Suppress("UNUSED_PARAMETER") gainmapResult: GainmapResult? = null,
     ): Boolean {
-        var success = false
-        val elapsed = measureTimeMillis {
-            success = UltraHdrWriter.writeJpeg(
-                UltraHdrWriter.Request(
-                    bitmap = bitmap,
-                    outputStream = outputStream,
-                    quality = quality,
-                    gainmap = gainmapResult?.gainmap,
-                )
-            )
-        }
+        // Encode a standard SDR JPEG; Ultra HDR gainmaps are intentionally unsupported.
+        val startedAt = SystemClock.elapsedRealtime()
+        val success = bitmap.compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(1, 100), outputStream)
         PLog.d(
             TAG,
-            "writeFinalJpeg took ${elapsed}ms, size=${bitmap.width}x${bitmap.height}, gainmap=${gainmapResult != null}, success=$success"
+            "writeFinalJpeg took ${SystemClock.elapsedRealtime() - startedAt}ms, " +
+                "size=${bitmap.width}x${bitmap.height}, ultraHdr=false, success=$success"
         )
         return success
     }
