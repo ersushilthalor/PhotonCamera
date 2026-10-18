@@ -10,8 +10,6 @@ import com.hinnka.mycamera.phantom.PhantomService
 import com.hinnka.mycamera.phantom.PhantomShortcutActivity
 import com.hinnka.mycamera.raw.RawSceneExposureEstimator
 import com.hinnka.mycamera.screencapture.PhantomPipPreviewCoordinator
-import com.hinnka.mycamera.update.AppUpdateManager
-import com.hinnka.mycamera.utils.BuglyHelper
 import com.hinnka.mycamera.utils.DeviceUtil
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.utils.StartupTrace
@@ -32,9 +30,6 @@ class MyCameraApplication : Application() {
         applicationScope.launch(Dispatchers.Default) {
             RawSceneExposureEstimator.warmUp(this@MyCameraApplication)
         }
-        StartupTrace.measure("BuglyHelper.init") {
-            BuglyHelper.init(this)
-        }
         val contentRepository = ContentRepository.getInstance(this)
         StartupTrace.measure("ContentRepository.initialize") {
             contentRepository.initialize()
@@ -43,7 +38,6 @@ class MyCameraApplication : Application() {
             PhantomService(this)
         }
         recoverPrivateGalleryIndex()
-//        AppUpdateManager.startSilentUpdate(this)
 
         val userPreferencesRepository = contentRepository.userPreferencesRepository
         applicationScope.launch {
