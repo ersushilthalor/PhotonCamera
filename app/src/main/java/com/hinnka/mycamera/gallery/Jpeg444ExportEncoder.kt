@@ -50,7 +50,8 @@ object Jpeg444ExportEncoder {
             }
 
             outputFile.parentFile?.mkdirs()
-            val gainmap = gainmapResult?.gainmap
+            // Ultra HDR/JPEG R gainmap packaging is disabled in the normal ISP build.
+            val gainmap: Gainmap? = null
             val baseOutputFile = if (gainmap == null) {
                 outputFile
             } else {
