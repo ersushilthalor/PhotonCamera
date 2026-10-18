@@ -1152,16 +1152,7 @@ fun CameraScreen(
                                             totalDrag += dragAmount
                                         } else if (!change.pressed) {
                                             // onDragEnd logic
-                                            if (!childConsumedDrag && abs(totalDrag) > 100) {
-                                                val selectedLut = if (totalDrag > 0) {
-                                                    viewModel.switchToPreviousLut()
-                                                } else {
-                                                    viewModel.switchToNextLut()
-                                                }
-                                                selectedLut?.let {
-                                                    lutNameOverlayState.show(it.getName())
-                                                }
-                                            }
+                                            // Horizontal swipes no longer switch LUTs.
                                             totalDrag = 0f
                                             viewModel.isZooming = false
                                         }
@@ -1461,10 +1452,7 @@ fun CameraScreen(
                         )
                     }
 
-                    LutNameOverlay(
-                        state = lutNameOverlayState,
-                        modifier = Modifier.align(Alignment.Center),
-                    )
+                    // LUT name overlay removed with the LUT UI.
                 }
             }
 
@@ -1499,10 +1487,7 @@ fun CameraScreen(
                             onZoomChange = { setZoomWithPreviewTransition(it) },
                             onZoomStopClick = { animateZoomStopWithPreviewTransition(it) },
                             onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
-                            onFilterClick = {
-                                activePanel =
-                                    if (activePanel == ActivePanel.FILTERS) ActivePanel.NONE else ActivePanel.FILTERS
-                            },
+                            onFilterClick = { activePanel = ActivePanel.NONE },
                             onFilterButtonBoundsChanged = { bounds ->
                                 filterButtonBounds = bounds
                             },
@@ -1760,7 +1745,7 @@ fun CameraScreen(
         val filterPanelBottom = requestedFilterPanelBottom.coerceIn(filterPanelTop, maxHeight)
 
         AnimatedVisibility(
-            activePanel == ActivePanel.FILTERS,
+            visible = false && activePanel == ActivePanel.FILTERS,
             enter = if (isXpan) {slideInVertically(initialOffsetY = { it })} else fadeIn(),
             exit = if (isXpan) {slideOutVertically(targetOffsetY = { it })} else fadeOut()
         ) {
