@@ -27,7 +27,6 @@ import com.hinnka.mycamera.hdr.GainmapResult
 import com.hinnka.mycamera.hdr.GainmapSourceSet
 import com.hinnka.mycamera.hdr.HdrGainmapStrength
 import com.hinnka.mycamera.hdr.SourceKind
-import com.hinnka.mycamera.hdr.UltraHdrWriter
 import com.hinnka.mycamera.hdr.UnifiedGainmapProducer
 import com.hinnka.mycamera.livephoto.MotionPhotoWriter
 import com.hinnka.mycamera.lut.BaselineColorCorrectionTarget
@@ -881,11 +880,17 @@ object GalleryManager {
         @Suppress("UNUSED_PARAMETER") gainmapResult: GainmapResult? = null,
     ): Boolean {
         // Encode a standard SDR JPEG; Ultra HDR gainmaps are intentionally unsupported.
-        val startedAt = SystemClock.elapsedRealtime()
-        val success = bitmap.compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(1, 100), outputStream)
+        var success = false
+        val elapsed = measureTimeMillis {
+            success = bitmap.compress(
+                Bitmap.CompressFormat.JPEG,
+                quality.coerceIn(1, 100),
+                outputStream,
+            )
+        }
         PLog.d(
             TAG,
-            "writeFinalJpeg took ${SystemClock.elapsedRealtime() - startedAt}ms, " +
+            "writeFinalJpeg took ${elapsed}ms, " +
                 "size=${bitmap.width}x${bitmap.height}, ultraHdr=false, success=$success"
         )
         return success
