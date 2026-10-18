@@ -194,36 +194,12 @@ class LutManager(private val context: Context) {
      * 初始化，扫描可用的 LUT 文件（包括内置和自定义）
      */
     fun initialize() {
-        val configuredBuiltInLuts = LutParser.listAvailableLuts(context, BUILT_IN_LUT_FOLDER)
-        customImportManager.initializeBuiltInLutCategoriesIfNeeded(configuredBuiltInLuts)
-        val builtInLuts = configuredBuiltInLuts.map { it.copy(category = "") }
-        val customLuts = customImportManager.getCustomLuts()
-        val categoryOverrides = customImportManager.getCategoryOverrides()
-        val favoriteOverrides = customImportManager.getFavoriteOverrides()
-
-        // 合并列表并以 ID 去重，避免 ID 重复导致的 Jetpack Compose 主键重复崩溃
-        val allLuts = (customLuts + builtInLuts).distinctBy { it.id }
-
-        // 应用分类重写 (用户手动创建的分类会通过这里恢复)
-        availableLuts = allLuts.map { lut ->
-            val overriddenCategory = categoryOverrides[lut.id]
-            val overriddenFavorite = favoriteOverrides[lut.id]
-            val encoding = if (lut.fileName.isBlank()) null else runCatching {
-                val input = if (lut.isBuiltIn) context.assets.open(lut.fileName)
-                    else java.io.File(lut.fileName).inputStream()
-                input.use(LutParser::readInputEncoding)
-            }.onFailure {
-                PLog.w(TAG, "Cannot read LUT input encoding: ${lut.id}", it)
-            }.getOrNull()
-            lut.copy(
-                category = overriddenCategory ?: lut.category,
-                isFavorite = overriddenFavorite ?: lut.isFavorite,
-                inputCurve = encoding?.first,
-                inputColorSpace = encoding?.second
-            )
-        }
-
-        PLog.d(TAG, "Found ${availableLuts.size} LUT files (${customLuts.size} custom, ${builtInLuts.size} built-in)")
+        // LUT support has been intentionally disabled and bundled LUT assets removed.
+        // Keep the manager API temporarily so camera modes continue to compile while
+        // remaining callers are removed in the next cleanup pass.
+        availableLuts = emptyList()
+        lutCache.clear()
+        PLog.d(TAG, "LUT system disabled")
     }
 
     /**
@@ -244,7 +220,10 @@ class LutManager(private val context: Context) {
      * @param id LUT ID
      * @return LUT 配置，如果加载失败返回 null
      */
-    fun loadLut(id: String): LutConfig? {
+    fun loadLut(id: String): LutConfig? = null
+
+    /*
+    private fun legacyLoadLut(id: String): LutConfig? {
         // 先从缓存查找
         lutCache.get(id)?.let {
             //PLog.d(TAG, "LUT loaded from cache: $id")
@@ -286,6 +265,7 @@ class LutManager(private val context: Context) {
             null
         }
     }
+    */
 
     /**
      * 清除缓存中的特定 LUT
