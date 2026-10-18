@@ -846,10 +846,8 @@ fun CameraScreen(
 
         val isVideoMode = state.captureMode == CaptureMode.VIDEO
         val isPhotoStyleMode = state.captureMode != CaptureMode.VIDEO
-        val onParameterClick: (CameraParameter) -> Unit = { parameter ->
-            val wasSelected = selectedParameter == parameter
-            selectedParameter = parameter
-            showParameterRuler = !wasSelected || !showParameterRuler
+        val onParameterClick: (CameraParameter) -> Unit = { _ ->
+            showParameterRuler = false
         }
         LaunchedEffect(showParameterRuler) {
             if (!showParameterRuler) {
@@ -1154,16 +1152,7 @@ fun CameraScreen(
                                             totalDrag += dragAmount
                                         } else if (!change.pressed) {
                                             // onDragEnd logic
-                                            if (!childConsumedDrag && abs(totalDrag) > 100) {
-                                                val selectedLut = if (totalDrag > 0) {
-                                                    viewModel.switchToPreviousLut()
-                                                } else {
-                                                    viewModel.switchToNextLut()
-                                                }
-                                                selectedLut?.let {
-                                                    lutNameOverlayState.show(it.getName())
-                                                }
-                                            }
+                                            // Horizontal swipes no longer switch LUTs.
                                             totalDrag = 0f
                                             viewModel.isZooming = false
                                         }
@@ -1463,10 +1452,7 @@ fun CameraScreen(
                         )
                     }
 
-                    LutNameOverlay(
-                        state = lutNameOverlayState,
-                        modifier = Modifier.align(Alignment.Center),
-                    )
+                    // LUT name overlay removed with the LUT UI.
                 }
             }
 
@@ -1501,29 +1487,13 @@ fun CameraScreen(
                             onZoomChange = { setZoomWithPreviewTransition(it) },
                             onZoomStopClick = { animateZoomStopWithPreviewTransition(it) },
                             onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
-                            onFilterClick = {
-                                activePanel =
-                                    if (activePanel == ActivePanel.FILTERS) ActivePanel.NONE else ActivePanel.FILTERS
-                            },
+                            onFilterClick = { activePanel = ActivePanel.NONE },
                             onFilterButtonBoundsChanged = { bounds ->
                                 filterButtonBounds = bounds
                             },
                         )
                     }
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .width(xpanSideWidth),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CameraParameterBarVerticel(
-                            state = state,
-                            selectedParameter = selectedParameter.takeIf {
-                                showParameterRuler
-                            },
-                            onParameterClick = onParameterClick,
-                        )
-                    }
+                    // Manual parameter controls are intentionally removed from the viewfinder.
                 }
             }
         }
@@ -1645,11 +1615,7 @@ fun CameraScreen(
                         )
                     }
                 },
-                parameterBar = {
-                    if (!isXpan) {
-                        parameterBar(selectedParameter.takeIf { showParameterRuler }, onParameterClick)
-                    }
-                },
+                parameterBar = {},
                 captureControls = {
                     controls(Modifier.fillMaxWidth())
                 }
@@ -1779,7 +1745,7 @@ fun CameraScreen(
         val filterPanelBottom = requestedFilterPanelBottom.coerceIn(filterPanelTop, maxHeight)
 
         AnimatedVisibility(
-            activePanel == ActivePanel.FILTERS,
+            visible = false && activePanel == ActivePanel.FILTERS,
             enter = if (isXpan) {slideInVertically(initialOffsetY = { it })} else fadeIn(),
             exit = if (isXpan) {slideOutVertically(targetOffsetY = { it })} else fadeOut()
         ) {
