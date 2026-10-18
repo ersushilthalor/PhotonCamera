@@ -1918,20 +1918,6 @@ fun SettingsScreen(
                             onLevelSelected = { viewModel.setEdgeLevel(it) }
                         )
 
-                        if (state.isP010Supported) {
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 12.dp)
-                            )
-
-                            SwitchSettingItem(
-                                title = stringResource(R.string.settings_use_p010),
-                                description = stringResource(R.string.settings_use_p010_description),
-                                checked = useP010,
-                                onCheckedChange = { viewModel.setUseP010(it) }
-                            )
-                        }
-
                         if (state.isP3Supported) {
                             HorizontalDivider(
                                 color = Color.White.copy(alpha = 0.1f),
