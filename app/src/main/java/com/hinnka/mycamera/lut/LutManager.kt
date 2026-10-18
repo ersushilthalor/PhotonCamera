@@ -198,7 +198,7 @@ class LutManager(private val context: Context) {
         // Keep the manager API temporarily so camera modes continue to compile while
         // remaining callers are removed in the next cleanup pass.
         availableLuts = emptyList()
-        lutCache.clear()
+        lutCache.evictAll()
         PLog.d(TAG, "LUT system disabled")
     }
 
