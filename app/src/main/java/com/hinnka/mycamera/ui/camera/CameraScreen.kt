@@ -846,10 +846,8 @@ fun CameraScreen(
 
         val isVideoMode = state.captureMode == CaptureMode.VIDEO
         val isPhotoStyleMode = state.captureMode != CaptureMode.VIDEO
-        val onParameterClick: (CameraParameter) -> Unit = { parameter ->
-            val wasSelected = selectedParameter == parameter
-            selectedParameter = parameter
-            showParameterRuler = !wasSelected || !showParameterRuler
+        val onParameterClick: (CameraParameter) -> Unit = { _ ->
+            showParameterRuler = false
         }
         LaunchedEffect(showParameterRuler) {
             if (!showParameterRuler) {
@@ -1510,20 +1508,7 @@ fun CameraScreen(
                             },
                         )
                     }
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .width(xpanSideWidth),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CameraParameterBarVerticel(
-                            state = state,
-                            selectedParameter = selectedParameter.takeIf {
-                                showParameterRuler
-                            },
-                            onParameterClick = onParameterClick,
-                        )
-                    }
+                    // Manual parameter controls are intentionally removed from the viewfinder.
                 }
             }
         }
@@ -1645,11 +1630,7 @@ fun CameraScreen(
                         )
                     }
                 },
-                parameterBar = {
-                    if (!isXpan) {
-                        parameterBar(selectedParameter.takeIf { showParameterRuler }, onParameterClick)
-                    }
-                },
+                parameterBar = {},
                 captureControls = {
                     controls(Modifier.fillMaxWidth())
                 }
