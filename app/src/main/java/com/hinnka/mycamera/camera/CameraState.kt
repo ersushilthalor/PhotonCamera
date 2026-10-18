@@ -388,7 +388,7 @@ data class CameraState(
     val droMode: String = "OFF",
     // 是否正在拍摄 Live Photo (用于 UI 动画)
     val isCapturingLivePhoto: Boolean = false,
-    val applyUltraHDR: Boolean = true,
+    val applyUltraHDR: Boolean = false,
     val useP010: Boolean = false,
     val useP3ColorSpace: Boolean = false,
     val isP010Supported: Boolean = false,
@@ -421,9 +421,9 @@ data class CameraState(
     val isAutoExposure: Boolean
         get() = isIsoAuto && isShutterSpeedAuto
 
+    // Normal ISP capture is single-frame; app-side burst stacking is disabled.
     val isMultiFrameEnabled: Boolean
-        get() = multiFrameOutputScale != null &&
-            (!useRaw || (isRawSupported && isRawMultiFrameSupported && normalizedHdrPlusFrameCount > 1))
+        get() = false
 
     // A single RAW frame uses the ordinary capture and development path.
     // Resolve the configured count without depending on the multi-frame enablement above.
