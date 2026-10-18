@@ -909,7 +909,7 @@ object GalleryManager {
                 bitmap = bitmap,
                 outputFile = outputFile,
                 quality = quality,
-                gainmapResult = gainmapResult,
+                gainmapResult = null,
                 captureInfo = captureInfo,
             )
             if (encoded) {
