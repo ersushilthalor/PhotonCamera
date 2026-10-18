@@ -45,18 +45,6 @@ fun ToolboxScreen(
 ) {
     val items = listOf(
         ToolboxItem(
-            titleRes = R.string.lut_creator_title,
-            descriptionRes = R.string.lut_creator_desc,
-            icon = AppIcons.Palette,
-            onClick = onLutCreatorClick
-        ),
-        ToolboxItem(
-            titleRes = R.string.lut_synthesis_title,
-            descriptionRes = R.string.lut_synthesis_desc,
-            icon = AppIcons.Layers,
-            onClick = onLutSynthesisClick
-        ),
-        ToolboxItem(
             titleRes = R.string.toolbox_puzzle_title,
             descriptionRes = R.string.toolbox_puzzle_desc,
             icon = AppIcons.AddPhotoAlternate,

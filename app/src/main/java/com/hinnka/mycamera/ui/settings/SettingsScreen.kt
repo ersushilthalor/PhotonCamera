@@ -1811,36 +1811,6 @@ fun SettingsScreen(
                             modifier = Modifier.padding(vertical = 8.dp)
                         )
 
-                        SwitchSettingItem(
-                            title = stringResource(R.string.settings_separate_video_lut),
-                            description = stringResource(R.string.settings_separate_video_lut_description),
-                            checked = separateVideoLutEnabled,
-                            onCheckedChange = viewModel::setSeparateVideoLutEnabled
-                        )
-
-                        if (separateVideoLutEnabled) {
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
-
-                            val effectiveVideoLutId = videoLutId
-                                ?: userPreferences.lutId
-                                ?: availableLuts.firstOrNull { it.isDefault }?.id
-                            val selectedVideoLutName = availableLuts
-                                .find { it.id == effectiveVideoLutId }
-                                ?.getName()
-                                ?: stringResource(R.string.none)
-                            NavigationSettingItem(
-                                title = stringResource(R.string.settings_video_lut),
-                                description = stringResource(
-                                    R.string.settings_video_lut_description,
-                                    selectedVideoLutName
-                                ),
-                                onClick = onVideoFilterManagementClick
-                            )
-                        }
-
                         HorizontalDivider(
                             color = Color.White.copy(alpha = 0.1f),
                             modifier = Modifier.padding(vertical = 8.dp)
@@ -2637,17 +2607,6 @@ fun SettingsScreen(
                         title = stringResource(R.string.settings_section_management),
                         showTitle = false
                     ) {
-                        NavigationSettingItem(
-                            title = stringResource(R.string.settings_filter_management),
-                            description = stringResource(R.string.settings_filter_management_description),
-                            onClick = onFilterManagementClick
-                        )
-
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-
                         NavigationSettingItem(
                             title = stringResource(R.string.settings_frame_management),
                             description = stringResource(R.string.settings_frame_management_description),
