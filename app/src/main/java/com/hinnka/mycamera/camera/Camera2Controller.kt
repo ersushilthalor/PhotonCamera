@@ -237,6 +237,26 @@ class Camera2Controller(private val context: Context) {
     private val backgroundUltraWideReady = BackgroundUltraWideReady(context)
     @Volatile private var keepUltraWideReadyEnabled = false
 
+    /**
+     * Match standby stream dimensions to the selected recording resolution in video mode.
+     * Photo mode keeps the active photo viewfinder's configured resolution.
+     */
+    private fun resolveBackgroundLensReadySize(): Size {
+        val state = _state.value
+        if (state.captureMode != CaptureMode.VIDEO) {
+            return state.currentPreviewSize
+        }
+        val capabilities = state.videoCapabilities
+        val selectedInputSize =
+            capabilities.cameraInputSizesByResolution[state.videoConfig.resolution]
+                ?: state.currentPreviewSize
+        return capabilities.recordingSizesByResolution[state.videoConfig.resolution]
+            ?: state.videoConfig.resolveOutputSize(
+                openGatePortraitAspectRatio = capabilities.openGatePortraitAspectRatio,
+                cameraInputSize = selectedInputSize,
+            )
+    }
+
     fun setKeepUltraWideReadyEnabled(enabled: Boolean) {
         keepUltraWideReadyEnabled = enabled
         if (!enabled) {
@@ -248,7 +268,7 @@ class Camera2Controller(private val context: Context) {
                     cameras = current.availableCameras,
                     currentCameraId = current.currentCameraId,
                     activeOpenCameraId = cameraDevice?.id,
-                    requestedPreviewSize = current.currentPreviewSize,
+                    requestedPreviewSize = resolveBackgroundLensReadySize(),
                 )
             }
         }
@@ -3900,7 +3920,7 @@ class Camera2Controller(private val context: Context) {
                     cameras = _state.value.availableCameras,
                     currentCameraId = _state.value.currentCameraId,
                     activeOpenCameraId = cameraDevice?.id,
-                    requestedPreviewSize = _state.value.currentPreviewSize,
+                    requestedPreviewSize = resolveBackgroundLensReadySize(),
                 )
             } else {
                 backgroundUltraWideReady.stop()
