@@ -236,15 +236,34 @@ class Camera2Controller(private val context: Context) {
     // explicitly declares the active/standby pair concurrent. No zoom transitions are attached.
     private val backgroundUltraWideReady = BackgroundUltraWideReady(context)
     @Volatile private var keepUltraWideReadyEnabled = false
+    @Volatile private var configuredPreviewOutputSize: Size? = null
 
     fun setKeepUltraWideReadyEnabled(enabled: Boolean) {
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { setKeepUltraWideReadyEnabled(enabled) }
+            return
+        }
         keepUltraWideReadyEnabled = enabled
-        if (!enabled) {
-            backgroundUltraWideReady.stop()
+        backgroundUltraWideReady.setEnabled(enabled)
+        val current = _state.value
+        if (enabled) {
+            if (current.isPreviewActive && cameraDevice != null && previewSurface != null) {
+                createPreviewSession()
+            } else if (current.isPreviewActive) {
+                backgroundUltraWideReady.update(
+                    current.availableCameras, current.currentCameraId, current.currentLensType,
+                    cameraDevice?.id, configuredPreviewOutputSize ?: current.currentPreviewSize
+                )
+            }
         } else {
-            val current = _state.value
-            if (current.isPreviewActive) {
-                backgroundUltraWideReady.update(current.availableCameras, current.currentCameraId, cameraDevice?.id)
+            backgroundUltraWideReady.stopIndependentStream()
+            if (current.isPreviewActive && cameraDevice != null && previewSurface != null &&
+                backgroundUltraWideReady.hasPreparedPhysicalOutput()
+            ) {
+                createPreviewSession()
+            } else {
+                backgroundUltraWideReady.stop()
             }
         }
     }
@@ -2715,6 +2734,7 @@ class Camera2Controller(private val context: Context) {
                     CaptureMode.VIDEO -> resolvedVideoPreviewSize
                     CaptureMode.PHOTO -> CameraUtils.getFixedPreviewSize(openCharacteristics, _state.value.aspectRatio)
                 }
+                configuredPreviewOutputSize = previewSize
                 surfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height)
 
                 if (_state.value.useLivePhoto && captureMode == CaptureMode.PHOTO) {
@@ -2784,6 +2804,7 @@ class Camera2Controller(private val context: Context) {
                     message = "相机特性不可用",
                     error = e
                 )
+                configuredPreviewOutputSize = previewSize
                 surfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height)
                 return
             }
@@ -2834,6 +2855,7 @@ class Camera2Controller(private val context: Context) {
                     captureFormat = ImageFormat.YUV_420_888
                 }
                 previewSize = CameraUtils.getFixedPreviewSize(outputCharacteristicsForStreams, aspectRatio)
+                configuredPreviewOutputSize = previewSize
                 surfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height)
                 val captureSize = if (rawOutput != null) {
                     rawOutput.size
@@ -3137,6 +3159,19 @@ class Camera2Controller(private val context: Context) {
         // Stop exposing it while the replacement is being configured.
         invalidateCaptureSession(captureSession, "preview session replacement")
         val captureMode = _state.value.captureMode
+        val sessionState = _state.value
+        val standbyPhysicalOutput = if (keepUltraWideReadyEnabled) {
+            backgroundUltraWideReady.preparePhysicalOutput(
+                cameras = sessionState.availableCameras,
+                currentCameraId = sessionState.currentCameraId,
+                currentLensType = sessionState.currentLensType,
+                activeOpenCameraId = device.id,
+                requestedSize = configuredPreviewOutputSize ?: sessionState.currentPreviewSize,
+                captureMode = captureMode
+            )
+        } else {
+            null
+        }
         val reader = imageReader
         val stabilizationReader = ensureStabilizationImageReader()
         val useEnhancedStabilization = shouldUseVideoEnhancedStabilization()
@@ -3170,6 +3205,7 @@ class Camera2Controller(private val context: Context) {
         try {
             previewRequestBuilder = device.createCaptureRequest(templateType).apply {
                 addTarget(surface)
+                standbyPhysicalOutput?.let { addTarget(it.surface) }
                 stabilizationReader?.surface?.let(::addTarget)
                 videoSurface?.let(::addTarget)
 
@@ -3178,6 +3214,7 @@ class Camera2Controller(private val context: Context) {
             }
 
             val surfaces = mutableListOf(surface)
+            standbyPhysicalOutput?.surface?.let(surfaces::add)
             stabilizationReader?.surface?.let(surfaces::add)
             videoSurface?.let(surfaces::add)
             if (captureMode == CaptureMode.PHOTO) {
@@ -3197,6 +3234,7 @@ class Camera2Controller(private val context: Context) {
                     sessionOperatingMode,
                     buildList {
                         add(createOutputConfiguration(surface))
+                        standbyPhysicalOutput?.let { add(createStandbyPhysicalOutputConfiguration(it)) }
                         stabilizationReader?.surface?.let { eisSurface ->
                             add(createOutputConfiguration(eisSurface))
                         }
@@ -3217,7 +3255,7 @@ class Camera2Controller(private val context: Context) {
                                 return
                             }
                             closeUnusedStabilizationImageReader(stabilizationReader)
-                            onSessionConfigured(session, openGeneration, sessionGeneration)
+                            onSessionConfigured(session, openGeneration, sessionGeneration, standbyPhysicalOutput)
                         }
 
                         override fun onConfigureFailed(session: CameraCaptureSession) {
@@ -3236,6 +3274,15 @@ class Camera2Controller(private val context: Context) {
                                 return
                             }
                             if (retryPreviewSessionWithoutPhysicalOutput("video configure failed", openGeneration)) {
+                                return
+                            }
+                                                        if (retryPreviewSessionWithoutStandbyPhysicalOutput(
+                                    standbyPhysicalOutput,
+                                    "video configure failed",
+                                    openGeneration,
+                                    forceWithoutVendorSessionParameters
+                                )
+                            ) {
                                 return
                             }
                             handlePreviewSessionFailure("video configure failed", openGeneration)
@@ -3261,6 +3308,7 @@ class Camera2Controller(private val context: Context) {
             )
             val outputConfigs = buildList {
                 add(createOutputConfiguration(surface))
+                standbyPhysicalOutput?.let { add(createStandbyPhysicalOutputConfiguration(it)) }
                 stabilizationReader?.surface?.let { eisSurface ->
                     add(createOutputConfiguration(eisSurface))
                 }
@@ -3284,7 +3332,7 @@ class Camera2Controller(private val context: Context) {
                             return
                         }
                         closeUnusedStabilizationImageReader(stabilizationReader)
-                        onSessionConfigured(session, openGeneration, sessionGeneration)
+                        onSessionConfigured(session, openGeneration, sessionGeneration, standbyPhysicalOutput)
                     }
 
                     override fun onConfigureFailed(session: CameraCaptureSession) {
@@ -3309,7 +3357,16 @@ class Camera2Controller(private val context: Context) {
                         if (retryPreviewSessionWithoutPhysicalOutput("photo configure failed", openGeneration)) {
                             return
                         }
-                        handlePreviewSessionFailure("photo configure failed", openGeneration)
+                                                    if (retryPreviewSessionWithoutStandbyPhysicalOutput(
+                                    standbyPhysicalOutput,
+                                    "photo configure failed",
+                                    openGeneration,
+                                    forceWithoutVendorSessionParameters
+                                )
+                            ) {
+                                return
+                            }
+                            handlePreviewSessionFailure("photo configure failed", openGeneration)
                     }
                 }
             )
@@ -3342,6 +3399,15 @@ class Camera2Controller(private val context: Context) {
             ) {
                 return
             }
+                        if (retryPreviewSessionWithoutStandbyPhysicalOutput(
+                    standbyPhysicalOutput,
+                    "create session illegal state: ${e.message}",
+                    openGeneration,
+                    forceWithoutVendorSessionParameters
+                )
+            ) {
+                return
+            }
             handlePreviewSessionFailure("create session illegal state", openGeneration, e)
         } catch (e: Exception) {
             PLog.w(TAG, "Failed to create preview session", e)
@@ -3356,6 +3422,15 @@ class Camera2Controller(private val context: Context) {
             if (retryPreviewSessionWithoutPhysicalOutput(
                     "create session exception: ${e.message}",
                     openGeneration
+                )
+            ) {
+                return
+            }
+                        if (retryPreviewSessionWithoutStandbyPhysicalOutput(
+                    standbyPhysicalOutput,
+                    "create session exception: ${e.message}",
+                    openGeneration,
+                    forceWithoutVendorSessionParameters
                 )
             ) {
                 return
@@ -3612,6 +3687,30 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    private fun createStandbyPhysicalOutputConfiguration(
+        output: BackgroundUltraWideReady.PreparedPhysicalOutput
+    ): OutputConfiguration {
+        return OutputConfiguration(output.surface).apply {
+            setPhysicalCameraId(output.physicalCameraId)
+        }
+    }
+
+    private fun retryPreviewSessionWithoutStandbyPhysicalOutput(
+        output: BackgroundUltraWideReady.PreparedPhysicalOutput?,
+        reason: String,
+        openGeneration: Long,
+        forceWithoutVendorSessionParameters: Boolean
+    ): Boolean {
+        if (output == null || openGeneration != cameraOpenGeneration) return false
+        if (!backgroundUltraWideReady.markPhysicalOutputConfigurationFailed(output)) return false
+        PLog.w(TAG, "Retrying preview without optional standby stream: " + reason)
+        createPreviewSession(
+            forceWithoutVendorSessionParameters = forceWithoutVendorSessionParameters,
+            openGeneration = openGeneration
+        )
+        return true
+    }
+
     private fun applyInitialSessionParameters(
         sessionConfig: SessionConfiguration,
         device: CameraDevice,
@@ -3793,7 +3892,8 @@ class Camera2Controller(private val context: Context) {
     private fun onSessionConfigured(
         session: CameraCaptureSession,
         openGeneration: Long = cameraOpenGeneration,
-        sessionGeneration: Long = previewSessionGeneration
+        sessionGeneration: Long = previewSessionGeneration,
+        standbyPhysicalOutput: BackgroundUltraWideReady.PreparedPhysicalOutput? = null
     ) {
         if (openGeneration != cameraOpenGeneration || sessionGeneration != previewSessionGeneration) {
             PLog.w(TAG, "Ignoring stale configured session")
@@ -3825,11 +3925,20 @@ class Camera2Controller(private val context: Context) {
             }
 
             _state.value = _state.value.copy(isPreviewActive = true)
+            backgroundUltraWideReady.onMainSessionConfigured(standbyPhysicalOutput)
             if (keepUltraWideReadyEnabled) {
+                val current = _state.value
                 backgroundUltraWideReady.update(
-                    cameras = _state.value.availableCameras,
-                    currentCameraId = _state.value.currentCameraId,
+                    cameras = current.availableCameras,
+                    currentCameraId = current.currentCameraId,
+                    currentLensType = current.currentLensType,
                     activeOpenCameraId = cameraDevice?.id,
+                    requestedSize = configuredPreviewOutputSize ?: current.currentPreviewSize
+                )
+            } else if (standbyPhysicalOutput != null) {
+                createPreviewSession(
+                    forceWithoutVendorSessionParameters = forceWithoutVendorSessionParameters,
+                    openGeneration = openGeneration
                 )
             } else {
                 backgroundUltraWideReady.stop()
@@ -8747,6 +8856,7 @@ class Camera2Controller(private val context: Context) {
             clearCameraSessionState("closeCamera")
             val deviceToClose = cameraDevice
             cameraDevice = null
+            configuredPreviewOutputSize = null
             clearCameraCapabilityCache()
 
             _state.value = if (keepVideoRecording) {
