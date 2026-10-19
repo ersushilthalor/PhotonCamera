@@ -250,11 +250,18 @@ class Camera2Controller(private val context: Context) {
         val selectedInputSize =
             capabilities.cameraInputSizesByResolution[state.videoConfig.resolution]
                 ?: state.currentPreviewSize
-        return capabilities.recordingSizesByResolution[state.videoConfig.resolution]
-            ?: state.videoConfig.resolveOutputSize(
+        return if (state.videoConfig.aspectRatio == VideoAspectRatio.OPEN_GATE) {
+            state.videoConfig.resolveOutputSize(
                 openGatePortraitAspectRatio = capabilities.openGatePortraitAspectRatio,
                 cameraInputSize = selectedInputSize,
             )
+        } else {
+            capabilities.recordingSizesByResolution[state.videoConfig.resolution]
+                ?: state.videoConfig.resolveOutputSize(
+                    openGatePortraitAspectRatio = capabilities.openGatePortraitAspectRatio,
+                    cameraInputSize = selectedInputSize,
+                )
+        }
     }
 
     fun setKeepUltraWideReadyEnabled(enabled: Boolean) {
