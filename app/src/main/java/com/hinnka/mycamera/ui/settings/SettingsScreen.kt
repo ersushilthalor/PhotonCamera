@@ -1343,7 +1343,7 @@ fun SettingsScreen(
                     ) {
                         SwitchSettingItem(
                             title = "Keep Ultra-Wide Lens Ready",
-                            description = "Keeps the rear ultra-wide lens warmed in the background when concurrent camera streams are supported. Uses extra power; unsupported combinations are skipped safely.",
+                            description = "Keeps the other rear lens streaming through a supported physical-camera stream or Android-declared concurrent camera pair. Uses extra power; unsupported combinations are skipped safely.",
                             checked = keepUltraWideReadyEnabled,
                             onCheckedChange = { viewModel.setKeepUltraWideReadyEnabled(it) }
                         )
