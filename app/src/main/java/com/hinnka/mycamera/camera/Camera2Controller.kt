@@ -244,7 +244,12 @@ class Camera2Controller(private val context: Context) {
         } else {
             val current = _state.value
             if (current.isPreviewActive) {
-                backgroundUltraWideReady.update(current.availableCameras, current.currentCameraId, cameraDevice?.id)
+                backgroundUltraWideReady.update(
+                    cameras = current.availableCameras,
+                    currentCameraId = current.currentCameraId,
+                    activeOpenCameraId = cameraDevice?.id,
+                    requestedPreviewSize = current.currentPreviewSize,
+                )
             }
         }
     }
@@ -3895,6 +3900,7 @@ class Camera2Controller(private val context: Context) {
                     cameras = _state.value.availableCameras,
                     currentCameraId = _state.value.currentCameraId,
                     activeOpenCameraId = cameraDevice?.id,
+                    requestedPreviewSize = _state.value.currentPreviewSize,
                 )
             } else {
                 backgroundUltraWideReady.stop()
