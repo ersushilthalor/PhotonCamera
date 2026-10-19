@@ -2486,6 +2486,34 @@ class Camera2Controller(private val context: Context) {
             }
             return
         }
+        // A physical-lens change inside the same logical CameraDevice must not close and
+        // reopen the device. Rebind only the output session when the preview SurfaceTexture
+        // is unchanged; this removes the slow CameraManager.openCamera round-trip.
+        val activeDevice = cameraDevice
+        if (
+            cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN &&
+            activeDevice != null &&
+            previewSurfaceTexture === surfaceTexture
+        ) {
+            val targetCamera = _state.value.getCurrentCameraInfo()
+            val targetOpenId = targetCamera?.let {
+                try { it.getOpenCameraId() } catch (_: RuntimeException) { it.cameraId }
+            } ?: _state.value.currentCameraId
+            if (targetOpenId == activeDevice.id) {
+                val desiredPhysicalCameraId = resolveOutputPhysicalCameraId(_state.value)
+                if (desiredPhysicalCameraId != activeOutputPhysicalCameraId) {
+                    pendingCameraOpenRequest = null
+                    PLog.i(
+                        TAG,
+                        "Fast lens handoff on existing logical CameraDevice: " +
+                            "openId=${activeDevice.id}, oldPhysical=$activeOutputPhysicalCameraId, " +
+                            "newPhysical=$desiredPhysicalCameraId"
+                    )
+                    if (recreateSessionForPhysicalZoomIfNeeded(_state.value)) return
+                }
+            }
+        }
+
         pendingCameraOpenRequest = CameraOpenRequest(surfaceTexture, preserveVideoRecording)
         when (cameraDeviceLifecycle) {
             CameraDeviceLifecycle.CLOSED -> openPendingCameraRequest()
