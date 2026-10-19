@@ -40,6 +40,8 @@ internal class BackgroundUltraWideReady(context: Context) {
     @Volatile private var standbySurface: Surface? = null
     @Volatile private var standbyCameraId: String? = null
     @Volatile private var activeCameraId: String? = null
+    @Volatile private var transferCameraAfterSessionClose: CameraDevice? = null
+    @Volatile private var transferCallbackAfterSessionClose: ((CameraDevice?) -> Unit)? = null
 
     fun update(cameras: List<CameraInfo>, currentCameraId: String, activeOpenCameraId: String?) {
         handler.post {
@@ -148,6 +150,22 @@ internal class BackgroundUltraWideReady(context: Context) {
 
                                     override fun onClosed(session: CameraCaptureSession) {
                                         if (standbySession === session) standbySession = null
+
+                                        // Promote the warmed device only after its standby session
+                                        // has fully closed; this avoids racing the next session setup.
+                                        val transferDevice = transferCameraAfterSessionClose
+                                        if (transferDevice != null) {
+                                            transferCameraAfterSessionClose = null
+                                            val callback = transferCallbackAfterSessionClose
+                                            transferCallbackAfterSessionClose = null
+                                            try { standbySurface?.release() } catch (_: Exception) {}
+                                            standbySurface = null
+                                            try { standbyTexture?.release() } catch (_: Exception) {}
+                                            standbyTexture = null
+                                            standbyCameraId = null
+                                            activeCameraId = null
+                                            callback?.invoke(transferDevice)
+                                        }
                                     }
                                 },
                                 handler
@@ -178,6 +196,47 @@ internal class BackgroundUltraWideReady(context: Context) {
         }
     }
 
+    /**
+     * Transfers a fully warmed standby device to the foreground camera pipeline.
+     * The callback runs after the standby session closes so the caller can configure its
+     * normal preview/capture outputs on the returned CameraDevice.
+     */
+    fun takeWarmCamera(cameraId: String, callback: (CameraDevice?) -> Unit) {
+        handler.post {
+            val device = standbyDevice
+            val session = standbySession
+            if (standbyCameraId != cameraId || device == null || session == null) {
+                callback(null)
+                return@post
+            }
+
+            generation.incrementAndGet()
+            standbyDevice = null // Ownership transfers to the foreground controller.
+            transferCameraAfterSessionClose = device
+            transferCallbackAfterSessionClose = callback
+            try {
+                session.stopRepeating()
+            } catch (_: Exception) {
+            }
+            try {
+                session.close()
+            } catch (error: Exception) {
+                transferCameraAfterSessionClose = null
+                transferCallbackAfterSessionClose = null
+                try { device.close() } catch (_: Exception) {}
+                try { standbySurface?.release() } catch (_: Exception) {}
+                standbySurface = null
+                try { standbyTexture?.release() } catch (_: Exception) {}
+                standbyTexture = null
+                standbySession = null
+                standbyCameraId = null
+                activeCameraId = null
+                callback(null)
+                PLog.w(TAG, "Could not close standby session for transfer: ${error.message}")
+            }
+        }
+    }
+
     fun stop() {
         handler.post { releaseLocked() }
     }
@@ -189,6 +248,10 @@ internal class BackgroundUltraWideReady(context: Context) {
 
     private fun releaseLocked() {
         generation.incrementAndGet()
+        transferCallbackAfterSessionClose?.invoke(null)
+        transferCallbackAfterSessionClose = null
+        try { transferCameraAfterSessionClose?.close() } catch (_: Exception) {}
+        transferCameraAfterSessionClose = null
         try { standbySession?.stopRepeating() } catch (_: Exception) {}
         try { standbySession?.close() } catch (_: Exception) {}
         standbySession = null
