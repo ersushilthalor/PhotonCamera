@@ -786,7 +786,7 @@ fun SettingsScreen(
     var downloadedUpdateApk by remember { mutableStateOf<File?>(null) }
     var showInstallUpdateDialog by remember { mutableStateOf(false) }
     var showRawBaselineRecipeEditor by remember { mutableStateOf(false) }
-var hdrPlusFrameCountSliderValue by remember(hdrPlusFrameCount) {
+    var hdrPlusFrameCountSliderValue by remember(hdrPlusFrameCount) {
         mutableStateOf(hdrPlusFrameCount.toFloat())
     }
     var hdrPlusLongFrameExposureEvUi by remember(hdrPlusLongFrameExposureEv) {
