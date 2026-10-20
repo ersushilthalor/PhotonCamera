@@ -265,8 +265,12 @@ class Camera2Controller(private val context: Context) {
                     cameras = current.availableCameras,
                     currentCameraId = current.currentCameraId,
                     activeOpenCameraId = cameraDevice?.id,
-                    targetSize = current.videoCapabilities.cameraInputSizesByResolution[current.videoConfig.resolution]
-                        ?: current.currentPreviewSize,
+                    targetSize = if (current.captureMode == CaptureMode.VIDEO) {
+                        current.videoCapabilities.cameraInputSizesByResolution[current.videoConfig.resolution]
+                            ?: current.currentPreviewSize
+                    } else {
+                        current.currentPreviewSize
+                    },
                 )
             }
         }
@@ -3881,8 +3885,12 @@ class Camera2Controller(private val context: Context) {
                     cameras = _state.value.availableCameras,
                     currentCameraId = _state.value.currentCameraId,
                     activeOpenCameraId = cameraDevice?.id,
-                    targetSize = _state.value.videoCapabilities.cameraInputSizesByResolution[_state.value.videoConfig.resolution]
-                        ?: _state.value.currentPreviewSize,
+                    targetSize = if (_state.value.captureMode == CaptureMode.VIDEO) {
+                        _state.value.videoCapabilities.cameraInputSizesByResolution[_state.value.videoConfig.resolution]
+                            ?: _state.value.currentPreviewSize
+                    } else {
+                        _state.value.currentPreviewSize
+                    },
                 )
             } else {
                 backgroundUltraWideReady.stop()

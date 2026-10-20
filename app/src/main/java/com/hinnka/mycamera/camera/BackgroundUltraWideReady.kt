@@ -65,6 +65,8 @@ internal class BackgroundUltraWideReady(
     @Volatile private var standbyCameraId: String? = null
     @Volatile private var standbyOutputSize: Size? = null
     @Volatile private var activeCameraId: String? = null
+    @Volatile private var standbyOpenPending = false
+    @Volatile private var standbyOpenLatch: CountDownLatch? = null
 
     // A handed-off device is now owned by Camera2Controller, but Android continues to dispatch
     // its callbacks to this class's original StateCallback. Route those terminal events back.
@@ -140,12 +142,11 @@ internal class BackgroundUltraWideReady(
 
             if (
                 standbyCameraId == standbyId &&
-                standbyDevice != null &&
-                activeCameraId == activeId
+                activeCameraId == activeId &&
+                standbyOutputSize == chosenSize &&
+                (standbyDevice != null || standbyOpenPending)
             ) {
-                if (standbySession != null && standbyOutputSize == chosenSize) {
-                    return@post
-                }
+                if (standbyOpenPending || standbySession != null) return@post
                 // Resolution changed (for example 1080p -> 4K). Wait for CameraDevice.onClosed
                 // before reopening this same ID; reopening it immediately can race camera-service
                 // ownership and leave the standby stream silently unavailable.
@@ -193,9 +194,15 @@ internal class BackgroundUltraWideReady(
                     }
                 }, handler)
 
+                val openCallbackLatch = CountDownLatch(1)
+                standbyOpenPending = true
+                standbyOpenLatch = openCallbackLatch
                 @SuppressLint("MissingPermission")
                 cameraManager.openCamera(standbyId, object : CameraDevice.StateCallback() {
                     override fun onOpened(camera: CameraDevice) {
+                        standbyOpenPending = false
+                        standbyOpenLatch = null
+                        openCallbackLatch.countDown()
                         if (generation.get() != token || activeCameraId != activeId) {
                             camera.close()
                             return
@@ -251,6 +258,9 @@ internal class BackgroundUltraWideReady(
                     }
 
                     override fun onDisconnected(camera: CameraDevice) {
+                        standbyOpenPending = false
+                        standbyOpenLatch = null
+                        openCallbackLatch.countDown()
                         if (transferredDevice === camera) {
                             onTransferredDeviceError(camera, "Transferred standby camera disconnected: ${camera.id}")
                             return
@@ -261,6 +271,9 @@ internal class BackgroundUltraWideReady(
                     }
 
                     override fun onError(camera: CameraDevice, error: Int) {
+                        standbyOpenPending = false
+                        standbyOpenLatch = null
+                        openCallbackLatch.countDown()
                         if (transferredDevice === camera) {
                             onTransferredDeviceError(
                                 camera,
@@ -290,6 +303,9 @@ internal class BackgroundUltraWideReady(
                     }
                 }, handler)
             } catch (error: Exception) {
+                standbyOpenPending = false
+                standbyOpenLatch?.countDown()
+                standbyOpenLatch = null
                 PLog.w(TAG, "Background lens warm-up failed safely: ${error.message}")
                 releaseLocked()
             }
@@ -303,6 +319,14 @@ internal class BackgroundUltraWideReady(
      * open, avoiding an ERROR_MAX_CAMERAS_IN_USE race when switching to another lens.
      */
     fun acquireForForeground(cameraId: String): CameraDevice? {
+        val openingLatch = standbyOpenLatch
+        if (standbyOpenPending && openingLatch != null) {
+            try {
+                openingLatch.await(ACQUIRE_OPERATION_WAIT_MS, TimeUnit.MILLISECONDS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
         val operation = FutureTask {
             val device = standbyDevice
             if (
@@ -401,6 +425,9 @@ internal class BackgroundUltraWideReady(
     ) {
         if (!preservePendingWarmup) pendingWarmupAfterClose = null
         generation.incrementAndGet()
+        standbyOpenPending = false
+        standbyOpenLatch?.countDown()
+        standbyOpenLatch = null
         val deviceToClose = standbyDevice
         if (deviceToClose != null && closingLatch != null) {
             closeSignals[deviceToClose] = closingLatch
