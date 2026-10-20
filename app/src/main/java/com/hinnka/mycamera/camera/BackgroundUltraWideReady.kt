@@ -40,14 +40,69 @@ internal class BackgroundUltraWideReady(context: Context) {
     @Volatile private var standbySurface: Surface? = null
     @Volatile private var standbyCameraId: String? = null
     @Volatile private var activeCameraId: String? = null
+    private var pendingCameraTransfer: PendingCameraTransfer? = null
+    private var transferredStateCallback: CameraDevice.StateCallback? = null
+
+    private data class PendingCameraTransfer(
+        val cameraId: String,
+        val session: CameraCaptureSession,
+        val stateCallback: CameraDevice.StateCallback,
+        val onReady: (CameraDevice?) -> Unit
+    )
+
+    /** True only when the standby device and its warm-up stream are both ready for hand-off. */
+    fun isReadyFor(cameraId: String): Boolean =
+        standbyCameraId == cameraId && standbyDevice != null && standbySession != null
+
+    /**
+     * Close the low-resolution warm-up session, then transfer the already-open device to the
+     * controller. Returns false only when no hand-off was scheduled.
+     */
+    fun consumeReadyCamera(
+        cameraId: String,
+        stateCallback: CameraDevice.StateCallback,
+        onReady: (CameraDevice?) -> Unit
+    ): Boolean {
+        if (!isReadyFor(cameraId)) return false
+        return handler.post {
+            if (standbyCameraId != cameraId || standbyDevice == null || standbySession == null ||
+                pendingCameraTransfer != null
+            ) {
+                onReady(null)
+                return@post
+            }
+            val session = standbySession ?: run {
+                onReady(null)
+                return@post
+            }
+            pendingCameraTransfer = PendingCameraTransfer(
+                cameraId = cameraId,
+                session = session,
+                stateCallback = stateCallback,
+                onReady = onReady
+            )
+            try {
+                session.stopRepeating()
+            } catch (_: Exception) {
+                // Closing the session below is the authoritative teardown operation.
+            }
+            try {
+                session.close()
+            } catch (error: Exception) {
+                pendingCameraTransfer = null
+                PLog.w(TAG, "Unable to detach warmed session for $cameraId: ${error.message}")
+                onReady(null)
+                releaseLocked()
+            }
+        }
+    }
 
     fun update(cameras: List<CameraInfo>, currentCameraId: String, activeOpenCameraId: String?) {
         handler.post {
-            val active = cameras.firstOrNull {
-                it.cameraId == currentCameraId ||
-                    it.logicalCameraId == activeOpenCameraId ||
-                    it.getOpenCameraId() == activeOpenCameraId
-            }
+            // Prefer the exact selected lens. Logical cameras commonly share the same open ID,
+            // so matching logicalCameraId first can select the wrong lens for standby.
+            val active = cameras.firstOrNull { it.cameraId == currentCameraId }
+                ?: cameras.firstOrNull { it.getOpenCameraId() == activeOpenCameraId }
             val ultraWide = cameras.firstOrNull { it.lensType == LensType.BACK_ULTRA_WIDE }
             val main = cameras.firstOrNull { it.lensType == LensType.BACK_MAIN }
             val standby = if (active?.lensType == LensType.BACK_ULTRA_WIDE) main else ultraWide
@@ -148,6 +203,24 @@ internal class BackgroundUltraWideReady(context: Context) {
 
                                     override fun onClosed(session: CameraCaptureSession) {
                                         if (standbySession === session) standbySession = null
+                                        val pending = pendingCameraTransfer ?: return
+                                        if (pending.session !== session || pending.cameraId != standbyCameraId) return
+                                        val device = standbyDevice ?: run {
+                                            pendingCameraTransfer = null
+                                            pending.onReady(null)
+                                            return
+                                        }
+
+                                        // Detach the warm-up outputs before configuring the real
+                                        // viewfinder/encoder/capture outputs on this same device.
+                                        pendingCameraTransfer = null
+                                        standbyDevice = null
+                                        standbyCameraId = null
+                                        activeCameraId = null
+                                        releaseStandbyOutputLocked()
+                                        transferredStateCallback = pending.stateCallback
+                                        PLog.i(TAG, "Handing warmed camera $standbyId to the active camera pipeline")
+                                        pending.onReady(device)
                                     }
                                 },
                                 handler
@@ -160,15 +233,35 @@ internal class BackgroundUltraWideReady(context: Context) {
                     }
 
                     override fun onDisconnected(camera: CameraDevice) {
+                        val owner = transferredStateCallback
+                        if (owner != null) {
+                            owner.onDisconnected(camera)
+                            return
+                        }
                         camera.close()
                         releaseResourcesForToken(token)
                         PLog.w(TAG, "Standby camera disconnected: $standbyId")
                     }
 
                     override fun onError(camera: CameraDevice, error: Int) {
+                        val owner = transferredStateCallback
+                        if (owner != null) {
+                            owner.onError(camera, error)
+                            return
+                        }
                         camera.close()
                         releaseResourcesForToken(token)
                         PLog.w(TAG, "Standby camera error: id=$standbyId, code=$error")
+                    }
+
+                    override fun onClosed(camera: CameraDevice) {
+                        val owner = transferredStateCallback
+                        if (owner != null) {
+                            transferredStateCallback = null
+                            owner.onClosed(camera)
+                        } else {
+                            releaseResourcesForToken(token)
+                        }
                     }
                 }, handler)
             } catch (error: Exception) {
@@ -187,18 +280,25 @@ internal class BackgroundUltraWideReady(context: Context) {
         releaseLocked()
     }
 
+    private fun releaseStandbyOutputLocked() {
+        try { standbySurface?.release() } catch (_: Exception) {}
+        standbySurface = null
+        try { standbyTexture?.release() } catch (_: Exception) {}
+        standbyTexture = null
+    }
+
     private fun releaseLocked() {
         generation.incrementAndGet()
+        val pending = pendingCameraTransfer
+        pendingCameraTransfer = null
         try { standbySession?.stopRepeating() } catch (_: Exception) {}
         try { standbySession?.close() } catch (_: Exception) {}
         standbySession = null
         try { standbyDevice?.close() } catch (_: Exception) {}
         standbyDevice = null
-        try { standbySurface?.release() } catch (_: Exception) {}
-        standbySurface = null
-        try { standbyTexture?.release() } catch (_: Exception) {}
-        standbyTexture = null
+        releaseStandbyOutputLocked()
         standbyCameraId = null
         activeCameraId = null
+        pending?.onReady?.invoke(null)
     }
 }
