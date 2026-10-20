@@ -351,8 +351,6 @@ fun SettingsScreen(
     val enableLogicalMultiCameraDiscovery by viewModel.enableLogicalMultiCameraDiscovery.collectAsState(initial = false)
     val keepUltraWideReadyEnabled by viewModel.keepUltraWideReadyEnabled.collectAsState(initial = false)
     val logicalCameraBindingWhitelist by viewModel.logicalCameraBindingWhitelist.collectAsState(initial = emptyList())
-    val jpgMultiFrameDenoiseFrameCount by viewModel.jpgMultiFrameDenoiseFrameCount.collectAsState()
-    val jpgMultiFrameDenoiseOutputScale by viewModel.jpgMultiFrameDenoiseOutputScale.collectAsState()
     val hdrPlusFrameCount by viewModel.hdrPlusFrameCount.collectAsState()
     val hdrPlusMergeMode by viewModel.hdrPlusMergeMode.collectAsState()
     val hdrPlusBracketExposureEnabled by viewModel.hdrPlusBracketExposureEnabled.collectAsState()
@@ -361,7 +359,6 @@ fun SettingsScreen(
     val mlAeMaxHdrRatio by viewModel.mlAeMaxHdrRatio.collectAsState()
     val effectiveHdrPlusBracketExposure = hdrPlusMergeMode.supportsBracketExposure &&
         hdrPlusBracketExposureEnabled
-    val multipleExposureCount by viewModel.multipleExposureCount.collectAsState()
     val enableDevelopAnimation by viewModel.enableDevelopAnimation.collectAsState()
     val colorPaletteEnabled by viewModel.colorPaletteEnabled.collectAsState()
     val developAnimationStyle by viewModel.developAnimationStyle.collectAsState()
@@ -370,7 +367,6 @@ fun SettingsScreen(
     val useJpeg444Export by viewModel.useJpeg444Export.collectAsState(initial = false)
     val useP010 by viewModel.useP010.collectAsState()
     val useP3ColorSpace by viewModel.useP3ColorSpace.collectAsState()
-    val ultraHdrGainMapEnabled by viewModel.ultraHdrGainMapEnabled.collectAsState()
     val useHdrScreenMode by viewModel.useHdrScreenMode.collectAsState()
     val isPurchased by viewModel.isPurchased.collectAsState()
     val phantomMode by viewModel.phantomMode.collectAsState()
@@ -790,13 +786,7 @@ fun SettingsScreen(
     var downloadedUpdateApk by remember { mutableStateOf<File?>(null) }
     var showInstallUpdateDialog by remember { mutableStateOf(false) }
     var showRawBaselineRecipeEditor by remember { mutableStateOf(false) }
-    var jpgMultiFrameDenoiseCountSliderValue by remember(jpgMultiFrameDenoiseFrameCount) {
-        mutableStateOf(jpgMultiFrameDenoiseFrameCount.toFloat())
-    }
-    var jpgMultiFrameDenoiseOutputScaleUi by remember(jpgMultiFrameDenoiseOutputScale) {
-        mutableStateOf(MultiFrameConfig.normalizeOutputScale(jpgMultiFrameDenoiseOutputScale))
-    }
-    var hdrPlusFrameCountSliderValue by remember(hdrPlusFrameCount) {
+var hdrPlusFrameCountSliderValue by remember(hdrPlusFrameCount) {
         mutableStateOf(hdrPlusFrameCount.toFloat())
     }
     var hdrPlusLongFrameExposureEvUi by remember(hdrPlusLongFrameExposureEv) {
@@ -1460,25 +1450,6 @@ fun SettingsScreen(
                         )
 
                         QualityLevelSetting(
-                            title = stringResource(R.string.settings_multiple_exposure_count),
-                            description = stringResource(R.string.settings_multiple_exposure_count_description),
-                            levels = listOf(
-                                2 to "2",
-                                3 to "3",
-                                4 to "4",
-                                5 to "5",
-                                6 to "6"
-                            ),
-                            currentLevel = multipleExposureCount,
-                            onLevelSelected = { viewModel.setMultipleExposureCount(it) }
-                        )
-
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-
-                        QualityLevelSetting(
                             title = stringResource(R.string.settings_photo_quality),
                             description = stringResource(R.string.settings_photo_quality_description),
                             levels = listOf(
@@ -1918,53 +1889,6 @@ fun SettingsScreen(
                         title = stringResource(R.string.settings_section_photo_mode),
                         showTitle = false
                     ) {
-                        SliderSettingItem(
-                            title = stringResource(R.string.settings_multi_frame_denoise_frame_count),
-                            description = stringResource(
-                                R.string.settings_multi_frame_denoise_frame_count_description
-                            ),
-                            value = jpgMultiFrameDenoiseCountSliderValue,
-                            valueRange = MultiFrameConfig.MIN_DENOISE_FRAME_COUNT.toFloat()..
-                                MultiFrameConfig.MAX_FRAME_COUNT.toFloat(),
-                            onValueChange = {
-                                jpgMultiFrameDenoiseCountSliderValue = it.roundToInt().toFloat()
-                            },
-                            resetValue = MultiFrameConfig.DEFAULT_DENOISE_FRAME_COUNT.toFloat(),
-                            onValueChangeFinished = {
-                                viewModel.setJpgMultiFrameDenoiseFrameCount(
-                                    jpgMultiFrameDenoiseCountSliderValue.roundToInt()
-                                )
-                            },
-                            valueTextFormatter = { it.roundToInt().toString() }
-                        )
-
-                        val jpgOutputScaleValueFormat = stringResource(R.string.settings_jpg_multi_frame_denoise_output_scale_value)
-                        SliderSettingItem(
-                            title = stringResource(R.string.settings_jpg_multi_frame_denoise_output_scale),
-                            description = stringResource(
-                                R.string.settings_jpg_multi_frame_denoise_output_scale_description
-                            ),
-                            value = jpgMultiFrameDenoiseOutputScaleUi,
-                            valueRange = MultiFrameConfig.MIN_OUTPUT_SCALE..MultiFrameConfig.MAX_OUTPUT_SCALE,
-                            resetValue = MultiFrameConfig.DEFAULT_SUPER_RESOLUTION_SCALE,
-                            onResetValue = { scale ->
-                                jpgMultiFrameDenoiseOutputScaleUi = scale
-                                viewModel.setJpgMultiFrameDenoiseOutputScale(scale)
-                            },
-                            onValueChange = {
-                                jpgMultiFrameDenoiseOutputScaleUi = MultiFrameConfig.normalizeOutputScale(it)
-                            },
-                            onValueChangeFinished = {
-                                viewModel.setJpgMultiFrameDenoiseOutputScale(jpgMultiFrameDenoiseOutputScaleUi)
-                            },
-                            valueTextFormatter = { scale -> String.format(jpgOutputScaleValueFormat, scale) }
-                        )
-
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
-
                         QualityLevelSetting(
                             title = stringResource(R.string.settings_nr_level),
                             description = stringResource(R.string.settings_nr_level_description),
@@ -2398,22 +2322,6 @@ fun SettingsScreen(
                     SettingsSection(
                         title = stringResource(R.string.settings_raw_group_capture_output)
                     ) {
-                        if (isHdrSettingsSupported) {
-                            SwitchSettingItem(
-                                title = stringResource(R.string.settings_ultra_hdr_gain_map),
-                                description = stringResource(
-                                    R.string.settings_ultra_hdr_gain_map_description
-                                ),
-                                checked = ultraHdrGainMapEnabled,
-                                onCheckedChange = viewModel::setUltraHdrGainMapEnabled,
-                            )
-
-                            HorizontalDivider(
-                                modifier = Modifier.padding(vertical = 8.dp),
-                                color = Color.White.copy(alpha = 0.1f)
-                            )
-                        }
-
                         QualityLevelSetting(
                             title = stringResource(R.string.settings_export_dng_with_raw_export),
                             description = stringResource(R.string.settings_export_dng_with_raw_export_description),
