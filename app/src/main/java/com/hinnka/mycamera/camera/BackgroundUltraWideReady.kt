@@ -47,6 +47,8 @@ internal class BackgroundUltraWideReady(context: Context) {
     private var pendingTakeStateCallback: CameraDevice.StateCallback? = null
     @Volatile private var adoptedDevice: CameraDevice? = null
     @Volatile private var adoptedStateCallback: CameraDevice.StateCallback? = null
+    private var pendingTakeFallbackDevice: CameraDevice? = null
+    private var pendingTakeFallbackCallback: ((CameraDevice?) -> Unit)? = null
 
     fun update(cameras: List<CameraInfo>, currentCameraId: String, activeOpenCameraId: String?) {
         handler.post {
@@ -118,6 +120,15 @@ internal class BackgroundUltraWideReady(context: Context) {
                 cameraManager.openCamera(standbyId, object : CameraDevice.StateCallback() {
                     override fun onOpened(camera: CameraDevice) {
                         if (generation.get() != token || activeCameraId != activeId) {
+                            // If a switch was waiting for this open, don't start a duplicate
+                            // openCamera() for the same ID until Android confirms this device closed.
+                            if (pendingTakeCameraId == standbyId) {
+                                pendingTakeFallbackDevice = camera
+                                pendingTakeFallbackCallback = pendingTakeCallback
+                                pendingTakeCameraId = null
+                                pendingTakeCallback = null
+                                pendingTakeStateCallback = null
+                            }
                             camera.close()
                             return
                         }
@@ -185,6 +196,13 @@ internal class BackgroundUltraWideReady(context: Context) {
                             delegate.onDisconnected(camera)
                             return
                         }
+                        if (pendingTakeCameraId == standbyId) {
+                            pendingTakeFallbackDevice = camera
+                            pendingTakeFallbackCallback = pendingTakeCallback
+                            pendingTakeCameraId = null
+                            pendingTakeCallback = null
+                            pendingTakeStateCallback = null
+                        }
                         camera.close()
                         releaseResourcesForToken(token)
                         PLog.w(TAG, "Standby camera disconnected: $standbyId")
@@ -196,12 +214,26 @@ internal class BackgroundUltraWideReady(context: Context) {
                             delegate.onError(camera, error)
                             return
                         }
+                        if (pendingTakeCameraId == standbyId) {
+                            pendingTakeFallbackDevice = camera
+                            pendingTakeFallbackCallback = pendingTakeCallback
+                            pendingTakeCameraId = null
+                            pendingTakeCallback = null
+                            pendingTakeStateCallback = null
+                        }
                         camera.close()
                         releaseResourcesForToken(token)
                         PLog.w(TAG, "Standby camera error: id=$standbyId, code=$error")
                     }
 
                     override fun onClosed(camera: CameraDevice) {
+                        if (pendingTakeFallbackDevice === camera) {
+                            pendingTakeFallbackDevice = null
+                            val callback = pendingTakeFallbackCallback
+                            pendingTakeFallbackCallback = null
+                            callback?.invoke(null)
+                            return
+                        }
                         if (adoptedDevice === camera) {
                             val delegate = adoptedStateCallback
                             adoptedDevice = null
@@ -287,6 +319,12 @@ internal class BackgroundUltraWideReady(context: Context) {
 
     fun stop() {
         handler.post {
+            // When CameraManager.openCamera is still in flight, wait for its stale device's
+            // onClosed() callback before allowing the normal open path to retry that same ID.
+            if (pendingTakeCameraId != null && standbyDevice == null) {
+                releaseLocked()
+                return@post
+            }
             val pending = pendingTakeCallback
             pendingTakeCameraId = null
             pendingTakeCallback = null
