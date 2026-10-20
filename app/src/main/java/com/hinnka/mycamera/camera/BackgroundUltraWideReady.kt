@@ -98,7 +98,12 @@ internal class BackgroundUltraWideReady(context: Context) {
         }
     }
 
-    fun update(cameras: List<CameraInfo>, currentCameraId: String, activeOpenCameraId: String?) {
+    fun update(
+        cameras: List<CameraInfo>,
+        currentCameraId: String,
+        activeOpenCameraId: String?,
+        requestedSize: Size? = null
+    ) {
         handler.post {
             // Prefer the exact selected lens. Logical cameras commonly share the same open ID,
             // so matching logicalCameraId first can select the wrong lens for standby.
@@ -152,9 +157,18 @@ internal class BackgroundUltraWideReady(context: Context) {
                 val map = cameraManager.getCameraCharacteristics(standbyId)
                     .get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
                 val sizes = map?.getOutputSizes(SurfaceTexture::class.java).orEmpty()
+                val targetSize = requestedSize ?: Size(640, 480)
+                // Prefer the selected photo viewfinder/video input dimensions when the standby
+                // camera advertises them. Camera output sizes may be returned landscape-first,
+                // so compare both orientations when choosing the closest supported size.
                 val chosenSize = sizes.minByOrNull { size ->
-                    kotlin.math.abs(size.width * size.height - 640 * 480)
-                } ?: Size(640, 480)
+                    minOf(
+                        kotlin.math.abs(size.width - targetSize.width) +
+                            kotlin.math.abs(size.height - targetSize.height),
+                        kotlin.math.abs(size.width - targetSize.height) +
+                            kotlin.math.abs(size.height - targetSize.width)
+                    )
+                } ?: targetSize
                 val texture = SurfaceTexture(0).apply {
                     setDefaultBufferSize(chosenSize.width, chosenSize.height)
                 }
