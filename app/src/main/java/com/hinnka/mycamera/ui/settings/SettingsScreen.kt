@@ -3128,7 +3128,6 @@ private fun SettingsCategoryOverview(
             title = stringResource(R.string.settings_section_capture_storage),
             description = listOf(
                 stringResource(R.string.settings_top_sheet_aspect_ratios),
-                stringResource(R.string.settings_multiple_exposure_count),
                 stringResource(R.string.settings_photo_quality),
                 stringResource(R.string.settings_auto_save),
                 stringResource(R.string.settings_save_location)
@@ -3162,8 +3161,6 @@ private fun SettingsCategoryOverview(
         NavigationSettingItem(
             title = stringResource(R.string.settings_section_photo_mode),
             description = listOf(
-                stringResource(R.string.settings_multi_frame_denoise_frame_count),
-                stringResource(R.string.settings_jpg_multi_frame_denoise_output_scale),
                 stringResource(R.string.settings_nr_level),
                 stringResource(R.string.settings_edge_level)
             ).joinToString(" · "),
