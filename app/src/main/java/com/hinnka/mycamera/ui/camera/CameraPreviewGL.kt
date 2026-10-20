@@ -67,6 +67,7 @@ fun CameraPreviewGL(
     onSurfaceTextureReady: (SurfaceTexture) -> Unit,
     onSurfaceDestroyed: (SurfaceTexture?) -> Unit,
     onStandbySurfaceTextureReady: (SurfaceTexture) -> Unit = {},
+    onStandbySurfaceTextureDestroyed: (SurfaceTexture?) -> Unit = {},
     onTap: (Float, Float, Int, Int) -> Unit,
     onLongPress: (Float, Float, Int, Int) -> Unit,
     onHistogramUpdated: ((IntArray) -> Unit)? = null,
@@ -222,6 +223,7 @@ fun CameraPreviewGL(
 
                         glSurfaceView.onSurfaceDestroyed = {
                             val destroyedSurfaceTexture = glSurfaceView.getSurfaceTexture()
+                            val destroyedStandbyTexture = glSurfaceView.getStandbySurfaceTexture()
                             if (glSurfaceViewRef === glSurfaceView) {
                                 surfaceAvailable = false
                                 surfaceTextureNotified = false
@@ -230,8 +232,10 @@ fun CameraPreviewGL(
                                 notifiedSurfaceTexture = null
                                 notifiedStandbySurfaceTexture = null
                                 glSurfaceViewRef = null
+                                onStandbySurfaceTextureDestroyed(destroyedStandbyTexture)
                                 onSurfaceDestroyed(destroyedSurfaceTexture)
                             } else if (destroyedSurfaceTexture != null) {
+                                onStandbySurfaceTextureDestroyed(destroyedStandbyTexture)
                                 onSurfaceDestroyed(destroyedSurfaceTexture)
                             }
                         }

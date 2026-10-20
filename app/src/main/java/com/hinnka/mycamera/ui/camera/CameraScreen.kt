@@ -1366,6 +1366,8 @@ fun CameraScreen(
                                 }
                                 viewModel.closeCamera(surfaceTexture)
                             },
+                            onStandbySurfaceTextureReady = viewModel::setStandbyPreviewSurfaceTexture,
+                            onStandbySurfaceTextureDestroyed = viewModel::clearStandbyPreviewSurfaceTexture,
                             onTap = { x, y, w, h ->
                                 if (state.isFocusLocked) {
                                     viewModel.unlockFocus()

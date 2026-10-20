@@ -2855,6 +2855,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** Forward the GL renderer's second OES target to the Camera2 standby-session owner. */
+    fun setStandbyPreviewSurfaceTexture(surfaceTexture: SurfaceTexture) {
+        cameraController.setStandbyPreviewSurfaceTexture(surfaceTexture)
+    }
+
+    fun clearStandbyPreviewSurfaceTexture(surfaceTexture: SurfaceTexture?) {
+        cameraController.clearStandbyPreviewSurfaceTexture(surfaceTexture)
+    }
+
     /**
      * 打开相机（Camera2 接口）
      */

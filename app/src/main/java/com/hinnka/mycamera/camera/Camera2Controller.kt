@@ -237,6 +237,9 @@ class Camera2Controller(private val context: Context) {
     // the active/standby pair concurrent. Lens/zoom transitions stay in the UI layer.
     private val backgroundUltraWideReady = BackgroundUltraWideReady(context)
     @Volatile private var keepUltraWideReadyEnabled = false
+    // Separate OES input owned by the preview renderer. The standby Camera2 session
+    // writes into this target while the primary lens remains active.
+    @Volatile private var standbyPreviewSurfaceTexture: SurfaceTexture? = null
 
     private fun resolveStandbyWarmupSize(state: CameraState): Size {
         if (state.captureMode == CaptureMode.PHOTO) return state.currentPreviewSize
@@ -259,21 +262,70 @@ class Camera2Controller(private val context: Context) {
             .takeIf { it.isFinite() && it > 0f } ?: 1f
     }
 
+    private fun refreshBackgroundUltraWideReady(state: CameraState = _state.value) {
+        if (!keepUltraWideReadyEnabled) {
+            backgroundUltraWideReady.stop()
+            return
+        }
+        if (!state.isPreviewActive || cameraDevice == null) return
+        val videoOutput = if (
+            state.captureMode == CaptureMode.VIDEO &&
+            state.videoRecordingState.isRecording
+        ) {
+            videoRecorder.standbyCameraInputSurface
+        } else {
+            null
+        }
+        backgroundUltraWideReady.update(
+            cameras = state.availableCameras,
+            currentCameraId = state.currentCameraId,
+            activeOpenCameraId = cameraDevice?.id,
+            requestedSize = resolveStandbyWarmupSize(state),
+            visibleZoomRatio = resolveVisibleZoomRatio(state),
+            previewSurfaceTexture = standbyPreviewSurfaceTexture,
+            videoOutputSurface = videoOutput
+        )
+    }
+
+    /** Attach the renderer-owned standby texture to the real concurrent Camera2 stream. */
+    fun setStandbyPreviewSurfaceTexture(surfaceTexture: SurfaceTexture) {
+        val action = Runnable {
+            if (standbyPreviewSurfaceTexture !== surfaceTexture) {
+                standbyPreviewSurfaceTexture = surfaceTexture
+                refreshBackgroundUltraWideReady(_state.value)
+            }
+        }
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post(action)
+        } else {
+            action.run()
+        }
+    }
+
+    /** Clear only the texture instance that was destroyed, never a newer renderer's texture. */
+    fun clearStandbyPreviewSurfaceTexture(surfaceTexture: SurfaceTexture?) {
+        if (surfaceTexture == null) return
+        val action = Runnable {
+            if (standbyPreviewSurfaceTexture === surfaceTexture) {
+                standbyPreviewSurfaceTexture = null
+                refreshBackgroundUltraWideReady(_state.value)
+            }
+        }
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post(action)
+        } else {
+            action.run()
+        }
+    }
+
     fun setKeepUltraWideReadyEnabled(enabled: Boolean) {
         keepUltraWideReadyEnabled = enabled
-        if (!enabled) {
-            backgroundUltraWideReady.stop()
+        if (enabled) {
+            refreshBackgroundUltraWideReady(_state.value)
         } else {
-            val current = _state.value
-            if (current.isPreviewActive) {
-                backgroundUltraWideReady.update(
-                    cameras = current.availableCameras,
-                    currentCameraId = current.currentCameraId,
-                    activeOpenCameraId = cameraDevice?.id,
-                    requestedSize = resolveStandbyWarmupSize(current),
-                    visibleZoomRatio = resolveVisibleZoomRatio(current)
-                )
-            }
+            backgroundUltraWideReady.stop()
         }
     }
 
@@ -3982,18 +4034,7 @@ class Camera2Controller(private val context: Context) {
             }
 
             _state.value = _state.value.copy(isPreviewActive = true)
-            if (keepUltraWideReadyEnabled) {
-                val currentState = _state.value
-                backgroundUltraWideReady.update(
-                    cameras = currentState.availableCameras,
-                    currentCameraId = currentState.currentCameraId,
-                    activeOpenCameraId = cameraDevice?.id,
-                    requestedSize = resolveStandbyWarmupSize(currentState),
-                    visibleZoomRatio = resolveVisibleZoomRatio(currentState)
-                )
-            } else {
-                backgroundUltraWideReady.stop()
-            }
+            refreshBackgroundUltraWideReady(_state.value)
             PLog.d(TAG, "Preview started")
 
         } catch (e: CameraAccessException) {
@@ -7425,6 +7466,9 @@ class Camera2Controller(private val context: Context) {
             videoRecordingState = VideoRecordingState(isRecording = true, elapsedMs = 0L)
         )
         videoRecordingPausedMs = 0L
+        // The encoder creates its second input only after recording starts. Rebuild the
+        // standby concurrent session with both preview and recording outputs now.
+        refreshBackgroundUltraWideReady(_state.value)
         createPreviewSession(openGeneration = cameraOpenGeneration)
     }
 
@@ -7544,6 +7588,9 @@ class Camera2Controller(private val context: Context) {
         }
         videoCameraHlg10InputActive = false
         videoRecorder.stopRecording()
+        // stopRecording removes the secondary encoder surface; stop targeting it so the
+        // background stream can remain ready for the next lens switch.
+        refreshBackgroundUltraWideReady(_state.value)
         if (pendingVendorSessionParameterRestart && cameraDevice != null && previewSurface != null) {
             PLog.d(TAG, "Restarting preview session after recording for pending vendor session parameter change")
             createPreviewSession(openGeneration = cameraOpenGeneration)

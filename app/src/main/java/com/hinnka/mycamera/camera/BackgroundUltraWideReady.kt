@@ -42,6 +42,12 @@ internal class BackgroundUltraWideReady(context: Context) {
     @Volatile private var standbySession: CameraCaptureSession? = null
     @Volatile private var standbyTexture: SurfaceTexture? = null
     @Volatile private var standbySurface: Surface? = null
+    // The preview GL renderer owns an external standby SurfaceTexture when available.
+    // Only fallback SurfaceTextures created here may be released by this class.
+    @Volatile private var standbyTextureIsExternal = false
+    @Volatile private var standbyVideoOutputSurface: Surface? = null
+    @Volatile private var standbyRequestedVideoOutputSurface: Surface? = null
+    @Volatile private var standbyRequestedSize: Size? = null
     @Volatile private var standbyCameraId: String? = null
     @Volatile private var activeCameraId: String? = null
     @Volatile private var requestedVisibleZoomRatio: Float = 1f
@@ -120,7 +126,9 @@ internal class BackgroundUltraWideReady(context: Context) {
         currentCameraId: String,
         activeOpenCameraId: String?,
         requestedSize: Size? = null,
-        visibleZoomRatio: Float? = null
+        visibleZoomRatio: Float? = null,
+        previewSurfaceTexture: SurfaceTexture? = null,
+        videoOutputSurface: Surface? = null
     ) {
         if (visibleZoomRatio != null && visibleZoomRatio.isFinite() && visibleZoomRatio > 0f) {
             requestedVisibleZoomRatio = visibleZoomRatio.coerceIn(0.1f, 100f)
@@ -164,8 +172,17 @@ internal class BackgroundUltraWideReady(context: Context) {
                 PLog.d(TAG, "Background lens warm-up skipped: camera pair is not declared concurrent")
                 return@post
             }
+            val desiredVideoSurface = videoOutputSurface?.takeIf { it.isValid }
+            val samePreviewTexture = if (previewSurfaceTexture != null) {
+                standbyTextureIsExternal && standbyTexture === previewSurfaceTexture
+            } else {
+                !standbyTextureIsExternal
+            }
             if (standbyCameraId == standbyId && standbyDevice != null && standbySession != null &&
-                activeCameraId == activeId
+                activeCameraId == activeId &&
+                samePreviewTexture &&
+                standbyRequestedVideoOutputSurface === desiredVideoSurface &&
+                standbyRequestedSize == requestedSize
             ) {
                 applyVisibleZoomRatioLocked(requestedVisibleZoomRatio, force = false)
                 return@post
@@ -193,12 +210,27 @@ internal class BackgroundUltraWideReady(context: Context) {
                             kotlin.math.abs(size.height - targetSize.width)
                     )
                 } ?: Size(640, 480)
-                val texture = SurfaceTexture(0).apply {
+                val texture = previewSurfaceTexture ?: SurfaceTexture(0).apply {
                     setDefaultBufferSize(chosenSize.width, chosenSize.height)
+                }
+                if (previewSurfaceTexture != null) {
+                    // The renderer owns this texture; the controller only wraps it in a Surface.
+                    texture.setDefaultBufferSize(chosenSize.width, chosenSize.height)
                 }
                 val surface = Surface(texture)
                 standbyTexture = texture
+                standbyTextureIsExternal = previewSurfaceTexture != null
                 standbySurface = surface
+                standbyRequestedVideoOutputSurface = desiredVideoSurface
+                standbyRequestedSize = requestedSize
+                // The secondary encoder target has a fixed input buffer size. Only add it to a
+                // Camera2 session when that exact size is supported by the standby camera.
+                standbyVideoOutputSurface = desiredVideoSurface?.takeIf {
+                    requestedSize != null && chosenSize == requestedSize
+                }
+                if (desiredVideoSurface != null && standbyVideoOutputSurface == null) {
+                    PLog.w(TAG, "Standby lens does not expose the requested video input size $requestedSize; keeping preview-only standby")
+                }
                 standbyCameraId = standbyId
 
                 @SuppressLint("MissingPermission")
@@ -210,8 +242,12 @@ internal class BackgroundUltraWideReady(context: Context) {
                         }
                         standbyDevice = camera
                         try {
+                            val outputSurfaces = listOfNotNull(
+                                surface,
+                                standbyVideoOutputSurface?.takeIf { it.isValid && it !== surface }
+                            ).distinct()
                             camera.createCaptureSession(
-                                listOf(surface),
+                                outputSurfaces,
                                 object : CameraCaptureSession.StateCallback() {
                                     override fun onConfigured(session: CameraCaptureSession) {
                                         if (generation.get() != token || standbyDevice !== camera) {
@@ -220,7 +256,12 @@ internal class BackgroundUltraWideReady(context: Context) {
                                         }
                                         try {
                                             val requestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-                                                .apply { addTarget(surface) }
+                                                .apply {
+                                                    addTarget(surface)
+                                                    standbyVideoOutputSurface
+                                                        ?.takeIf { it.isValid && it !== surface }
+                                                        ?.let(::addTarget)
+                                                }
                                             standbyRequestBuilder = requestBuilder
                                             standbySession = session
                                             lastStandbyZoomRatio = Float.NaN
@@ -378,8 +419,16 @@ internal class BackgroundUltraWideReady(context: Context) {
     private fun releaseStandbyOutputLocked() {
         try { standbySurface?.release() } catch (_: Exception) {}
         standbySurface = null
-        try { standbyTexture?.release() } catch (_: Exception) {}
+        // A SurfaceTexture supplied by LutRenderer is renderer-owned and must survive
+        // standby-session reconfiguration and camera hand-off.
+        if (!standbyTextureIsExternal) {
+            try { standbyTexture?.release() } catch (_: Exception) {}
+        }
         standbyTexture = null
+        standbyTextureIsExternal = false
+        standbyVideoOutputSurface = null
+        standbyRequestedVideoOutputSurface = null
+        standbyRequestedSize = null
         standbyRequestBuilder = null
         standbyLensInfo = null
         standbyCharacteristics = null
