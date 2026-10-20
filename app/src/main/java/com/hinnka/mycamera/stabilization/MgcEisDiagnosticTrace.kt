@@ -21,9 +21,6 @@ internal class MgcEisDiagnosticTrace(
         private const val TAG = "MgcEisTrace"
         private const val MAX_FRAME_CALLS = 180
         private const val MAX_GYRO_SAMPLES = 8_192
-        // Native-input tracing allocates strings on every gyro callback. Keep it opt-in so
-        // debug camera builds do not add avoidable GC pressure during high-resolution video.
-        private const val ENABLE_DIFFERENTIAL_TRACE = false
     }
 
     private val writer = Executors.newSingleThreadExecutor { runnable ->
@@ -39,7 +36,7 @@ internal class MgcEisDiagnosticTrace(
     @Synchronized
     fun start(width: Int, height: Int, frontFacing: Boolean, strength: Float) {
         entries.clear()
-        active = BuildConfig.DEBUG && ENABLE_DIFFERENTIAL_TRACE
+        active = BuildConfig.DEBUG
         snapshotQueued = false
         gyroCount = 0
         frameCount = 0
