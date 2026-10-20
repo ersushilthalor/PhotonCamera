@@ -981,7 +981,8 @@ class VideoRecorder(
                         "boottimeDeltaMs=${boottimeDeltaNs / 1_000_000.0}, " +
                         "offsetNs=$cameraTimestampToBoottimeOffsetNs"
                 )
-            } else if (!cameraTimestampOffsetActive &&
+            } else if (
+                cameraTimestampToBoottimeOffsetNs == UNSET_TIMESTAMP &&
                 requestedCameraTimestampSource != CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
             ) {
                 cameraTimestampToBoottimeOffsetNs = observedBoottimeNs - cameraTimestampNs
