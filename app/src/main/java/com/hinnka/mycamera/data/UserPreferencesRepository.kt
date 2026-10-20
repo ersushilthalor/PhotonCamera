@@ -619,8 +619,7 @@ class UserPreferencesRepository(private val context: Context) {
                 storedUseRaw && legacyMultiFrameEnabled
             }
             val useRawMax = requestedUseRawMax || storedUseRaw
-            // RAW/HDR+ and YUV denoise belong to different shooting modes. Keep the YUV
-            // preference while professional mode is active so returning to PHOTO restores it.
+            // JPG multi-frame denoise is removed; RAW Max remains controlled by useRawMax.
             val useJpgMax = false
             val useHeicExport = preferences[USE_HEIC_EXPORT] ?: false
             val useJpeg444Export =
