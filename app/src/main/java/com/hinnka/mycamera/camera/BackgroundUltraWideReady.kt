@@ -44,6 +44,9 @@ internal class BackgroundUltraWideReady(context: Context) {
     // All access is serialized on this class' handler.
     private var pendingTakeCameraId: String? = null
     private var pendingTakeCallback: ((CameraDevice?) -> Unit)? = null
+    private var pendingTakeStateCallback: CameraDevice.StateCallback? = null
+    @Volatile private var adoptedDevice: CameraDevice? = null
+    @Volatile private var adoptedStateCallback: CameraDevice.StateCallback? = null
 
     fun update(cameras: List<CameraInfo>, currentCameraId: String, activeOpenCameraId: String?) {
         handler.post {
@@ -124,9 +127,11 @@ internal class BackgroundUltraWideReady(context: Context) {
                         // its full preview/capture session on this same CameraDevice.
                         if (pendingTakeCameraId == standbyId) {
                             val callback = pendingTakeCallback
+                            val stateCallback = pendingTakeStateCallback
                             pendingTakeCameraId = null
                             pendingTakeCallback = null
-                            detachForHandoff(camera, null)
+                            pendingTakeStateCallback = null
+                            detachForHandoff(camera, null, stateCallback)
                             callback?.invoke(camera)
                             return
                         }
@@ -175,15 +180,34 @@ internal class BackgroundUltraWideReady(context: Context) {
                     }
 
                     override fun onDisconnected(camera: CameraDevice) {
+                        val delegate = if (adoptedDevice === camera) adoptedStateCallback else null
+                        if (delegate != null) {
+                            delegate.onDisconnected(camera)
+                            return
+                        }
                         camera.close()
                         releaseResourcesForToken(token)
                         PLog.w(TAG, "Standby camera disconnected: $standbyId")
                     }
 
                     override fun onError(camera: CameraDevice, error: Int) {
+                        val delegate = if (adoptedDevice === camera) adoptedStateCallback else null
+                        if (delegate != null) {
+                            delegate.onError(camera, error)
+                            return
+                        }
                         camera.close()
                         releaseResourcesForToken(token)
                         PLog.w(TAG, "Standby camera error: id=$standbyId, code=$error")
+                    }
+
+                    override fun onClosed(camera: CameraDevice) {
+                        if (adoptedDevice === camera) {
+                            val delegate = adoptedStateCallback
+                            adoptedDevice = null
+                            adoptedStateCallback = null
+                            delegate?.onClosed(camera)
+                        }
                     }
                 }, handler)
             } catch (error: Exception) {
@@ -200,7 +224,11 @@ internal class BackgroundUltraWideReady(context: Context) {
      * immediately configures its normal preview/capture session on the still-open device.
      * This first handoff stage removes the expensive camera-device open from supported switches.
      */
-    fun takeCameraDevice(cameraId: String, onTaken: (CameraDevice?) -> Unit) {
+    fun takeCameraDevice(
+        cameraId: String,
+        stateCallback: CameraDevice.StateCallback,
+        onTaken: (CameraDevice?) -> Unit
+    ) {
         handler.post {
             if (standbyCameraId != cameraId) {
                 onTaken(null)
@@ -212,22 +240,34 @@ internal class BackgroundUltraWideReady(context: Context) {
                 // CameraManager.openCamera is still in flight. onOpened will hand it over.
                 pendingTakeCameraId = cameraId
                 pendingTakeCallback = onTaken
+                pendingTakeStateCallback = stateCallback
                 return@post
             }
 
             val callback = if (pendingTakeCameraId == cameraId) {
                 pendingTakeCameraId = null
-                pendingTakeCallback
+                pendingTakeStateCallback ?: stateCallback
             } else {
-                onTaken
+                stateCallback
             }
+            val resultCallback = pendingTakeCallback ?: onTaken
             pendingTakeCallback = null
-            detachForHandoff(device, standbySession)
-            callback?.invoke(device)
+            pendingTakeStateCallback = null
+            detachForHandoff(device, standbySession, callback)
+            resultCallback(device)
         }
     }
 
-    private fun detachForHandoff(device: CameraDevice, session: CameraCaptureSession?) {
+    private fun detachForHandoff(
+        device: CameraDevice,
+        session: CameraCaptureSession?,
+        stateCallback: CameraDevice.StateCallback?
+    ) {
+        // Delegate future CameraDevice lifecycle callbacks to the active controller. Camera2
+        // keeps the StateCallback supplied to the original openCamera() call for the device's
+        // whole lifetime; it cannot be replaced after opening.
+        adoptedDevice = device
+        adoptedStateCallback = stateCallback
         // Invalidate callbacks from the retiring standby session before releasing its surfaces.
         generation.incrementAndGet()
         if (standbyDevice === device) standbyDevice = null
@@ -250,6 +290,7 @@ internal class BackgroundUltraWideReady(context: Context) {
             val pending = pendingTakeCallback
             pendingTakeCameraId = null
             pendingTakeCallback = null
+            pendingTakeStateCallback = null
             releaseLocked()
             pending?.invoke(null)
         }
