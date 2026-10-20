@@ -3752,15 +3752,22 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun switchToLens(cameraId: String) {
         if (isVideoLensLocked()) return
+        val previousCamera = state.value.getCurrentCameraInfo()
         val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId }
         syncVendorCaptureSettingsToController()
         cameraController.switchToCameraId(cameraId)
         targetCamera?.let { camera ->
             setZoomRatioForCamera(camera.defaultVisibleZoomRatio(), camera.cameraId)
         }
-        reopenCamera(
-            preserveVideoRecording = true
-        )
+        if (shouldReopenCameraAfterLensSwitch(previousCamera, targetCamera)) {
+            reopenCamera(preserveVideoRecording = true)
+        } else {
+            PLog.d(
+                TAG,
+                "Keeping the logical rear CameraDevice open for lens switch: " +
+                    "${previousCamera?.cameraId} -> ${targetCamera?.cameraId}"
+            )
+        }
     }
 
     fun switchToLensAndSetZoomRatio(cameraId: String, ratio: Float) {
@@ -3768,12 +3775,38 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             setZoomRatio(ratio)
             return
         }
+        val previousCamera = state.value.getCurrentCameraInfo()
+        val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId }
         syncVendorCaptureSettingsToController()
         cameraController.switchToCameraId(cameraId)
         setZoomRatioForCamera(ratio, cameraId)
-        reopenCamera(
-            preserveVideoRecording = true
-        )
+        if (shouldReopenCameraAfterLensSwitch(previousCamera, targetCamera)) {
+            reopenCamera(preserveVideoRecording = true)
+        } else {
+            PLog.d(
+                TAG,
+                "Keeping the logical rear CameraDevice open for lens switch: " +
+                    "${previousCamera?.cameraId} -> ${targetCamera?.cameraId}"
+            )
+        }
+    }
+
+    /**
+     * Reopening the same logical Camera2 device adds latency and can drop the preview for a full
+     * device restart. When standby-lens readiness is enabled, keep that device open and let the
+     * controller rebuild only its physical-output capture session.
+     */
+    private fun shouldReopenCameraAfterLensSwitch(
+        previousCamera: CameraInfo?,
+        targetCamera: CameraInfo?
+    ): Boolean {
+        if (!userPreferences.value.keepUltraWideReadyEnabled) return true
+        if (previousCamera == null || targetCamera == null) return true
+        if (previousCamera.lensFacing != CameraCharacteristics.LENS_FACING_BACK ||
+            targetCamera.lensFacing != CameraCharacteristics.LENS_FACING_BACK
+        ) return true
+
+        return previousCamera.getOpenCameraId() != targetCamera.getOpenCameraId()
     }
 
     /**
