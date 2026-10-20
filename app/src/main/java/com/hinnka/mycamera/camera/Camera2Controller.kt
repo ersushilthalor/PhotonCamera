@@ -2624,7 +2624,7 @@ class Camera2Controller(private val context: Context) {
                     timingCharacteristics = openCharacteristics,
                 )
                 if (stabilizationCameraChanged && _state.value.videoRecordingState.isRecording) {
-                    videoRecorder.onCameraSwitched()
+                    videoRecorder.onCameraSwitched(cachedSensorOrientation)
                 }
                 if (_state.value.captureMode == CaptureMode.PHOTO &&
                     _state.value.photoPreviewStabilizationEnabled &&

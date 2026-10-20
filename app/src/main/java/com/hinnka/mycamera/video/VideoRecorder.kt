@@ -323,11 +323,11 @@ class VideoRecorder(
      * Explicitly restart its renderer session after Camera2 swaps physical lenses; no encoder
      * SurfaceTexture callback is guaranteed to wake a stopped EIS session.
      */
-    fun onCameraSwitched() {
+    fun onCameraSwitched(sensorOrientationDegrees: Int) {
         if (!isRecording || isPaused || stopRequested || !requestedEnhancedStabilization) return
         scope.launch(renderDispatcher) {
             if (!isRecording || isPaused || stopRequested) return@launch
-            renderer?.restartStabilizationForCameraSwitch()
+            renderer?.restartStabilizationForCameraSwitch(sensorOrientationDegrees)
         }
     }
 

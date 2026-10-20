@@ -245,7 +245,11 @@ class RealtimeVideoRenderer(
             sourceTextureTarget = GLES30.GL_TEXTURE_2D
             sourceTextureId = rendered.textureId
             sourceStMatrix = mgcEisPresentationTransform.matrix
-            sourceCropRect = cameraCropRect
+            sourceCropRect = resolveCameraCropRect(
+                presentationMatrix = mgcEisPresentationTransform.matrix,
+                inputWidth = rendered.width,
+                inputHeight = rendered.height,
+            )
             timestampNs = rendered.timestampNs
         } else {
             if (!cameraFrameUpdated || cameraTimestampNs <= 0L) return null
@@ -350,8 +354,29 @@ class RealtimeVideoRenderer(
             return hardwareRendered
         }
         return mgcEisYuvRenderer.render(frame)?.let { rendered ->
-            MgcEisHardwareBufferRenderer.Frame(rendered.timestampNs, rendered.textureId)
+            MgcEisHardwareBufferRenderer.Frame(
+                timestampNs = rendered.timestampNs,
+                textureId = rendered.textureId,
+                width = rendered.width,
+                height = rendered.height,
+            )
         }
+    }
+
+    private fun resolveCameraCropRect(
+        presentationMatrix: FloatArray,
+        inputWidth: Int,
+        inputHeight: Int,
+    ): FloatArray {
+        val safeWidth = inputWidth.coerceAtLeast(1)
+        val safeHeight = inputHeight.coerceAtLeast(1)
+        val axesSwapped = isTextureTransformAxesSwapped(presentationMatrix)
+        val orientedInputSize = if (axesSwapped) {
+            Size(safeHeight, safeWidth)
+        } else {
+            Size(safeWidth, safeHeight)
+        }
+        return resolveCenterCropRect(orientedInputSize, encoderOutputSize)
     }
 
     private fun updateCameraTransformGeometry(presentationMatrix: FloatArray) {
@@ -359,16 +384,16 @@ class RealtimeVideoRenderer(
         if (cameraTransformAxesSwapped == axesSwapped) return
 
         cameraTransformAxesSwapped = axesSwapped
-        val orientedInputSize = if (axesSwapped) {
-            Size(cameraInputSize.height, cameraInputSize.width)
-        } else {
-            cameraInputSize
-        }
-        cameraCropRect = resolveCenterCropRect(orientedInputSize, encoderOutputSize)
+        cameraCropRect = resolveCameraCropRect(
+            presentationMatrix = presentationMatrix,
+            inputWidth = cameraInputSize.width,
+            inputHeight = cameraInputSize.height,
+        )
         PLog.i(
             TAG,
             "Camera texture transform: axesSwapped=$axesSwapped, " +
-                "effective=${orientedInputSize.width}x${orientedInputSize.height}, " +
+                "effectiveInput=${if (axesSwapped) cameraInputSize.height else cameraInputSize.width}x" +
+                "${if (axesSwapped) cameraInputSize.width else cameraInputSize.height}, " +
                 "crop=${cameraCropRect.joinToString(prefix = "[", postfix = "]")}, " +
                 "matrix=${presentationMatrix.joinToString(prefix = "[", postfix = "]")}"
         )
@@ -877,8 +902,20 @@ class RealtimeVideoRenderer(
      * encoder waiting forever on an inactive stabilization session.
      */
     @Synchronized
-    fun restartStabilizationForCameraSwitch() {
+    fun restartStabilizationForCameraSwitch(sensorOrientationDegrees: Int) {
         if (!initialized || !enhancedStabilizationEnabled) return
+
+        // A selected physical camera may expose a different cardinal sensor orientation.
+        // Reset only the presentation transform; keep the encoder and stabilization lifecycle
+        // intact so the existing no-freeze fix is not undone.
+        mgcEisPresentationTransform.reset()
+        if (mgcEisPresentationTransform.captureFromSensorOrientation(sensorOrientationDegrees)) {
+            cameraTransformAxesSwapped = null
+            updateCameraTransformGeometry(mgcEisPresentationTransform.matrix)
+        } else {
+            PLog.w(TAG, "Cannot refresh EIS presentation orientation: $sensorOrientationDegrees")
+        }
+
         val session = stabilizationSession ?: return
         session.stop()
         stabilizationSessionStarted = false
@@ -886,6 +923,7 @@ class RealtimeVideoRenderer(
         PLog.i(
             TAG,
             "MGC EIS recording session refreshed after camera switch: " +
+                "sensorOrientation=$sensorOrientationDegrees, " +
                 "started=$stabilizationSessionStarted, " +
                 "cameraSupported=${stabilizationCoordinator?.isCurrentCameraSupported}",
         )
@@ -971,9 +1009,19 @@ internal fun isTextureTransformAxesSwapped(matrix: FloatArray): Boolean {
     return transformedXAxisFollowsY && transformedYAxisFollowsX
 }
 
-private fun resolveCenterCropRect(source: Size, target: Size): FloatArray {
-    val sourceAspect = source.width.toFloat() / max(1, source.height).toFloat()
-    val targetAspect = target.width.toFloat() / max(1, target.height).toFloat()
+private fun resolveCenterCropRect(source: Size, target: Size): FloatArray =
+    resolveCenterCropRect(source.width, source.height, target.width, target.height)
+
+internal fun resolveCenterCropRect(
+    sourceWidth: Int,
+    sourceHeight: Int,
+    targetWidth: Int,
+    targetHeight: Int,
+): FloatArray {
+    val sourceAspect = sourceWidth.coerceAtLeast(1).toFloat() /
+        sourceHeight.coerceAtLeast(1).toFloat()
+    val targetAspect = targetWidth.coerceAtLeast(1).toFloat() /
+        targetHeight.coerceAtLeast(1).toFloat()
     return when {
         sourceAspect > targetAspect -> {
             val visibleWidth = targetAspect / sourceAspect

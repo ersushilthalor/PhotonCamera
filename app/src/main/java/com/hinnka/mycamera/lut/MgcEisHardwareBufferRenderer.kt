@@ -20,7 +20,7 @@ import com.hinnka.mycamera.utils.PLog
  * CPU YUV fallback on devices that cannot import the buffer into EGL.
  */
 internal class MgcEisHardwareBufferRenderer(private val tag: String) {
-    data class Frame(val timestampNs: Long, val textureId: Int)
+    data class Frame(val timestampNs: Long, val textureId: Int, val width: Int, val height: Int)
 
     private val mesh = MgcEisMesh()
     // Native output matrices pass through convertPixelHomographyToClip then
@@ -111,7 +111,7 @@ internal class MgcEisHardwareBufferRenderer(private val tag: String) {
                 loggedZeroCopy = true
                 PLog.i(tag, "MGC HardwareBuffer EGLImage renderer active")
             }
-            Frame(frame.timestampNs, outputTextureId)
+            Frame(frame.timestampNs, outputTextureId, width, height)
         } catch (error: RuntimeException) {
             PLog.w(tag, "MGC EGLImage draw failed ts=${frame.timestampNs}: ${error.message}")
             null

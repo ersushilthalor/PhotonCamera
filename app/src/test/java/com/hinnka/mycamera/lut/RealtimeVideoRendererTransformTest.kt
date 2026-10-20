@@ -36,6 +36,34 @@ class RealtimeVideoRendererTransformTest {
     }
 
     @Test
+    fun centerCropUsesActualSwitchedLensInputGeometry() {
+        // A 4:3 YUV input from the switched lens must be center-cropped to 16:9.
+        assertArrayEquals(
+            floatArrayOf(0f, 0.125f, 1f, 0.875f),
+            resolveCenterCropRect(
+                sourceWidth = 1920,
+                sourceHeight = 1440,
+                targetWidth = 3840,
+                targetHeight = 2160,
+            ),
+            0.0001f,
+        )
+
+        // A quarter-turn changes which axis is cropped; it must not reuse the
+        // original lens's landscape crop values.
+        assertArrayEquals(
+            floatArrayOf(0f, 0.2890625f, 1f, 0.7109375f),
+            resolveCenterCropRect(
+                sourceWidth = 1440,
+                sourceHeight = 1920,
+                targetWidth = 3840,
+                targetHeight = 2160,
+            ),
+            0.0001f,
+        )
+    }
+
+    @Test
     fun sensorOrientationBuildsRawYuvPresentationTransform() {
         assertMappedCorners(
             orientationDegrees = 0,

@@ -15,7 +15,7 @@ import java.nio.ByteBuffer
  * presentation pass.
  */
 internal class MgcEisYuvRenderer(private val tag: String) {
-    data class Frame(val timestampNs: Long, val textureId: Int)
+    data class Frame(val timestampNs: Long, val textureId: Int, val width: Int, val height: Int)
 
     private val mesh = MgcEisMesh()
     // Native output matrices pass through convertPixelHomographyToClip then
@@ -113,7 +113,7 @@ internal class MgcEisYuvRenderer(private val tag: String) {
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
             }
             GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
-            Frame(frame.timestampNs, outputTextureId)
+            Frame(frame.timestampNs, outputTextureId, source.width, source.height)
         } catch (error: IllegalStateException) {
             // Camera2 may revoke an acquired Image when the underlying
             // ImageReader is torn down during a delayed-EIS session change.
