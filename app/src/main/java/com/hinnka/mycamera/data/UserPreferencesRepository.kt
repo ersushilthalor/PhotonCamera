@@ -273,7 +273,6 @@ data class UserPreferences(
     val phantomSaveAsNew: Boolean = false,
     val useHdrScreenMode: Boolean = true,
     val defaultVirtualAperture: Float = 0f, // 默认虚化光圈，0表示关闭
-    val portraitModeEnabled: Boolean = false,
     val customFocalLengths: List<Float> = emptyList(), // 自定义焦段/倍率，正数为35mm等效焦段，负数为精确倍率
     val customLensIds: List<String> = emptyList(), // 自定义镜头 ID，逗号分隔存储
     val lensIdBlacklist: List<String> = emptyList(), // 所有发现来源共用的镜头 ID 黑名单，逗号分隔存储
@@ -563,7 +562,6 @@ class UserPreferencesRepository(private val context: Context) {
         private val USE_BUILT_IN_AI_SERVICE = booleanPreferencesKey("use_built_in_ai_service")
         private val PHANTOM_SAVE_AS_NEW = booleanPreferencesKey("phantom_save_as_new")
         private val DEFAULT_VIRTUAL_APERTURE = floatPreferencesKey("default_virtual_aperture")
-        private val PORTRAIT_MODE_ENABLED = booleanPreferencesKey("portrait_mode_enabled")
         private val CUSTOM_FOCAL_LENGTHS = stringPreferencesKey("custom_focal_lengths")
         private val CUSTOM_LENS_IDS = stringPreferencesKey("custom_lens_ids")
         private val LENS_ID_BLACKLIST = stringPreferencesKey("lens_id_blacklist")
@@ -940,7 +938,6 @@ class UserPreferencesRepository(private val context: Context) {
                 useBuiltInAiService = preferences[USE_BUILT_IN_AI_SERVICE] ?: false,
                 phantomSaveAsNew = preferences[PHANTOM_SAVE_AS_NEW] ?: false,
                 defaultVirtualAperture = preferences[DEFAULT_VIRTUAL_APERTURE] ?: 0f,
-                portraitModeEnabled = preferences[PORTRAIT_MODE_ENABLED] ?: false,
                 customFocalLengths = preferences[CUSTOM_FOCAL_LENGTHS]
                     ?.split(",")?.filter { it.isNotEmpty() }
                     ?.mapNotNull { CustomFocalLengthValue.parsePersisted(it) }
@@ -2585,12 +2582,6 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun saveDefaultVirtualAperture(aperture: Float) {
         context.dataStore.edit { preferences ->
             preferences[DEFAULT_VIRTUAL_APERTURE] = aperture
-        }
-    }
-
-    suspend fun savePortraitModeEnabled(enabled: Boolean) {
-        context.dataStore.edit { preferences ->
-            preferences[PORTRAIT_MODE_ENABLED] = enabled
         }
     }
 
