@@ -2991,6 +2991,34 @@ class Camera2Controller(private val context: Context) {
                 }
             }
 
+            // CameraDevice.StateCallback remains bound to the background opener that created
+            // the standby device. Marshal all post-adoption lifecycle events back onto the
+            // controller's camera thread before invoking the primary callback.
+            val adoptedCameraStateCallback = object : CameraDevice.StateCallback() {
+                private fun dispatch(action: () -> Unit) {
+                    val handler = cameraHandler
+                    if (handler != null && Looper.myLooper() != handler.looper) {
+                        if (!handler.post { action() }) action()
+                    } else {
+                        action()
+                    }
+                }
+
+                override fun onOpened(camera: CameraDevice) = Unit
+
+                override fun onDisconnected(camera: CameraDevice) {
+                    dispatch { cameraStateCallback.onDisconnected(camera) }
+                }
+
+                override fun onError(camera: CameraDevice, error: Int) {
+                    dispatch { cameraStateCallback.onError(camera, error) }
+                }
+
+                override fun onClosed(camera: CameraDevice) {
+                    dispatch { cameraStateCallback.onClosed(camera) }
+                }
+            }
+
             val openCameraNormally: () -> Unit = {
                 try {
                     cameraManager.openCamera(openCameraId, cameraStateCallback, cameraHandler)
@@ -3009,7 +3037,7 @@ class Camera2Controller(private val context: Context) {
                     selectedCamera?.lensType == LensType.BACK_ULTRA_WIDE)
 
             if (canAdoptStandbyDevice) {
-                backgroundUltraWideReady.takeCameraDevice(openCameraId, cameraStateCallback) { warmedCamera ->
+                backgroundUltraWideReady.takeCameraDevice(openCameraId, adoptedCameraStateCallback) { warmedCamera ->
                     val continueOpen = Runnable {
                         if (
                             openGeneration != cameraOpenGeneration ||
