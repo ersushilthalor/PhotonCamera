@@ -3009,7 +3009,7 @@ class Camera2Controller(private val context: Context) {
                     selectedCamera?.lensType == LensType.BACK_ULTRA_WIDE)
 
             if (canAdoptStandbyDevice) {
-                backgroundUltraWideReady.takeCameraDevice(openCameraId) { warmedCamera ->
+                backgroundUltraWideReady.takeCameraDevice(openCameraId, cameraStateCallback) { warmedCamera ->
                     val continueOpen = Runnable {
                         if (
                             openGeneration != cameraOpenGeneration ||
