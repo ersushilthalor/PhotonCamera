@@ -140,6 +140,29 @@ internal class BackgroundUltraWideReady(
             }
             val (format, chosenSize) = resolvedOutput
 
+            // Do not overlap two opens when a previous CameraManager.openCamera callback is still
+            // outstanding or its CameraDevice has just been asked to close.
+            if (standbyOpenPending) {
+                if (
+                    standbyCameraId == standbyId &&
+                    activeCameraId == activeId &&
+                    standbyOutputSize == chosenSize
+                ) {
+                    return@post
+                }
+                pendingWarmupAfterClose = {
+                    update(cameras, currentCameraId, activeOpenCameraId, targetSize)
+                }
+                releaseLocked(preservePendingWarmup = true)
+                return@post
+            }
+            if (closeSignals.keys.any { it.id == standbyId }) {
+                pendingWarmupAfterClose = {
+                    update(cameras, currentCameraId, activeOpenCameraId, targetSize)
+                }
+                return@post
+            }
+
             if (
                 standbyCameraId == standbyId &&
                 activeCameraId == activeId &&
@@ -179,7 +202,11 @@ internal class BackgroundUltraWideReady(
                         val image = availableReader.acquireLatestImage()
                         if (image != null) {
                             image.close()
-                            if (frameReady.compareAndSet(false, true)) {
+                            if (
+                                generation.get() == token &&
+                                standbyReader === availableReader &&
+                                frameReady.compareAndSet(false, true)
+                            ) {
                                 PLog.i(
                                     TAG,
                                     "Standby first frame received: cameraId=$standbyId, " +
@@ -206,6 +233,7 @@ internal class BackgroundUltraWideReady(
                         }
                         openCallbackLatch.countDown()
                         if (generation.get() != token || activeCameraId != activeId) {
+                            closeSignals.putIfAbsent(camera, CountDownLatch(1))
                             camera.close()
                             return
                         }
@@ -269,6 +297,7 @@ internal class BackgroundUltraWideReady(
                             onTransferredDeviceError(camera, "Transferred standby camera disconnected: ${camera.id}")
                             return
                         }
+                        closeSignals.putIfAbsent(camera, CountDownLatch(1))
                         camera.close()
                         releaseResourcesForToken(token)
                         PLog.w(TAG, "Standby camera disconnected: $standbyId")
@@ -287,6 +316,7 @@ internal class BackgroundUltraWideReady(
                             )
                             return
                         }
+                        closeSignals.putIfAbsent(camera, CountDownLatch(1))
                         camera.close()
                         releaseResourcesForToken(token)
                         PLog.w(TAG, "Standby camera error: id=$standbyId, code=$error")
@@ -298,6 +328,12 @@ internal class BackgroundUltraWideReady(
                         if (transferredDevice === camera) {
                             transferredDevice = null
                             onTransferredDeviceClosed(camera)
+                        }
+                        if (standbyDevice == null && standbyCameraId == camera.id) {
+                            standbyCameraId = null
+                            standbyOutputSize = null
+                            activeCameraId = null
+                            frameReady.set(false)
                         }
                         if (closingSignal != null) {
                             val restart = pendingWarmupAfterClose
@@ -362,9 +398,15 @@ internal class BackgroundUltraWideReady(
             } else {
                 // A foreground request takes precedence over a queued size-change warm-up.
                 pendingWarmupAfterClose = null
-                val closingLatch = if (device != null) CountDownLatch(1) else null
+                val closingLatch = if (device != null) {
+                    closeSignals[device] ?: CountDownLatch(1)
+                } else {
+                    closeSignals.values.firstOrNull()
+                }
                 releaseLocked(closingLatch)
-                ForegroundAcquireResult(closingLatch = closingLatch)
+                ForegroundAcquireResult(
+                    closingLatch = if (device != null) closeSignals[device] ?: closingLatch else closingLatch
+                )
             }
         }
         handler.post(operation)
@@ -431,12 +473,16 @@ internal class BackgroundUltraWideReady(
     ) {
         if (!preservePendingWarmup) pendingWarmupAfterClose = null
         generation.incrementAndGet()
-        standbyOpenPending = false
-        standbyOpenLatch?.countDown()
-        standbyOpenLatch = null
         val deviceToClose = standbyDevice
-        if (deviceToClose != null && closingLatch != null) {
-            closeSignals[deviceToClose] = closingLatch
+        val openStillPending = deviceToClose == null && standbyOpenPending
+        if (!openStillPending) {
+            standbyOpenPending = false
+            standbyOpenLatch?.countDown()
+            standbyOpenLatch = null
+        }
+        if (deviceToClose != null) {
+            val signal = closeSignals[deviceToClose] ?: closingLatch ?: CountDownLatch(1)
+            closeSignals.putIfAbsent(deviceToClose, signal)
         }
         try { standbySession?.stopRepeating() } catch (_: Exception) {}
         try { standbySession?.close() } catch (_: Exception) {}
@@ -446,9 +492,11 @@ internal class BackgroundUltraWideReady(
         try { standbyReader?.setOnImageAvailableListener(null, null) } catch (_: Exception) {}
         try { standbyReader?.close() } catch (_: Exception) {}
         standbyReader = null
-        standbyCameraId = null
-        standbyOutputSize = null
-        activeCameraId = null
+        if (!openStillPending) {
+            standbyCameraId = null
+            standbyOutputSize = null
+            activeCameraId = null
+        }
         frameReady.set(false)
     }
 }
