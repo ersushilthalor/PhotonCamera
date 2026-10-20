@@ -961,9 +961,8 @@ fun CameraScreen(
                     onZoomStopClick = { animateZoomStopWithPreviewTransition(it) },
                     onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
                     onFilterClick = {
-                        // In Video + Log mode this button opens the live LUT picker.
-                        // With Log disabled, preserve the existing direct Edit behavior.
-                        val targetPanel = if (isVideoMode && state.videoConfig.logProfile.isEnabled) {
+                        // Video mode opens the live LUT picker whether Log is enabled or not.
+                        val targetPanel = if (isVideoMode) {
                             ActivePanel.FILTERS
                         } else {
                             ActivePanel.EDIT
@@ -1511,9 +1510,8 @@ fun CameraScreen(
                             onZoomStopClick = { animateZoomStopWithPreviewTransition(it) },
                             onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
                             onFilterClick = {
-                                // Match the horizontal layout: Log video opens the live LUT picker;
-                                // Log Off continues to open the Edit panel directly.
-                                val targetPanel = if (isVideoMode && state.videoConfig.logProfile.isEnabled) {
+                                // Match the horizontal layout: all video modes open the live LUT picker.
+                                val targetPanel = if (isVideoMode) {
                                     ActivePanel.FILTERS
                                 } else {
                                     ActivePanel.EDIT
