@@ -68,6 +68,16 @@ class CameraGLSurfaceView @JvmOverloads constructor(
     var onSurfaceReady: ((Surface) -> Unit)? = null
     var onSurfaceDestroyed: (() -> Unit)? = null
     var onFirstPreviewFrame: (() -> Unit)? = null
+    var onUltraWideSurfaceTextureReady: ((SurfaceTexture) -> Unit)? = null
+        set(value) {
+            field = value
+            renderer.onUltraWideSurfaceTextureAvailable = { texture ->
+                post { onUltraWideSurfaceTextureReady?.invoke(texture) }
+            }
+            renderer.getUltraWideSurfaceTexture()?.let { texture ->
+                post { onUltraWideSurfaceTextureReady?.invoke(texture) }
+            }
+        }
     private var currentSurface: Surface? = null
 
     init {
@@ -318,6 +328,12 @@ class CameraGLSurfaceView @JvmOverloads constructor(
      */
     fun getSurfaceTexture(): SurfaceTexture? = renderer.getSurfaceTexture()
 
+    fun getUltraWideSurfaceTexture(): SurfaceTexture? = renderer.getUltraWideSurfaceTexture()
+
+    fun setUltraWidePreviewActive(active: Boolean) {
+        renderer.setUltraWidePreviewActive(active)
+    }
+
     fun getRenderSurface(): Surface? = currentSurface
 
     fun setSourceCrop(crop: PhantomPipCrop) {
@@ -479,8 +495,12 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         super.onDetachedFromWindow()
         PLog.d(TAG, "onDetachedFromWindow")
 
-        // 通知 Surface 销毁
+        // 通知两路相机 SurfaceTexture 即将销毁，避免 Camera2 留下指向旧 GL context 的输出。
         onSurfaceDestroyed?.invoke()
+        renderer.getUltraWideSurfaceTexture()?.let { texture ->
+            onUltraWideSurfaceTextureReady?.invoke(texture)
+        }
+        onUltraWideSurfaceTextureReady = null
         onEyeFocusInputAvailable = null
 
         // 释放 Surface

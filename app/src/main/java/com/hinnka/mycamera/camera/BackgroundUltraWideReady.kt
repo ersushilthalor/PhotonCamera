@@ -40,6 +40,15 @@ internal class BackgroundUltraWideReady(context: Context) {
     @Volatile private var standbySurface: Surface? = null
     @Volatile private var standbyCameraId: String? = null
     @Volatile private var activeCameraId: String? = null
+    // A lens switch can claim the already-open standby CameraDevice instead of opening it again.
+    // All access is serialized on this class' handler.
+    private var pendingTakeCameraId: String? = null
+    private var pendingTakeCallback: ((CameraDevice?) -> Unit)? = null
+    private var pendingTakeStateCallback: CameraDevice.StateCallback? = null
+    @Volatile private var adoptedDevice: CameraDevice? = null
+    @Volatile private var adoptedStateCallback: CameraDevice.StateCallback? = null
+    private var pendingTakeFallbackDevice: CameraDevice? = null
+    private var pendingTakeFallbackCallback: ((CameraDevice?) -> Unit)? = null
 
     fun update(cameras: List<CameraInfo>, currentCameraId: String, activeOpenCameraId: String?) {
         handler.post {
@@ -111,10 +120,32 @@ internal class BackgroundUltraWideReady(context: Context) {
                 cameraManager.openCamera(standbyId, object : CameraDevice.StateCallback() {
                     override fun onOpened(camera: CameraDevice) {
                         if (generation.get() != token || activeCameraId != activeId) {
+                            // If a switch was waiting for this open, don't start a duplicate
+                            // openCamera() for the same ID until Android confirms this device closed.
+                            if (pendingTakeCameraId == standbyId) {
+                                pendingTakeFallbackDevice = camera
+                                pendingTakeFallbackCallback = pendingTakeCallback
+                                pendingTakeCameraId = null
+                                pendingTakeCallback = null
+                                pendingTakeStateCallback = null
+                            }
                             camera.close()
                             return
                         }
                         standbyDevice = camera
+                        // If the user switched while the standby device was still opening, hand
+                        // the open device over directly. The normal active-camera path will build
+                        // its full preview/capture session on this same CameraDevice.
+                        if (pendingTakeCameraId == standbyId) {
+                            val callback = pendingTakeCallback
+                            val stateCallback = pendingTakeStateCallback
+                            pendingTakeCameraId = null
+                            pendingTakeCallback = null
+                            pendingTakeStateCallback = null
+                            detachForHandoff(camera, null, stateCallback)
+                            callback?.invoke(camera)
+                            return
+                        }
                         try {
                             camera.createCaptureSession(
                                 listOf(surface),
@@ -160,15 +191,55 @@ internal class BackgroundUltraWideReady(context: Context) {
                     }
 
                     override fun onDisconnected(camera: CameraDevice) {
+                        val delegate = if (adoptedDevice === camera) adoptedStateCallback else null
+                        if (delegate != null) {
+                            delegate.onDisconnected(camera)
+                            return
+                        }
+                        if (pendingTakeCameraId == standbyId) {
+                            pendingTakeFallbackDevice = camera
+                            pendingTakeFallbackCallback = pendingTakeCallback
+                            pendingTakeCameraId = null
+                            pendingTakeCallback = null
+                            pendingTakeStateCallback = null
+                        }
                         camera.close()
                         releaseResourcesForToken(token)
                         PLog.w(TAG, "Standby camera disconnected: $standbyId")
                     }
 
                     override fun onError(camera: CameraDevice, error: Int) {
+                        val delegate = if (adoptedDevice === camera) adoptedStateCallback else null
+                        if (delegate != null) {
+                            delegate.onError(camera, error)
+                            return
+                        }
+                        if (pendingTakeCameraId == standbyId) {
+                            pendingTakeFallbackDevice = camera
+                            pendingTakeFallbackCallback = pendingTakeCallback
+                            pendingTakeCameraId = null
+                            pendingTakeCallback = null
+                            pendingTakeStateCallback = null
+                        }
                         camera.close()
                         releaseResourcesForToken(token)
                         PLog.w(TAG, "Standby camera error: id=$standbyId, code=$error")
+                    }
+
+                    override fun onClosed(camera: CameraDevice) {
+                        if (pendingTakeFallbackDevice === camera) {
+                            pendingTakeFallbackDevice = null
+                            val callback = pendingTakeFallbackCallback
+                            pendingTakeFallbackCallback = null
+                            callback?.invoke(null)
+                            return
+                        }
+                        if (adoptedDevice === camera) {
+                            val delegate = adoptedStateCallback
+                            adoptedDevice = null
+                            adoptedStateCallback = null
+                            delegate?.onClosed(camera)
+                        }
                     }
                 }, handler)
             } catch (error: Exception) {
@@ -178,8 +249,89 @@ internal class BackgroundUltraWideReady(context: Context) {
         }
     }
 
+    /**
+     * Transfers a warmed CameraDevice to the primary camera controller.
+     *
+     * The low-resolution standby session is intentionally retired; the receiving controller
+     * immediately configures its normal preview/capture session on the still-open device.
+     * This first handoff stage removes the expensive camera-device open from supported switches.
+     */
+    fun takeCameraDevice(
+        cameraId: String,
+        stateCallback: CameraDevice.StateCallback,
+        onTaken: (CameraDevice?) -> Unit
+    ) {
+        handler.post {
+            if (standbyCameraId != cameraId) {
+                onTaken(null)
+                return@post
+            }
+
+            val device = standbyDevice
+            if (device == null) {
+                // CameraManager.openCamera is still in flight. onOpened will hand it over.
+                pendingTakeCameraId = cameraId
+                pendingTakeCallback = onTaken
+                pendingTakeStateCallback = stateCallback
+                return@post
+            }
+
+            val callback = if (pendingTakeCameraId == cameraId) {
+                pendingTakeCameraId = null
+                pendingTakeStateCallback ?: stateCallback
+            } else {
+                stateCallback
+            }
+            val resultCallback = pendingTakeCallback ?: onTaken
+            pendingTakeCallback = null
+            pendingTakeStateCallback = null
+            detachForHandoff(device, standbySession, callback)
+            resultCallback(device)
+        }
+    }
+
+    private fun detachForHandoff(
+        device: CameraDevice,
+        session: CameraCaptureSession?,
+        stateCallback: CameraDevice.StateCallback?
+    ) {
+        // Delegate future CameraDevice lifecycle callbacks to the active controller. Camera2
+        // keeps the StateCallback supplied to the original openCamera() call for the device's
+        // whole lifetime; it cannot be replaced after opening.
+        adoptedDevice = device
+        adoptedStateCallback = stateCallback
+        // Invalidate callbacks from the retiring standby session before releasing its surfaces.
+        generation.incrementAndGet()
+        if (standbyDevice === device) standbyDevice = null
+        if (standbySession === session) standbySession = null
+        val surface = standbySurface
+        val texture = standbyTexture
+        standbySurface = null
+        standbyTexture = null
+        standbyCameraId = null
+        activeCameraId = null
+
+        try { session?.stopRepeating() } catch (_: Exception) {}
+        try { session?.close() } catch (_: Exception) {}
+        try { surface?.release() } catch (_: Exception) {}
+        try { texture?.release() } catch (_: Exception) {}
+    }
+
     fun stop() {
-        handler.post { releaseLocked() }
+        handler.post {
+            // When CameraManager.openCamera is still in flight, wait for its stale device's
+            // onClosed() callback before allowing the normal open path to retry that same ID.
+            if (pendingTakeCameraId != null && standbyDevice == null) {
+                releaseLocked()
+                return@post
+            }
+            val pending = pendingTakeCallback
+            pendingTakeCameraId = null
+            pendingTakeCallback = null
+            pendingTakeStateCallback = null
+            releaseLocked()
+            pending?.invoke(null)
+        }
     }
 
     private fun releaseResourcesForToken(token: Int) {
