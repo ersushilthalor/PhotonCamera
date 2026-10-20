@@ -238,6 +238,17 @@ class Camera2Controller(private val context: Context) {
     private val backgroundUltraWideReady = BackgroundUltraWideReady(context)
     @Volatile private var keepUltraWideReadyEnabled = false
 
+    private fun resolveStandbyWarmupSize(state: CameraState): Size {
+        if (state.captureMode == CaptureMode.PHOTO) return state.currentPreviewSize
+
+        val videoConfig = state.videoConfig
+        if (videoConfig.aspectRatio == VideoAspectRatio.OPEN_GATE) {
+            state.videoCapabilities.cameraInputSizesByResolution[videoConfig.resolution]
+                ?.let { return it }
+        }
+        return videoConfig.resolution.resolveOutputSize(state.getPreviewAspectRatio())
+    }
+
     fun setKeepUltraWideReadyEnabled(enabled: Boolean) {
         keepUltraWideReadyEnabled = enabled
         if (!enabled) {
@@ -245,7 +256,12 @@ class Camera2Controller(private val context: Context) {
         } else {
             val current = _state.value
             if (current.isPreviewActive) {
-                backgroundUltraWideReady.update(current.availableCameras, current.currentCameraId, cameraDevice?.id)
+                backgroundUltraWideReady.update(
+                    cameras = current.availableCameras,
+                    currentCameraId = current.currentCameraId,
+                    activeOpenCameraId = cameraDevice?.id,
+                    requestedSize = resolveStandbyWarmupSize(current)
+                )
             }
         }
     }
@@ -3935,10 +3951,12 @@ class Camera2Controller(private val context: Context) {
 
             _state.value = _state.value.copy(isPreviewActive = true)
             if (keepUltraWideReadyEnabled) {
+                val currentState = _state.value
                 backgroundUltraWideReady.update(
-                    cameras = _state.value.availableCameras,
-                    currentCameraId = _state.value.currentCameraId,
+                    cameras = currentState.availableCameras,
+                    currentCameraId = currentState.currentCameraId,
                     activeOpenCameraId = cameraDevice?.id,
+                    requestedSize = resolveStandbyWarmupSize(currentState)
                 )
             } else {
                 backgroundUltraWideReady.stop()
