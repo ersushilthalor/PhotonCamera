@@ -249,7 +249,7 @@ class Camera2Controller(private val context: Context) {
                     onCameraError?.invoke(ERROR_CAMERA_DISCONNECTED, reason, true)
                 }
             }
-            if (handler != null) handler.post(action) else action()
+            if (handler != null) handler.post { action() } else action()
         },
     )
     @Volatile private var keepUltraWideReadyEnabled = false

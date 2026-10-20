@@ -69,6 +69,7 @@ internal class BackgroundUltraWideReady(
     // A handed-off device is now owned by Camera2Controller, but Android continues to dispatch
     // its callbacks to this class's original StateCallback. Route those terminal events back.
     @Volatile private var transferredDevice: CameraDevice? = null
+    @Volatile private var pendingWarmupAfterClose: (() -> Unit)? = null
 
     fun update(
         cameras: List<CameraInfo>,
@@ -140,13 +141,22 @@ internal class BackgroundUltraWideReady(
             if (
                 standbyCameraId == standbyId &&
                 standbyDevice != null &&
-                standbySession != null &&
-                activeCameraId == activeId &&
-                standbyOutputSize == chosenSize
+                activeCameraId == activeId
             ) {
+                if (standbySession != null && standbyOutputSize == chosenSize) {
+                    return@post
+                }
+                // Resolution changed (for example 1080p -> 4K). Wait for CameraDevice.onClosed
+                // before reopening this same ID; reopening it immediately can race camera-service
+                // ownership and leave the standby stream silently unavailable.
+                pendingWarmupAfterClose = {
+                    update(cameras, currentCameraId, activeOpenCameraId, targetSize)
+                }
+                releaseLocked(CountDownLatch(1), preservePendingWarmup = true)
                 return@post
             }
 
+            pendingWarmupAfterClose = null
             releaseLocked()
             activeCameraId = activeId
             val token = generation.incrementAndGet()
@@ -264,10 +274,18 @@ internal class BackgroundUltraWideReady(
                     }
 
                     override fun onClosed(camera: CameraDevice) {
-                        closeSignals.remove(camera)?.countDown()
+                        val closingSignal = closeSignals.remove(camera)
+                        closingSignal?.countDown()
                         if (transferredDevice === camera) {
                             transferredDevice = null
                             onTransferredDeviceClosed(camera)
+                        }
+                        if (closingSignal != null) {
+                            val restart = pendingWarmupAfterClose
+                            if (restart != null) {
+                                pendingWarmupAfterClose = null
+                                restart.invoke()
+                            }
                         }
                     }
                 }, handler)
@@ -312,6 +330,8 @@ internal class BackgroundUltraWideReady(
                 PLog.i(TAG, "Reusing warmed CameraDevice for foreground lens: ${device.id}")
                 ForegroundAcquireResult(device = device)
             } else {
+                // A foreground request takes precedence over a queued size-change warm-up.
+                pendingWarmupAfterClose = null
                 val closingLatch = if (device != null) CountDownLatch(1) else null
                 releaseLocked(closingLatch)
                 ForegroundAcquireResult(closingLatch = closingLatch)
@@ -375,7 +395,11 @@ internal class BackgroundUltraWideReady(
         releaseLocked()
     }
 
-    private fun releaseLocked(closingLatch: CountDownLatch? = null) {
+    private fun releaseLocked(
+        closingLatch: CountDownLatch? = null,
+        preservePendingWarmup: Boolean = false,
+    ) {
+        if (!preservePendingWarmup) pendingWarmupAfterClose = null
         generation.incrementAndGet()
         val deviceToClose = standbyDevice
         if (deviceToClose != null && closingLatch != null) {
