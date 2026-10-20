@@ -2899,24 +2899,26 @@ class Camera2Controller(private val context: Context) {
 
             PLog.d(TAG, "Opening camera: open=$openCameraId, selected=$cameraId")
 
-            cameraManager.openCamera(openCameraId, object : CameraDevice.StateCallback() {
-                override fun onOpened(camera: CameraDevice) {
-                    if (
-                        openGeneration != cameraOpenGeneration ||
-                        cameraDeviceLifecycle != CameraDeviceLifecycle.OPENING
-                    ) {
-                        PLog.w(TAG, "Ignoring stale camera open callback: camera=${camera.id}")
-                        closeCameraDeviceAndAwait(camera, "stale camera open")
-                        return
-                    }
-                    PLog.d(TAG, "Camera opened: ${camera.id}")
-                    cameraDeviceLifecycle = CameraDeviceLifecycle.OPEN
-                    cameraDevice = camera
-                    if (restartCameraForRawCaptureOutputMismatch("camera opened")) {
-                        return
-                    }
-                    createPreviewSession(openGeneration = openGeneration)
+            fun handleOpenedCamera(camera: CameraDevice) {
+                if (
+                    openGeneration != cameraOpenGeneration ||
+                    cameraDeviceLifecycle != CameraDeviceLifecycle.OPENING
+                ) {
+                    PLog.w(TAG, "Ignoring stale camera open callback: camera=${camera.id}")
+                    closeCameraDeviceAndAwait(camera, "stale camera open")
+                    return
                 }
+                PLog.d(TAG, "Camera opened/adopted: ${camera.id}")
+                cameraDeviceLifecycle = CameraDeviceLifecycle.OPEN
+                cameraDevice = camera
+                if (restartCameraForRawCaptureOutputMismatch("camera opened")) {
+                    return
+                }
+                createPreviewSession(openGeneration = openGeneration)
+            }
+
+            val cameraStateCallback = object : CameraDevice.StateCallback() {
+                override fun onOpened(camera: CameraDevice) = handleOpenedCamera(camera)
 
                 override fun onDisconnected(camera: CameraDevice) {
                     if (openGeneration != cameraOpenGeneration) {
@@ -2987,7 +2989,54 @@ class Camera2Controller(private val context: Context) {
                 override fun onClosed(camera: CameraDevice) {
                     handleCameraDeviceClosed(camera)
                 }
-            }, cameraHandler)
+            }
+
+            val openCameraNormally: () -> Unit = {
+                try {
+                    cameraManager.openCamera(openCameraId, cameraStateCallback, cameraHandler)
+                } catch (error: Exception) {
+                    handleCameraOpenFailure(
+                        cameraId = openCameraId,
+                        errorCode = ERROR_CAMERA_OPEN_FAILED,
+                        message = "相机打开失败",
+                        error = error
+                    )
+                }
+            }
+
+            val canAdoptStandbyDevice = keepUltraWideReadyEnabled &&
+                (selectedCamera?.lensType == LensType.BACK_MAIN ||
+                    selectedCamera?.lensType == LensType.BACK_ULTRA_WIDE)
+
+            if (canAdoptStandbyDevice) {
+                backgroundUltraWideReady.takeCameraDevice(openCameraId) { warmedCamera ->
+                    val continueOpen = Runnable {
+                        if (
+                            openGeneration != cameraOpenGeneration ||
+                            cameraDeviceLifecycle != CameraDeviceLifecycle.OPENING
+                        ) {
+                            if (warmedCamera != null) {
+                                closeCameraDeviceAndAwait(warmedCamera, "stale standby handoff")
+                            }
+                            return@Runnable
+                        }
+                        if (warmedCamera != null) {
+                            PLog.i(TAG, "Reusing prewarmed CameraDevice for lens switch: ${warmedCamera.id}")
+                            handleOpenedCamera(warmedCamera)
+                        } else {
+                            openCameraNormally()
+                        }
+                    }
+                    val handler = cameraHandler
+                    if (handler != null) {
+                        if (!handler.post(continueOpen)) continueOpen.run()
+                    } else {
+                        continueOpen.run()
+                    }
+                }
+            } else {
+                openCameraNormally()
+            }
 
         } catch (e: Exception) {
             handleCameraOpenFailure(
@@ -8799,7 +8848,14 @@ class Camera2Controller(private val context: Context) {
                 PLog.d(TAG, "Closing camera while video recording is finalizing")
             }
 
-            backgroundUltraWideReady.stop()
+            val targetLensForReopen = _state.value.currentLensType
+            val canKeepStandbyForRearLensHandoff = keepUltraWideReadyEnabled &&
+                !clearPendingOpen &&
+                (targetLensForReopen == LensType.BACK_MAIN ||
+                    targetLensForReopen == LensType.BACK_ULTRA_WIDE)
+            if (!canKeepStandbyForRearLensHandoff) {
+                backgroundUltraWideReady.stop()
+            }
             clearCameraSessionState("closeCamera")
             val deviceToClose = cameraDevice
             cameraDevice = null
