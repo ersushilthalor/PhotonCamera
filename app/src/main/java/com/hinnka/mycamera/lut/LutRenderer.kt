@@ -2362,6 +2362,9 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             mgcEisYuvRenderer.release()
             recreatePreviewStabilizationSession()
         }
+        if (previewStabilizationUseCase == StabilizationUseCase.VIDEO) {
+            updateMVPMatrix()
+        }
     }
 
     fun setStabilizationCoordinator(coordinator: RealtimeStabilizationCoordinator?) {
@@ -2385,6 +2388,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         ) {
             return
         }
+        val previousUseCase = previewStabilizationUseCase
         previewStabilizationUseCase = useCase
         previewStabilizationStrength = normalizedStrength
         previewStabilizationLookahead = normalizedLookahead
@@ -2394,6 +2398,11 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 "strength=$normalizedStrength, lookahead=$normalizedLookahead"
         )
         recreatePreviewStabilizationSession()
+        if (previousUseCase == StabilizationUseCase.VIDEO ||
+            useCase == StabilizationUseCase.VIDEO
+        ) {
+            updateMVPMatrix()
+        }
     }
 
     private fun recreatePreviewStabilizationSession() {
@@ -2550,10 +2559,24 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         val isSwapped = (sensorOrientation + calibrationOffset) % 180 != 0
         val cropWidth = (cropRect[2] - cropRect[0]).coerceAtLeast(0.05f)
         val cropHeight = (cropRect[3] - cropRect[1]).coerceAtLeast(0.05f)
-        val previewAspect = if (isSwapped) {
-            (previewHeight.toFloat() * cropHeight) / (previewWidth.toFloat() * cropWidth)
+        // Video EIS+ renders from its YUV stabilization input, which can use a
+        // different aspect ratio from the regular viewfinder stream (e.g. 4:3 UW
+        // sensor input while the video viewfinder is 9:16). Crop using the actual
+        // stabilized source dimensions instead of stretching them to preview geometry.
+        val sourceWidth = if (previewStabilizationUseCase == StabilizationUseCase.VIDEO) {
+            stabilizationInputWidth
         } else {
-            (previewWidth.toFloat() * cropWidth) / (previewHeight.toFloat() * cropHeight)
+            previewWidth
+        }
+        val sourceHeight = if (previewStabilizationUseCase == StabilizationUseCase.VIDEO) {
+            stabilizationInputHeight
+        } else {
+            previewHeight
+        }
+        val sourceAspect = if (isSwapped) {
+            (sourceHeight.toFloat() * cropHeight) / (sourceWidth.toFloat() * cropWidth)
+        } else {
+            (sourceWidth.toFloat() * cropWidth) / (sourceHeight.toFloat() * cropHeight)
         }
         val viewAspect = targetWidth.toFloat() / targetHeight.toFloat()
 
@@ -2561,14 +2584,14 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             Matrix.rotateM(matrix, 0, (-calibrationOffset).toFloat(), 0f, 0f, 1f)
         }
 
-        if (previewAspect != viewAspect) {
+        if (sourceAspect != viewAspect) {
             val scaleX: Float
             val scaleY: Float
-            if (viewAspect > previewAspect) {
+            if (viewAspect > sourceAspect) {
                 scaleX = 1f
-                scaleY = viewAspect / previewAspect
+                scaleY = viewAspect / sourceAspect
             } else {
-                scaleX = previewAspect / viewAspect
+                scaleX = sourceAspect / viewAspect
                 scaleY = 1f
             }
             Matrix.scaleM(matrix, 0, scaleX, scaleY, 1f)
