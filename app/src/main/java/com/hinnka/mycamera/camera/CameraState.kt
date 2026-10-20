@@ -423,7 +423,8 @@ data class CameraState(
 
     val isMultiFrameEnabled: Boolean
         get() = multiFrameOutputScale != null &&
-            (!useRaw || (isRawSupported && isRawMultiFrameSupported && normalizedHdrPlusFrameCount > 1))
+            useRaw && isRawSupported && isRawMultiFrameSupported &&
+            normalizedHdrPlusFrameCount > 1
 
     // A single RAW frame uses the ordinary capture and development path.
     // Resolve the configured count without depending on the multi-frame enablement above.
