@@ -200,8 +200,10 @@ internal class BackgroundUltraWideReady(
                 @SuppressLint("MissingPermission")
                 cameraManager.openCamera(standbyId, object : CameraDevice.StateCallback() {
                     override fun onOpened(camera: CameraDevice) {
-                        standbyOpenPending = false
-                        standbyOpenLatch = null
+                        if (standbyOpenLatch === openCallbackLatch) {
+                            standbyOpenPending = false
+                            standbyOpenLatch = null
+                        }
                         openCallbackLatch.countDown()
                         if (generation.get() != token || activeCameraId != activeId) {
                             camera.close()
@@ -258,8 +260,10 @@ internal class BackgroundUltraWideReady(
                     }
 
                     override fun onDisconnected(camera: CameraDevice) {
-                        standbyOpenPending = false
-                        standbyOpenLatch = null
+                        if (standbyOpenLatch === openCallbackLatch) {
+                            standbyOpenPending = false
+                            standbyOpenLatch = null
+                        }
                         openCallbackLatch.countDown()
                         if (transferredDevice === camera) {
                             onTransferredDeviceError(camera, "Transferred standby camera disconnected: ${camera.id}")
@@ -271,8 +275,10 @@ internal class BackgroundUltraWideReady(
                     }
 
                     override fun onError(camera: CameraDevice, error: Int) {
-                        standbyOpenPending = false
-                        standbyOpenLatch = null
+                        if (standbyOpenLatch === openCallbackLatch) {
+                            standbyOpenPending = false
+                            standbyOpenLatch = null
+                        }
                         openCallbackLatch.countDown()
                         if (transferredDevice === camera) {
                             onTransferredDeviceError(
