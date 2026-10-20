@@ -3013,13 +3013,37 @@ class Camera2Controller(private val context: Context) {
                     dispatchCameraCallback { cameraOpenCallback.onOpened(camera) }
 
                 override fun onDisconnected(camera: CameraDevice) =
-                    dispatchCameraCallback { cameraOpenCallback.onDisconnected(camera) }
+                    dispatchCameraCallback {
+                        if (openGeneration == cameraOpenGeneration) {
+                            cameraOpenCallback.onDisconnected(camera)
+                        } else {
+                            camera.close()
+                        }
+                    }
 
                 override fun onError(camera: CameraDevice, error: Int) =
-                    dispatchCameraCallback { cameraOpenCallback.onError(camera, error) }
+                    dispatchCameraCallback {
+                        if (openGeneration == cameraOpenGeneration) {
+                            cameraOpenCallback.onError(camera, error)
+                        } else {
+                            camera.close()
+                        }
+                    }
 
                 override fun onClosed(camera: CameraDevice) =
-                    dispatchCameraCallback { cameraOpenCallback.onClosed(camera) }
+                    dispatchCameraCallback {
+                        // A rapidly superseded warm-device handoff must not reset the lifecycle
+                        // of a newer camera request. The active device still needs to complete its
+                        // normal CLOSING -> CLOSED transition when it is actually being retired.
+                        if (openGeneration == cameraOpenGeneration ||
+                            camera === cameraDevice ||
+                            cameraDeviceLifecycle == CameraDeviceLifecycle.CLOSING
+                        ) {
+                            cameraOpenCallback.onClosed(camera)
+                        } else {
+                            PLog.d(TAG, "Ignoring stale handed-off camera close: ${camera.id}")
+                        }
+                    }
             }
 
             val cameraHandlerForOpen = cameraHandler
