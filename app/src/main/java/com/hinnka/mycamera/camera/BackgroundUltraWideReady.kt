@@ -56,8 +56,8 @@ internal class BackgroundUltraWideReady(context: Context) {
         standbyCameraId == cameraId && standbyDevice != null && standbySession != null
 
     /**
-     * Close the low-resolution warm-up session, then transfer the already-open device to the
-     * controller. Returns false only when no hand-off was scheduled.
+     * Close the warm-up session, then transfer the already-open device to the controller.
+     * Returns false only when no hand-off was scheduled.
      */
     fun consumeReadyCamera(
         cameraId: String,
