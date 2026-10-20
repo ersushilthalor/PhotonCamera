@@ -1892,6 +1892,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val defaultVirtualAperture: Flow<Float> =
         userPreferencesRepository.userPreferences.map { it.defaultVirtualAperture }
+    val portraitModeEnabled = userPreferencesRepository.userPreferences
+        .map { it.portraitModeEnabled }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     val mirrorFrontCamera: Flow<Boolean> = userPreferencesRepository.userPreferences.map { it.mirrorFrontCamera }
     val widgetTheme = userPreferencesRepository.userPreferences.map { it.widgetTheme }
@@ -2550,8 +2553,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 cameraController.setHdrPlusLongFrameExposureEv(prefs.hdrPlusLongFrameExposureEv)
                 cameraController.setHdrPlusShortFrameExposureEv(prefs.hdrPlusShortFrameExposureEv)
                 cameraController.setUseLivePhoto(shouldEnableLivePhoto(prefs))
-                // 应用保存的虚拟光圈
-                applyDefaultVirtualAperture(prefs.defaultVirtualAperture)
+                // Apply the saved virtual aperture only when Portrait mode is active.
+                applyDefaultVirtualAperture(
+                    prefs.defaultVirtualAperture,
+                    prefs.portraitModeEnabled && prefs.captureMode == CaptureMode.PHOTO
+                )
             } else {
                 // 如果没有任何偏好设置，使用配置文件中的默认 LUT（第一个）
                 val defaultLut = availableLutList.firstOrNull { it.isDefault }
@@ -7040,14 +7046,28 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setDefaultVirtualAperture(aperture: Float) {
-        applyDefaultVirtualAperture(aperture)
         viewModelScope.launch {
             userPreferencesRepository.saveDefaultVirtualAperture(aperture)
+            val prefs = userPreferencesRepository.userPreferences.first()
+            applyDefaultVirtualAperture(
+                aperture,
+                prefs.portraitModeEnabled && prefs.captureMode == CaptureMode.PHOTO
+            )
         }
     }
 
-    private fun applyDefaultVirtualAperture(aperture: Float) {
-        val enabled = aperture > 0f && DepthModelManager.isInstalled(getApplication())
+    fun setPortraitModeEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.savePortraitModeEnabled(enabled)
+            val prefs = userPreferencesRepository.userPreferences.first()
+            applyDefaultVirtualAperture(prefs.defaultVirtualAperture, enabled)
+        }
+    }
+
+    private fun applyDefaultVirtualAperture(aperture: Float, portraitModeEnabled: Boolean) {
+        val enabled = portraitModeEnabled &&
+            aperture > 0f &&
+            DepthModelManager.isInstalled(getApplication())
         setVirtualApertureAuto(enabled)
         if (enabled) {
             setAperture(aperture)
