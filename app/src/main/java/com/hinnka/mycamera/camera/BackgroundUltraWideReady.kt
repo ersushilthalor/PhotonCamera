@@ -260,7 +260,7 @@ internal class BackgroundUltraWideReady(context: Context) {
                                                     addTarget(surface)
                                                     standbyVideoOutputSurface
                                                         ?.takeIf { it.isValid && it !== surface }
-                                                        ?.let(::addTarget)
+                                                        ?.let { addTarget(it) }
                                                 }
                                             standbyRequestBuilder = requestBuilder
                                             standbySession = session
