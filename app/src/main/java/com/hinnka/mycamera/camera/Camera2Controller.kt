@@ -241,12 +241,11 @@ class Camera2Controller(private val context: Context) {
     private fun resolveStandbyWarmupSize(state: CameraState): Size {
         if (state.captureMode == CaptureMode.PHOTO) return state.currentPreviewSize
 
-        val videoConfig = state.videoConfig
-        if (videoConfig.aspectRatio == VideoAspectRatio.OPEN_GATE) {
-            state.videoCapabilities.cameraInputSizesByResolution[videoConfig.resolution]
-                ?.let { return it }
-        }
-        return videoConfig.resolution.resolveOutputSize(state.getPreviewAspectRatio())
+        // Video encoding output size can differ from the sensor input stream (for example,
+        // UHD output sourced from an 8 MP 4:3 SurfaceTexture stream). Match the selected
+        // resolution's actual camera input size instead of guessing from encoder dimensions.
+        return state.videoCapabilities.cameraInputSizesByResolution[state.videoConfig.resolution]
+            ?: state.currentPreviewSize
     }
 
     fun setKeepUltraWideReadyEnabled(enabled: Boolean) {
