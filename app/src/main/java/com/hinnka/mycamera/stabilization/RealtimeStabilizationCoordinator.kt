@@ -225,6 +225,10 @@ class RealtimeStabilizationCoordinator(context: Context) {
     @Volatile
     private var calibration: CameraCalibration? = null
 
+    /** Last sensor profile configured, including temporarily unsupported physical lenses. */
+    private var lastConfiguredCameraId: String? = null
+    private var cameraReconfigurationPending = false
+
     @Volatile
     private var externalLensStabilizationConfig = ExternalLensStabilizationConfig.Disabled
 
@@ -358,16 +362,20 @@ class RealtimeStabilizationCoordinator(context: Context) {
         cameraId: String,
         characteristics: CameraCharacteristics,
         timingCharacteristics: CameraCharacteristics = characteristics,
-    ) {
-        synchronized(lock) {
-            halStabilizationConflictDetected = false
-            consecutiveHalStabilizationConflictCount = 0
-        }
+    ): Boolean {
         val activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
         val physicalSize = characteristics.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
         if (activeArray == null || physicalSize == null) {
-            calibration = null
-            return
+            val cameraChanged = synchronized(lock) {
+                val changed = lastConfiguredCameraId?.let { it != cameraId } == true
+                lastConfiguredCameraId = cameraId
+                calibration = null
+                halStabilizationConflictDetected = false
+                consecutiveHalStabilizationConflictCount = 0
+                if (changed) resetFramePipelineForCameraSwitchLocked(null)
+                changed
+            }
+            return cameraChanged
         }
         val nominalLensIntrinsics = characteristics.get(
             CameraCharacteristics.LENS_INTRINSIC_CALIBRATION,
@@ -393,7 +401,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
         val supportsLensIntrinsicsSamples = Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM &&
             nominalLensIntrinsics != null &&
             resultKeyNames.contains(CaptureResult.STATISTICS_LENS_INTRINSICS_SAMPLES.name)
-        calibration = CameraCalibration(
+        val nextCalibration = CameraCalibration(
             cameraId = cameraId,
             activeArray = Rect(activeArray),
             preCorrectionActiveArray = Rect(
@@ -415,18 +423,27 @@ class RealtimeStabilizationCoordinator(context: Context) {
             supportsOisSamples = supportsOisSamples,
             supportsLensIntrinsicsSamples = supportsLensIntrinsicsSamples,
         )
+        val cameraChanged = synchronized(lock) {
+            val changed = lastConfiguredCameraId?.let { it != cameraId } == true
+            lastConfiguredCameraId = cameraId
+            calibration = nextCalibration
+            halStabilizationConflictDetected = false
+            consecutiveHalStabilizationConflictCount = 0
+            if (changed) resetFramePipelineForCameraSwitchLocked(nextCalibration)
+            changed
+        }
         PLog.i(
             TAG,
             "MGC camera calibration: camera=$cameraId, active=$activeArray, physical=$physicalSize, " +
-                "orientation=${calibration?.sensorOrientationDegrees}, " +
-                "facing=${calibration?.lensFacing}, timestampSource=${calibration?.timestampSource}, " +
+                "orientation=${nextCalibration.sensorOrientationDegrees}, " +
+                "facing=${nextCalibration.lensFacing}, timestampSource=${nextCalibration.timestampSource}, " +
                 "oisSamples=$supportsOisSamples, " +
                 "lensIntrinsicsSamples=$supportsLensIntrinsicsSamples, " +
                 "externalMagnification=" +
                 externalLensStabilizationConfig.magnificationFor(cameraId),
         )
+        return cameraChanged
     }
-
     fun submitCaptureResult(
         result: CaptureResult,
         request: CaptureRequest? = null,
@@ -614,11 +631,25 @@ class RealtimeStabilizationCoordinator(context: Context) {
         val timestampNs = image.timestampNs
         synchronized(lock) {
             if (image.owner.isClosed || activeSessionCount <= 0 || timestampNs <= 0L ||
-                image.width != nativeFrameWidth || image.height != nativeFrameHeight
+                image.width <= 0 || image.height <= 0
             ) {
                 image.close()
                 return
             }
+            if (image.width != nativeFrameWidth || image.height != nativeFrameHeight) {
+                val previousWidth = nativeFrameWidth
+                val previousHeight = nativeFrameHeight
+                val restarted = reconfigureNativeInputSizeLocked(image.width, image.height)
+                PLog.i(
+                    TAG,
+                    "MGC input geometry changed: ${previousWidth}x${previousHeight} -> " +
+                        "${image.width}x${image.height}, reinitialized=$restarted; " +
+                        "dropping transition frame",
+                )
+                image.close()
+                return
+            }
+            cameraReconfigurationPending = false
             bufferedImages.remove(timestampNs)?.let(::retireBufferedImageLocked)
             bufferedImages[timestampNs] = BufferedStabilizationImage(
                 image = image,
@@ -668,6 +699,22 @@ class RealtimeStabilizationCoordinator(context: Context) {
         if (sameConfig) {
             activeSessions[sessionId] = onFrameAvailable
             activeSessionCount = activeSessions.size
+            return resultSequence
+        }
+
+        // During a physical-camera switch, the first YUV frame—not stale per-camera metadata—
+        // determines the replacement input size. Keep sibling sessions alive until it arrives.
+        if (activeSessions.isNotEmpty() && cameraReconfigurationPending &&
+            nativeLookaheadFrames == normalizedLookahead &&
+            kotlin.math.abs(nativeStrength - strength) <= 0.0001f
+        ) {
+            activeSessions[sessionId] = onFrameAvailable
+            activeSessionCount = activeSessions.size
+            PLog.i(
+                TAG,
+                "MGC EIS session joined during camera transition; waiting for actual YUV input " +
+                    "size instead of resetting active sessions",
+            )
             return resultSequence
         }
 
@@ -754,20 +801,23 @@ class RealtimeStabilizationCoordinator(context: Context) {
         }
     }
 
-    private fun resetFeederLocked() {
+    /**
+     * Clears frame/timestamp state without invalidating active Session objects or rewinding their
+     * sequence cursors. Camera sensors can restart at a different timestamp origin after switching.
+     */
+    private fun clearFrameTimelineLocked(resetSequence: Boolean) {
         pendingGyroSamples.clear()
         frameMetadata.clear()
         frameBoundaries.clear()
         nativeResults.clear()
         bufferedImages.values.forEach(::retireBufferedImageLocked)
         bufferedImages.clear()
-        activeSessions.clear()
         gyroFeedBoundaryNs = 0L
         lastProcessedGyroTimestampNs = 0L
         lastOpticalCorrectionTimestampNs = 0L
         latestMetadataTimestampNs = 0L
         lastFrameBoundaryNs = 0L
-        resultSequence = 0L
+        if (resetSequence) resultSequence = 0L
         boundaryCount = 0L
         nativeFrameAttemptCount = 0L
         captureResultCount = 0L
@@ -780,6 +830,77 @@ class RealtimeStabilizationCoordinator(context: Context) {
         lastLoggedGateBoundaryCount = -1L
     }
 
+    private fun resetFramePipelineForCameraSwitchLocked(currentCalibration: CameraCalibration?) {
+        val previousWidth = nativeFrameWidth
+        val previousHeight = nativeFrameHeight
+        val previousStrength = nativeStrength
+        val previousLookahead = nativeLookaheadFrames
+        nativeEngine.stop()
+        clearFrameTimelineLocked(resetSequence = false)
+
+        val canRestart = activeSessions.isNotEmpty() &&
+            previousWidth > 0 && previousHeight > 0 &&
+            previousStrength.isFinite() &&
+            currentCalibration != null
+        if (canRestart) {
+            val restarted = nativeEngine.start(
+                width = previousWidth,
+                height = previousHeight,
+                frontFacing = currentCalibration!!.lensFacing ==
+                    CameraCharacteristics.LENS_FACING_FRONT,
+                strength = previousStrength,
+                lookaheadFrames = previousLookahead,
+            )
+            nativeFrameWidth = if (restarted) previousWidth else 0
+            nativeFrameHeight = if (restarted) previousHeight else 0
+            if (!restarted) {
+                PLog.e(TAG, "MGC native engine could not restart for camera switch")
+            }
+        } else {
+            nativeFrameWidth = 0
+            nativeFrameHeight = 0
+        }
+        // Keep the current session tuning so the first frame from a different-size sensor can
+        // recreate the engine without tearing down other active preview/recording sessions.
+        nativeStrength = previousStrength
+        nativeLookaheadFrames = previousLookahead
+        cameraReconfigurationPending = true
+        PLog.i(
+            TAG,
+            "MGC camera pipeline reset: camera=${currentCalibration?.cameraId}, " +
+                "activeSessions=${activeSessions.size}, input=${nativeFrameWidth}x${nativeFrameHeight}",
+        )
+    }
+
+    private fun reconfigureNativeInputSizeLocked(width: Int, height: Int): Boolean {
+        if (width <= 0 || height <= 0) return false
+        val currentCalibration = calibration ?: return false
+        val strength = nativeStrength
+        if (!strength.isFinite()) return false
+        val lookahead = nativeLookaheadFrames
+        nativeEngine.stop()
+        clearFrameTimelineLocked(resetSequence = false)
+        val restarted = nativeEngine.start(
+            width = width,
+            height = height,
+            frontFacing = currentCalibration.lensFacing ==
+                CameraCharacteristics.LENS_FACING_FRONT,
+            strength = strength,
+            lookaheadFrames = lookahead,
+        )
+        nativeFrameWidth = if (restarted) width else 0
+        nativeFrameHeight = if (restarted) height else 0
+        nativeStrength = strength
+        nativeLookaheadFrames = lookahead
+        cameraReconfigurationPending = false
+        return restarted
+    }
+
+    private fun resetFeederLocked() {
+        clearFrameTimelineLocked(resetSequence = true)
+        activeSessions.clear()
+        cameraReconfigurationPending = false
+    }
     private fun detectHalStabilizationConflictLocked(
         actualVideoMode: Int?,
         requestedOpticalMode: Int?,

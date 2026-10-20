@@ -871,6 +871,26 @@ class RealtimeVideoRenderer(
         stabilizationSessionStarted = stabilizationSession?.start() == true
     }
 
+    /**
+     * Camera2 closes and recreates its capture session during a physical lens switch. Restart the
+     * EIS session against the new calibration so returning to a supported lens cannot leave the
+     * encoder waiting forever on an inactive stabilization session.
+     */
+    @Synchronized
+    fun restartStabilizationForCameraSwitch() {
+        if (!initialized || !enhancedStabilizationEnabled) return
+        val session = stabilizationSession ?: return
+        session.stop()
+        stabilizationSessionStarted = false
+        stabilizationSessionStarted = session.start()
+        PLog.i(
+            TAG,
+            "MGC EIS recording session refreshed after camera switch: " +
+                "started=$stabilizationSessionStarted, " +
+                "cameraSupported=${stabilizationCoordinator?.isCurrentCameraSupported}",
+        )
+    }
+
     fun release() {
         stabilizationSession?.stop()
         stabilizationSession = null

@@ -2618,11 +2618,14 @@ class Camera2Controller(private val context: Context) {
                         openCharacteristics
                     }
                 }
-                realtimeStabilizationCoordinator.configureCamera(
+                val stabilizationCameraChanged = realtimeStabilizationCoordinator.configureCamera(
                     cameraId = capabilityCameraId,
                     characteristics = capabilityCharacteristics,
                     timingCharacteristics = openCharacteristics,
                 )
+                if (stabilizationCameraChanged && _state.value.videoRecordingState.isRecording) {
+                    videoRecorder.onCameraSwitched()
+                }
                 if (_state.value.captureMode == CaptureMode.PHOTO &&
                     _state.value.photoPreviewStabilizationEnabled &&
                     !realtimeStabilizationCoordinator.isCurrentCameraSupported

@@ -318,6 +318,19 @@ class VideoRecorder(
         return true
     }
 
+    /**
+     * EIS+ input is delivered through the timestamped YUV reader rather than cameraInputSurface.
+     * Explicitly restart its renderer session after Camera2 swaps physical lenses; no encoder
+     * SurfaceTexture callback is guaranteed to wake a stopped EIS session.
+     */
+    fun onCameraSwitched() {
+        if (!isRecording || isPaused || stopRequested || !requestedEnhancedStabilization) return
+        scope.launch(renderDispatcher) {
+            if (!isRecording || isPaused || stopRequested) return@launch
+            renderer?.restartStabilizationForCameraSwitch()
+        }
+    }
+
     fun onCameraInputStarted(): Boolean {
         if (!isRecording || stopRequested || cameraInputStarted) return false
         cameraInputStarted = true
