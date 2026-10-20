@@ -799,7 +799,7 @@ class UserPreferencesRepository(private val context: Context) {
                 }.getOrDefault(LutSelectorMode.Style),
                 defaultFocalLength = preferences[DEFAULT_FOCAL_LENGTH] ?: 0f,
                 zoomDisplayMode = preferences[ZOOM_DISPLAY_MODE] ?: "FOCAL_LENGTH",
-                useJpgMax = useJpgMax,
+                useJpgMax = false,
                 useJpgMaxHdrComposition = false,
                 jpgMultiFrameDenoiseFrameCount = preferences[JPG_MULTI_FRAME_DENOISE_FRAME_COUNT]
                     ?.let(MultiFrameConfig::normalizeDenoiseFrameCount)
@@ -812,7 +812,7 @@ class UserPreferencesRepository(private val context: Context) {
                         )
                     }
                     ?: MultiFrameConfig.DEFAULT_SUPER_RESOLUTION_SCALE,
-                useMultipleExposure = preferences[USE_MULTIPLE_EXPOSURE] ?: false,
+                useMultipleExposure = false,
                 multipleExposureCount = preferences[MULTIPLE_EXPOSURE_COUNT] ?: 2,
                 rawMaxQualityTuningEnabled = preferences[RAW_MAX_QUALITY_TUNING_ENABLED]
                     ?: PhotonSensorSizeTuning.DEFAULT_RAW_MAX_QUALITY_TUNING_ENABLED,
@@ -870,7 +870,7 @@ class UserPreferencesRepository(private val context: Context) {
                 captureButtonImagePath = preferences[CAPTURE_BUTTON_IMAGE_PATH]
                     ?.takeIf { it.isNotBlank() },
                 droMode = preferences[DRO_MODE] ?: if (preferences[RAW_DRO_ENABLED_KEY] == true) "DR100" else "OFF",
-                applyUltraHDR = preferences[APPLY_ULTRA_HDR] ?: false,
+                applyUltraHDR = false,
                 colorSpace = ColorSpace.valueOf(preferences[COLOR_SPACE] ?: ColorSpace.SRGB.name),
                 logCurve = TransferCurve.fromPersistedName(preferences[LOG_CURVE] ?: TransferCurve.SRGB.name),
                 rawLuts = parseRawLuts(preferences),
@@ -916,7 +916,7 @@ class UserPreferencesRepository(private val context: Context) {
                 videoCodec = com.hinnka.mycamera.video.VideoCodec.valueOf(
                     preferences[VIDEO_CODEC] ?: com.hinnka.mycamera.video.VideoCodec.H264.name
                 ),
-                ultraHdrGainMapEnabled = preferences[ULTRA_HDR_GAIN_MAP_ENABLED] ?: false,
+                ultraHdrGainMapEnabled = false,
                 phantomMode = preferences[PHANTOM_MODE] ?: false,
                 phantomButtonHidden = preferences[PHANTOM_BUTTON_HIDDEN] ?: false,
                 launchCameraOnPhantomMode = preferences[LAUNCH_CAMERA_ON_PHANTOM_MODE] ?: false,
@@ -2169,7 +2169,7 @@ class UserPreferencesRepository(private val context: Context) {
      */
     suspend fun saveUseMultipleExposure(enabled: Boolean) {
         context.dataStore.edit { preferences ->
-            preferences[USE_MULTIPLE_EXPOSURE] = enabled
+            preferences[USE_MULTIPLE_EXPOSURE] = false
         }
     }
 
@@ -2316,7 +2316,7 @@ class UserPreferencesRepository(private val context: Context) {
      */
     suspend fun saveApplyUltraHDR(enabled: Boolean) {
         context.dataStore.edit { preferences ->
-            preferences[APPLY_ULTRA_HDR] = enabled
+            preferences[APPLY_ULTRA_HDR] = false
         }
     }
 
@@ -2453,7 +2453,7 @@ class UserPreferencesRepository(private val context: Context) {
 
     suspend fun saveUltraHdrGainMapEnabled(enabled: Boolean) {
         context.dataStore.edit { preferences ->
-            preferences[ULTRA_HDR_GAIN_MAP_ENABLED] = enabled
+            preferences[ULTRA_HDR_GAIN_MAP_ENABLED] = false
         }
     }
 
@@ -2648,16 +2648,16 @@ class UserPreferencesRepository(private val context: Context) {
                 preferences[USE_RAW] = it.value
             }
             update.useJpgMax?.let {
-                preferences[USE_JPG_MAX] = it.value
+                preferences[USE_JPG_MAX] = false
             }
             update.useRawMax?.let {
                 preferences[USE_RAW_MAX] = it.value
             }
             update.ultraHdrGainMapEnabled?.let {
-                preferences[ULTRA_HDR_GAIN_MAP_ENABLED] = it.value
+                preferences[ULTRA_HDR_GAIN_MAP_ENABLED] = false
             }
             update.useMultipleExposure?.let {
-                preferences[USE_MULTIPLE_EXPOSURE] = it.value
+                preferences[USE_MULTIPLE_EXPOSURE] = false
             }
             update.frameId?.let {
                 if (it.value != null) {
