@@ -453,7 +453,7 @@ internal class BackgroundUltraWideReady(
         return null
     }
 
-    private fun chooseClosestSize(sizes: Array<Size>, target: Size): Size? {
+    private fun chooseClosestSize(sizes: Array<out Size>, target: Size): Size? {
         if (sizes.isEmpty()) return null
         val wantedWidth = target.width.coerceAtLeast(1)
         val wantedHeight = target.height.coerceAtLeast(1)
