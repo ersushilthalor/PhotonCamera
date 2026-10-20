@@ -26,7 +26,7 @@ const val STABILIZATION_LOOKAHEAD_FRAME_COUNT = MgcEisNativeEngine.LOOKAHEAD_FRA
 // MGC profile 7 passes 1.0 to setStabilizationStrength. The value is consumed by the packed
 // method-4 look-ahead pose blend; the outer full-grid feasibility correction is independent.
 const val DEFAULT_VIDEO_STABILIZATION_STRENGTH = 1f
-const val DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD = 7
+const val DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD = 3
 const val MIN_VIDEO_STABILIZATION_LOOKAHEAD = 0
 const val MAX_VIDEO_STABILIZATION_LOOKAHEAD = 10
 
@@ -187,8 +187,7 @@ private class BufferedStabilizationImage(
  * Source reconstruction of MGC's htd frame feeder around Photon's native EIS implementation.
  *
  * Camera metadata, calibrated gyro samples and optional OIS samples are held until they cross the
- * next timestamped image boundary. Reconstructed profile 7 then supplies a seven-frame
- * look-ahead. Preview and recording sessions share the feeder, source image and
+ * next timestamped image boundary. Reconstructed profile 7 then supplies the configured look-ahead. Preview and recording sessions share the feeder, source image and
  * result stream.
  */
 class RealtimeStabilizationCoordinator(context: Context) {
@@ -199,7 +198,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
         private const val MAX_METADATA_COUNT = 90
         private const val MAX_PENDING_GYRO_COUNT = 4096
         private const val HAL_STABILIZATION_CONFLICT_CONFIRMATION_FRAME_COUNT = 3
-        // Wait through the seven-frame native lookahead plus a small margin for delayed HAL OIS samples.
+        // Wait through the configured native lookahead plus a small margin for delayed HAL OIS samples.
         private const val HAL_OPTICAL_CORRECTION_PROBE_FRAME_COUNT =
             DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD + 3
         private const val MIN_OPTICAL_CORRECTION_SAMPLES_PER_FRAME = 2

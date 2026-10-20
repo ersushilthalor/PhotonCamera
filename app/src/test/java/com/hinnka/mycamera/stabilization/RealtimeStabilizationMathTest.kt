@@ -11,7 +11,7 @@ class RealtimeStabilizationMathTest {
         assertEquals(0, normalizeStabilizationLookahead(-1))
         assertEquals(10, normalizeStabilizationLookahead(10))
         assertEquals(10, normalizeStabilizationLookahead(11))
-        assertEquals(7, normalizeStabilizationLookahead(DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD))
+        assertEquals(3, normalizeStabilizationLookahead(DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD))
     }
 
     @Test

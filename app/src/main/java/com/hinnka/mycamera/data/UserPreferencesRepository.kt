@@ -5,6 +5,7 @@ import android.content.Context
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.model.AppAppearance
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.DataMigration
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -12,6 +13,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.toMutablePreferences
 import androidx.datastore.preferences.preferencesDataStore
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.CustomCaptureSettings
@@ -87,9 +89,36 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
         listOf(
             OpenAiApiKeyEncryptionMigration(),
             BuiltInDeviceConfigurationMigration.create(context),
+            VideoProcessingDefaultsMigration(),
         )
     },
 )
+
+/**
+ * One-time migration for the requested video-processing defaults.
+ *
+ * Reset these three values once for existing installs so users actually receive the
+ * new defaults; the marker prevents this migration from overwriting choices they make later.
+ */
+private class VideoProcessingDefaultsMigration : DataMigration<Preferences> {
+    private val migratedKey = booleanPreferencesKey("video_processing_defaults_migration_v1")
+    private val videoNrKey = intPreferencesKey("video_nr_level")
+    private val videoEdgeKey = intPreferencesKey("video_edge_level")
+    private val lookaheadKey = intPreferencesKey("video_enhanced_stabilization_lookahead")
+
+    override suspend fun shouldMigrate(currentData: Preferences): Boolean =
+        currentData[migratedKey] != true
+
+    override suspend fun migrate(currentData: Preferences): Preferences =
+        currentData.toMutablePreferences().apply {
+            this[videoNrKey] = NoiseReductionLevel.OFF
+            this[videoEdgeKey] = 0
+            this[lookaheadKey] = 3
+            this[migratedKey] = true
+        }
+
+    override suspend fun cleanUp() = Unit
+}
 
 enum class VolumeKeyAction {
     NONE,
@@ -183,8 +212,8 @@ data class UserPreferences(
     val photoSaveTreeUri: String? = null,
     val nrLevel: Int = NoiseReductionLevel.DEFAULT,  // 降噪等级：0=Off, 1=Fast, 2=High Quality, 3=ZSL, 4=Minimal
     val edgeLevel: Int = 1, // 锐化等级：0=Off, 1=Fast, 2=High Quality, 3=Real-time
-    val videoNrLevel: Int = NoiseReductionLevel.DEFAULT,
-    val videoEdgeLevel: Int = 1,
+    val videoNrLevel: Int = NoiseReductionLevel.OFF,
+    val videoEdgeLevel: Int = 0,
     val vendorCaptureSettingsByLens: VendorCaptureSettingsByLens = VendorCaptureSettingsByLens.Empty,
     val customVendorKeySettings: CustomVendorKeySettings = CustomVendorKeySettings.Empty,
     val useRaw: Boolean = false,                // 使用 RAW 格式拍摄
@@ -771,9 +800,9 @@ class UserPreferencesRepository(private val context: Context) {
                 ),
                 edgeLevel = preferences[EDGE_LEVEL] ?: 1,
                 videoNrLevel = NoiseReductionLevel.normalize(
-                    preferences[VIDEO_NR_LEVEL] ?: NoiseReductionLevel.DEFAULT
+                    preferences[VIDEO_NR_LEVEL] ?: NoiseReductionLevel.OFF
                 ),
-                videoEdgeLevel = preferences[VIDEO_EDGE_LEVEL] ?: 1,
+                videoEdgeLevel = preferences[VIDEO_EDGE_LEVEL] ?: 0,
                 vendorCaptureSettingsByLens = VendorCaptureSettingsByLens.deserialize(
                     preferences[VENDOR_CAPTURE_SETTINGS]
                 ),
