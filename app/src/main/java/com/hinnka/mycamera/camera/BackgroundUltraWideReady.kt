@@ -67,6 +67,7 @@ internal class BackgroundUltraWideReady(
     @Volatile private var activeCameraId: String? = null
     @Volatile private var standbyOpenPending = false
     @Volatile private var standbyOpenLatch: CountDownLatch? = null
+    @Volatile private var standbyOpenGeneration: Int = -1
 
     // A handed-off device is now owned by Camera2Controller, but Android continues to dispatch
     // its callbacks to this class's original StateCallback. Route those terminal events back.
@@ -144,6 +145,7 @@ internal class BackgroundUltraWideReady(
             // outstanding or its CameraDevice has just been asked to close.
             if (standbyOpenPending) {
                 if (
+                    standbyOpenGeneration == generation.get() &&
                     standbyCameraId == standbyId &&
                     activeCameraId == activeId &&
                     standbyOutputSize == chosenSize
@@ -224,12 +226,14 @@ internal class BackgroundUltraWideReady(
                 val openCallbackLatch = CountDownLatch(1)
                 standbyOpenPending = true
                 standbyOpenLatch = openCallbackLatch
+                standbyOpenGeneration = token
                 @SuppressLint("MissingPermission")
                 cameraManager.openCamera(standbyId, object : CameraDevice.StateCallback() {
                     override fun onOpened(camera: CameraDevice) {
                         if (standbyOpenLatch === openCallbackLatch) {
                             standbyOpenPending = false
                             standbyOpenLatch = null
+                            standbyOpenGeneration = -1
                         }
                         openCallbackLatch.countDown()
                         if (generation.get() != token || activeCameraId != activeId) {
@@ -291,6 +295,7 @@ internal class BackgroundUltraWideReady(
                         if (standbyOpenLatch === openCallbackLatch) {
                             standbyOpenPending = false
                             standbyOpenLatch = null
+                            standbyOpenGeneration = -1
                         }
                         openCallbackLatch.countDown()
                         if (transferredDevice === camera) {
@@ -307,6 +312,7 @@ internal class BackgroundUltraWideReady(
                         if (standbyOpenLatch === openCallbackLatch) {
                             standbyOpenPending = false
                             standbyOpenLatch = null
+                            standbyOpenGeneration = -1
                         }
                         openCallbackLatch.countDown()
                         if (transferredDevice === camera) {
@@ -348,6 +354,7 @@ internal class BackgroundUltraWideReady(
                 standbyOpenPending = false
                 standbyOpenLatch?.countDown()
                 standbyOpenLatch = null
+                standbyOpenGeneration = -1
                 PLog.w(TAG, "Background lens warm-up failed safely: ${error.message}")
                 releaseLocked()
             }
@@ -479,6 +486,7 @@ internal class BackgroundUltraWideReady(
             standbyOpenPending = false
             standbyOpenLatch?.countDown()
             standbyOpenLatch = null
+            standbyOpenGeneration = -1
         }
         if (deviceToClose != null) {
             val signal = closeSignals[deviceToClose] ?: closingLatch ?: CountDownLatch(1)
