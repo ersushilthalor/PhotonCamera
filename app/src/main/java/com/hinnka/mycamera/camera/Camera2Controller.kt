@@ -6948,7 +6948,10 @@ class Camera2Controller(private val context: Context) {
 
     fun setVideoLogLutMode(mode: VideoLogLutMode) {
         if (_state.value.videoRecordingState.isRecording || _state.value.videoRecordingState.isProcessing) return
-        _state.value = _state.value.copy(videoConfig = _state.value.videoConfig.copy(logLutMode = mode))
+        // Log LUTs are always baked into the recorded output; monitor-only is intentionally disabled.
+        _state.value = _state.value.copy(
+            videoConfig = _state.value.videoConfig.copy(logLutMode = VideoLogLutMode.BAKE_IN)
+        )
     }
 
     fun setVideoLogProfile(logProfile: VideoLogProfile) {
@@ -7194,12 +7197,10 @@ class Camera2Controller(private val context: Context) {
         )
         val shouldFlipEncodedFrame = isFrontCamera && mirrorFrontCameraEnabled
         val logProfile = _state.value.videoConfig.logProfile
-        val monitorOnly = logProfile.isEnabled &&
-            _state.value.videoConfig.logLutMode == VideoLogLutMode.MONITOR_ONLY
-        val recordingLut = creativeLutConfig?.takeIf {
-            !monitorOnly && logProfile.matchesLut(it.curve, it.colorSpace)
-        }
-        val recordingRecipe = creativeRecipeParams.takeUnless { monitorOnly }
+        // Creative LUTs are only applied to Log video, and are always baked into the
+        // encoded output. Normal video must remain untouched by the selected creative LUT.
+        val recordingLut = creativeLutConfig.takeIf { logProfile.isEnabled }
+        val recordingRecipe = creativeRecipeParams.takeIf { logProfile.isEnabled }
         val colorLayers = buildList {
             if (recordingLut != null || recordingRecipe?.isDefault() == false) {
                 add(VideoColorEffectLayer(recordingLut, recordingRecipe))
