@@ -42,6 +42,7 @@ internal class BackgroundUltraWideReady(context: Context) {
     @Volatile private var activeCameraId: String? = null
     private var pendingCameraTransfer: PendingCameraTransfer? = null
     private var transferredStateCallback: CameraDevice.StateCallback? = null
+    @Volatile private var transferredDevice: CameraDevice? = null
 
     private data class PendingCameraTransfer(
         val cameraId: String,
@@ -218,6 +219,7 @@ internal class BackgroundUltraWideReady(context: Context) {
                                         standbyCameraId = null
                                         activeCameraId = null
                                         releaseStandbyOutputLocked()
+                                        transferredDevice = device
                                         transferredStateCallback = pending.stateCallback
                                         PLog.i(TAG, "Handing warmed camera $standbyId to the active camera pipeline")
                                         pending.onReady(device)
@@ -233,9 +235,8 @@ internal class BackgroundUltraWideReady(context: Context) {
                     }
 
                     override fun onDisconnected(camera: CameraDevice) {
-                        val owner = transferredStateCallback
-                        if (owner != null) {
-                            owner.onDisconnected(camera)
+                        if (transferredDevice === camera) {
+                            transferredStateCallback?.onDisconnected(camera)
                             return
                         }
                         camera.close()
@@ -244,9 +245,8 @@ internal class BackgroundUltraWideReady(context: Context) {
                     }
 
                     override fun onError(camera: CameraDevice, error: Int) {
-                        val owner = transferredStateCallback
-                        if (owner != null) {
-                            owner.onError(camera, error)
+                        if (transferredDevice === camera) {
+                            transferredStateCallback?.onError(camera, error)
                             return
                         }
                         camera.close()
@@ -255,10 +255,11 @@ internal class BackgroundUltraWideReady(context: Context) {
                     }
 
                     override fun onClosed(camera: CameraDevice) {
-                        val owner = transferredStateCallback
-                        if (owner != null) {
+                        if (transferredDevice === camera) {
+                            val owner = transferredStateCallback
+                            transferredDevice = null
                             transferredStateCallback = null
-                            owner.onClosed(camera)
+                            owner?.onClosed(camera)
                         } else {
                             releaseResourcesForToken(token)
                         }
