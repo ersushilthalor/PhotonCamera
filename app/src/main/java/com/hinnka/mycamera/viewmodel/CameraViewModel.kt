@@ -965,15 +965,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     ) {
         val prefs = userPreferencesRepository.userPreferences.first()
         var desiredUseRaw = prefs.useRaw
-        var desiredUseJpgMax = prefs.useJpgMax
+        var desiredUseJpgMax = false
         var desiredUseRawMax = prefs.useRawMax
-        var desiredUseMultipleExposure = prefs.useMultipleExposure
+        var desiredUseMultipleExposure = false
         var desiredRawRenderingEngine = prefs.rawRenderingEngine
 
         update.useRaw?.let { desiredUseRaw = it.value }
-        update.useJpgMax?.let { desiredUseJpgMax = it.value }
         update.useRawMax?.let { desiredUseRawMax = it.value }
-        update.useMultipleExposure?.let { desiredUseMultipleExposure = it.value }
         update.rawRenderingEngine?.let { desiredRawRenderingEngine = it.value }
 
         if (update.useRaw?.value == true) {
@@ -982,19 +980,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         } else if (update.useRaw?.value == false) {
             desiredUseRawMax = false
         }
-        if (update.useJpgMax?.value == true) {
-            desiredUseRaw = false
-            desiredUseMultipleExposure = false
-            desiredUseRawMax = false
-        }
         if (update.useRawMax?.value == true) {
             desiredUseRaw = true
             desiredUseMultipleExposure = false
-        }
-        if (update.useMultipleExposure?.value == true) {
-            desiredUseRaw = false
-            desiredUseJpgMax = false
-            desiredUseRawMax = false
         }
         // 专业模式与 HDR+ 是同一个拍摄能力，不再保留可独立关闭的状态。
         desiredUseRawMax = desiredUseRaw
@@ -3264,22 +3252,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun defaultHdrEffectEnabled(
-        hasEmbeddedGainmap: Boolean,
-        userPrefs: UserPreferences?,
-    ): Boolean {
-        if (hasEmbeddedGainmap) return true
-        return userPrefs?.ultraHdrGainMapEnabled ?: false
-    }
+        @Suppress("UNUSED_PARAMETER") hasEmbeddedGainmap: Boolean,
+        @Suppress("UNUSED_PARAMETER") userPrefs: UserPreferences?,
+    ): Boolean = false
 
-    fun setUseMultipleExposure(enabled: Boolean) {
+    fun setUseMultipleExposure(@Suppress("UNUSED_PARAMETER") enabled: Boolean) {
+        cancelMultipleExposureSession()
+        multipleExposureState = multipleExposureState.copy(enabled = false)
         viewModelScope.launch {
-            applyCameraFeatureUpdate(
-                CameraFeatureUpdate(useMultipleExposure = SettingValue(enabled))
-            )
-            if (enabled) {
-                userPreferencesRepository.saveUseLivePhoto(false)
-                cameraController.setUseLivePhoto(false)
-            }
+            userPreferencesRepository.saveUseMultipleExposure(false)
+            cameraController.setUseMultipleExposure(false)
         }
     }
 
@@ -4555,9 +4537,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /**
      * 设置是否应用 Ultra HDR 策略
      */
-    fun setApplyUltraHDR(enabled: Boolean) {
+    fun setApplyUltraHDR(@Suppress("UNUSED_PARAMETER") enabled: Boolean) {
         viewModelScope.launch {
-            userPreferencesRepository.saveApplyUltraHDR(enabled)
+            userPreferencesRepository.saveApplyUltraHDR(false)
         }
     }
 
@@ -4649,9 +4631,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         reopenCamera()
     }
 
-    fun setUltraHdrGainMapEnabled(enabled: Boolean) {
+    fun setUltraHdrGainMapEnabled(@Suppress("UNUSED_PARAMETER") enabled: Boolean) {
         viewModelScope.launch {
-            userPreferencesRepository.saveUltraHdrGainMapEnabled(enabled)
+            userPreferencesRepository.saveUltraHdrGainMapEnabled(false)
         }
     }
 
@@ -4956,29 +4938,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // ==================== 延时拍摄和网格线相关方法 ====================
 
     /** 拍照模式：YUV 多帧降噪。 */
-    fun setUseJpgMax(enabled: Boolean) {
-        viewModelScope.launch {
-            applyCameraFeatureUpdate(
-                CameraFeatureUpdate(useJpgMax = SettingValue(enabled))
-            )
-        }
-    }
+    fun setUseJpgMax(@Suppress("UNUSED_PARAMETER") enabled: Boolean) = Unit
 
-    fun setJpgMultiFrameDenoiseFrameCount(count: Int) {
-        val normalizedCount = MultiFrameConfig.normalizeDenoiseFrameCount(count)
-        cameraController.setJpgMultiFrameDenoiseFrameCount(normalizedCount)
-        viewModelScope.launch {
-            userPreferencesRepository.saveJpgMultiFrameDenoiseFrameCount(normalizedCount)
-        }
-    }
+    fun setJpgMultiFrameDenoiseFrameCount(@Suppress("UNUSED_PARAMETER") count: Int) = Unit
 
-    fun setJpgMultiFrameDenoiseOutputScale(scale: Float) {
-        viewModelScope.launch {
-            userPreferencesRepository.saveJpgMultiFrameDenoiseOutputScale(
-                MultiFrameConfig.normalizeOutputScale(scale)
-            )
-        }
-    }
+    fun setJpgMultiFrameDenoiseOutputScale(@Suppress("UNUSED_PARAMETER") scale: Float) = Unit
 
     fun setHdrPlusMergeMode(mode: MgcRawMaxMode) {
         cameraController.setHdrPlusMergeMode(mode)
@@ -5021,13 +4985,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch { userPreferencesRepository.saveMlAeMaxHdrRatio(value) }
     }
 
-    fun setMultipleExposureCount(count: Int) {
-        val normalizedCount = count.coerceIn(2, 9)
-        multipleExposureState = multipleExposureState.copy(targetCount = normalizedCount)
-        viewModelScope.launch {
-            userPreferencesRepository.saveMultipleExposureCount(normalizedCount)
-        }
-    }
+    fun setMultipleExposureCount(@Suppress("UNUSED_PARAMETER") count: Int) = Unit
 
     fun setRawDigitalZoomResamplingEnabled(enabled: Boolean) {
         viewModelScope.launch {
