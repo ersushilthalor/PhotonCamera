@@ -846,6 +846,7 @@ fun CameraScreen(
         val backgroundPainter = rememberBackgroundPainter(viewModel)
 
         val isVideoMode = state.captureMode == CaptureMode.VIDEO
+        val isVideoLog = isVideoMode && state.videoConfig.logProfile.isEnabled
         val isPhotoStyleMode = state.captureMode != CaptureMode.VIDEO
         val onParameterClick: (CameraParameter) -> Unit = { parameter ->
             val wasSelected = selectedParameter == parameter
@@ -1211,10 +1212,10 @@ fun CameraScreen(
                             lensFacing = if (state.getCurrentCameraInfo()?.lensFacing == android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT) 0 else 1,
                             calibrationOffset = calibrationOffset,
                             baselineLut = viewModel.currentBaselineLutConfig,
-                            currentLut = viewModel.currentLutConfig,
+                            currentLut = viewModel.currentLutConfig.takeIf { isVideoLog },
                             enginePreviewPlan = viewModel.currentEnginePreviewPlan,
                             baselineColorRecipeParams = currentBaselineRecipeParams,
-                            colorRecipeParams = previewRecipeParamsOverride ?: currentRecipeParams,
+                            colorRecipeParams = if (isVideoLog) previewRecipeParamsOverride ?: currentRecipeParams else ColorRecipeParams.DEFAULT,
                             focusPoint = state.focusPoint,
                             meteringPoint = state.meteringPoint,
                             canMoveMeteringPoint = state.supportsPointMetering &&
@@ -1796,7 +1797,6 @@ fun CameraScreen(
             ) {
                 val allPresets by viewModel.allPresets.collectAsState()
                 val defaultPresetName = stringResource(R.string.preset_new_preset_default)
-                val isVideoLog = isVideoMode && state.videoConfig.logProfile.isEnabled
 
                 // LUT 选择器 (内嵌 Presets 列表与统一控制，无多余背景遮挡)
                 LutSelector(
@@ -1865,14 +1865,7 @@ fun CameraScreen(
                     },
                     categoryOrder = categoryOrder,
                     headerContent = if (isVideoLog) {
-                        {
-                            VideoLogLutModeSelector(
-                                mode = state.videoConfig.logLutMode,
-                                enabled = !state.videoRecordingState.isRecording &&
-                                    !state.videoRecordingState.isProcessing,
-                                onModeSelected = viewModel::setVideoLogLutMode
-                            )
-                        }
+                        { Text("LUT is applied to the recorded Log video") }
                     } else null,
                     modifier = Modifier
                         .fillMaxWidth()
