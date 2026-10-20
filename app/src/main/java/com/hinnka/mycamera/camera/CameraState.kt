@@ -388,7 +388,7 @@ data class CameraState(
     val droMode: String = "OFF",
     // 是否正在拍摄 Live Photo (用于 UI 动画)
     val isCapturingLivePhoto: Boolean = false,
-    val applyUltraHDR: Boolean = true,
+    val applyUltraHDR: Boolean = false,
     val useP010: Boolean = false,
     val useP3ColorSpace: Boolean = false,
     val isP010Supported: Boolean = false,
@@ -444,8 +444,9 @@ data class CameraState(
     val requiresMultiFrameCaptureSequence: Boolean
         get() = isMultiFrameEnabled && activeMultiFrameCount > 1
 
+    // JPG multi-frame denoise was removed. Keep RAW Max multi-frame capture available.
     val isJpgMaxEnabled: Boolean
-        get() = isMultiFrameEnabled && !useRaw
+        get() = false
 
     val isJpgMaxHdrEnabled: Boolean
         get() = isJpgMaxEnabled && useJpgMaxHdrComposition
