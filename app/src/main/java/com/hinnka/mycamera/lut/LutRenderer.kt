@@ -82,6 +82,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
 
     // 纹理 ID
     private var cameraTextureId: Int = 0
+    private var ultraWideCameraTextureId: Int = 0
     private var lutTextureId: Int = 0
     private var baselineLutTextureId: Int = 0
     private val basicToneTextures = BasicToneGlTextures()
@@ -213,6 +214,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
 
     // SurfaceTexture 变换矩阵
     private val stMatrix = FloatArray(16).apply { Matrix.setIdentityM(this, 0) }
+    private val ultraWideStMatrix = FloatArray(16).apply { Matrix.setIdentityM(this, 0) }
     private val mgcEisPresentationTransform = MgcEisPresentationTransform()
 
     // MVP 变换矩阵（用于 center crop）；EIS 输出可能使用不同于 OES 预览的输入尺寸。
@@ -221,6 +223,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
 
     // 相机 SurfaceTexture
     private var surfaceTexture: SurfaceTexture? = null
+    private var ultraWideSurfaceTexture: SurfaceTexture? = null
+    @Volatile private var ultraWidePreviewActive = false
     private val frameAvailable = AtomicBoolean(false)
     private var stabilizationCoordinator: RealtimeStabilizationCoordinator? = null
     @Volatile
@@ -488,6 +492,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
 
     // 回调
     var onSurfaceTextureAvailable: ((SurfaceTexture) -> Unit)? = null
+    var onUltraWideSurfaceTextureAvailable: ((SurfaceTexture) -> Unit)? = null
     var onRequestRender: (() -> Unit)? = null
     var onHistogramUpdated: ((IntArray) -> Unit)? = null
     var onMeteringUpdated: ((Double, Double) -> Unit)? = null
@@ -546,6 +551,22 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             }
         }
 
+        // Dedicated OES input for the continuously-running secondary rear lens. Both camera
+        // streams can stay configured on different SurfaceTextures; rendering selects one
+        // source without forcing Camera2 to tear down and recreate the active session.
+        ultraWideCameraTextureId = GlUtils.createOESTexture()
+        ultraWideSurfaceTexture = SurfaceTexture(ultraWideCameraTextureId).apply {
+            setDefaultBufferSize(previewWidth, previewHeight)
+            setOnFrameAvailableListener {
+                frameAvailable.set(true)
+                if (previewStabilizationUseCase == null ||
+                    stabilizationCoordinator?.isCurrentCameraSupported != true
+                ) {
+                    onRequestRender?.invoke()
+                }
+            }
+        }
+
         // 初始化测光 FBO
         initMeteringFbo()
 
@@ -564,6 +585,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
 
         // 通知调用者 SurfaceTexture 已准备好
         surfaceTexture?.let { onSurfaceTextureAvailable?.invoke(it) }
+        ultraWideSurfaceTexture?.let { onUltraWideSurfaceTextureAvailable?.invoke(it) }
 
         GlUtils.checkGlError("initShaderProgram")
     }
@@ -579,6 +601,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         mgcEisHardwareBufferRenderer.resetAfterContextLoss()
         mgcEisYuvRenderer.resetAfterContextLoss()
         cameraTextureId = 0
+        ultraWideCameraTextureId = 0
         currentCameraTextureId = 0
         currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
         currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
@@ -1299,24 +1322,39 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         )
     }
 
+    private fun activeOesSurfaceTexture(): SurfaceTexture? =
+        if (ultraWidePreviewActive) ultraWideSurfaceTexture ?: surfaceTexture else surfaceTexture
+
+    private fun activeOesTextureId(): Int =
+        if (ultraWidePreviewActive && ultraWideSurfaceTexture != null) {
+            ultraWideCameraTextureId
+        } else {
+            cameraTextureId
+        }
+
+    private fun activeOesTransformMatrix(): FloatArray =
+        if (ultraWidePreviewActive && ultraWideSurfaceTexture != null) ultraWideStMatrix else stMatrix
+
     private fun useCurrentOesFrame() {
         currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
         currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
-        currentCameraTextureId = cameraTextureId
-        currentCameraTextureMatrix = stMatrix
-        currentFrameTimestampNs = surfaceTexture?.timestamp ?: 0L
+        currentCameraTextureId = activeOesTextureId()
+        currentCameraTextureMatrix = activeOesTransformMatrix()
+        currentFrameTimestampNs = activeOesSurfaceTexture()?.timestamp ?: 0L
     }
 
     private fun acquireLatestCameraFrame(): Boolean {
         return try {
-            surfaceTexture?.updateTexImage()
-            surfaceTexture?.getTransformMatrix(stMatrix)
+            val inputTexture = activeOesSurfaceTexture() ?: return false
+            val inputMatrix = activeOesTransformMatrix()
+            inputTexture.updateTexImage()
+            inputTexture.getTransformMatrix(inputMatrix)
             if (previewStabilizationUseCase != null &&
-                !mgcEisPresentationTransform.captureFromOes(stMatrix)
+                !mgcEisPresentationTransform.captureFromOes(inputMatrix)
             ) {
                 PLog.w(TAG, "MGC cannot derive a cardinal presentation orientation yet")
             }
-            surfaceTexture != null
+            true
         } catch (error: RuntimeException) {
             PLog.e(
                 TAG,
@@ -2358,6 +2396,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         previewWidth = width
         previewHeight = height
         surfaceTexture?.setDefaultBufferSize(width, height)
+        ultraWideSurfaceTexture?.setDefaultBufferSize(width, height)
         if (sizeChanged && previewStabilizationUseCase != null) {
             mgcEisHardwareBufferRenderer.release()
             mgcEisYuvRenderer.release()
@@ -2366,6 +2405,14 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         // 更新 MVP 矩阵以处理 center crop
         updateMVPMatrix()
         updateCaptureSize()
+    }
+
+    fun getUltraWideSurfaceTexture(): SurfaceTexture? = ultraWideSurfaceTexture
+
+    fun setUltraWidePreviewActive(active: Boolean) {
+        ultraWidePreviewActive = active && ultraWideSurfaceTexture != null
+        frameAvailable.set(true)
+        onRequestRender?.invoke()
     }
 
     fun setStabilizationInputSize(width: Int, height: Int) {
@@ -3294,9 +3341,11 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         GlUtils.deleteProgram(copyProgramId)
         copyProgramId = 0
 
-        // 释放 SurfaceTexture
+        // 释放两路 GL SurfaceTexture；Camera2Controller releases their Surface wrappers.
         surfaceTexture?.release()
         surfaceTexture = null
+        ultraWideSurfaceTexture?.release()
+        ultraWideSurfaceTexture = null
         frameAvailable.set(false)
 
         // 重置状态
