@@ -3806,7 +3806,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             targetCamera.lensFacing != CameraCharacteristics.LENS_FACING_BACK
         ) return true
 
-        return previousCamera.getOpenCameraId() != targetCamera.getOpenCameraId()
+        val previousOpenId = runCatching { previousCamera.getOpenCameraId() }.getOrNull()
+            ?: return true
+        val targetOpenId = runCatching { targetCamera.getOpenCameraId() }.getOrNull()
+            ?: return true
+        return previousOpenId != targetOpenId
     }
 
     /**
