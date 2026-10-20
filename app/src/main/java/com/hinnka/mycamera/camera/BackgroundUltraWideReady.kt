@@ -16,7 +16,7 @@ import com.hinnka.mycamera.utils.PLog
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Keeps the non-active rear lens warm using a low-resolution repeating preview stream.
+ * Keeps the non-active rear lens warm using a repeating preview stream sized for the active mode.
  *
  * This intentionally uses only Android's declared concurrent-camera combinations. It never
  * attempts to open an unsupported camera pair, which could disconnect the active viewfinder.
@@ -168,7 +168,7 @@ internal class BackgroundUltraWideReady(context: Context) {
                         kotlin.math.abs(size.width - targetSize.height) +
                             kotlin.math.abs(size.height - targetSize.width)
                     )
-                } ?: targetSize
+                } ?: Size(640, 480)
                 val texture = SurfaceTexture(0).apply {
                     setDefaultBufferSize(chosenSize.width, chosenSize.height)
                 }
