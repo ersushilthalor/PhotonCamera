@@ -60,6 +60,8 @@ class VideoRecorder(
         private const val UNSET_TIMESTAMP = Long.MIN_VALUE
         private const val NANOS_PER_SECOND = 1_000_000_000L
         private const val MICROS_PER_SECOND = 1_000_000L
+        // Camera switches can move the sensor timestamp to a different clock epoch.
+        private const val CAMERA_TIMESTAMP_DISCONTINUITY_THRESHOLD_NS = 500_000_000L
     }
 
     private data class AudioCaptureConfig(
@@ -135,6 +137,10 @@ class VideoRecorder(
     private var requestedCameraTimestampSource = CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_UNKNOWN
     private var requestedSensorOrientationDegrees = 0
     private var cameraTimestampToBoottimeOffsetNs = UNSET_TIMESTAMP
+    private var cameraTimestampOffsetActive = false
+    private var lastCameraTimestampNs = UNSET_TIMESTAMP
+    private var lastCameraTimestampObservedBoottimeNs = UNSET_TIMESTAMP
+    private var lastMappedCameraTimestampNs = UNSET_TIMESTAMP
     private var timelineOriginUs = UNSET_TIMESTAMP
     private var pauseIntervals = mutableListOf<PauseInterval>()
     private var activePauseStartTimeUs = UNSET_TIMESTAMP
@@ -936,19 +942,79 @@ class VideoRecorder(
     }
 
     private fun mapCameraTimestampToBoottimeNs(cameraTimestampNs: Long): Long {
-        if (requestedCameraTimestampSource == CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME) {
-            return cameraTimestampNs
-        }
+        val observedBoottimeNs = SystemClock.elapsedRealtimeNanos()
+        return synchronized(timelineLock) {
+            val previousCameraTimestampNs = lastCameraTimestampNs
+            val previousObservedBoottimeNs = lastCameraTimestampObservedBoottimeNs
+            val cameraDeltaNs = if (previousCameraTimestampNs != UNSET_TIMESTAMP) {
+                cameraTimestampNs - previousCameraTimestampNs
+            } else {
+                UNSET_TIMESTAMP
+            }
+            val boottimeDeltaNs = if (previousObservedBoottimeNs != UNSET_TIMESTAMP) {
+                observedBoottimeNs - previousObservedBoottimeNs
+            } else {
+                UNSET_TIMESTAMP
+            }
+            val clockDiscontinuity = previousCameraTimestampNs != UNSET_TIMESTAMP &&
+                (cameraDeltaNs <= 0L ||
+                    boottimeDeltaNs <= 0L ||
+                    (cameraDeltaNs > boottimeDeltaNs &&
+                        cameraDeltaNs - boottimeDeltaNs > CAMERA_TIMESTAMP_DISCONTINUITY_THRESHOLD_NS) ||
+                    (boottimeDeltaNs > cameraDeltaNs &&
+                        boottimeDeltaNs - cameraDeltaNs > CAMERA_TIMESTAMP_DISCONTINUITY_THRESHOLD_NS))
 
-        if (cameraTimestampToBoottimeOffsetNs == UNSET_TIMESTAMP) {
-            cameraTimestampToBoottimeOffsetNs = SystemClock.elapsedRealtimeNanos() - cameraTimestampNs
-            PLog.w(
-                TAG,
-                "Camera timestamp source is not REALTIME; calibrated to BOOTTIME with " +
-                    "offsetNs=$cameraTimestampToBoottimeOffsetNs"
-            )
+            if (clockDiscontinuity) {
+                // Keep the encoded timeline continuous even when the next lens reports
+                // timestamps from a different epoch (or restarts its timestamp counter).
+                val monotonicAnchorNs = if (lastMappedCameraTimestampNs == UNSET_TIMESTAMP) {
+                    observedBoottimeNs
+                } else {
+                    maxOf(observedBoottimeNs, lastMappedCameraTimestampNs + 1L)
+                }
+                cameraTimestampToBoottimeOffsetNs = monotonicAnchorNs - cameraTimestampNs
+                cameraTimestampOffsetActive = true
+                PLog.w(
+                    TAG,
+                    "Camera timestamp discontinuity; rebasing to BOOTTIME: " +
+                        "cameraDeltaMs=${cameraDeltaNs / 1_000_000.0}, " +
+                        "boottimeDeltaMs=${boottimeDeltaNs / 1_000_000.0}, " +
+                        "offsetNs=$cameraTimestampToBoottimeOffsetNs"
+                )
+            } else if (!cameraTimestampOffsetActive &&
+                requestedCameraTimestampSource != CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
+            ) {
+                cameraTimestampToBoottimeOffsetNs = observedBoottimeNs - cameraTimestampNs
+                cameraTimestampOffsetActive = true
+                PLog.w(
+                    TAG,
+                    "Camera timestamp source is not REALTIME; calibrated to BOOTTIME with " +
+                        "offsetNs=$cameraTimestampToBoottimeOffsetNs"
+                )
+            }
+
+            var mappedTimestampNs = if (cameraTimestampOffsetActive) {
+                cameraTimestampNs + cameraTimestampToBoottimeOffsetNs
+            } else {
+                cameraTimestampNs
+            }
+
+            // MediaCodec/EGL require a forward-moving presentation timeline. Rebase again
+            // if rounding or a source clock change would otherwise move time backwards.
+            if (lastMappedCameraTimestampNs != UNSET_TIMESTAMP &&
+                mappedTimestampNs <= lastMappedCameraTimestampNs
+            ) {
+                cameraTimestampOffsetActive = true
+                mappedTimestampNs = lastMappedCameraTimestampNs + 1L
+                cameraTimestampToBoottimeOffsetNs = mappedTimestampNs - cameraTimestampNs
+                PLog.w(TAG, "Camera presentation timestamp was non-monotonic; preserving recording timeline")
+            }
+
+            lastCameraTimestampNs = cameraTimestampNs
+            lastCameraTimestampObservedBoottimeNs = observedBoottimeNs
+            lastMappedCameraTimestampNs = mappedTimestampNs
+            mappedTimestampNs
         }
-        return cameraTimestampNs + cameraTimestampToBoottimeOffsetNs
     }
 
     private fun establishTimelineOrigin(firstVideoPresentationTimeUs: Long) {
@@ -1508,6 +1574,11 @@ class VideoRecorder(
         }
         synchronized(timelineLock) {
             cameraTimestampToBoottimeOffsetNs = UNSET_TIMESTAMP
+            cameraTimestampOffsetActive =
+                requestedCameraTimestampSource != CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
+            lastCameraTimestampNs = UNSET_TIMESTAMP
+            lastCameraTimestampObservedBoottimeNs = UNSET_TIMESTAMP
+            lastMappedCameraTimestampNs = UNSET_TIMESTAMP
             timelineOriginUs = UNSET_TIMESTAMP
             pauseIntervals = mutableListOf()
             activePauseStartTimeUs = UNSET_TIMESTAMP
