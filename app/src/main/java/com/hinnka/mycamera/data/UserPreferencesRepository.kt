@@ -5,6 +5,7 @@ import android.content.Context
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.model.AppAppearance
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.DataMigration
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -87,9 +88,36 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
         listOf(
             OpenAiApiKeyEncryptionMigration(),
             BuiltInDeviceConfigurationMigration.create(context),
+            VideoProcessingDefaultsMigration(),
         )
     },
 )
+
+/**
+ * One-time migration for the requested video-processing defaults.
+ *
+ * Reset these three values once for existing installs so users actually receive the
+ * new defaults; the marker prevents this migration from overwriting choices they make later.
+ */
+private class VideoProcessingDefaultsMigration : DataMigration<Preferences> {
+    private val migratedKey = booleanPreferencesKey("video_processing_defaults_migration_v1")
+    private val videoNrKey = intPreferencesKey("video_nr_level")
+    private val videoEdgeKey = intPreferencesKey("video_edge_level")
+    private val lookaheadKey = intPreferencesKey("video_enhanced_stabilization_lookahead")
+
+    override suspend fun shouldMigrate(currentData: Preferences): Boolean =
+        currentData[migratedKey] != true
+
+    override suspend fun migrate(currentData: Preferences): Preferences =
+        currentData.toMutablePreferences().apply {
+            this[videoNrKey] = NoiseReductionLevel.OFF
+            this[videoEdgeKey] = 0
+            this[lookaheadKey] = 3
+            this[migratedKey] = true
+        }
+
+    override suspend fun cleanUp() = Unit
+}
 
 enum class VolumeKeyAction {
     NONE,
