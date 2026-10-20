@@ -108,7 +108,6 @@ enum class ActivePanel {
 private enum class CameraShootingMode {
     PROFESSIONAL,
     PHOTO,
-    PORTRAIT,
     VIDEO
 }
 
@@ -245,7 +244,6 @@ fun CameraScreen(
     val currentBaselineRecipeParams by viewModel.currentBaselineRecipeParams.collectAsState()
     val categoryOrder by viewModel.categoryOrder.collectAsState(emptyList())
     val useRaw by viewModel.useRaw.collectAsState()
-    val isPortraitModeEnabled by viewModel.portraitModeEnabled.collectAsState()
     val useJpgMax by viewModel.useJpgMax.collectAsState()
     val useMultipleExposure by viewModel.useMultipleExposure.collectAsState()
     val useRawMax by viewModel.useRawMax.collectAsState()
@@ -624,36 +622,26 @@ fun CameraScreen(
     fun setShootingModeWithPreviewTransition(mode: CameraShootingMode) {
         if (mode == CameraShootingMode.PROFESSIONAL && !state.isRawSupported) return
 
-        val targetPortraitModeEnabled = mode == CameraShootingMode.PORTRAIT
         val targetCaptureMode = when (mode) {
             CameraShootingMode.PROFESSIONAL,
-            CameraShootingMode.PHOTO,
-            CameraShootingMode.PORTRAIT -> CaptureMode.PHOTO
+            CameraShootingMode.PHOTO -> CaptureMode.PHOTO
             CameraShootingMode.VIDEO -> CaptureMode.VIDEO
         }
         val targetUseRaw = when (mode) {
             CameraShootingMode.PROFESSIONAL -> true
-            CameraShootingMode.PHOTO,
-            CameraShootingMode.PORTRAIT -> false
+            CameraShootingMode.PHOTO -> false
             CameraShootingMode.VIDEO -> null
         }
-        val portraitModeWillChange = targetPortraitModeEnabled != isPortraitModeEnabled
         if (
             targetCaptureMode == state.captureMode &&
             (targetUseRaw == null || targetUseRaw == state.useRaw)
         ) {
-            if (portraitModeWillChange) {
-                viewModel.setPortraitModeEnabled(targetPortraitModeEnabled)
-            }
             return
         }
 
         runPreviewTransition {
             if (targetCaptureMode == CaptureMode.VIDEO && state.aspectRatio == AspectRatio.XPAN) {
                 viewModel.setAspectRatio(AspectRatio.RATIO_4_3)
-            }
-            if (portraitModeWillChange) {
-                viewModel.setPortraitModeEnabled(targetPortraitModeEnabled)
             }
             viewModel.setShootingMode(targetCaptureMode, targetUseRaw)
         }
@@ -2038,7 +2026,6 @@ private fun Controls(
     val captureButtonImagePath by viewModel.captureButtonImagePath.collectAsState()
     val captureProcessingState by viewModel.captureProcessingState.collectAsState()
     val capturedThumbnail by viewModel.capturedThumbnail.collectAsState()
-    val portraitModeEnabled by viewModel.portraitModeEnabled.collectAsState()
 
     Box(
         modifier = modifier,
@@ -2186,11 +2173,12 @@ private fun Controls(
 
             CaptureModeSwitcher(
                 oppoStyle = uiStyle == "OPPO",
-                // Pro/RAW remains internal; Portrait shares the photo capture pipeline.
-                shootingMode = when {
-                    state.captureMode == CaptureMode.VIDEO -> CameraShootingMode.VIDEO
-                    portraitModeEnabled -> CameraShootingMode.PORTRAIT
-                    else -> CameraShootingMode.PHOTO
+                // Pro/RAW remains an internal capture option, but is no longer a
+                // separate item in the visible Photo/Video mode switcher.
+                shootingMode = if (state.captureMode == CaptureMode.VIDEO) {
+                    CameraShootingMode.VIDEO
+                } else {
+                    CameraShootingMode.PHOTO
                 },
                 enabled = modeSwitchEnabled &&
                     !state.videoRecordingState.isRecording &&
@@ -2535,13 +2523,10 @@ private fun CaptureModeSwitcher(
             )
             .padding(3.dp)
     ) {
-        // Pro/RAW remains internal; Photo, Portrait and Video are user-facing modes.
-        val knobWidth = maxWidth / 3
-        val selectedIndex = when (shootingMode) {
-            CameraShootingMode.PORTRAIT -> 1
-            CameraShootingMode.VIDEO -> 2
-            else -> 0
-        }
+        // The visible switcher contains only Photo and Video. Pro/RAW capture
+        // internals are preserved but are not exposed as a separate UI mode.
+        val knobWidth = maxWidth / 2
+        val selectedIndex = if (shootingMode == CameraShootingMode.VIDEO) 1 else 0
         val knobOffset by animateDpAsState(
             targetValue = knobWidth * selectedIndex,
             animationSpec = tween(durationMillis = 220),
@@ -2566,19 +2551,10 @@ private fun CaptureModeSwitcher(
         ) {
             ModeSwitcherItem(
                 label = stringResource(R.string.capture_mode_photo) +
-                    if (oppoStyle && shootingMode == CameraShootingMode.PHOTO) " ▴" else "",
-                selected = shootingMode == CameraShootingMode.PHOTO,
+                    if (oppoStyle && shootingMode != CameraShootingMode.VIDEO) " ▴" else "",
+                selected = shootingMode != CameraShootingMode.VIDEO,
                 enabled = enabled,
                 onClick = { onModeSelected(CameraShootingMode.PHOTO) },
-                modifier = Modifier.weight(1f),
-                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.Black
-            )
-            ModeSwitcherItem(
-                label = stringResource(R.string.capture_mode_portrait) +
-                    if (oppoStyle && shootingMode == CameraShootingMode.PORTRAIT) " ▴" else "",
-                selected = shootingMode == CameraShootingMode.PORTRAIT,
-                enabled = enabled,
-                onClick = { onModeSelected(CameraShootingMode.PORTRAIT) },
                 modifier = Modifier.weight(1f),
                 selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.Black
             )
