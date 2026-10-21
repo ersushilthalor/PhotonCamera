@@ -2,12 +2,15 @@ package com.hinnka.mycamera.camera
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Rect
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraDevice
+import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.os.Build
+import android.os.SystemClock
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Size
@@ -16,11 +19,12 @@ import com.hinnka.mycamera.utils.PLog
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Keeps the non-active rear lens warm using a low-resolution repeating preview stream.
+ * Keeps the non-active rear lens warm and transfers the opened CameraDevice to the foreground pipeline.
  *
  * This intentionally uses only Android's declared concurrent-camera combinations. It never
  * attempts to open an unsupported camera pair, which could disconnect the active viewfinder.
- * Lens transitions/animations and zoom handoff are deliberately out of scope.
+ * Zoom interpolation and UI transitions are coordinated by CameraScreen; this class owns the
+ * warm stream, stream detach, callback ownership, and safe resource release.
  */
 internal class BackgroundUltraWideReady(context: Context) {
     companion object {
@@ -38,16 +42,102 @@ internal class BackgroundUltraWideReady(context: Context) {
     @Volatile private var standbySession: CameraCaptureSession? = null
     @Volatile private var standbyTexture: SurfaceTexture? = null
     @Volatile private var standbySurface: Surface? = null
+    // The preview GL renderer owns an external standby SurfaceTexture when available.
+    // Only fallback SurfaceTextures created here may be released by this class.
+    @Volatile private var standbyTextureIsExternal = false
+    @Volatile private var standbyVideoOutputSurface: Surface? = null
+    @Volatile private var standbyRequestedVideoOutputSurface: Surface? = null
+    @Volatile private var standbyRequestedSize: Size? = null
     @Volatile private var standbyCameraId: String? = null
     @Volatile private var activeCameraId: String? = null
+    @Volatile private var requestedVisibleZoomRatio: Float = 1f
+    private var standbyLensInfo: CameraInfo? = null
+    private var standbyCharacteristics: CameraCharacteristics? = null
+    private var standbyRequestBuilder: CaptureRequest.Builder? = null
+    private var lastStandbyZoomRatio = Float.NaN
+    private var lastStandbyZoomUpdateAtMs = 0L
+    private var pendingCameraTransfer: PendingCameraTransfer? = null
+    private var transferredStateCallback: CameraDevice.StateCallback? = null
+    @Volatile private var transferredDevice: CameraDevice? = null
 
-    fun update(cameras: List<CameraInfo>, currentCameraId: String, activeOpenCameraId: String?) {
-        handler.post {
-            val active = cameras.firstOrNull {
-                it.cameraId == currentCameraId ||
-                    it.logicalCameraId == activeOpenCameraId ||
-                    it.getOpenCameraId() == activeOpenCameraId
+    private data class PendingCameraTransfer(
+        val cameraId: String,
+        val session: CameraCaptureSession,
+        val stateCallback: CameraDevice.StateCallback,
+        val onReady: (CameraDevice?) -> Unit
+    )
+
+    /** True only when the standby device and its warm-up stream are both ready for hand-off. */
+    fun isReadyFor(cameraId: String): Boolean =
+        standbyCameraId == cameraId && standbyDevice != null && standbySession != null
+
+    /**
+     * Close the warm-up session, then transfer the already-open device to the controller.
+     * Returns false only when no hand-off was scheduled.
+     */
+    fun consumeReadyCamera(
+        cameraId: String,
+        stateCallback: CameraDevice.StateCallback,
+        onReady: (CameraDevice?) -> Unit
+    ): Boolean {
+        if (!isReadyFor(cameraId)) return false
+        return handler.post {
+            if (standbyCameraId != cameraId || standbyDevice == null || standbySession == null ||
+                pendingCameraTransfer != null
+            ) {
+                onReady(null)
+                return@post
             }
+            val session = standbySession ?: run {
+                onReady(null)
+                return@post
+            }
+            pendingCameraTransfer = PendingCameraTransfer(
+                cameraId = cameraId,
+                session = session,
+                stateCallback = stateCallback,
+                onReady = onReady
+            )
+            try {
+                session.stopRepeating()
+            } catch (_: Exception) {
+                // Closing the session below is the authoritative teardown operation.
+            }
+            try {
+                session.close()
+            } catch (error: Exception) {
+                pendingCameraTransfer = null
+                PLog.w(TAG, "Unable to detach warmed session for $cameraId: ${error.message}")
+                onReady(null)
+                releaseLocked()
+            }
+        }
+    }
+
+    /** Keep the warmed lens framed for the current user-visible zoom, not its default wide FOV. */
+    fun updateVisibleZoomRatio(visibleZoomRatio: Float) {
+        if (!visibleZoomRatio.isFinite() || visibleZoomRatio <= 0f) return
+        requestedVisibleZoomRatio = visibleZoomRatio.coerceIn(0.1f, 100f)
+        handler.post { applyVisibleZoomRatioLocked(requestedVisibleZoomRatio, force = false) }
+    }
+
+    fun update(
+        cameras: List<CameraInfo>,
+        currentCameraId: String,
+        activeOpenCameraId: String?,
+        requestedSize: Size? = null,
+        visibleZoomRatio: Float? = null,
+        previewSurfaceTexture: SurfaceTexture? = null,
+        videoOutputSurface: Surface? = null
+    ) {
+        if (visibleZoomRatio != null && visibleZoomRatio.isFinite() && visibleZoomRatio > 0f) {
+            requestedVisibleZoomRatio = visibleZoomRatio.coerceIn(0.1f, 100f)
+        }
+        handler.post {
+            // Prefer the exact selected lens. Logical cameras commonly share the same open ID,
+            // so matching logicalCameraId first can select the wrong lens for standby.
+            val active = cameras.firstOrNull { it.cameraId == currentCameraId }
+                ?: cameras.firstOrNull { it.getOpenCameraId() == activeOpenCameraId }
             val ultraWide = cameras.firstOrNull { it.lensType == LensType.BACK_ULTRA_WIDE }
             val main = cameras.firstOrNull { it.lensType == LensType.BACK_MAIN }
             val standby = if (active?.lensType == LensType.BACK_ULTRA_WIDE) main else ultraWide
@@ -82,9 +172,19 @@ internal class BackgroundUltraWideReady(context: Context) {
                 PLog.d(TAG, "Background lens warm-up skipped: camera pair is not declared concurrent")
                 return@post
             }
+            val desiredVideoSurface = videoOutputSurface?.takeIf { it.isValid }
+            val samePreviewTexture = if (previewSurfaceTexture != null) {
+                standbyTextureIsExternal && standbyTexture === previewSurfaceTexture
+            } else {
+                !standbyTextureIsExternal
+            }
             if (standbyCameraId == standbyId && standbyDevice != null && standbySession != null &&
-                activeCameraId == activeId
+                activeCameraId == activeId &&
+                samePreviewTexture &&
+                standbyRequestedVideoOutputSurface === desiredVideoSurface &&
+                standbyRequestedSize == requestedSize
             ) {
+                applyVisibleZoomRatioLocked(requestedVisibleZoomRatio, force = false)
                 return@post
             }
 
@@ -92,19 +192,45 @@ internal class BackgroundUltraWideReady(context: Context) {
             activeCameraId = activeId
             val token = generation.incrementAndGet()
             try {
+                val characteristics = cameraManager.getCameraCharacteristics(standbyId)
+                standbyLensInfo = standby
+                standbyCharacteristics = characteristics
                 @Suppress("DEPRECATION")
-                val map = cameraManager.getCameraCharacteristics(standbyId)
-                    .get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
                 val sizes = map?.getOutputSizes(SurfaceTexture::class.java).orEmpty()
+                val targetSize = requestedSize ?: Size(640, 480)
+                // Prefer the selected photo viewfinder/video input dimensions when the standby
+                // camera advertises them. Camera output sizes may be returned landscape-first,
+                // so compare both orientations when choosing the closest supported size.
                 val chosenSize = sizes.minByOrNull { size ->
-                    kotlin.math.abs(size.width * size.height - 640 * 480)
+                    minOf(
+                        kotlin.math.abs(size.width - targetSize.width) +
+                            kotlin.math.abs(size.height - targetSize.height),
+                        kotlin.math.abs(size.width - targetSize.height) +
+                            kotlin.math.abs(size.height - targetSize.width)
+                    )
                 } ?: Size(640, 480)
-                val texture = SurfaceTexture(0).apply {
+                val texture = previewSurfaceTexture ?: SurfaceTexture(0).apply {
                     setDefaultBufferSize(chosenSize.width, chosenSize.height)
+                }
+                if (previewSurfaceTexture != null) {
+                    // The renderer owns this texture; the controller only wraps it in a Surface.
+                    texture.setDefaultBufferSize(chosenSize.width, chosenSize.height)
                 }
                 val surface = Surface(texture)
                 standbyTexture = texture
+                standbyTextureIsExternal = previewSurfaceTexture != null
                 standbySurface = surface
+                standbyRequestedVideoOutputSurface = desiredVideoSurface
+                standbyRequestedSize = requestedSize
+                // The secondary encoder target has a fixed input buffer size. Only add it to a
+                // Camera2 session when that exact size is supported by the standby camera.
+                standbyVideoOutputSurface = desiredVideoSurface?.takeIf {
+                    requestedSize != null && chosenSize == requestedSize
+                }
+                if (desiredVideoSurface != null && standbyVideoOutputSurface == null) {
+                    PLog.w(TAG, "Standby lens does not expose the requested video input size $requestedSize; keeping preview-only standby")
+                }
                 standbyCameraId = standbyId
 
                 @SuppressLint("MissingPermission")
@@ -116,8 +242,12 @@ internal class BackgroundUltraWideReady(context: Context) {
                         }
                         standbyDevice = camera
                         try {
+                            val outputSurfaces = listOfNotNull(
+                                surface,
+                                standbyVideoOutputSurface?.takeIf { it.isValid && it !== surface }
+                            ).distinct()
                             camera.createCaptureSession(
-                                listOf(surface),
+                                outputSurfaces,
                                 object : CameraCaptureSession.StateCallback() {
                                     override fun onConfigured(session: CameraCaptureSession) {
                                         if (generation.get() != token || standbyDevice !== camera) {
@@ -125,11 +255,22 @@ internal class BackgroundUltraWideReady(context: Context) {
                                             return
                                         }
                                         try {
-                                            val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-                                                .apply { addTarget(surface) }
-                                                .build()
-                                            session.setRepeatingRequest(request, null, handler)
+                                            val requestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+                                                .apply {
+                                                    addTarget(surface)
+                                                    standbyVideoOutputSurface
+                                                        ?.takeIf { it.isValid && it !== surface }
+                                                        ?.let { addTarget(it) }
+                                                }
+                                            standbyRequestBuilder = requestBuilder
                                             standbySession = session
+                                            lastStandbyZoomRatio = Float.NaN
+                                            applyVisibleZoomRatioLocked(
+                                                requestedVisibleZoomRatio,
+                                                force = true,
+                                                submitToSession = false
+                                            )
+                                            session.setRepeatingRequest(requestBuilder.build(), null, handler)
                                             PLog.i(TAG, "Ultra-wide standby stream ready: cameraId=$standbyId, size=${chosenSize.width}x${chosenSize.height}")
                                         } catch (error: Exception) {
                                             PLog.w(TAG, "Could not start standby repeating stream: ${error.message}")
@@ -148,6 +289,25 @@ internal class BackgroundUltraWideReady(context: Context) {
 
                                     override fun onClosed(session: CameraCaptureSession) {
                                         if (standbySession === session) standbySession = null
+                                        val pending = pendingCameraTransfer ?: return
+                                        if (pending.session !== session || pending.cameraId != standbyCameraId) return
+                                        val device = standbyDevice ?: run {
+                                            pendingCameraTransfer = null
+                                            pending.onReady(null)
+                                            return
+                                        }
+
+                                        // Detach the warm-up outputs before configuring the real
+                                        // viewfinder/encoder/capture outputs on this same device.
+                                        pendingCameraTransfer = null
+                                        standbyDevice = null
+                                        standbyCameraId = null
+                                        activeCameraId = null
+                                        releaseStandbyOutputLocked()
+                                        transferredDevice = device
+                                        transferredStateCallback = pending.stateCallback
+                                        PLog.i(TAG, "Handing warmed camera $standbyId to the active camera pipeline")
+                                        pending.onReady(device)
                                     }
                                 },
                                 handler
@@ -160,15 +320,34 @@ internal class BackgroundUltraWideReady(context: Context) {
                     }
 
                     override fun onDisconnected(camera: CameraDevice) {
+                        if (transferredDevice === camera) {
+                            transferredStateCallback?.onDisconnected(camera)
+                            return
+                        }
                         camera.close()
                         releaseResourcesForToken(token)
                         PLog.w(TAG, "Standby camera disconnected: $standbyId")
                     }
 
                     override fun onError(camera: CameraDevice, error: Int) {
+                        if (transferredDevice === camera) {
+                            transferredStateCallback?.onError(camera, error)
+                            return
+                        }
                         camera.close()
                         releaseResourcesForToken(token)
                         PLog.w(TAG, "Standby camera error: id=$standbyId, code=$error")
+                    }
+
+                    override fun onClosed(camera: CameraDevice) {
+                        if (transferredDevice === camera) {
+                            val owner = transferredStateCallback
+                            transferredDevice = null
+                            transferredStateCallback = null
+                            owner?.onClosed(camera)
+                        } else {
+                            releaseResourcesForToken(token)
+                        }
                     }
                 }, handler)
             } catch (error: Exception) {
@@ -187,18 +366,88 @@ internal class BackgroundUltraWideReady(context: Context) {
         releaseLocked()
     }
 
+    private fun applyVisibleZoomRatioLocked(
+        visibleZoomRatio: Float,
+        force: Boolean,
+        submitToSession: Boolean = true
+    ) {
+        val session = standbySession ?: return
+        val builder = standbyRequestBuilder ?: return
+        val lens = standbyLensInfo ?: return
+        val characteristics = standbyCharacteristics ?: return
+        val targetRatio = (visibleZoomRatio / lens.displayIntrinsicZoomRatio.coerceAtLeast(0.01f))
+            .coerceIn(0.1f, 100f)
+        val now = SystemClock.uptimeMillis()
+        if (!force && !lastStandbyZoomRatio.isNaN()) {
+            val zoomDelta = kotlin.math.abs(targetRatio - lastStandbyZoomRatio)
+            if (zoomDelta < 0.015f) return
+            // Avoid flooding Camera2's request queue during fast touch/gesture updates.
+            if (now - lastStandbyZoomUpdateAtMs < 35L && zoomDelta < 0.06f) return
+        }
+
+        try {
+            val appliedRatio: Float
+            val zoomRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+            } else null
+            if (zoomRange != null) {
+                appliedRatio = targetRatio.coerceIn(zoomRange.lower, zoomRange.upper)
+                builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, appliedRatio)
+            } else {
+                val activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                    ?: return
+                val maxDigitalZoom = characteristics.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM)
+                    ?: 1f
+                appliedRatio = targetRatio.coerceIn(1f, maxDigitalZoom.coerceAtLeast(1f))
+                val width = (activeArray.width() / appliedRatio).toInt().coerceAtLeast(1)
+                val height = (activeArray.height() / appliedRatio).toInt().coerceAtLeast(1)
+                val left = activeArray.centerX() - width / 2
+                val top = activeArray.centerY() - height / 2
+                builder.set(
+                    CaptureRequest.SCALER_CROP_REGION,
+                    Rect(left, top, left + width, top + height)
+                )
+            }
+            if (submitToSession) session.setRepeatingRequest(builder.build(), null, handler)
+            lastStandbyZoomRatio = targetRatio
+            lastStandbyZoomUpdateAtMs = now
+        } catch (error: Exception) {
+            PLog.w(TAG, "Could not update standby zoom: " + error.message)
+        }
+    }
+
+    private fun releaseStandbyOutputLocked() {
+        try { standbySurface?.release() } catch (_: Exception) {}
+        standbySurface = null
+        // A SurfaceTexture supplied by LutRenderer is renderer-owned and must survive
+        // standby-session reconfiguration and camera hand-off.
+        if (!standbyTextureIsExternal) {
+            try { standbyTexture?.release() } catch (_: Exception) {}
+        }
+        standbyTexture = null
+        standbyTextureIsExternal = false
+        standbyVideoOutputSurface = null
+        standbyRequestedVideoOutputSurface = null
+        standbyRequestedSize = null
+        standbyRequestBuilder = null
+        standbyLensInfo = null
+        standbyCharacteristics = null
+        lastStandbyZoomRatio = Float.NaN
+        lastStandbyZoomUpdateAtMs = 0L
+    }
+
     private fun releaseLocked() {
         generation.incrementAndGet()
+        val pending = pendingCameraTransfer
+        pendingCameraTransfer = null
         try { standbySession?.stopRepeating() } catch (_: Exception) {}
         try { standbySession?.close() } catch (_: Exception) {}
         standbySession = null
         try { standbyDevice?.close() } catch (_: Exception) {}
         standbyDevice = null
-        try { standbySurface?.release() } catch (_: Exception) {}
-        standbySurface = null
-        try { standbyTexture?.release() } catch (_: Exception) {}
-        standbyTexture = null
+        releaseStandbyOutputLocked()
         standbyCameraId = null
         activeCameraId = null
+        pending?.onReady?.invoke(null)
     }
 }

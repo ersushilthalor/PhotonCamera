@@ -2855,6 +2855,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** Forward the GL renderer's second OES target to the Camera2 standby-session owner. */
+    fun setStandbyPreviewSurfaceTexture(surfaceTexture: SurfaceTexture) {
+        cameraController.setStandbyPreviewSurfaceTexture(surfaceTexture)
+    }
+
+    fun clearStandbyPreviewSurfaceTexture(surfaceTexture: SurfaceTexture?) {
+        cameraController.clearStandbyPreviewSurfaceTexture(surfaceTexture)
+    }
+
     /**
      * 打开相机（Camera2 接口）
      */
@@ -3752,15 +3761,22 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun switchToLens(cameraId: String) {
         if (isVideoLensLocked()) return
+        val previousCamera = state.value.getCurrentCameraInfo()
         val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId }
         syncVendorCaptureSettingsToController()
         cameraController.switchToCameraId(cameraId)
         targetCamera?.let { camera ->
             setZoomRatioForCamera(camera.defaultVisibleZoomRatio(), camera.cameraId)
         }
-        reopenCamera(
-            preserveVideoRecording = true
-        )
+        if (shouldReopenCameraAfterLensSwitch(previousCamera, targetCamera)) {
+            reopenCamera(preserveVideoRecording = true)
+        } else {
+            PLog.d(
+                TAG,
+                "Keeping the logical rear CameraDevice open for lens switch: " +
+                    "${previousCamera?.cameraId} -> ${targetCamera?.cameraId}"
+            )
+        }
     }
 
     fun switchToLensAndSetZoomRatio(cameraId: String, ratio: Float) {
@@ -3768,12 +3784,41 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             setZoomRatio(ratio)
             return
         }
+        val previousCamera = state.value.getCurrentCameraInfo()
+        val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId }
         syncVendorCaptureSettingsToController()
         cameraController.switchToCameraId(cameraId)
         setZoomRatioForCamera(ratio, cameraId)
-        reopenCamera(
-            preserveVideoRecording = true
-        )
+        if (shouldReopenCameraAfterLensSwitch(previousCamera, targetCamera)) {
+            reopenCamera(preserveVideoRecording = true)
+        } else {
+            PLog.d(
+                TAG,
+                "Keeping the logical rear CameraDevice open for lens switch: " +
+                    "${previousCamera?.cameraId} -> ${targetCamera?.cameraId}"
+            )
+        }
+    }
+
+    /**
+     * Keep the current logical Camera2 device open when both selected lenses belong to it.
+     * The controller can then reroute the physical output instead of paying a device-open cycle.
+     */
+    private fun shouldReopenCameraAfterLensSwitch(
+        previousCamera: CameraInfo?,
+        targetCamera: CameraInfo?
+    ): Boolean {
+        if (!userPreferences.value.keepUltraWideReadyEnabled) return true
+        if (previousCamera == null || targetCamera == null) return true
+        if (previousCamera.lensFacing != CameraCharacteristics.LENS_FACING_BACK ||
+            targetCamera.lensFacing != CameraCharacteristics.LENS_FACING_BACK
+        ) return true
+
+        val previousOpenId = runCatching { previousCamera.getOpenCameraId() }.getOrNull()
+            ?: return true
+        val targetOpenId = runCatching { targetCamera.getOpenCameraId() }.getOrNull()
+            ?: return true
+        return previousOpenId != targetOpenId
     }
 
     /**
@@ -3868,12 +3913,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun setZoomRatio(ratio: Float) {
         zoomRatioByMain = ratio
+        cameraController.setStandbyVisibleZoomRatio(ratio)
         val cameraInfo = state.value.getCurrentCameraInfo()
         setCameraControllerZoomRatio(ratio, cameraInfo)
     }
 
     private fun setZoomRatioForCamera(ratio: Float, cameraId: String) {
         zoomRatioByMain = ratio
+        cameraController.setStandbyVisibleZoomRatio(ratio)
         val cameraInfo = state.value.availableCameras.find { it.cameraId == cameraId }
         setCameraControllerZoomRatio(ratio, cameraInfo)
     }
