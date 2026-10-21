@@ -1426,11 +1426,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val selectableLutList: List<LutInfo>
         get() {
             val profile = state.value.videoConfig.logProfile
-            return if (state.value.captureMode == CaptureMode.VIDEO && profile.isEnabled) {
-                availableLutList.filter {
-                    it.id == "none" || profile.matchesLut(it.inputCurve, it.inputColorSpace)
-                }
-            } else availableLutList
+            // Keep every installed/imported LUT visible in Log mode, including .cube files
+            // whose metadata does not encode the intended Log input transform.
+            return availableLutList
         }
 
     // LUT 预览图缓存（lutId -> 预览Bitmap）
@@ -2565,8 +2563,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // 监听相机状态，用于同步预览渲染参数
         viewModelScope.launch {
             state.collect { currentState ->
-                if (currentState.captureMode == CaptureMode.VIDEO) {
-                    validateAndCancelNonMatchingVideoLut(currentState.videoConfig.logProfile, currentLutConfig)
+                val shouldApplyCreativeLut = currentState.captureMode == CaptureMode.VIDEO &&
+                    currentState.videoConfig.logProfile.isEnabled && currentLutConfig != null
+                if (currentState.lutEnabled != shouldApplyCreativeLut) {
+                    cameraController.setLutEnabled(shouldApplyCreativeLut)
+                }
+                if (!shouldApplyCreativeLut && currentState.isLogLutActive) {
+                    cameraController.setLogLutActive(false)
                 }
                 glSurfaceView?.let { view ->
                     view.setVideoLogProfile(currentState.videoConfig.logProfile)
@@ -3079,24 +3082,25 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (currentLutId.value != lutId || lutLoadGeneration != loadGeneration) {
                 return@launch
             }
-            val profile = state.value.videoConfig.logProfile
-            val loadedLut = candidateLut?.takeIf {
-                state.value.captureMode != CaptureMode.VIDEO || profile.matchesLut(it.curve, it.colorSpace)
-            }
-            if (candidateLut != null && loadedLut == null) applyLut("none")
+            val loadedLut = candidateLut
             currentLutConfig = loadedLut
-            cameraController.setLutEnabled(loadedLut != null)
-            cameraController.setLogLutActive(loadedLut?.curve?.isLog == true)
+            val currentState = state.value
+            val shouldApplyCreativeLut = currentState.captureMode == CaptureMode.VIDEO &&
+                currentState.videoConfig.logProfile.isEnabled && loadedLut != null
+            cameraController.setLutEnabled(shouldApplyCreativeLut)
+            cameraController.setLogLutActive(shouldApplyCreativeLut && loadedLut?.curve?.isLog == true)
             glSurfaceView?.let { view ->
                 val currentState = state.value
                 view.setEnginePreview(currentEnginePreviewPlan.value)
                 view.setBaselineLut(currentBaselineLutConfig)
                 view.setBaselineLutEnabled(currentBaselineLutConfig != null)
                 view.setBaselineParams(currentBaselineRecipeParams.value)
-                view.setLut(loadedLut)
-                view.setLutEnabled(loadedLut != null)
-                view.setParams(currentRecipeParams.value)
-                view.setColorRecipeEnabled(!currentRecipeParams.value.isDefault())
+                view.setLut(loadedLut.takeIf { shouldApplyCreativeLut })
+                view.setLutEnabled(shouldApplyCreativeLut)
+                val recipe = currentRecipeParams.value.takeIf { shouldApplyCreativeLut }
+                    ?: ColorRecipeParams.DEFAULT
+                view.setParams(recipe)
+                view.setColorRecipeEnabled(shouldApplyCreativeLut && !recipe.isDefault())
                 view.setVideoLogProfile(currentState.videoConfig.logProfile)
                 view.restoreRenderStateAfterResume()
             }
@@ -4072,13 +4076,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             userPreferencesRepository.saveVideoLogProfile(logProfile)
         }
-        validateAndCancelNonMatchingVideoLut(logProfile, currentLutConfig)
     }
 
     fun setVideoLogLutMode(mode: VideoLogLutMode) {
         if (state.value.videoRecordingState.isRecording || state.value.videoRecordingState.isProcessing) return
-        cameraController.setVideoLogLutMode(mode)
-        viewModelScope.launch { userPreferencesRepository.saveVideoLogLutMode(mode) }
+        cameraController.setVideoLogLutMode(VideoLogLutMode.BAKE_IN)
+        viewModelScope.launch {
+            userPreferencesRepository.saveVideoLogLutMode(VideoLogLutMode.BAKE_IN)
+        }
     }
 
     /**
@@ -4372,14 +4377,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun setLut(lutId: String?, persist: Boolean = true) {
         val normalizedLutId = lutId ?: "none"
-        val profile = state.value.videoConfig.logProfile
-        if (state.value.captureMode == CaptureMode.VIDEO && profile.isEnabled && normalizedLutId != "none") {
-            val info = availableLutList.firstOrNull { it.id == normalizedLutId }
-            if (info != null && !profile.matchesLut(info.inputCurve, info.inputColorSpace)) {
-                if (!persist) applyLut("none")
-                return
-            }
-        }
         applyLut(normalizedLutId)
 
         if (persist) {
@@ -4466,12 +4463,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private fun applyLut(normalizedLutId: String) {
         val loadGeneration = ++lutLoadGeneration
         lutLoadJob?.cancel()
-        val profile = state.value.videoConfig.logProfile
-        if (state.value.captureMode == CaptureMode.VIDEO && profile.isEnabled &&
-            !profile.matchesLut(currentLutConfig?.curve, currentLutConfig?.colorSpace)) {
-            currentLutConfig = null
-            cameraController.setLogLutActive(false)
-        }
         currentLutId.value = normalizedLutId
         if (normalizedLutId == "none") {
             currentLutConfig = null
@@ -4491,19 +4482,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 if (lutLoadGeneration != loadGeneration || currentLutId.value != normalizedLutId) {
                     return@launch
                 }
-                if (state.value.captureMode == CaptureMode.VIDEO) {
-                    val logProfile = state.value.videoConfig.logProfile
-                    if (logProfile != VideoLogProfile.OFF && loadedLut != null) {
-                        if (!logProfile.matchesLut(loadedLut.curve, loadedLut.colorSpace)) {
-                            PLog.d(TAG, "Deselecting newly selected LUT [${loadedLut.title}] because it does not match video log profile [${logProfile.name}] colorSpace/curve")
-                            setLut(null, persist = false)
-                            return@launch
-                        }
-                    }
-                }
                 currentLutConfig = loadedLut
-                cameraController.setLogLutActive(loadedLut?.curve?.isLog == true)
-                cameraController.setLutEnabled(loadedLut != null)
+                val currentState = state.value
+                val shouldApplyCreativeLut = currentState.captureMode == CaptureMode.VIDEO &&
+                    currentState.videoConfig.logProfile.isEnabled && loadedLut != null
+                cameraController.setLogLutActive(
+                    shouldApplyCreativeLut && loadedLut?.curve?.isLog == true
+                )
+                cameraController.setLutEnabled(shouldApplyCreativeLut)
                 if (lutLoadGeneration == loadGeneration) {
                     lutLoadJob = null
                 }

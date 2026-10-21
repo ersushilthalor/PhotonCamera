@@ -241,7 +241,7 @@ data class UserPreferences(
     val videoFps: VideoFpsPreset = VideoFpsPreset.FPS_30,
     val videoAspectRatio: VideoAspectRatio = VideoAspectRatio.RATIO_16_9,
     val videoLogProfile: VideoLogProfile = VideoLogProfile.OFF,
-    val videoLogLutMode: VideoLogLutMode = VideoLogLutMode.MONITOR_ONLY,
+    val videoLogLutMode: VideoLogLutMode = VideoLogLutMode.BAKE_IN,
     val videoBitrate: VideoBitratePreset = VideoBitratePreset.P1,
     val videoAudioInputId: String = VIDEO_AUDIO_INPUT_AUTO,
     val videoRecordingPath: VideoRecordingPath = VideoRecordingPath.DCIM_PHOTON,
@@ -884,7 +884,7 @@ class UserPreferencesRepository(private val context: Context) {
                 videoLogProfile = VideoLogProfile.fromPersistedName(preferences[VIDEO_LOG_PROFILE]),
                 videoLogLutMode = VideoLogLutMode.entries.firstOrNull {
                     it.name == preferences[VIDEO_LOG_LUT_MODE]
-                } ?: VideoLogLutMode.MONITOR_ONLY,
+                } ?: VideoLogLutMode.BAKE_IN,
                 videoBitrate = VideoBitratePreset.valueOf(
                     preferences[VIDEO_BITRATE] ?: VideoBitratePreset.P1.name
                 ),

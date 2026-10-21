@@ -133,7 +133,7 @@ data class VideoConfig(
     val fps: VideoFpsPreset = VideoFpsPreset.FPS_30,
     val aspectRatio: VideoAspectRatio = VideoAspectRatio.RATIO_16_9,
     val logProfile: VideoLogProfile = VideoLogProfile.OFF,
-    val logLutMode: VideoLogLutMode = VideoLogLutMode.MONITOR_ONLY,
+    val logLutMode: VideoLogLutMode = VideoLogLutMode.BAKE_IN,
     val bitrate: VideoBitratePreset = VideoBitratePreset.P1,
     val codec: VideoCodec = VideoCodec.H264,
     val audioInputId: String = VIDEO_AUDIO_INPUT_AUTO,
