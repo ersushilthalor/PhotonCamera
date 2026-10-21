@@ -108,23 +108,28 @@ internal class LensSwitchTransitionState(
                     pendingRequest = null
                     val timestampBeforeSwitch = viewModel.state.value.previewFirstFrameTimestampNs
                     request.onSwitch()
+                    val instantSwitch = viewModel.isInstantVideoLensInputActive(request.cameraId)
 
                     coroutineScope {
                         val animation = launch {
-                            animateSnapshotTo(request.targetZoom)
+                            if (!instantSwitch) animateSnapshotTo(request.targetZoom)
                         }
                         snapshotAnimationJob = animation
                         val readyState = viewModel.state.first {
                             it.currentCameraId == request.cameraId && it.isPreviewActive &&
-                                it.previewFirstFrameTimestampNs != null &&
-                                it.previewFirstFrameTimestampNs != timestampBeforeSwitch
+                                (instantSwitch ||
+                                    (it.previewFirstFrameTimestampNs != null &&
+                                        it.previewFirstFrameTimestampNs != timestampBeforeSwitch))
                         }
                         // Follow the current SurfaceView if preview dimensions change.
                         val rendered = CompletableDeferred<Unit>()
                         val waiter = launch {
                             snapshotFlow { viewModel.glSurfaceView }.collectLatest { preview ->
                                 if (preview != null) {
-                                    preview.awaitPreviewFrame(readyState.previewFirstFrameTimestampNs!!)
+                                    preview.awaitPreviewFrame(
+                                        if (instantSwitch) Long.MIN_VALUE
+                                        else readyState.previewFirstFrameTimestampNs!!
+                                    )
                                     rendered.complete(Unit)
                                 }
                             }
@@ -146,7 +151,7 @@ internal class LensSwitchTransitionState(
                     // Renderer callbacks run before GLSurfaceView swaps buffers.
                     withFrameNanos { }
                     withFrameNanos { }
-                    opacity.animateTo(0f, tween(160))
+                    opacity.animateTo(0f, tween(if (instantSwitch) 80 else 160))
                     if (pendingRequest != null) {
                         opacity.snapTo(1f)
                         continue

@@ -72,6 +72,18 @@ internal class BackgroundUltraWideReady(context: Context) {
         standbyCameraId == cameraId && standbyDevice != null && standbySession != null
 
     /**
+     * Video can use the second encoder input only if that exact surface was configured on the
+     * active standby session. A merely-open standby camera is not sufficient: it can be preview-only.
+     */
+    fun isReadyForVideoInput(cameraId: String, surface: Surface?): Boolean {
+        val output = surface ?: return false
+        return output.isValid &&
+            isReadyFor(cameraId) &&
+            standbyVideoOutputSurface === output &&
+            standbyRequestedVideoOutputSurface === output
+    }
+
+    /**
      * Close the warm-up session, then transfer the already-open device to the controller.
      * Returns false only when no hand-off was scheduled.
      */

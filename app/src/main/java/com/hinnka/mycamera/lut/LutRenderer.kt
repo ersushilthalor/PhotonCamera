@@ -223,7 +223,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     // Camera2 writes into two independent OES inputs. Only the selected input is advanced and
     // passed through the existing ISP/LUT/post-processing chain.
     private var surfaceTexture: SurfaceTexture? = null
-    private var standbySurfaceTexture: SurfaceTexture? = null
+    @Volatile private var standbySurfaceTexture: SurfaceTexture? = null
     private val frameAvailable = AtomicBoolean(false)
     private val standbyFrameAvailable = AtomicBoolean(false)
     @Volatile private var activePreviewSourceIndex = 0
@@ -232,7 +232,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private var stabilizationSession: RealtimeStabilizationCoordinator.Session? = null
     @Volatile
     private var stabilizationSessionStarted = false
-    private var previewStabilizationUseCase: StabilizationUseCase? = null
+    @Volatile private var previewStabilizationUseCase: StabilizationUseCase? = null
     private var previewStabilizationStrength = 0f
     private var currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
     private var currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
@@ -3202,15 +3202,24 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     fun getStandbySurfaceTexture(): SurfaceTexture? = standbySurfaceTexture
 
     /**
+     * True only after the standby SurfaceTexture has produced a frame and can be rendered
+     * without reconfiguring the preview pipeline.
+     */
+    fun canSwitchToStandbyPreviewSource(): Boolean {
+        return previewStabilizationUseCase == null &&
+            standbySurfaceTexture != null &&
+            standbyFrameAvailable.get()
+    }
+
+    /**
      * Select a pre-warmed camera input without replacing the GL renderer or its existing
      * post-processing state. Enhanced-stabilization frames are tied to the primary source and
      * deliberately reject this path; callers retain the regular safe Camera2 handoff there.
      */
     fun setActivePreviewSource(useStandby: Boolean): Boolean {
-        if (useStandby && previewStabilizationUseCase != null) return false
+        if (useStandby && !canSwitchToStandbyPreviewSource()) return false
         val next = if (useStandby) 1 else 0
         if (activePreviewSourceIndex == next) return true
-        if (useStandby && standbySurfaceTexture == null) return false
         activePreviewSourceIndex = next
         // On switching, updateTexImage acquires the newest buffer from the newly selected queue.
         if (useStandby) standbyFrameAvailable.set(true) else frameAvailable.set(true)

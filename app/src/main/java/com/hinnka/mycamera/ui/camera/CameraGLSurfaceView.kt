@@ -321,6 +321,8 @@ class CameraGLSurfaceView @JvmOverloads constructor(
     /** Second camera target consumed by the same GL renderer, for a live standby lens session. */
     fun getStandbySurfaceTexture(): SurfaceTexture? = renderer.getStandbySurfaceTexture()
 
+    fun canSwitchToStandbyPreviewSource(): Boolean = renderer.canSwitchToStandbyPreviewSource()
+
     fun setActivePreviewSource(useStandby: Boolean) {
         queueEvent {
             if (renderer.setActivePreviewSource(useStandby)) {

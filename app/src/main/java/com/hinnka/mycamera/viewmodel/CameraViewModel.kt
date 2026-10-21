@@ -3476,7 +3476,32 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 return
             }
             if (state.value.videoRecordingState.isRecording) {
+                val reopenAfterInstantSwitch = cameraController.needsReopenAfterInstantVideoLensSwitch()
+                val switchedToCameraId = state.value.currentCameraId
                 cameraController.stopVideoRecording()
+                if (reopenAfterInstantSwitch) {
+                    viewModelScope.launch {
+                        cameraController.state.first {
+                            !it.videoRecordingState.isRecording && !it.videoRecordingState.isProcessing
+                        }
+                        val timestampBeforeReopen = cameraController.state.value.previewFirstFrameTimestampNs
+                        reopenCamera(preserveVideoRecording = false)
+                        try {
+                            cameraController.state.first {
+                                it.currentCameraId == switchedToCameraId &&
+                                    it.isPreviewActive &&
+                                    it.previewFirstFrameTimestampNs != null &&
+                                    it.previewFirstFrameTimestampNs != timestampBeforeReopen
+                            }
+                        } finally {
+                            // The promoted Camera2 device now writes to the primary GL texture.
+                            glSurfaceView?.setActivePreviewSource(false)
+                            cameraController.clearInstantVideoLensSwitchState()
+                        }
+                    }
+                } else {
+                    cameraController.clearInstantVideoLensSwitchState()
+                }
             } else {
                 val currentState = state.value
                 val orientationOffset = userPreferences.value.cameraOrientationOffsets[
@@ -3784,6 +3809,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             setZoomRatio(ratio)
             return
         }
+        if (trySwitchVideoLensInputInstantly(cameraId, ratio)) return
+
         val previousCamera = state.value.getCurrentCameraInfo()
         val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId }
         syncVendorCaptureSettingsToController()
@@ -3799,6 +3826,40 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
     }
+
+    private fun trySwitchVideoLensInputInstantly(cameraId: String, visibleZoomRatio: Float): Boolean {
+        val current = state.value
+        if (current.captureMode != CaptureMode.VIDEO ||
+            !current.videoRecordingState.isRecording ||
+            current.videoRecordingState.isPaused ||
+            isVideoLensLocked()
+        ) return false
+
+        val preview = glSurfaceView ?: return false
+        val canSwitchStandbyPreview = preview.canSwitchToStandbyPreviewSource()
+        if (!cameraController.canInstantlySwitchVideoInput(cameraId, canSwitchStandbyPreview)) {
+            return false
+        }
+
+        // Frame the warmed stream before selecting it, then update both the encoder and viewfinder.
+        cameraController.setStandbyVisibleZoomRatio(visibleZoomRatio)
+        val useStandby = cameraController.switchVideoLensInputInstantly(
+            targetCameraId = cameraId,
+            visibleZoomRatio = visibleZoomRatio,
+            canSwitchStandbyPreview = canSwitchStandbyPreview,
+        ) ?: return false
+        zoomRatioByMain = visibleZoomRatio
+        preview.setActivePreviewSource(useStandby)
+        PLog.i(
+            TAG,
+            "Instant video lens switch completed: camera=$cameraId, source=" +
+                if (useStandby) "standby" else "primary",
+        )
+        return true
+    }
+
+    fun isInstantVideoLensInputActive(cameraId: String): Boolean =
+        cameraController.isInstantVideoLensInputActive(cameraId)
 
     /**
      * Keep the current logical Camera2 device open when both selected lenses belong to it.

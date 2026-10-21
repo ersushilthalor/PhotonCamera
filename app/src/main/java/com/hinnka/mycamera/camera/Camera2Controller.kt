@@ -240,6 +240,11 @@ class Camera2Controller(private val context: Context) {
     // Separate OES input owned by the preview renderer. The standby Camera2 session
     // writes into this target while the primary lens remains active.
     @Volatile private var standbyPreviewSurfaceTexture: SurfaceTexture? = null
+    // The CameraDevice remains on the original lens during a dual-input recording switch.
+    @Volatile private var videoRecordingPrimaryCameraId: String? = null
+    @Volatile private var fastVideoInputUsingStandby = false
+    @Volatile private var hasSwitchedVideoInputInstantly = false
+    @Volatile private var instantVideoInputSwitchCameraId: String? = null
 
     private fun resolveStandbyWarmupSize(state: CameraState): Size {
         if (state.captureMode == CaptureMode.PHOTO) return state.currentPreviewSize
@@ -276,9 +281,14 @@ class Camera2Controller(private val context: Context) {
         } else {
             null
         }
+        val standbyOwnerCameraId = if (fastVideoInputUsingStandby) {
+            videoRecordingPrimaryCameraId ?: state.currentCameraId
+        } else {
+            state.currentCameraId
+        }
         backgroundUltraWideReady.update(
             cameras = state.availableCameras,
-            currentCameraId = state.currentCameraId,
+            currentCameraId = standbyOwnerCameraId,
             activeOpenCameraId = cameraDevice?.id,
             requestedSize = resolveStandbyWarmupSize(state),
             visibleZoomRatio = resolveVisibleZoomRatio(state),
@@ -327,6 +337,113 @@ class Camera2Controller(private val context: Context) {
         } else {
             backgroundUltraWideReady.stop()
         }
+    }
+
+    private fun isInstantSwitchRearLens(camera: CameraInfo): Boolean {
+        return camera.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+            (camera.lensType == LensType.BACK_MAIN ||
+                camera.lensType == LensType.BACK_ULTRA_WIDE)
+    }
+
+    /**
+     * Instant recording switches are safe only when both the GL preview and the encoder are
+     * already receiving frames from the same warmed secondary lens. Otherwise use the normal
+     * Camera2 session/device hand-off.
+     */
+    fun canInstantlySwitchVideoInput(
+        targetCameraId: String,
+        canSwitchStandbyPreview: Boolean,
+    ): Boolean {
+        val current = _state.value
+        if (current.captureMode != CaptureMode.VIDEO ||
+            !current.videoRecordingState.isRecording ||
+            current.videoRecordingState.isPaused ||
+            current.videoConfig.shouldLockLens(
+                captureMode = current.captureMode,
+                isRecording = current.videoRecordingState.isRecording,
+            )
+        ) return false
+
+        val primaryId = videoRecordingPrimaryCameraId ?: return false
+        val target = current.availableCameras.firstOrNull { it.cameraId == targetCameraId } ?: return false
+        val primary = current.availableCameras.firstOrNull { it.cameraId == primaryId } ?: return false
+        if (!isInstantSwitchRearLens(primary) || !isInstantSwitchRearLens(target)) return false
+
+        // The primary encoder input is always available for switching back to the lens that
+        // actually owns the current CameraDevice; same-logical-camera aliases need a real
+        // physical-output reconfiguration and deliberately stay on the safe path.
+        if (target.cameraId == primaryId) {
+            return runCatching { target.getOpenCameraId() == cameraDevice?.id }.getOrDefault(false)
+        }
+        if (!keepUltraWideReadyEnabled || !canSwitchStandbyPreview) return false
+
+        val targetOpenId = runCatching { target.getOpenCameraId() }.getOrNull() ?: return false
+        if (targetOpenId == cameraDevice?.id) return false
+        val encoderSurface = videoRecorder.standbyCameraInputSurface ?: return false
+        return backgroundUltraWideReady.isReadyForVideoInput(targetOpenId, encoderSurface)
+    }
+
+    /**
+     * Switch both the viewfinder and the existing video encoder to an already-running Camera2
+     * input. Returns true for standby, false for primary, and null when the normal hand-off is
+     * required. No CameraDevice/session teardown happens on the instant path.
+     */
+    fun switchVideoLensInputInstantly(
+        targetCameraId: String,
+        visibleZoomRatio: Float,
+        canSwitchStandbyPreview: Boolean,
+    ): Boolean? {
+        if (!visibleZoomRatio.isFinite() || visibleZoomRatio <= 0f ||
+            !canInstantlySwitchVideoInput(targetCameraId, canSwitchStandbyPreview)
+        ) return null
+
+        val current = _state.value
+        val target = current.availableCameras.firstOrNull { it.cameraId == targetCameraId } ?: return null
+        val primaryId = videoRecordingPrimaryCameraId ?: return null
+        val useStandby = target.cameraId != primaryId
+        if (!videoRecorder.setActiveCameraInput(useStandby)) return null
+
+        val displayRatio = target.displayIntrinsicZoomRatio.takeIf { it.isFinite() && it > 0f } ?: 1f
+        val cameraZoomRatio = (visibleZoomRatio / displayRatio).coerceAtLeast(0.01f)
+        fastVideoInputUsingStandby = useStandby
+        hasSwitchedVideoInputInstantly = true
+        instantVideoInputSwitchCameraId = target.cameraId
+        _state.value = _state.value.copy(
+            currentCameraId = target.cameraId,
+            currentLensType = target.lensType,
+            zoomRatio = cameraZoomRatio,
+        )
+
+        // When standby is selected, setZoomRatio would address the still-open primary Camera2
+        // session and can reconfigure it. When switching back, applying zoom to that primary is
+        // correct and does not require replacing its encoder.
+        if (!useStandby) setZoomRatio(cameraZoomRatio)
+
+        PLog.i(
+            TAG,
+            "Instant video lens input switch: ${current.currentCameraId} -> ${target.cameraId}, " +
+                "source=${if (useStandby) "standby" else "primary"}",
+        )
+        return useStandby
+    }
+
+    fun isInstantVideoLensInputActive(cameraId: String): Boolean {
+        return _state.value.videoRecordingState.isRecording &&
+            hasSwitchedVideoInputInstantly &&
+            instantVideoInputSwitchCameraId == cameraId &&
+            _state.value.currentCameraId == cameraId
+    }
+
+    fun needsReopenAfterInstantVideoLensSwitch(): Boolean {
+        val primaryId = videoRecordingPrimaryCameraId ?: return false
+        return hasSwitchedVideoInputInstantly && _state.value.currentCameraId != primaryId
+    }
+
+    fun clearInstantVideoLensSwitchState() {
+        fastVideoInputUsingStandby = false
+        hasSwitchedVideoInputInstantly = false
+        instantVideoInputSwitchCameraId = null
+        videoRecordingPrimaryCameraId = null
     }
 
     // --- 拍照状态机相关 ---
@@ -6483,6 +6600,14 @@ class Camera2Controller(private val context: Context) {
         }
         val requestedRatio = sanitizeZoomRatio(ratio)
         _state.value = _state.value.copy(zoomRatio = requestedRatio)
+        if (fastVideoInputUsingStandby &&
+            _state.value.captureMode == CaptureMode.VIDEO &&
+            _state.value.videoRecordingState.isRecording
+        ) {
+            // ViewModel has already sent the visible zoom to BackgroundUltraWideReady.
+            // Do not zoom or reconfigure the still-open primary lens while standby is encoded.
+            return
+        }
         val builder = previewRequestBuilder ?: return
         val openCameraId = activeOpenCameraId.takeIf { it.isNotEmpty() } ?: return
 
@@ -7420,6 +7545,7 @@ class Camera2Controller(private val context: Context) {
                 "monitorLut=${creativeLutConfig?.title}, recordingLut=${recordingLut?.title}, " +
                 "cameraInputHlg10=${cameraInputIsHlg10}"
         )
+        val recordingPrimaryCameraId = _state.value.currentCameraId
         val started = videoRecorder.startRecording(
             size = outputSize,
             cameraInputSize = cameraInputSize,
@@ -7453,9 +7579,12 @@ class Camera2Controller(private val context: Context) {
         ) { uri ->
             PLog.i(TAG, "Video saved: $uri")
             val completeRecording = Runnable {
+                val reopenForInstantLensSwitch = needsReopenAfterInstantVideoLensSwitch()
                 _state.value = _state.value.copy(videoRecordingState = VideoRecordingState())
-                if (cameraDevice != null && previewSurface != null) {
+                if (cameraDevice != null && previewSurface != null && !reopenForInstantLensSwitch) {
                     createPreviewSession(openGeneration = cameraOpenGeneration)
+                } else if (reopenForInstantLensSwitch) {
+                    PLog.i(TAG, "Deferring preview session until the selected instant-switched lens is promoted")
                 }
                 onVideoSaved?.invoke(uri)
             }
@@ -7463,8 +7592,13 @@ class Camera2Controller(private val context: Context) {
         }
         if (!started) {
             videoCameraHlg10InputActive = false
+            clearInstantVideoLensSwitchState()
             return
         }
+        videoRecordingPrimaryCameraId = recordingPrimaryCameraId
+        fastVideoInputUsingStandby = false
+        hasSwitchedVideoInputInstantly = false
+        instantVideoInputSwitchCameraId = null
         _state.value = _state.value.copy(
             videoRecordingState = VideoRecordingState(isRecording = true, elapsedMs = 0L)
         )
