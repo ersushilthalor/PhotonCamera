@@ -57,7 +57,7 @@ class VideoRecorder(
         private const val AUDIO_MONO_BITRATE = 96_000
         private const val AUDIO_STEREO_BITRATE = 192_000
         private const val I_FRAME_INTERVAL = 1
-        private const val MAX_REQUESTED_VIDEO_BITRATE_MBPS = 10_000
+        private const val MAX_REQUESTED_VIDEO_BITRATE_MBPS = 2_147
         private const val UNSET_TIMESTAMP = Long.MIN_VALUE
         private const val NANOS_PER_SECOND = 1_000_000_000L
         private const val MICROS_PER_SECOND = 1_000_000L
