@@ -318,7 +318,7 @@ class Camera2Controller(private val context: Context) {
     fun setStandbyPreviewSurfaceTexture(surfaceTexture: SurfaceTexture) {
         val action = Runnable {
             if (standbyPreviewSurfaceTexture !== surfaceTexture) {
-                logicalStandbyPreviewSurface?.release()
+                val previousStandbySurface = logicalStandbyPreviewSurface
                 logicalStandbyPreviewSurface = null
                 logicalStandbySurfaceTextureOwner = null
                 logicalStandbyPreviewPhysicalCameraId = null
@@ -326,6 +326,7 @@ class Camera2Controller(private val context: Context) {
                 logicalStandbyPreviewFailedOpenCameraId = null
                 standbyPreviewSurfaceTexture = surfaceTexture
                 reconfigurePreviewSessionForStandbyOutputs("standby preview SurfaceTexture changed")
+                previousStandbySurface?.release()
             }
         }
         val handler = cameraHandler
@@ -341,13 +342,14 @@ class Camera2Controller(private val context: Context) {
         if (surfaceTexture == null) return
         val action = Runnable {
             if (standbyPreviewSurfaceTexture === surfaceTexture) {
+                val previousStandbySurface = logicalStandbyPreviewSurface
                 standbyPreviewSurfaceTexture = null
-                logicalStandbyPreviewSurface?.release()
                 logicalStandbyPreviewSurface = null
                 logicalStandbySurfaceTextureOwner = null
                 logicalStandbyPreviewPhysicalCameraId = null
                 logicalStandbyVideoPhysicalCameraId = null
                 reconfigurePreviewSessionForStandbyOutputs("standby preview SurfaceTexture destroyed")
+                previousStandbySurface?.release()
             }
         }
         val handler = cameraHandler
