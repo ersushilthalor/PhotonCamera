@@ -57,6 +57,7 @@ class VideoRecorder(
         private const val AUDIO_MONO_BITRATE = 96_000
         private const val AUDIO_STEREO_BITRATE = 192_000
         private const val I_FRAME_INTERVAL = 1
+        private const val MAX_REQUESTED_VIDEO_BITRATE_MBPS = Int.MAX_VALUE / 1_000_000
         private const val UNSET_TIMESTAMP = Long.MIN_VALUE
         private const val NANOS_PER_SECOND = 1_000_000_000L
         private const val MICROS_PER_SECOND = 1_000_000L
@@ -232,7 +233,7 @@ class VideoRecorder(
         // 已解析的显示尺寸（片门全开使用最大相机输入尺寸）。设备横竖屏差异只通过容器 rotation metadata 表达。
         requestedSize = requestedOutputSize
         requestedFps = fps
-        requestedBitrateMbps = bitrateMbps
+        requestedBitrateMbps = bitrateMbps.coerceIn(1, MAX_REQUESTED_VIDEO_BITRATE_MBPS)
         val hlg10Encoder = if (
             colorConfig.logProfile == VideoLogProfile.HLG10 && !colorConfig.force8BitHlg
         ) findHlg10Encoder() else null
@@ -531,13 +532,46 @@ class VideoRecorder(
         if (videoEncoder != null && inputSurface != null) return
         val width = requestedSize.width
         val height = requestedSize.height
-        val videoBitrate = (requestedBitrateMbps * 1_000_000).coerceIn(2_000_000, 300_000_000)
+        // MediaFormat.KEY_BIT_RATE is an Int in bits/second. Convert with Long first to
+        // avoid overflow; the preset list is capped to the API's representable whole-Mbps range.
+        val requestedBitrateBps = (requestedBitrateMbps.toLong() * 1_000_000L)
+            .coerceIn(2_000_000L, Int.MAX_VALUE.toLong())
+            .toInt()
 
+        // Reuse the same format-compatible encoder chosen by the bitrate capability resolver
+        // for ordinary recordings; preserve the explicit Main10 encoder selection for HLG10.
+        val compatibleEncoderName = VideoEncoderCapabilities.findForFormat(
+            mimeType = requestedCodecMime,
+            size = requestedSize,
+            fps = requestedFps
+        )?.codecName
         videoEncoder = preferredEncoderCodecName?.let { codecName ->
+            runCatching { MediaCodec.createByCodecName(codecName) }.getOrNull()
+        } ?: compatibleEncoderName?.let { codecName ->
             runCatching { MediaCodec.createByCodecName(codecName) }.getOrNull()
         } ?: MediaCodec.createEncoderByType(requestedCodecMime)
         videoEncoder?.apply {
             val capabilities = codecInfo.getCapabilitiesForType(requestedCodecMime)
+            val codecBitrateRange = runCatching {
+                capabilities.videoCapabilities?.bitrateRange
+            }.getOrNull()
+            // KEY_BIT_RATE is a target, not a guarantee that a VBR stream averages at that rate.
+            // Clamp against the active encoder's advertised range rather than a hard-coded 300 Mbps.
+            val videoBitrate = if (codecBitrateRange != null && codecBitrateRange.upper > 0) {
+                requestedBitrateBps.coerceIn(
+                    codecBitrateRange.lower.coerceAtLeast(1),
+                    codecBitrateRange.upper
+                )
+            } else {
+                requestedBitrateBps.coerceIn(2_000_000, 300_000_000)
+            }
+            PLog.i(
+                TAG,
+                "Video bitrate target: requested=${requestedBitrateMbps}Mbps, " +
+                    "applied=${videoBitrate / 1_000_000}Mbps (${videoBitrate}bps), " +
+                    "codec=${codecInfo.name}, advertisedRange=" +
+                    (codecBitrateRange?.let { "${it.lower}..${it.upper}bps" } ?: "unknown")
+            )
             val isCbrSupported = capabilities.encoderCapabilities?.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR) == true
             val bitrateMode = if (isCbrSupported) {
                 MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR

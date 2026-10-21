@@ -103,6 +103,26 @@ object VideoCapabilitiesResolver {
             ?: availableFps.firstOrNull()
             ?: VideoFpsPreset.FPS_30
 
+        // Offer only presets that the selected codec's actual encoder advertises for this
+        // output format. Higher enum targets remain an internal ceiling, not fake UI options.
+        val encoderBitrateSupport = VideoEncoderCapabilities.findForFormat(
+            mimeType = requestedConfig.codec.mimeType,
+            size = recordingSize,
+            fps = resolvedFps.fps
+        )
+        val availableBitrates = encoderBitrateSupport?.let { support ->
+            VideoBitratePreset.entries.filter { preset ->
+                val bitrateBps = preset.bitrateMbps.toLong() * 1_000_000L
+                bitrateBps in support.minBitrateBps.toLong()..support.maxBitrateBps.toLong()
+            }
+        }.orEmpty()
+        val resolvedBitrate = requestedConfig.bitrate.takeIf { it in availableBitrates }
+            ?: availableBitrates.lastOrNull {
+                it.bitrateMbps <= requestedConfig.bitrate.bitrateMbps
+            }
+            ?: availableBitrates.firstOrNull()
+            ?: requestedConfig.bitrate
+
         val enhancedCameraInputSize =
             enhancedStabilizationInputSizesByResolution[resolvedResolution]
         val enhancedStabilizationAvailable = algorithmicStabilizationSupported &&
@@ -157,7 +177,7 @@ object VideoCapabilitiesResolver {
                 resolution = resolvedResolution,
                 fps = resolvedFps,
                 logProfile = resolvedLogProfile,
-                bitrate = requestedConfig.bitrate,
+                bitrate = resolvedBitrate,
                 stabilizationMode = resolvedStabilizationMode,
                 torchEnabled = requestedConfig.torchEnabled && isFlashSupported
             ),
@@ -170,7 +190,7 @@ object VideoCapabilitiesResolver {
                 availableFps = availableFps,
                 availableAspectRatios = VideoAspectRatio.entries.toList(),
                 availableLogProfiles = availableLogProfiles,
-                availableBitrates = VideoBitratePreset.entries.toList(),
+                availableBitrates = availableBitrates,
                 cameraInputSizesByResolution = cameraInputSizesByResolution,
                 enhancedStabilizationInputSizesByResolution =
                     enhancedStabilizationInputSizesByResolution,
