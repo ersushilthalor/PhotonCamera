@@ -78,15 +78,7 @@ enum class VideoBitratePreset(val bitrateMbps: Int) {
     P2(60),
     P3(90),
     P4(120),
-    P5(250),
-    P6(500),
-    P7(750),
-    P8(1000),
-    P9(1500),
-    P10(2000),
-    // MediaFormat.KEY_BIT_RATE is an Int in bits/second: whole-Mbps targets above
-    // 2,147 cannot be represented and must not appear as distinct selectable presets.
-    P11(2147);
+    P5(250);
 }
 
 enum class VideoCodec(val displayName: String, val mimeType: String) {

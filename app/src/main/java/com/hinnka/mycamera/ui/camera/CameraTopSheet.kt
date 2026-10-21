@@ -69,7 +69,6 @@ fun CameraTopSheet(
     availableVideoLogProfiles: List<VideoLogProfile>,
     onVideoLogProfileChange: (VideoLogProfile) -> Unit,
     videoBitrate: VideoBitratePreset,
-    availableVideoBitrates: List<VideoBitratePreset>,
     onVideoBitrateChange: (VideoBitratePreset) -> Unit,
     videoCodec: VideoCodec,
     onVideoCodecChange: (VideoCodec) -> Unit,
@@ -373,7 +372,7 @@ fun CameraTopSheet(
                                             verticalArrangement = Arrangement.spacedBy(8.dp),
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            availableVideoBitrates.forEach { bitrate ->
+                                            VideoBitratePreset.entries.forEach { bitrate ->
                                                 VideoOptionChip(
                                                     title = "${bitrate.bitrateMbps}M",
                                                     selected = videoBitrate == bitrate,
