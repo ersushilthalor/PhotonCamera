@@ -4062,9 +4062,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         zoomRatioByMain = ratio
         cameraController.setStandbyVisibleZoomRatio(ratio)
         if (instantStandbyPreviewHandoffCameraId != null) {
-            val cameraInfo = state.value.getCurrentCameraInfo()
-            val displayRatio = cameraInfo?.displayIntrinsicZoomRatio?.takeIf { it > 0f } ?: 1f
-            cameraController.setZoomRatioForPendingLensOpen(ratio / displayRatio)
+            if (cameraController.isLogicalStandbyPreviewPromotion(instantStandbyPreviewHandoffCameraId!!)) {
+                val cameraInfo = state.value.getCurrentCameraInfo()
+                setCameraControllerZoomRatio(ratio, cameraInfo)
+            } else {
+                val cameraInfo = state.value.getCurrentCameraInfo()
+                val displayRatio = cameraInfo?.displayIntrinsicZoomRatio?.takeIf { it > 0f } ?: 1f
+                cameraController.setZoomRatioForPendingLensOpen(ratio / displayRatio)
+            }
             return
         }
         val cameraInfo = state.value.getCurrentCameraInfo()
@@ -4076,8 +4081,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.setStandbyVisibleZoomRatio(ratio)
         val cameraInfo = state.value.availableCameras.find { it.cameraId == cameraId }
         if (instantStandbyPreviewHandoffCameraId == cameraId) {
-            val displayRatio = cameraInfo?.displayIntrinsicZoomRatio?.takeIf { it > 0f } ?: 1f
-            cameraController.setZoomRatioForPendingLensOpen(ratio / displayRatio)
+            if (cameraController.isLogicalStandbyPreviewPromotion(cameraId)) {
+                setCameraControllerZoomRatio(ratio, cameraInfo)
+            } else {
+                val displayRatio = cameraInfo?.displayIntrinsicZoomRatio?.takeIf { it > 0f } ?: 1f
+                cameraController.setZoomRatioForPendingLensOpen(ratio / displayRatio)
+            }
             return
         }
         setCameraControllerZoomRatio(ratio, cameraInfo)
