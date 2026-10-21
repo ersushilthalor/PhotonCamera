@@ -66,8 +66,6 @@ fun CameraPreviewGL(
     meteringMode: MeteringMode = MeteringMode.SYSTEM_DEFAULT,
     onSurfaceTextureReady: (SurfaceTexture) -> Unit,
     onSurfaceDestroyed: (SurfaceTexture?) -> Unit,
-    onStandbySurfaceTextureReady: (SurfaceTexture) -> Unit = {},
-    onStandbySurfaceTextureDestroyed: (SurfaceTexture?) -> Unit = {},
     onTap: (Float, Float, Int, Int) -> Unit,
     onLongPress: (Float, Float, Int, Int) -> Unit,
     onHistogramUpdated: ((IntArray) -> Unit)? = null,
@@ -155,7 +153,6 @@ fun CameraPreviewGL(
         var notifiedPreviewSize by remember { mutableStateOf<Size?>(null) }
         var notifiedResumeGeneration by remember { mutableIntStateOf(-1) }
         var notifiedSurfaceTexture by remember { mutableStateOf<SurfaceTexture?>(null) }
-        var notifiedStandbySurfaceTexture by remember { mutableStateOf<SurfaceTexture?>(null) }
         // 标记 Surface 是否已经准备好
         var surfaceAvailable by remember { mutableStateOf(false) }
 
@@ -204,12 +201,6 @@ fun CameraPreviewGL(
                                         stabilizationInputSize.width,
                                         stabilizationInputSize.height,
                                     )
-                                    glSurfaceView.getStandbySurfaceTexture()?.let { standbyTexture ->
-                                        if (notifiedStandbySurfaceTexture !== standbyTexture) {
-                                            notifiedStandbySurfaceTexture = standbyTexture
-                                            onStandbySurfaceTextureReady(standbyTexture)
-                                        }
-                                    }
                                     PLog.d("CameraPreviewGL", "onSurfaceReady: notifiedST=$notifiedSurfaceTexture, newST=$surfaceTexture")
                                     // If the SurfaceTexture changed (e.g. Surface recreated due to layout bounds change), force notify
                                     if (notifiedSurfaceTexture != null && notifiedSurfaceTexture != surfaceTexture) {
@@ -223,19 +214,15 @@ fun CameraPreviewGL(
 
                         glSurfaceView.onSurfaceDestroyed = {
                             val destroyedSurfaceTexture = glSurfaceView.getSurfaceTexture()
-                            val destroyedStandbyTexture = glSurfaceView.getStandbySurfaceTexture()
                             if (glSurfaceViewRef === glSurfaceView) {
                                 surfaceAvailable = false
                                 surfaceTextureNotified = false
                                 notifiedPreviewSize = null
                                 notifiedResumeGeneration = -1
                                 notifiedSurfaceTexture = null
-                                notifiedStandbySurfaceTexture = null
                                 glSurfaceViewRef = null
-                                onStandbySurfaceTextureDestroyed(destroyedStandbyTexture)
                                 onSurfaceDestroyed(destroyedSurfaceTexture)
                             } else if (destroyedSurfaceTexture != null) {
-                                onStandbySurfaceTextureDestroyed(destroyedStandbyTexture)
                                 onSurfaceDestroyed(destroyedSurfaceTexture)
                             }
                         }
