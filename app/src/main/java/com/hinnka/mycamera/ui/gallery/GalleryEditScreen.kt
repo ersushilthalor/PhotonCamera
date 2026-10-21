@@ -101,7 +101,6 @@ import android.view.LayoutInflater
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
-import androidx.media3.common.VideoFrameProcessor
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.AspectRatioFrameLayout
 import com.hinnka.mycamera.lut.VideoLutEffect
@@ -385,6 +384,15 @@ fun GalleryEditScreen(
 
     fun toggleEditControls() {
         areEditControlsHidden = !areEditControlsHidden
+    }
+
+    // Video controls can emit several changes before Compose recomposes. Always apply each
+    // change to the latest ViewModel recipe so one slider/curve cannot overwrite another.
+    fun updateVideoRecipe(transform: (ColorRecipeParams) -> ColorRecipeParams) {
+        if (currentPhoto?.isVideo != true) return
+        val latestRecipe = viewModel.editPhotoRecipeParams.value
+            ?: viewModel.editLutRecipeParams.value
+        viewModel.setPhotoRecipeParams(transform(latestRecipe))
     }
 
     var previewRenderRequestId by remember { mutableLongStateOf(0L) }
@@ -1431,12 +1439,18 @@ fun GalleryEditScreen(
                                             LutIntensitySlider(
                                                 intensity = effectiveRecipe.lutIntensity,
                                                 onIntensityChange = { intensity ->
-                                                    viewModel.setPhotoRecipeParams(
-                                                        RecipeParam.LUT_INTENSITY.setValue(
-                                                            effectiveRecipe,
-                                                            intensity
+                                                    if (currentPhoto.isVideo) {
+                                                        updateVideoRecipe { latest ->
+                                                            RecipeParam.LUT_INTENSITY.setValue(latest, intensity)
+                                                        }
+                                                    } else {
+                                                        viewModel.setPhotoRecipeParams(
+                                                            RecipeParam.LUT_INTENSITY.setValue(
+                                                                effectiveRecipe,
+                                                                intensity
+                                                            )
                                                         )
-                                                    )
+                                                    }
                                                 },
                                                 enabled = editLutId != null,
                                                 modifier = Modifier.fillMaxWidth()
@@ -1526,9 +1540,13 @@ fun GalleryEditScreen(
                                     ColorRecipePanel(
                                         currentParams = effectiveRecipe,
                                         onParamChange = { param, value ->
-                                            viewModel.setPhotoRecipeParams(
-                                                param.setValue(effectiveRecipe, value)
-                                            )
+                                            if (currentPhoto.isVideo) {
+                                                updateVideoRecipe { latest -> param.setValue(latest, value) }
+                                            } else {
+                                                viewModel.setPhotoRecipeParams(
+                                                    param.setValue(effectiveRecipe, value)
+                                                )
+                                            }
                                         },
                                         onParamsChange = { params ->
                                             viewModel.setPhotoRecipeParams(
@@ -1536,20 +1554,33 @@ fun GalleryEditScreen(
                                             )
                                         },
                                         onRemarksChange = { remarks ->
-                                            viewModel.setPhotoRecipeParams(
-                                                effectiveRecipe.copy(remarks = remarks)
-                                            )
+                                            if (currentPhoto.isVideo) {
+                                                updateVideoRecipe { latest -> latest.copy(remarks = remarks) }
+                                            } else {
+                                                viewModel.setPhotoRecipeParams(
+                                                    effectiveRecipe.copy(remarks = remarks)
+                                                )
+                                            }
                                         },
                                         onCurveChange = { channel, points ->
-                                            val updated = when (channel) {
-                                                CurveChannel.MASTER -> effectiveRecipe.copy(masterCurvePoints = points)
-                                                CurveChannel.RED -> effectiveRecipe.copy(redCurvePoints = points)
-                                                CurveChannel.GREEN -> effectiveRecipe.copy(greenCurvePoints = points)
-                                                CurveChannel.BLUE -> effectiveRecipe.copy(blueCurvePoints = points)
+                                            if (currentPhoto.isVideo) {
+                                                updateVideoRecipe { latest ->
+                                                    when (channel) {
+                                                        CurveChannel.MASTER -> latest.copy(masterCurvePoints = points)
+                                                        CurveChannel.RED -> latest.copy(redCurvePoints = points)
+                                                        CurveChannel.GREEN -> latest.copy(greenCurvePoints = points)
+                                                        CurveChannel.BLUE -> latest.copy(blueCurvePoints = points)
+                                                    }
+                                                }
+                                            } else {
+                                                val updated = when (channel) {
+                                                    CurveChannel.MASTER -> effectiveRecipe.copy(masterCurvePoints = points)
+                                                    CurveChannel.RED -> effectiveRecipe.copy(redCurvePoints = points)
+                                                    CurveChannel.GREEN -> effectiveRecipe.copy(greenCurvePoints = points)
+                                                    CurveChannel.BLUE -> effectiveRecipe.copy(blueCurvePoints = points)
+                                                }
+                                                viewModel.setPhotoRecipeParams(updated)
                                             }
-                                            viewModel.setPhotoRecipeParams(
-                                                updated
-                                            )
                                         },
                                         imageHistogram = imageHistogram,
                                         currentEffects = effectiveRecipe.toEffectParams(),
@@ -2435,7 +2466,7 @@ private fun VideoEditPlayer(
     val exoPlayer = remember(photo.id, mediaUri, isPlayerActive, videoLutEffect) {
         if (!isPlayerActive) return@remember null
         PLog.d("VideoEditPlayer", "Re-creating loopable ExoPlayer instance for video preview.")
-        ExoPlayer.Builder(context, VideoEditRenderersFactory(context, sourceLogProfile.isEnabled)).build().apply {
+        ExoPlayer.Builder(context, VideoEditRenderersFactory(context)).build().apply {
             setMediaItem(MediaItem.fromUri(mediaUri))
             repeatMode = Player.REPEAT_MODE_ONE
             setVideoEffects(listOf(videoLutEffect))
@@ -2457,11 +2488,11 @@ private fun VideoEditPlayer(
         PLog.d("VideoEditPlayer", "Updating VideoLutEffect with lutConfig: ${lutConfig?.title}, recipeParams: ${recipeParams != null}")
         videoLutEffect.update(lutConfig, recipeParams)
 
-        // A paused player does not submit another frame to the GL effect pipeline. REDRAW asks the
-        // Media3 video graph to process its retained frame again without seeking or changing the
-        // playback state, so the controller stays hidden and the new LUT is visible immediately.
+        // A paused player won't submit another frame after an effect update. The standard renderer
+        // is required for setVideoEffects(), so seek to the current timestamp to redraw the preview
+        // using the latest recipe without resuming playback.
         if (exoPlayer != null && !exoPlayer.playWhenReady) {
-            exoPlayer.setVideoEffects(VideoFrameProcessor.REDRAW)
+            exoPlayer.seekTo(exoPlayer.currentPosition.coerceAtLeast(0L))
         }
     }
 
