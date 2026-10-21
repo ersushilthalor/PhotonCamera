@@ -342,6 +342,9 @@ class Camera2Controller(private val context: Context) {
     private var lastWhiteBalanceResult: WhiteBalanceResultSnapshot? = null
     private var manualWhiteBalanceAnchor: ManualWhiteBalanceAnchor? = null
     @Volatile
+    private var jpegCaptureQuality: Byte = 95.toByte()
+
+    @Volatile
     private var requestedRawCaptureEnabled = false
     private var isRawSupported = false
     private var isP010Supported = false
@@ -1101,12 +1104,7 @@ class Camera2Controller(private val context: Context) {
 
     private fun resolveImageReaderMaxImages(): Int = CAPTURE_READER_MAX_IMAGES
 
-    private fun captureImageRequestCount(state: CameraState, reader: ImageReader): Int = when {
-        shouldUseJpgMaxHdrCapture(state, isRawCaptureReader(reader)) && !shouldUseMultiFrameTorch(state) ->
-            buildHdrBracketEvOffsets(resolveHdrBracketZeroEvFrameCount(state)).size
-        state.requiresMultiFrameCaptureSequence -> state.activeMultiFrameCount
-        else -> 1
-    }
+    private fun captureImageRequestCount(state: CameraState, reader: ImageReader): Int = 1
 
     private fun canAcquireImage(logPrefix: String): Boolean {
         val openImages = openImagesCount.get()
@@ -2799,7 +2797,7 @@ class Camera2Controller(private val context: Context) {
 
             if (captureMode == CaptureMode.PHOTO) {
                 val aspectRatio = state.value.aspectRatio
-                val effectivelyUseRaw = requestedRawCaptureEnabled && isRawSupported
+                val effectivelyUseRaw = false
                 val openCharacteristics = getCameraCharacteristicsCached(openCameraId)
                 var outputCameraIdForStreams = outputPhysicalCameraId ?: openCameraId
                 var outputCharacteristicsForStreams = if (outputCameraIdForStreams == openCameraId) {
@@ -2812,17 +2810,8 @@ class Camera2Controller(private val context: Context) {
                 } else {
                     null
                 }
-                val wantsP010 = !effectivelyUseRaw &&
-                        isP010Supported &&
-                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                        state.value.useP010
-                var captureFormat = if (rawOutput != null) {
-                    rawOutput.format
-                } else if (wantsP010 && isOutputFormatAdvertised(outputCharacteristicsForStreams, ImageFormat.YCBCR_P010)) {
-                    ImageFormat.YCBCR_P010
-                } else {
-                    ImageFormat.YUV_420_888
-                }
+                val wantsP010 = false
+                var captureFormat = ImageFormat.JPEG
                 if (outputPhysicalCameraId != null && isPhysicalOutputProfileFailed(outputPhysicalCameraId, captureFormat)) {
                     val failedPhysicalCameraId = outputPhysicalCameraId
                     PLog.w(
@@ -2836,7 +2825,7 @@ class Camera2Controller(private val context: Context) {
                     outputCameraIdForStreams = openCameraId
                     outputCharacteristicsForStreams = openCharacteristics
                     rawOutput = null
-                    captureFormat = ImageFormat.YUV_420_888
+                    captureFormat = ImageFormat.JPEG
                 }
                 previewSize = CameraUtils.getFixedPreviewSize(outputCharacteristicsForStreams, aspectRatio)
                 surfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height)
@@ -5463,9 +5452,10 @@ class Camera2Controller(private val context: Context) {
         enabled: Boolean,
         reconfigureCaptureOutputIfNeeded: Boolean = true
     ) {
-        requestedRawCaptureEnabled = enabled
-        _state.update { it.copy(useRaw = enabled) }
-        PLog.d(TAG, "RAW 格式拍照: $enabled")
+        // This build captures ISP-rendered JPEGs only; app-side RAW development is disabled.
+        requestedRawCaptureEnabled = false
+        _state.update { it.copy(useRaw = false) }
+        PLog.d(TAG, "Normal ISP JPEG capture active; RAW request ignored")
 
         if (!reconfigureCaptureOutputIfNeeded) return
 
@@ -7528,15 +7518,11 @@ class Camera2Controller(private val context: Context) {
     }
 
     fun setMultiFrameOutputScale(outputScale: Float?) {
-        val currentState = _state.value
-        val normalizedScale = outputScale?.let(MultiFrameConfig::normalizeOutputScale)
-        _state.value = currentState.copy(
-            multiFrameOutputScale = normalizedScale,
-        )
+        _state.update { it.copy(multiFrameOutputScale = null) }
     }
 
     fun setUseMultipleExposure(useMultipleExposure: Boolean) {
-        _state.value = _state.value.copy(useMultipleExposure = useMultipleExposure)
+        _state.update { it.copy(useMultipleExposure = false) }
     }
 
     fun onHdrBracketFramesCollected() {
@@ -7573,7 +7559,7 @@ class Camera2Controller(private val context: Context) {
     }
 
     fun setUseJpgMaxHdrComposition(enabled: Boolean) {
-        _state.value = _state.value.copy(useJpgMaxHdrComposition = enabled)
+        _state.update { it.copy(useJpgMaxHdrComposition = false) }
     }
 
     fun setHdrPlusBracketExposureEnabled(enabled: Boolean) {
@@ -7606,7 +7592,7 @@ class Camera2Controller(private val context: Context) {
     }
 
     fun setApplyUltraHDR(enabled: Boolean) {
-        _state.value = _state.value.copy(applyUltraHDR = enabled)
+        _state.update { it.copy(applyUltraHDR = false) }
     }
 
 // ==================== 拍照 ====================
@@ -8330,6 +8316,19 @@ class Camera2Controller(private val context: Context) {
 
             val captureBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
                 addTarget(reader.surface)
+                if (reader.imageFormat == ImageFormat.JPEG) {
+                    set(CaptureRequest.JPEG_QUALITY, jpegCaptureQuality)
+                    val sensorOrientation = cachedSensorOrientation
+                    val deviceOrientation = OrientationObserver.captureRotationDegrees.toInt()
+                    val lensFacing = currentState.getCurrentCameraInfo()?.lensFacing
+                        ?: CameraCharacteristics.LENS_FACING_BACK
+                    val jpegOrientation = if (lensFacing == CameraCharacteristics.LENS_FACING_FRONT) {
+                        (sensorOrientation - deviceOrientation + 360) % 360
+                    } else {
+                        (sensorOrientation + deviceOrientation) % 360
+                    }
+                    set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
+                }
 
                 // Do not mirror still capture frames to the GL preview SurfaceTexture.
                 // Some camera HALs occasionally deliver a still-capture buffer that
@@ -9098,8 +9097,12 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    fun setPhotoQuality(quality: Int) {
+        jpegCaptureQuality = quality.coerceIn(1, 100).toByte()
+    }
+
     fun setUseP010(enabled: Boolean) {
-        _state.value = _state.value.copy(useP010 = enabled)
+        _state.update { it.copy(useP010 = false) }
     }
 
     fun setUseP3ColorSpace(enabled: Boolean) {

@@ -27,7 +27,6 @@ import com.hinnka.mycamera.hdr.GainmapResult
 import com.hinnka.mycamera.hdr.GainmapSourceSet
 import com.hinnka.mycamera.hdr.HdrGainmapStrength
 import com.hinnka.mycamera.hdr.SourceKind
-import com.hinnka.mycamera.hdr.UltraHdrWriter
 import com.hinnka.mycamera.hdr.UnifiedGainmapProducer
 import com.hinnka.mycamera.livephoto.MotionPhotoWriter
 import com.hinnka.mycamera.lut.BaselineColorCorrectionTarget
@@ -878,22 +877,21 @@ object GalleryManager {
         bitmap: Bitmap,
         outputStream: FileOutputStream,
         quality: Int,
-        gainmapResult: GainmapResult? = null,
+        @Suppress("UNUSED_PARAMETER") gainmapResult: GainmapResult? = null,
     ): Boolean {
+        // Encode a standard SDR JPEG; Ultra HDR gainmaps are intentionally unsupported.
         var success = false
         val elapsed = measureTimeMillis {
-            success = UltraHdrWriter.writeJpeg(
-                UltraHdrWriter.Request(
-                    bitmap = bitmap,
-                    outputStream = outputStream,
-                    quality = quality,
-                    gainmap = gainmapResult?.gainmap,
-                )
+            success = bitmap.compress(
+                Bitmap.CompressFormat.JPEG,
+                quality.coerceIn(1, 100),
+                outputStream,
             )
         }
         PLog.d(
             TAG,
-            "writeFinalJpeg took ${elapsed}ms, size=${bitmap.width}x${bitmap.height}, gainmap=${gainmapResult != null}, success=$success"
+            "writeFinalJpeg took ${elapsed}ms, " +
+                "size=${bitmap.width}x${bitmap.height}, ultraHdr=false, success=$success"
         )
         return success
     }
@@ -911,7 +909,7 @@ object GalleryManager {
                 bitmap = bitmap,
                 outputFile = outputFile,
                 quality = quality,
-                gainmapResult = gainmapResult,
+                gainmapResult = null,
                 captureInfo = captureInfo,
             )
             if (encoded) {
@@ -2062,6 +2060,112 @@ object GalleryManager {
         }
     }
 
+    /**
+     * Saves the JPEG rendered by the device camera HAL/ISP as-is.
+     * No app-side denoising, RAW development, sharpening, LUT, bokeh or gainmap pass is run.
+     */
+    private suspend fun saveCameraJpegPhoto(
+        context: Context,
+        photoId: String,
+        image: SafeImage,
+        rotation: Int,
+        shouldAutoSave: Boolean,
+    ) = withContext(Dispatchers.IO) {
+        try {
+            val photoDir = getPhotoDir(context, photoId, true)
+            val targetFile = getPhotoFile(context, photoId)
+            val tempFile = File(photoDir, "temp_camera_isp.jpg")
+            val sourceBuffer = image.image.planes.firstOrNull()?.buffer?.duplicate()
+                ?: throw IOException("Camera2 JPEG image has no data plane")
+            if (!sourceBuffer.hasRemaining()) {
+                throw IOException("Camera2 JPEG image is empty")
+            }
+            val jpegBytes = ByteArray(sourceBuffer.remaining())
+            sourceBuffer.get(jpegBytes)
+            FileOutputStream(tempFile).use { it.write(jpegBytes) }
+            if (targetFile.exists() && !targetFile.delete()) {
+                tempFile.delete()
+                throw IOException("Could not replace the pending photo file")
+            }
+            if (!tempFile.renameTo(targetFile)) {
+                tempFile.delete()
+                throw IOException("Could not publish the Camera2 ISP JPEG")
+            }
+
+            val storedMetadata = loadMetadata(context, photoId)
+                ?: throw IOException("Photo metadata unavailable for $photoId")
+            val ispMetadata = storedMetadata.copy(
+                lutId = null,
+                frameId = null,
+                colorRecipeParams = null,
+                baselineTarget = null,
+                baselineLutId = null,
+                baselineColorRecipeParams = null,
+                sharpening = 0f,
+                noiseReduction = 0f,
+                chromaNoiseReduction = 0f,
+                rawDenoiseValue = null,
+                rawChromaDenoiseValue = null,
+                manualHdrEffectEnabled = false,
+                hasEmbeddedGainmap = false,
+                hasAiDenoisedBase = false,
+                aiDenoiseStrength = null,
+                computationalAperture = null,
+                isMirrored = false,
+            )
+            updateMetadata(context, photoId) { ispMetadata }
+            ExifWriter.writeExif(
+                targetFile,
+                ispMetadata.toCaptureInfo().copy(
+                    imageWidth = image.width,
+                    imageHeight = image.height,
+                ),
+                orientationDegrees = rotation,
+            )
+            markProcessingPhotoDisplayReady(photoId, targetFile, ispMetadata)
+
+            // Generate only a small gallery thumbnail; the captured JPEG itself remains untouched.
+            val thumbnail = loadBitmap(
+                context = context,
+                uri = Uri.fromFile(targetFile),
+                maxEdge = THUMBNAIL_MAX_EDGE,
+            )
+            if (thumbnail != null) {
+                try {
+                    generateThumbnail(thumbnail, getThumbnailFile(context, photoId))
+                } finally {
+                    thumbnail.recycle()
+                }
+            } else {
+                generateThumbnail(targetFile, getThumbnailFile(context, photoId))
+            }
+            notifyPhotoThumbnailUpdated(photoId)
+
+            if (shouldAutoSave) {
+                val dateTaken = ispMetadata.dateTaken ?: System.currentTimeMillis()
+                val displayName = "PhotonCamera_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(dateTaken))}.jpg"
+                val exportedUri = exportFileToConfiguredPhotoStorage(
+                    context = context,
+                    destination = resolvePhotoExportDestination(context),
+                    collectionUri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    displayName = displayName,
+                    mimeType = "image/jpeg",
+                    sourceFile = targetFile,
+                    dateTaken = dateTaken,
+                )
+                if (exportedUri != null) {
+                    updateMetadata(context, photoId) { current ->
+                        current.copy(exportedUris = current.exportedUris + exportedUri.toString())
+                    }
+                }
+            }
+            PLog.i(TAG, "Saved device ISP JPEG directly: $photoId (${targetFile.length()} bytes)")
+        } catch (e: Exception) {
+            PLog.e(TAG, "Failed to save device ISP JPEG for $photoId", e)
+            throw e
+        }
+    }
+
     suspend fun saveYuvPhoto(
         context: Context,
         photoId: String,
@@ -2713,6 +2817,10 @@ object GalleryManager {
     ) {
         // 根据图像格式处理
         when (val format = image.format) {
+            ImageFormat.JPEG -> {
+                saveCameraJpegPhoto(context, photoId, image, rotation, shouldAutoSave)
+            }
+
             ImageFormat.YUV_420_888, ImageFormat.YCBCR_P010, ImageFormat.NV21 -> {
                 saveYuvPhoto(
                     context,

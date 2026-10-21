@@ -31,10 +31,20 @@ object ExifWriter {
      * @param file JPEG 文件
      * @param captureInfo 拍摄信息
      */
-    fun writeExif(file: File, captureInfo: CaptureInfo) {
+    fun writeExif(file: File, captureInfo: CaptureInfo, orientationDegrees: Int? = null) {
         try {
             val exif = ExifInterface(file)
             writeExifInternal(exif, captureInfo)
+            orientationDegrees?.let { degrees ->
+                val normalized = ((degrees % 360) + 360) % 360
+                val orientation = when (normalized) {
+                    90 -> ExifInterface.ORIENTATION_ROTATE_90
+                    180 -> ExifInterface.ORIENTATION_ROTATE_180
+                    270 -> ExifInterface.ORIENTATION_ROTATE_270
+                    else -> ExifInterface.ORIENTATION_NORMAL
+                }
+                exif.setAttribute(ExifInterface.TAG_ORIENTATION, orientation.toString())
+            }
             exif.saveAttributes()
             PLog.d(
                 TAG, "EXIF written to ${file.name}: ISO=${captureInfo.iso}, " +

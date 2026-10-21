@@ -115,7 +115,6 @@ fun CameraTopSheet(
     modifier: Modifier = Modifier
 ) {
     var expandedVideoPanel by rememberSaveable { mutableStateOf<VideoSettingPanel?>(null) }
-    var showRenderingEngineSheet by rememberSaveable { mutableStateOf(false) }
     var showContentManagementOptions by rememberSaveable { mutableStateOf(false) }
     fun handleContentManagementAction(action: () -> Unit) {
         showContentManagementOptions = false
@@ -128,8 +127,7 @@ fun CameraTopSheet(
 
     LaunchedEffect(useRaw) {
         if (!useRaw) {
-            showRenderingEngineSheet = false
-        }
+            }
     }
 
     AnimatedVisibility(
@@ -191,33 +189,6 @@ fun CameraTopSheet(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     QuickSettingGrid { itemModifier ->
-                        if (isProfessionalMode) {
-                            QuickSettingButton2(
-                                title = stringResource(R.string.settings_raw_color_engine),
-                                checked = true,
-                                onClick = { showRenderingEngineSheet = true },
-                                modifier = itemModifier
-                            )
-                        } else {
-                            QuickSettingToggle(
-                                title = stringResource(R.string.settings_use_jpg_max),
-                                checked = useJpgMax,
-                                onCheckedChange = onJpgMaxToggle,
-                                modifier = itemModifier
-                            )
-                            QuickSettingToggle(
-                                title = stringResource(R.string.settings_use_multiple_exposure),
-                                checked = useMultipleExposure,
-                                onCheckedChange = onMultipleExposureToggle,
-                                modifier = itemModifier
-                            )
-                        }
-                        QuickSettingToggle(
-                            title = stringResource(R.string.settings_ultra_hdr_gain_map),
-                            checked = ultraHdrEnabled,
-                            onCheckedChange = onUltraHdrToggle,
-                            modifier = itemModifier
-                        )
                         QuickSettingToggle(
                             title = stringResource(R.string.camera_preview_stabilization),
                             checked = photoPreviewStabilizationEnabled,
@@ -495,52 +466,7 @@ fun CameraTopSheet(
         }
     }
 
-    if (showRenderingEngineSheet) {
-        AppModalBottomSheet(
-            onDismissRequest = { showRenderingEngineSheet = false },
-            dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.2f)) }
-        ) {
-            Text(
-                text = stringResource(R.string.settings_raw_color_engine),
-                color = Color.White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-            )
-            // Fill the sheet so switching engines only changes the scroll range, never the anchors.
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp)
-                    .padding(top = 4.dp, bottom = 8.dp)
-            ) {
-                RawRenderingEngineSettingsPanel(
-                    selectedDcpId = rawDcpId,
-                    rawDcpIdsByLens = rawDcpIdsByLens,
-                    dcpLensOptions = rawDcpLensOptions,
-                    availableDcps = availableDcps,
-                    rawRenderingEngine = rawRenderingEngine,
-                    rawToneMappingParameters = rawToneMappingParameters,
-                    spectralFilmSelection = rawSpectralFilmSelection,
-                    spectralFilmPrint = rawSpectralFilmPrint,
-                    onSelectDcp = onRawDcpChange,
-                    onRawDcpIdsByLensChange = onRawDcpIdsByLensChange,
-                    onImportDcp = onImportRawDcp,
-                    onDeleteDcp = onDeleteRawDcp,
-                    hncsFilmCurveMode = rawHncsFilmCurveMode,
-                    onHncsFilmCurveModeChange = onRawHncsFilmCurveModeChange,
-                    onRawColorEngineChange = onRawColorEngineChange,
-                    onRawToneMappingParametersChange = onRawToneMappingParametersChange,
-                    onSpectralFilmSelectionChange = onRawSpectralFilmSelectionChange,
-                    onSpectralFilmPrintChange = onRawSpectralFilmPrintChange,
-                    inlineEngineOptions = true,
-                    showToneMappingControls = true,
-                )
-            }
-        }
-    }
+
 }
 
 @Composable

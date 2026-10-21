@@ -692,7 +692,7 @@ class UserPreferencesRepository(private val context: Context) {
                 rawHncsFilmCurveMode = HncsFilmCurveMode.fromPersistedValue(
                     preferences[RAW_HNCS_FILM_CURVE_MODE_KEY]
                 ),
-                rawRenderingEngine = RawRenderingEngine.fromPersistedName(preferences[RAW_COLOR_ENGINE_KEY]),
+                rawRenderingEngine = RawRenderingEngine.AdobeCurve,
                 rawToneMappingParameters = RawToneMappingParameters(
                     agxBlackRelativeExposure = preferences[RAW_AGX_BLACK_RELATIVE_EXPOSURE_KEY]
                         ?: RawToneMappingParameters.AGX_BLACK_RELATIVE_EXPOSURE_DEFAULT,
@@ -780,11 +780,7 @@ class UserPreferencesRepository(private val context: Context) {
                 customVendorKeySettings = CustomVendorKeySettings.deserialize(
                     preferences[CUSTOM_VENDOR_KEY_SETTINGS]
                 ),
-                useRaw = when {
-                    useRawMax -> true
-                    useJpgMax -> false
-                    else -> storedUseRaw
-                },
+                useRaw = false,
                 meteringMode = MeteringMode.valueOf(
                     preferences[METERING_MODE] ?: MeteringMode.SYSTEM_DEFAULT.name
                 ),
@@ -799,7 +795,7 @@ class UserPreferencesRepository(private val context: Context) {
                 }.getOrDefault(LutSelectorMode.Style),
                 defaultFocalLength = preferences[DEFAULT_FOCAL_LENGTH] ?: 0f,
                 zoomDisplayMode = preferences[ZOOM_DISPLAY_MODE] ?: "FOCAL_LENGTH",
-                useJpgMax = useJpgMax,
+                useJpgMax = false,
                 useJpgMaxHdrComposition = false,
                 jpgMultiFrameDenoiseFrameCount = preferences[JPG_MULTI_FRAME_DENOISE_FRAME_COUNT]
                     ?.let(MultiFrameConfig::normalizeDenoiseFrameCount)
@@ -812,11 +808,11 @@ class UserPreferencesRepository(private val context: Context) {
                         )
                     }
                     ?: MultiFrameConfig.DEFAULT_SUPER_RESOLUTION_SCALE,
-                useMultipleExposure = preferences[USE_MULTIPLE_EXPOSURE] ?: false,
+                useMultipleExposure = false,
                 multipleExposureCount = preferences[MULTIPLE_EXPOSURE_COUNT] ?: 2,
                 rawMaxQualityTuningEnabled = preferences[RAW_MAX_QUALITY_TUNING_ENABLED]
                     ?: PhotonSensorSizeTuning.DEFAULT_RAW_MAX_QUALITY_TUNING_ENABLED,
-                useRawMax = useRawMax,
+                useRawMax = false,
                 hdrPlusMergeMode = hdrPlusMergeMode,
                 hdrPlusFrameCount = preferences[HDR_PLUS_FRAME_COUNT]
                     ?.let {
@@ -826,7 +822,7 @@ class UserPreferencesRepository(private val context: Context) {
                         )
                     }
                     ?: MultiFrameConfig.DEFAULT_HDR_PLUS_FRAME_COUNT,
-                hdrPlusBracketExposureEnabled = hdrPlusBracketExposureEnabled,
+                hdrPlusBracketExposureEnabled = false,
                 hdrPlusLongFrameExposureEv = MultiFrameConfig.normalizeLongFrameExposureEv(
                     preferences[HDR_PLUS_LONG_FRAME_EXPOSURE_EV]
                         ?: MultiFrameConfig.LONG_FRAME_EXPOSURE_EV.toFloat(),
@@ -870,11 +866,11 @@ class UserPreferencesRepository(private val context: Context) {
                 captureButtonImagePath = preferences[CAPTURE_BUTTON_IMAGE_PATH]
                     ?.takeIf { it.isNotBlank() },
                 droMode = preferences[DRO_MODE] ?: if (preferences[RAW_DRO_ENABLED_KEY] == true) "DR100" else "OFF",
-                applyUltraHDR = preferences[APPLY_ULTRA_HDR] ?: false,
+                applyUltraHDR = false,
                 colorSpace = ColorSpace.valueOf(preferences[COLOR_SPACE] ?: ColorSpace.SRGB.name),
                 logCurve = TransferCurve.fromPersistedName(preferences[LOG_CURVE] ?: TransferCurve.SRGB.name),
                 rawLuts = parseRawLuts(preferences),
-                useP010 = preferences[USE_P010] ?: false,
+                useP010 = false,
                 useP3ColorSpace = preferences[USE_P3_COLOR_SPACE] ?: false,
                 videoResolution = storedVideoResolution,
                 videoFps = storedVideoFps,
@@ -916,7 +912,7 @@ class UserPreferencesRepository(private val context: Context) {
                 videoCodec = com.hinnka.mycamera.video.VideoCodec.valueOf(
                     preferences[VIDEO_CODEC] ?: com.hinnka.mycamera.video.VideoCodec.H264.name
                 ),
-                ultraHdrGainMapEnabled = preferences[ULTRA_HDR_GAIN_MAP_ENABLED] ?: false,
+                ultraHdrGainMapEnabled = false,
                 phantomMode = preferences[PHANTOM_MODE] ?: false,
                 phantomButtonHidden = preferences[PHANTOM_BUTTON_HIDDEN] ?: false,
                 launchCameraOnPhantomMode = preferences[LAUNCH_CAMERA_ON_PHANTOM_MODE] ?: false,
