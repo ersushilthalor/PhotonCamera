@@ -538,7 +538,16 @@ class VideoRecorder(
             .coerceIn(2_000_000L, Int.MAX_VALUE.toLong())
             .toInt()
 
+        // Reuse the same format-compatible encoder chosen by the bitrate capability resolver
+        // for ordinary recordings; preserve the explicit Main10 encoder selection for HLG10.
+        val compatibleEncoderName = VideoEncoderCapabilities.findForFormat(
+            mimeType = requestedCodecMime,
+            size = requestedSize,
+            fps = requestedFps
+        )?.codecName
         videoEncoder = preferredEncoderCodecName?.let { codecName ->
+            runCatching { MediaCodec.createByCodecName(codecName) }.getOrNull()
+        } ?: compatibleEncoderName?.let { codecName ->
             runCatching { MediaCodec.createByCodecName(codecName) }.getOrNull()
         } ?: MediaCodec.createEncoderByType(requestedCodecMime)
         videoEncoder?.apply {
