@@ -1929,6 +1929,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     // 保存当前的 SurfaceTexture 以便切换摄像头时重用
     private var currentSurfaceTexture: SurfaceTexture? = null
+    @Volatile private var instantStandbyPreviewHandoffCameraId: String? = null
+    private var instantStandbyPreviewHandoffJob: Job? = null
     private var cameraOpenInFlight = false
     private var cameraReopenJob: Job? = null
     private var cameraErrorRecoveryJob: Job? = null
@@ -2925,6 +2927,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             )
             return
         }
+        cancelInstantStandbyPreviewHandoff()
         cameraReopenJob?.cancel()
         cameraOpenInFlight = false
         currentSurfaceTexture = null
@@ -3471,6 +3474,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun capture() {
+        if (instantStandbyPreviewHandoffCameraId != null) return
         if (state.value.captureMode == CaptureMode.VIDEO) {
             if (state.value.videoRecordingState.isProcessing) {
                 return
@@ -3774,6 +3778,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 切换摄像头（前后置切换）
      */
     fun switchCamera() {
+        cancelInstantStandbyPreviewHandoff()
         cameraController.switchCamera()
         reopenCamera(
             preserveVideoRecording = true
@@ -3786,8 +3791,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun switchToLens(cameraId: String) {
         if (isVideoLensLocked()) return
+        if (instantStandbyPreviewHandoffCameraId != null &&
+            instantStandbyPreviewHandoffCameraId != cameraId
+        ) cancelInstantStandbyPreviewHandoff()
+        if (instantStandbyPreviewHandoffCameraId == cameraId) {
+            targetLensZoomRatio(cameraId)?.let(::setZoomRatio)
+            return
+        }
         val previousCamera = state.value.getCurrentCameraInfo()
         val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId }
+        if (targetCamera != null) tryStartInstantStandbyPreviewHandoff(
+            cameraId = cameraId,
+            visibleZoomRatio = targetCamera.defaultVisibleZoomRatio(),
+        )
         syncVendorCaptureSettingsToController()
         cameraController.switchToCameraId(cameraId)
         targetCamera?.let { camera ->
@@ -3809,7 +3825,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             setZoomRatio(ratio)
             return
         }
+        if (instantStandbyPreviewHandoffCameraId != null &&
+            instantStandbyPreviewHandoffCameraId != cameraId
+        ) cancelInstantStandbyPreviewHandoff()
         if (trySwitchVideoLensInputInstantly(cameraId, ratio)) return
+        if (instantStandbyPreviewHandoffCameraId == cameraId) {
+            zoomRatioByMain = ratio
+            cameraController.setStandbyVisibleZoomRatio(ratio)
+            targetLensZoomRatio(cameraId, ratio)?.let(cameraController::setZoomRatioForPendingLensOpen)
+            return
+        }
+        tryStartInstantStandbyPreviewHandoff(cameraId, ratio)
 
         val previousCamera = state.value.getCurrentCameraInfo()
         val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId }
@@ -3825,6 +3851,65 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     "${previousCamera?.cameraId} -> ${targetCamera?.cameraId}"
             )
         }
+    }
+
+    private fun targetLensZoomRatio(cameraId: String, visibleZoomRatio: Float? = null): Float? {
+        val target = state.value.availableCameras.firstOrNull { it.cameraId == cameraId } ?: return null
+        val visible = visibleZoomRatio ?: target.defaultVisibleZoomRatio()
+        val displayRatio = target.displayIntrinsicZoomRatio.takeIf { it.isFinite() && it > 0f } ?: 1f
+        return visible / displayRatio
+    }
+
+    private fun tryStartInstantStandbyPreviewHandoff(
+        cameraId: String,
+        visibleZoomRatio: Float,
+    ): Boolean {
+        val current = state.value
+        if (current.videoRecordingState.isRecording ||
+            current.videoRecordingState.isProcessing ||
+            isVideoLensLocked()
+        ) return false
+
+        val preview = glSurfaceView ?: return false
+        val canSwitchStandbyPreview = preview.canSwitchToStandbyPreviewSource()
+        if (!cameraController.canInstantlySwitchStandbyPreview(cameraId, canSwitchStandbyPreview)) {
+            return false
+        }
+
+        val timestampBeforeSwitch = current.previewFirstFrameTimestampNs
+        cameraController.setStandbyVisibleZoomRatio(visibleZoomRatio)
+        instantStandbyPreviewHandoffJob?.cancel()
+        instantStandbyPreviewHandoffCameraId = cameraId
+        preview.setActivePreviewSource(true)
+        instantStandbyPreviewHandoffJob = viewModelScope.launch {
+            try {
+                val promoted = withTimeoutOrNull(10_000L) {
+                    cameraController.state.first {
+                        it.currentCameraId == cameraId &&
+                            it.isPreviewActive &&
+                            it.previewFirstFrameTimestampNs != null &&
+                            it.previewFirstFrameTimestampNs != timestampBeforeSwitch
+                    }
+                }
+                if (promoted == null) {
+                    PLog.w(TAG, "Timed out promoting warmed lens $cameraId; returning to primary preview input")
+                }
+            } finally {
+                if (instantStandbyPreviewHandoffCameraId == cameraId) {
+                    glSurfaceView?.setActivePreviewSource(false)
+                    instantStandbyPreviewHandoffCameraId = null
+                    instantStandbyPreviewHandoffJob = null
+                }
+            }
+        }
+        return true
+    }
+
+    private fun cancelInstantStandbyPreviewHandoff() {
+        instantStandbyPreviewHandoffCameraId = null
+        instantStandbyPreviewHandoffJob?.cancel()
+        instantStandbyPreviewHandoffJob = null
+        glSurfaceView?.setActivePreviewSource(false)
     }
 
     private fun trySwitchVideoLensInputInstantly(cameraId: String, visibleZoomRatio: Float): Boolean {
@@ -3858,8 +3943,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         return true
     }
 
-    fun isInstantVideoLensInputActive(cameraId: String): Boolean =
-        cameraController.isInstantVideoLensInputActive(cameraId)
+    fun isInstantLensSwitchActive(cameraId: String): Boolean =
+        cameraController.isInstantVideoLensInputActive(cameraId) ||
+            instantStandbyPreviewHandoffCameraId == cameraId
 
     /**
      * Keep the current logical Camera2 device open when both selected lenses belong to it.
@@ -3975,6 +4061,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun setZoomRatio(ratio: Float) {
         zoomRatioByMain = ratio
         cameraController.setStandbyVisibleZoomRatio(ratio)
+        if (instantStandbyPreviewHandoffCameraId != null) {
+            val cameraInfo = state.value.getCurrentCameraInfo()
+            val displayRatio = cameraInfo?.displayIntrinsicZoomRatio?.takeIf { it > 0f } ?: 1f
+            cameraController.setZoomRatioForPendingLensOpen(ratio / displayRatio)
+            return
+        }
         val cameraInfo = state.value.getCurrentCameraInfo()
         setCameraControllerZoomRatio(ratio, cameraInfo)
     }
@@ -3983,6 +4075,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         zoomRatioByMain = ratio
         cameraController.setStandbyVisibleZoomRatio(ratio)
         val cameraInfo = state.value.availableCameras.find { it.cameraId == cameraId }
+        if (instantStandbyPreviewHandoffCameraId == cameraId) {
+            val displayRatio = cameraInfo?.displayIntrinsicZoomRatio?.takeIf { it > 0f } ?: 1f
+            cameraController.setZoomRatioForPendingLensOpen(ratio / displayRatio)
+            return
+        }
         setCameraControllerZoomRatio(ratio, cameraInfo)
     }
 

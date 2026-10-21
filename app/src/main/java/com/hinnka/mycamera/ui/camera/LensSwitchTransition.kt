@@ -108,7 +108,7 @@ internal class LensSwitchTransitionState(
                     pendingRequest = null
                     val timestampBeforeSwitch = viewModel.state.value.previewFirstFrameTimestampNs
                     request.onSwitch()
-                    val instantSwitch = viewModel.isInstantVideoLensInputActive(request.cameraId)
+                    val instantSwitch = viewModel.isInstantLensSwitchActive(request.cameraId)
 
                     coroutineScope {
                         val animation = launch {

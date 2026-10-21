@@ -261,6 +261,11 @@ class Camera2Controller(private val context: Context) {
         backgroundUltraWideReady.updateVisibleZoomRatio(visibleZoomRatio)
     }
 
+    /** Update a not-yet-open lens's zoom without applying it to the outgoing CameraDevice. */
+    fun setZoomRatioForPendingLensOpen(ratio: Float) {
+        _state.value = _state.value.copy(zoomRatio = sanitizeZoomRatio(ratio))
+    }
+
     private fun resolveVisibleZoomRatio(state: CameraState): Float {
         val camera = state.getCurrentCameraInfo()
         return (state.zoomRatio * (camera?.displayIntrinsicZoomRatio ?: 1f))
@@ -346,6 +351,36 @@ class Camera2Controller(private val context: Context) {
     }
 
     /**
+     * True when the selected rear lens is already streaming to the renderer-owned standby
+     * SurfaceTexture and can be shown while Camera2 promotes that warmed device to primary.
+     */
+    fun canInstantlySwitchStandbyPreview(
+        targetCameraId: String,
+        canSwitchStandbyPreview: Boolean,
+    ): Boolean {
+        val current = _state.value
+        if (!keepUltraWideReadyEnabled ||
+            !canSwitchStandbyPreview ||
+            !current.isPreviewActive ||
+            current.videoRecordingState.isRecording ||
+            current.videoRecordingState.isProcessing ||
+            fastVideoInputUsingStandby
+        ) return false
+
+        val currentCamera = current.getCurrentCameraInfo() ?: return false
+        val target = current.availableCameras.firstOrNull { it.cameraId == targetCameraId } ?: return false
+        if (currentCamera.cameraId == target.cameraId ||
+            !isInstantSwitchRearLens(currentCamera) ||
+            !isInstantSwitchRearLens(target)
+        ) return false
+
+        val activeOpenId = cameraDevice?.id ?: return false
+        val targetOpenId = runCatching { target.getOpenCameraId() }.getOrNull() ?: return false
+        if (targetOpenId == activeOpenId) return false
+        return backgroundUltraWideReady.isReadyFor(targetOpenId)
+    }
+
+    /**
      * Instant recording switches are safe only when both the GL preview and the encoder are
      * already receiving frames from the same warmed secondary lens. Otherwise use the normal
      * Camera2 session/device hand-off.
@@ -358,6 +393,7 @@ class Camera2Controller(private val context: Context) {
         if (current.captureMode != CaptureMode.VIDEO ||
             !current.videoRecordingState.isRecording ||
             current.videoRecordingState.isPaused ||
+            videoCameraHlg10InputActive ||
             current.videoConfig.shouldLockLens(
                 captureMode = current.captureMode,
                 isRecording = current.videoRecordingState.isRecording,
