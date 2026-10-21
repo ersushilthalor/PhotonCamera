@@ -57,7 +57,7 @@ class VideoRecorder(
         private const val AUDIO_MONO_BITRATE = 96_000
         private const val AUDIO_STEREO_BITRATE = 192_000
         private const val I_FRAME_INTERVAL = 1
-        private const val MAX_REQUESTED_VIDEO_BITRATE_MBPS = 2_147
+        private const val MAX_REQUESTED_VIDEO_BITRATE_MBPS = Int.MAX_VALUE / 1_000_000
         private const val UNSET_TIMESTAMP = Long.MIN_VALUE
         private const val NANOS_PER_SECOND = 1_000_000_000L
         private const val MICROS_PER_SECOND = 1_000_000L
@@ -532,8 +532,8 @@ class VideoRecorder(
         if (videoEncoder != null && inputSurface != null) return
         val width = requestedSize.width
         val height = requestedSize.height
-        // MediaFormat.KEY_BIT_RATE is an Int in bits/second. Convert with Long first so
-        // high user targets (up to 10,000 Mbps) cannot overflow into a fake low/negative value.
+        // MediaFormat.KEY_BIT_RATE is an Int in bits/second. Convert with Long first to
+        // avoid overflow; the preset list is capped to the API's representable whole-Mbps range.
         val requestedBitrateBps = (requestedBitrateMbps.toLong() * 1_000_000L)
             .coerceIn(2_000_000L, Int.MAX_VALUE.toLong())
             .toInt()
