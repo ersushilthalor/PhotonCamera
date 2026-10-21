@@ -2451,7 +2451,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             return hardwareRendered
         }
         return mgcEisYuvRenderer.render(frame)?.let { rendered ->
-            MgcEisHardwareBufferRenderer.Frame(rendered.timestampNs, rendered.textureId)
+            MgcEisHardwareBufferRenderer.Frame(rendered.timestampNs, rendered.textureId, rendered.width, rendered.height)
         }
     }
 
