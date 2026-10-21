@@ -78,7 +78,16 @@ enum class VideoBitratePreset(val bitrateMbps: Int) {
     P2(60),
     P3(90),
     P4(120),
-    P5(250);
+    P5(250),
+    P6(500),
+    P7(750),
+    P8(1000),
+    P9(1500),
+    P10(2000),
+    P11(3000),
+    P12(5000),
+    P13(7500),
+    P14(10000);
 }
 
 enum class VideoCodec(val displayName: String, val mimeType: String) {
