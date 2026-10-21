@@ -69,6 +69,7 @@ fun CameraTopSheet(
     availableVideoLogProfiles: List<VideoLogProfile>,
     onVideoLogProfileChange: (VideoLogProfile) -> Unit,
     videoBitrate: VideoBitratePreset,
+    availableVideoBitrates: List<VideoBitratePreset>,
     onVideoBitrateChange: (VideoBitratePreset) -> Unit,
     videoCodec: VideoCodec,
     onVideoCodecChange: (VideoCodec) -> Unit,
@@ -310,7 +311,7 @@ fun CameraTopSheet(
                         )
                         VideoSettingTile(
                             title = stringResource(R.string.video_bitrate_chip),
-                            summary = "${videoBitrate.bitrateMbps}M target",
+                            summary = "${videoBitrate.bitrateMbps}M",
                             expanded = expandedVideoPanel == VideoSettingPanel.BITRATE,
                             onClick = {
                                 expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.BITRATE) null else VideoSettingPanel.BITRATE
@@ -372,7 +373,7 @@ fun CameraTopSheet(
                                             verticalArrangement = Arrangement.spacedBy(8.dp),
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            VideoBitratePreset.entries.forEach { bitrate ->
+                                            availableVideoBitrates.forEach { bitrate ->
                                                 VideoOptionChip(
                                                     title = "${bitrate.bitrateMbps}M",
                                                     selected = videoBitrate == bitrate,
@@ -380,12 +381,6 @@ fun CameraTopSheet(
                                                 )
                                             }
                                         }
-                                        Text(
-                                            text = "Bitrate is an encoder target, not a guaranteed average. The app clamps the request to the selected codec's advertised range; actual output can be lower.",
-                                            color = Color.White.copy(alpha = 0.62f),
-                                            fontSize = 11.sp,
-                                            modifier = Modifier.padding(top = 10.dp)
-                                        )
                                     }
 
                                     VideoSettingPanel.CODEC -> {
