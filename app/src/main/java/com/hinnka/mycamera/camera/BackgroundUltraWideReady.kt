@@ -39,9 +39,17 @@ internal class BackgroundUltraWideReady(context: Context) {
     @Volatile private var standbyTexture: SurfaceTexture? = null
     @Volatile private var standbySurface: Surface? = null
     @Volatile private var standbyCameraId: String? = null
+    @Volatile private var standbySize: Size? = null
     @Volatile private var activeCameraId: String? = null
+    @Volatile private var transferCameraAfterSessionClose: CameraDevice? = null
+    @Volatile private var transferCallbackAfterSessionClose: ((CameraDevice?) -> Unit)? = null
 
-    fun update(cameras: List<CameraInfo>, currentCameraId: String, activeOpenCameraId: String?) {
+    fun update(
+        cameras: List<CameraInfo>,
+        currentCameraId: String,
+        activeOpenCameraId: String?,
+        requestedPreviewSize: Size,
+    ) {
         handler.post {
             val active = cameras.firstOrNull {
                 it.cameraId == currentCameraId ||
@@ -83,7 +91,7 @@ internal class BackgroundUltraWideReady(context: Context) {
                 return@post
             }
             if (standbyCameraId == standbyId && standbyDevice != null && standbySession != null &&
-                activeCameraId == activeId
+                activeCameraId == activeId && standbySize == requestedPreviewSize
             ) {
                 return@post
             }
@@ -96,9 +104,34 @@ internal class BackgroundUltraWideReady(context: Context) {
                 val map = cameraManager.getCameraCharacteristics(standbyId)
                     .get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
                 val sizes = map?.getOutputSizes(SurfaceTexture::class.java).orEmpty()
-                val chosenSize = sizes.minByOrNull { size ->
-                    kotlin.math.abs(size.width * size.height - 640 * 480)
-                } ?: Size(640, 480)
+                // Keep standby at the active viewfinder size whenever the target lens supports it.
+                // In video mode currentPreviewSize follows the selected video resolution; in photo
+                // mode it is the configured photo viewfinder resolution.
+                val chosenSize = sizes.firstOrNull { it == requestedPreviewSize }
+                    ?: sizes.minWithOrNull(
+                        compareBy<Size>(
+                            { size ->
+                                val requestedAspect =
+                                    requestedPreviewSize.width.toDouble() / requestedPreviewSize.height
+                                val aspect = size.width.toDouble() / size.height
+                                kotlin.math.abs(aspect - requestedAspect)
+                            },
+                            { size ->
+                                kotlin.math.abs(
+                                    size.width.toLong() * size.height -
+                                        requestedPreviewSize.width.toLong() * requestedPreviewSize.height
+                                )
+                            }
+                        )
+                    )
+                    ?: requestedPreviewSize
+                if (chosenSize != requestedPreviewSize) {
+                    PLog.w(
+                        TAG,
+                        "Requested standby size ${requestedPreviewSize.width}x${requestedPreviewSize.height} " +
+                            "is unsupported by camera $standbyId; using ${chosenSize.width}x${chosenSize.height}"
+                    )
+                }
                 val texture = SurfaceTexture(0).apply {
                     setDefaultBufferSize(chosenSize.width, chosenSize.height)
                 }
@@ -106,6 +139,7 @@ internal class BackgroundUltraWideReady(context: Context) {
                 standbyTexture = texture
                 standbySurface = surface
                 standbyCameraId = standbyId
+                standbySize = chosenSize
 
                 @SuppressLint("MissingPermission")
                 cameraManager.openCamera(standbyId, object : CameraDevice.StateCallback() {
@@ -148,6 +182,23 @@ internal class BackgroundUltraWideReady(context: Context) {
 
                                     override fun onClosed(session: CameraCaptureSession) {
                                         if (standbySession === session) standbySession = null
+
+                                        // Promote the warmed device only after its standby session
+                                        // has fully closed; this avoids racing the next session setup.
+                                        val transferDevice = transferCameraAfterSessionClose
+                                        if (transferDevice != null) {
+                                            transferCameraAfterSessionClose = null
+                                            val callback = transferCallbackAfterSessionClose
+                                            transferCallbackAfterSessionClose = null
+                                            try { standbySurface?.release() } catch (_: Exception) {}
+                                            standbySurface = null
+                                            try { standbyTexture?.release() } catch (_: Exception) {}
+                                            standbyTexture = null
+                                            standbyCameraId = null
+                                            standbySize = null
+                                            activeCameraId = null
+                                            callback?.invoke(transferDevice)
+                                        }
                                     }
                                 },
                                 handler
@@ -178,6 +229,48 @@ internal class BackgroundUltraWideReady(context: Context) {
         }
     }
 
+    /**
+     * Transfers a fully warmed standby device to the foreground camera pipeline.
+     * The callback runs after the standby session closes so the caller can configure its
+     * normal preview/capture outputs on the returned CameraDevice.
+     */
+    fun takeWarmCamera(cameraId: String, callback: (CameraDevice?) -> Unit) {
+        handler.post {
+            val device = standbyDevice
+            val session = standbySession
+            if (standbyCameraId != cameraId || device == null || session == null) {
+                callback(null)
+                return@post
+            }
+
+            generation.incrementAndGet()
+            standbyDevice = null // Ownership transfers to the foreground controller.
+            transferCameraAfterSessionClose = device
+            transferCallbackAfterSessionClose = callback
+            try {
+                session.stopRepeating()
+            } catch (_: Exception) {
+            }
+            try {
+                session.close()
+            } catch (error: Exception) {
+                transferCameraAfterSessionClose = null
+                transferCallbackAfterSessionClose = null
+                try { device.close() } catch (_: Exception) {}
+                try { standbySurface?.release() } catch (_: Exception) {}
+                standbySurface = null
+                try { standbyTexture?.release() } catch (_: Exception) {}
+                standbyTexture = null
+                standbySession = null
+                standbyCameraId = null
+                standbySize = null
+                activeCameraId = null
+                callback(null)
+                PLog.w(TAG, "Could not close standby session for transfer: ${error.message}")
+            }
+        }
+    }
+
     fun stop() {
         handler.post { releaseLocked() }
     }
@@ -189,6 +282,10 @@ internal class BackgroundUltraWideReady(context: Context) {
 
     private fun releaseLocked() {
         generation.incrementAndGet()
+        transferCallbackAfterSessionClose?.invoke(null)
+        transferCallbackAfterSessionClose = null
+        try { transferCameraAfterSessionClose?.close() } catch (_: Exception) {}
+        transferCameraAfterSessionClose = null
         try { standbySession?.stopRepeating() } catch (_: Exception) {}
         try { standbySession?.close() } catch (_: Exception) {}
         standbySession = null
@@ -199,6 +296,7 @@ internal class BackgroundUltraWideReady(context: Context) {
         try { standbyTexture?.release() } catch (_: Exception) {}
         standbyTexture = null
         standbyCameraId = null
+        standbySize = null
         activeCameraId = null
     }
 }
