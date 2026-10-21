@@ -50,7 +50,8 @@ object Jpeg444ExportEncoder {
             }
 
             outputFile.parentFile?.mkdirs()
-            val gainmap = gainmapResult?.gainmap
+            // Ultra HDR gain-map output has been removed; keep a standard JPEG base.
+            val gainmap: Gainmap? = null
             val baseOutputFile = if (gainmap == null) {
                 outputFile
             } else {

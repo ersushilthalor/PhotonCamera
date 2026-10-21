@@ -198,26 +198,7 @@ fun CameraTopSheet(
                                 onClick = { showRenderingEngineSheet = true },
                                 modifier = itemModifier
                             )
-                        } else {
-                            QuickSettingToggle(
-                                title = stringResource(R.string.settings_use_jpg_max),
-                                checked = useJpgMax,
-                                onCheckedChange = onJpgMaxToggle,
-                                modifier = itemModifier
-                            )
-                            QuickSettingToggle(
-                                title = stringResource(R.string.settings_use_multiple_exposure),
-                                checked = useMultipleExposure,
-                                onCheckedChange = onMultipleExposureToggle,
-                                modifier = itemModifier
-                            )
                         }
-                        QuickSettingToggle(
-                            title = stringResource(R.string.settings_ultra_hdr_gain_map),
-                            checked = ultraHdrEnabled,
-                            onCheckedChange = onUltraHdrToggle,
-                            modifier = itemModifier
-                        )
                         QuickSettingToggle(
                             title = stringResource(R.string.camera_preview_stabilization),
                             checked = photoPreviewStabilizationEnabled,

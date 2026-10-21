@@ -27,7 +27,6 @@ import com.hinnka.mycamera.hdr.GainmapResult
 import com.hinnka.mycamera.hdr.GainmapSourceSet
 import com.hinnka.mycamera.hdr.HdrGainmapStrength
 import com.hinnka.mycamera.hdr.SourceKind
-import com.hinnka.mycamera.hdr.UltraHdrWriter
 import com.hinnka.mycamera.hdr.UnifiedGainmapProducer
 import com.hinnka.mycamera.livephoto.MotionPhotoWriter
 import com.hinnka.mycamera.lut.BaselineColorCorrectionTarget
@@ -882,18 +881,15 @@ object GalleryManager {
     ): Boolean {
         var success = false
         val elapsed = measureTimeMillis {
-            success = UltraHdrWriter.writeJpeg(
-                UltraHdrWriter.Request(
-                    bitmap = bitmap,
-                    outputStream = outputStream,
-                    quality = quality,
-                    gainmap = gainmapResult?.gainmap,
-                )
+            success = bitmap.compress(
+                Bitmap.CompressFormat.JPEG,
+                quality.coerceIn(1, 100),
+                outputStream,
             )
         }
         PLog.d(
             TAG,
-            "writeFinalJpeg took ${elapsed}ms, size=${bitmap.width}x${bitmap.height}, gainmap=${gainmapResult != null}, success=$success"
+            "writeFinalJpeg took ${elapsed}ms, size=${bitmap.width}x${bitmap.height}, ultraHdr=false, success=$success"
         )
         return success
     }

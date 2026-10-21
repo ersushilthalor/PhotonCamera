@@ -7698,8 +7698,8 @@ class Camera2Controller(private val context: Context) {
         )
     }
 
-    fun setUseMultipleExposure(useMultipleExposure: Boolean) {
-        _state.value = _state.value.copy(useMultipleExposure = useMultipleExposure)
+    fun setUseMultipleExposure(@Suppress("UNUSED_PARAMETER") useMultipleExposure: Boolean) {
+        _state.update { it.copy(useMultipleExposure = false) }
     }
 
     fun onHdrBracketFramesCollected() {
@@ -7709,10 +7709,8 @@ class Camera2Controller(private val context: Context) {
         )
     }
 
-    fun setJpgMultiFrameDenoiseFrameCount(frameCount: Int) {
-        _state.value = _state.value.copy(
-            jpgMultiFrameDenoiseFrameCount = MultiFrameConfig.normalizeDenoiseFrameCount(frameCount),
-        )
+    fun setJpgMultiFrameDenoiseFrameCount(@Suppress("UNUSED_PARAMETER") frameCount: Int) {
+        // JPG multi-frame denoise has been removed; no capture state is changed.
     }
 
     fun setHdrPlusMergeMode(mode: MgcRawMaxMode) {
@@ -7735,8 +7733,8 @@ class Camera2Controller(private val context: Context) {
         )
     }
 
-    fun setUseJpgMaxHdrComposition(enabled: Boolean) {
-        _state.value = _state.value.copy(useJpgMaxHdrComposition = enabled)
+    fun setUseJpgMaxHdrComposition(@Suppress("UNUSED_PARAMETER") enabled: Boolean) {
+        _state.update { it.copy(useJpgMaxHdrComposition = false) }
     }
 
     fun setHdrPlusBracketExposureEnabled(enabled: Boolean) {
@@ -7768,8 +7766,8 @@ class Camera2Controller(private val context: Context) {
         _state.value = _state.value.copy(isCapturingLivePhoto = enabled)
     }
 
-    fun setApplyUltraHDR(enabled: Boolean) {
-        _state.value = _state.value.copy(applyUltraHDR = enabled)
+    fun setApplyUltraHDR(@Suppress("UNUSED_PARAMETER") enabled: Boolean) {
+        _state.update { it.copy(applyUltraHDR = false) }
     }
 
 // ==================== 拍照 ====================
