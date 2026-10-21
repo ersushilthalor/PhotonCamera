@@ -3957,15 +3957,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     ): Boolean {
         if (!userPreferences.value.keepUltraWideReadyEnabled) return true
         if (previousCamera == null || targetCamera == null) return true
-        if (previousCamera.lensFacing != CameraCharacteristics.LENS_FACING_BACK ||
-            targetCamera.lensFacing != CameraCharacteristics.LENS_FACING_BACK
-        ) return true
-
-        val previousOpenId = runCatching { previousCamera.getOpenCameraId() }.getOrNull()
-            ?: return true
-        val targetOpenId = runCatching { targetCamera.getOpenCameraId() }.getOrNull()
-            ?: return true
-        return previousOpenId != targetOpenId
+        return !cameraController.canSwitchLogicalPhysicalLensWithoutReopen(
+            previousCamera.cameraId,
+            targetCamera.cameraId
+        )
     }
 
     /**
