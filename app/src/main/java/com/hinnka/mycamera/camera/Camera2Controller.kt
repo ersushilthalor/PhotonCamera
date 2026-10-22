@@ -6415,15 +6415,26 @@ class Camera2Controller(private val context: Context) {
         if (!deltaX.isFinite() || !deltaY.isFinite()) return
 
         val current = _state.value
-        if (current.zoomRatio <= 1.001f ||
-            current.getCurrentCameraInfo()?.supportsFreeformZoomPan != true
-        ) {
+        val cameraInfo = current.getCurrentCameraInfo()
+        if (current.zoomRatio <= 1.001f || cameraInfo?.supportsFreeformZoomPan != true) {
             return
         }
 
+        // Joystick deltas are expressed in the displayed viewfinder's axes, while
+        // SCALER_CROP_REGION uses unrotated sensor coordinates.
+        val (sensorDeltaX, sensorDeltaY) = when (Math.floorMod(cameraInfo.sensorOrientation, 360)) {
+            90 -> deltaY to -deltaX
+            180 -> -deltaX to -deltaY
+            270 -> -deltaY to deltaX
+            else -> deltaX to deltaY
+        }
+        val sensorDeltaXForFacing = if (
+            cameraInfo.lensFacing == CameraCharacteristics.LENS_FACING_FRONT
+        ) -sensorDeltaX else sensorDeltaX
+
         val next = current.copy(
-            zoomPanX = (current.zoomPanX + deltaX).coerceIn(-1f, 1f),
-            zoomPanY = (current.zoomPanY + deltaY).coerceIn(-1f, 1f),
+            zoomPanX = (current.zoomPanX + sensorDeltaXForFacing).coerceIn(-1f, 1f),
+            zoomPanY = (current.zoomPanY + sensorDeltaY).coerceIn(-1f, 1f),
             zoomPanEnabled = true,
         )
         if (next.zoomPanX == current.zoomPanX &&
