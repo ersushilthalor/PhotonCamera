@@ -134,7 +134,7 @@ data class VideoConfig(
     val aspectRatio: VideoAspectRatio = VideoAspectRatio.RATIO_16_9,
     val logProfile: VideoLogProfile = VideoLogProfile.OFF,
     val logLutMode: VideoLogLutMode = VideoLogLutMode.MONITOR_ONLY,
-    val bitrate: VideoBitratePreset = VideoBitratePreset.P1,
+    val bitrate: VideoBitratePreset = VideoBitratePreset.P5,
     val codec: VideoCodec = VideoCodec.H264,
     val audioInputId: String = VIDEO_AUDIO_INPUT_AUTO,
     val recordingPath: VideoRecordingPath = VideoRecordingPath.DCIM_PHOTON,
