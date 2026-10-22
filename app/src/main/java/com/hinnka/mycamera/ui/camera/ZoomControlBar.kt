@@ -299,7 +299,7 @@ fun ZoomControlBar(
                             onZoomStopClick(preset)
                         }
                     },
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.wrapContentWidth().fillMaxHeight()
                 )
             }
         }
@@ -320,7 +320,7 @@ private fun ZoomPresetPill(
         modifier = modifier
             .clip(CircleShape)
             .background(Color(0xFF25242C))
-            .padding(horizontal = 6.dp, vertical = 3.dp),
+            .padding(horizontal = 4.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -328,15 +328,15 @@ private fun ZoomPresetPill(
             val selected = selectedPreset != null && abs(selectedPreset - preset) <= 0.01f
             Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
+                    .width(34.dp)
+                    .height(26.dp)
                     .clickable { onPresetClick(preset) },
                 contentAlignment = Alignment.Center
             ) {
                 if (selected) {
                     Box(
                         modifier = Modifier
-                            .size(42.dp)
+                            .size(26.dp)
                             .clip(CircleShape)
                             .background(Color(0xFF484651))
                     )
@@ -348,7 +348,7 @@ private fun ZoomPresetPill(
                 Text(
                     text = if (selected) "${label}x" else label,
                     style = TextStyle(
-                        fontSize = if (selected) 20.sp else 18.sp,
+                        fontSize = if (selected) 14.sp else 13.sp,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                         color = Color.White,
                         textAlign = TextAlign.Center
