@@ -4977,6 +4977,10 @@ class Camera2Controller(private val context: Context) {
         }
 
         if (shouldUseControlZoomRatio(zoomRatioRange)) {
+            // A previous joystick interaction may have installed a freeform crop.
+            // Clear it before returning to native CONTROL_ZOOM_RATIO so the old offset
+            // cannot compound the requested zoom or survive a joystick reset.
+            builder.set(CaptureRequest.SCALER_CROP_REGION, null)
             builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoomRatio)
             return
         }
