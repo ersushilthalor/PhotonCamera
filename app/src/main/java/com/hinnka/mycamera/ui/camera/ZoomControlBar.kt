@@ -3,11 +3,10 @@ package com.hinnka.mycamera.ui.camera
 import androidx.compose.animation.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -19,19 +18,16 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.ui.theme.AccentColor
@@ -66,7 +62,6 @@ enum class ZoomDisplayMode {
 
 @Composable
 fun ZoomControlBar(
-    oppoStyle: Boolean = false,
     viewModel: CameraViewModel,
     zoomRatio: Float,
     availableCameras: List<CameraInfo>,
@@ -80,8 +75,6 @@ fun ZoomControlBar(
 ) {
     val displayMode by viewModel.zoomDisplayMode.collectAsState()
 
-    val currentCameraIdState by rememberUpdatedState(currentCameraId)
-
     val currentCamera = availableCameras.find { it.cameraId == currentCameraId }
     val isCameraReady = currentCamera != null
 
@@ -94,10 +87,6 @@ fun ZoomControlBar(
     val hiddenFocalLengths by viewModel.hiddenFocalLengths.collectAsState(initial = emptyList())
     val lensZoomStops = viewModel.calculateLensZoomStops(availableCameras, currentCamera)
     val zoomStops = viewModel.allZoomStops(lensZoomStops, mainCamera, currentCamera, customFocalLengths, hiddenFocalLengths)
-
-    val macroCameras = remember(availableCameras) {
-        availableCameras.filter { it.lensType == LensType.BACK_MACRO }
-    }
 
     val cameraState by viewModel.state.collectAsState()
     val minZoom = remember(cameraState.availableCameras) {
@@ -113,31 +102,20 @@ fun ZoomControlBar(
     var internalZoomRatio by remember { mutableFloatStateOf(zoomRatio) }
     var isDragging by remember { mutableStateOf(false) }
     
-    // 离开连续变焦后显示的临时档位逻辑
-    var customZoomStop by remember { mutableStateOf<Float?>(null) }
-    var replacedStopIndex by remember { mutableIntStateOf(-1) }
-    var originalStopRatio by remember { mutableFloatStateOf(0f) }
-
     fun closeContinuousZoomBar() {
-        if (!isContinuousZooming) {
-            return
-        }
+        if (!isContinuousZooming) return
 
         isContinuousZooming = false
-
         val settlement = settleContinuousZoomStop(
             zoomStops = zoomStops,
             zoomRatio = internalZoomRatio
         )
-        customZoomStop = settlement.customZoomStop
-        replacedStopIndex = settlement.replacedStopIndex
-        originalStopRatio = settlement.originalStopRatio
         settlement.snapZoomStop?.let(onZoomChange)
     }
 
-    // 当不处于拖拽状态且没有临时档位时，或者处于外部变焦（Pinch）过程中，同步外部变焦值
+    // Keep the local value synchronized unless a drag or continuous-zoom interaction is active.
     LaunchedEffect(zoomRatio, isDragging, isContinuousZooming, viewModel.isZooming) {
-        if (viewModel.isZooming || (!isDragging && !isContinuousZooming && customZoomStop == null)) {
+        if (viewModel.isZooming || (!isDragging && !isContinuousZooming)) {
             internalZoomRatio = zoomRatio
         }
     }
@@ -146,17 +124,8 @@ fun ZoomControlBar(
     LaunchedEffect(viewModel.isZooming) {
         if (viewModel.isZooming) {
             isContinuousZooming = true
-            customZoomStop = null
-            replacedStopIndex = -1
         }
         lastInteractionTime = System.currentTimeMillis()
-    }
-
-    LaunchedEffect(zoomStops, customZoomStop, replacedStopIndex) {
-        if (customZoomStop != null && replacedStopIndex !in zoomStops.indices) {
-            customZoomStop = null
-            replacedStopIndex = -1
-        }
     }
 
     // 自动恢复默认 UI 的定时器
@@ -181,8 +150,6 @@ fun ZoomControlBar(
                     onDragStart = {
                         dragAccumulated = 0f
                         isDragging = true
-                        customZoomStop = null
-                        replacedStopIndex = -1
                     },
                     onHorizontalDrag = { change, dragAmount ->
                         if (!isContinuousZooming) {
@@ -301,202 +268,94 @@ fun ZoomControlBar(
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
-                val effectiveStops = remember(zoomStops, customZoomStop, replacedStopIndex) {
-                    buildEffectiveZoomStops(
-                        zoomStops = zoomStops,
-                        customZoomStop = customZoomStop,
-                        replacedStopIndex = replacedStopIndex
-                    )
-                }
-                val stopItems = remember(effectiveStops, availableCameras, currentCamera) {
-                    buildZoomStopItems(
-                        stops = effectiveStops,
-                        availableCameras = availableCameras,
-                        currentCamera = currentCamera
-                    )
-                }
-                ZoomRuler(
-                    oppoStyle = oppoStyle,
+                ZoomPresetPill(
                     zoomRatio = internalZoomRatio,
-                    stopItems = stopItems,
-                    macroCameras = macroCameras,
-                    currentCameraId = currentCameraIdState,
-                    mainCamera = mainCamera,
-                    displayMode = displayMode,
-                    onZoomChange = { stop ->
-                        val targetStop = if (customZoomStop != null && stop == customZoomStop) originalStopRatio else stop
-                        onZoomStopClick(targetStop)
-                        customZoomStop = null
-                        replacedStopIndex = -1
+                    onPresetClick = { preset ->
+                        val matchingLensCameras = availableCameras
+                            .filter { camera ->
+                                val matchesFacing = if (currentCamera?.lensType == LensType.FRONT) {
+                                    camera.lensType == LensType.FRONT
+                                } else {
+                                    camera.lensType != LensType.FRONT &&
+                                        camera.lensType != LensType.BACK_MACRO
+                                }
+                                matchesFacing &&
+                                    camera.displayIntrinsicZoomRatio > 0f &&
+                                    abs(camera.displayIntrinsicZoomRatio - preset) <= 0.01f
+                            }
+                            .sortedWith(compareBy<CameraInfo>({ it.displayIntrinsicZoomRatio }, { it.cameraId }))
+
+                        val currentIndex = matchingLensCameras.indexOfFirst { it.cameraId == currentCameraId }
+                        val targetCameraId = when {
+                            matchingLensCameras.isEmpty() -> null
+                            currentIndex >= 0 && matchingLensCameras.size > 1 ->
+                                matchingLensCameras[(currentIndex + 1) % matchingLensCameras.size].cameraId
+                            else -> matchingLensCameras.first().cameraId
+                        }
+
+                        if (targetCameraId != null && targetCameraId != currentCameraId) {
+                            onLensSwitch(targetCameraId)
+                        } else {
+                            onZoomStopClick(preset)
+                        }
                     },
-                    onLensSwitch = onLensSwitch,
-                    modifier = Modifier.fillMaxHeight()
+                    modifier = Modifier.fillMaxSize()
                 )
             }
         }
     }
 }
 
-private fun buildEffectiveZoomStops(
-    zoomStops: List<Float>,
-    customZoomStop: Float?,
-    replacedStopIndex: Int
-): List<Float> {
-    if (customZoomStop == null || replacedStopIndex !in zoomStops.indices) {
-        return zoomStops
-    }
-
-    return zoomStops.toMutableList().apply {
-        this[replacedStopIndex] = customZoomStop
-    }
-}
-
-
-
-
 @Composable
-private fun ZoomRuler(
-    oppoStyle: Boolean,
+private fun ZoomPresetPill(
     zoomRatio: Float,
-    stopItems: List<ZoomStopItem>,
-    macroCameras: List<CameraInfo>,
-    currentCameraId: String,
-    mainCamera: CameraInfo?,
-    displayMode: ZoomDisplayMode,
-    onZoomChange: (Float) -> Unit,
-    onLensSwitch: (String) -> Unit,
+    onPresetClick: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val activeColor = if (oppoStyle) Color(0xFFFF8500) else AccentColor
-    val inactiveColor = Color.White
+    val basePresets = listOf(0.6f, 1f, 2f, 3f)
+    val visiblePresets = if (zoomRatio >= 3f) basePresets + listOf(5f, 10f) else basePresets
+    val selectedPreset = visiblePresets.firstOrNull { abs(it - zoomRatio) <= 0.05f }
 
-    val stopsState by rememberUpdatedState(stopItems)
-
-    BoxWithConstraints(
-        modifier = modifier,
-        contentAlignment = Alignment.Center
+    Row(
+        modifier = modifier
+            .clip(CircleShape)
+            .background(Color(0xFF25242C))
+            .padding(horizontal = 6.dp, vertical = 3.dp),
+        horizontalArrangement = Arrangement.spacedBy(0.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        val hasMacroSeparator = stopsState.isNotEmpty() && macroCameras.isNotEmpty()
-        val adaptiveMetrics = calculateZoomRulerAdaptiveMetrics(
-            availableSpace = maxWidth,
-            itemCount = stopsState.size + macroCameras.size,
-            separatorCount = if (hasMacroSeparator) 1 else 0
-        )
-
-        Row(
-            modifier = Modifier
-                .width(adaptiveMetrics.rulerLength)
-                .fillMaxHeight(),
-            horizontalArrangement = Arrangement.spacedBy(adaptiveMetrics.spacing, Alignment.CenterHorizontally),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val isCurrentMacro = macroCameras.any { it.cameraId == currentCameraId }
-            val selectedStopIndex = if (isCurrentMacro) -1 else stopsState.indices.minByOrNull {
-                val item = stopsState[it]
-                if (item.containsCamera(currentCameraId) && abs(item.zoomRatio - zoomRatio) <= 0.01f) {
-                    -1f
-                } else {
-                    abs(item.zoomRatio - zoomRatio)
+        visiblePresets.forEach { preset ->
+            val selected = selectedPreset != null && abs(selectedPreset - preset) <= 0.01f
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clickable { onPresetClick(preset) },
+                contentAlignment = Alignment.Center
+            ) {
+                if (selected) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF484651))
+                    )
                 }
-            }
-
-            stopsState.forEachIndexed { index, item ->
-                val stop = item.zoomRatio
-                val isSelected = index == selectedStopIndex && abs(stop - zoomRatio) <= 0.01f
-
-                // 显示文本
-                val text = if (oppoStyle) {
-                    if (isSelected) zoomRatioToFocalLength(stop, mainCamera)
-                    else formatZoomRatioLabel(stop)
-                } else {
-                    when (displayMode) {
-                        ZoomDisplayMode.ZOOM_RATIO -> formatZoomRatioLabel(stop)
-                        ZoomDisplayMode.FOCAL_LENGTH -> zoomRatioToFocalLength(stop, mainCamera)
-                    }
-                } + if (item.isCustomLensStop) "*" else ""
-
-                val style = TextStyle(
-                    fontSize = if (isSelected) adaptiveMetrics.selectedFontSize else adaptiveMetrics.normalFontSize,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                    color = if (isSelected) activeColor else inactiveColor,
-                    textAlign = TextAlign.Center,
-                    textDecoration = if (item.isLensStop) TextDecoration.Underline else TextDecoration.None,
-                    shadow = ViewfinderTextShadow
+                val label = when {
+                    abs(preset - 0.6f) <= 0.01f -> ".6"
+                    else -> preset.toInt().toString()
+                }
+                Text(
+                    text = if (selected) "${label}x" else label,
+                    style = TextStyle(
+                        fontSize = if (selected) 20.sp else 18.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                        color = Color.White,
+                        textAlign = TextAlign.Center
+                    ),
+                    maxLines = 1,
+                    softWrap = false
                 )
-
-                Box(
-                    modifier = Modifier
-                        .size(adaptiveMetrics.itemSize)
-                        .autoRotate()
-                        .pointerInput(item.cameraIds, stop, currentCameraId) {
-                            detectTapGestures {
-                                val cameraId = item.targetCameraId(currentCameraId)
-                                if (cameraId != null && cameraId != currentCameraId) {
-                                    onLensSwitch(cameraId)
-                                } else {
-                                    onZoomChange(stop)
-                                }
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = text,
-                        style = style,
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Clip
-                    )
-                    if (item.hasVariantBadge) {
-                        val badgeText = item.selectedVariantIndex(currentCameraId)
-                            ?.takeIf { isSelected }
-                            ?.toString()
-                            ?: item.variantCount.toString()
-                        ZoomStopVariantBadge(
-                            text = badgeText,
-                            isSelected = isSelected,
-                            activeColor = activeColor,
-                            inactiveColor = inactiveColor,
-                            itemSize = adaptiveMetrics.itemSize,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(top = 1.dp, end = 1.dp)
-                        )
-                    }
-                }
-            }
-
-            if (macroCameras.isNotEmpty()) {
-                if (hasMacroSeparator) {
-                    Box(
-                        modifier = Modifier
-                            .width(1.dp)
-                            .height(adaptiveMetrics.separatorLength)
-                            .background(Color.White.copy(alpha = 0.2f))
-                    )
-                }
-
-                macroCameras.forEach { macroCam ->
-                    val isSelected = macroCam.cameraId == currentCameraId
-                    Box(
-                        modifier = Modifier
-                            .size(adaptiveMetrics.itemSize)
-                            .autoRotate()
-                            .pointerInput(macroCam.cameraId) {
-                                detectTapGestures { onLensSwitch(macroCam.cameraId) }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = AppIcons.FilterVintage,
-                            contentDescription = "Macro",
-                            tint = if (isSelected) activeColor else inactiveColor,
-                            modifier = Modifier.size(
-                                if (isSelected) adaptiveMetrics.selectedIconSize else adaptiveMetrics.normalIconSize
-                            )
-                        )
-                    }
-                }
             }
         }
     }

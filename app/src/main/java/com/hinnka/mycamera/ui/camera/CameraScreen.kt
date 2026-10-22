@@ -970,7 +970,6 @@ fun CameraScreen(
             if (activePanel == ActivePanel.NONE && !isXpan) {
                 ZoomControlBar(
                     viewModel = viewModel,
-                    oppoStyle = uiStyle == "OPPO",
                     zoomRatio = viewModel.zoomRatioByMain,
                     availableCameras = state.availableCameras,
                     currentCameraId = state.getCurrentCameraInfo()?.cameraId ?: "0",
