@@ -328,15 +328,15 @@ private fun ZoomPresetPill(
             val selected = selectedPreset != null && abs(selectedPreset - preset) <= 0.01f
             Box(
                 modifier = Modifier
-                    .width(34.dp)
-                    .height(26.dp)
+                    .width(37.dp)
+                    .height(29.dp)
                     .clickable { onPresetClick(preset) },
                 contentAlignment = Alignment.Center
             ) {
                 if (selected) {
                     Box(
                         modifier = Modifier
-                            .size(26.dp)
+                            .size(29.dp)
                             .clip(CircleShape)
                             .background(Color(0xFF484651))
                     )
