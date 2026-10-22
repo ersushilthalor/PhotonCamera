@@ -199,7 +199,8 @@ data class CameraInfo(
     val baseCameraId: String? = null, // 虚拟镜头对应的真实物理镜头 ID
     val iszZoomRatio: Float = 1f, // ISZ 虚拟倍率
     val rawBlackBorderCrop: RawBlackBorderCrop = RawBlackBorderCrop(), // RAW 原始分辨率黑边裁切像素
-    val minimumFocusDistance: Float = 0f // 最小对焦距离 (diopters, 0 = infinity only)
+    val minimumFocusDistance: Float = 0f, // 最小对焦距离 (diopters, 0 = infinity only)
+    val supportsFreeformZoomPan: Boolean = false, // Requires Camera2 freeform crop support for joystick panning
 ) {
     fun getOpenCameraId(): String {
         if (!isVirtualIszLens) return logicalCameraId ?: cameraId
@@ -403,6 +404,10 @@ data class CameraState(
     val videoConfig: VideoConfig = VideoConfig(),
     val videoCapabilities: VideoCapabilities = VideoCapabilities(),
     val videoRecordingState: VideoRecordingState = VideoRecordingState(),
+    // Joystick pan is stored as normalized sensor-crop displacement (-1..1).
+    val zoomPanX: Float = 0f,
+    val zoomPanY: Float = 0f,
+    val zoomPanEnabled: Boolean = false,
 ) {
     val effectiveMeteringMode: MeteringMode
         get() = if (meteringPoint != null) MeteringMode.SPOT else meteringMode

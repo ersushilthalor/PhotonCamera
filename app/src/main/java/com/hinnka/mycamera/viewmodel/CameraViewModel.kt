@@ -3860,12 +3860,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun setZoomRatio(ratio: Float) {
         zoomRatioByMain = ratio
+        if (ratio <= 2f) cameraController.resetZoomPan()
         val cameraInfo = state.value.getCurrentCameraInfo()
         setCameraControllerZoomRatio(ratio, cameraInfo)
     }
 
+    /** Apply a normalized delta from the on-screen joystick to the camera crop. */
+    fun panZoomBy(deltaX: Float, deltaY: Float) {
+        cameraController.panZoomBy(deltaX, deltaY)
+    }
+
+    fun resetZoomPan() {
+        cameraController.resetZoomPan()
+    }
+
     private fun setZoomRatioForCamera(ratio: Float, cameraId: String) {
         zoomRatioByMain = ratio
+        if (ratio <= 2f) cameraController.resetZoomPan()
         val cameraInfo = state.value.availableCameras.find { it.cameraId == cameraId }
         setCameraControllerZoomRatio(ratio, cameraInfo)
     }
