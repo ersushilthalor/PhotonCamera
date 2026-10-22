@@ -163,7 +163,7 @@ data class UserPreferences(
     val exportDngWithRawExport: Boolean = false,
     val frameId: String? = null,
     val phantomFrameId: String? = null,
-    val showHistogram: Boolean = true,
+    val showHistogram: Boolean = false,
     val showGrid: Boolean = false,  // 网格线显示
     val gridStyle: GridStyle = GridStyle.THIRDS,
     val showLevelIndicator: Boolean = false,  // 水平仪显示
@@ -744,7 +744,7 @@ class UserPreferencesRepository(private val context: Context) {
                 exportDngWithRawExport = preferences[EXPORT_DNG_WITH_RAW_EXPORT_KEY] ?: false,
                 frameId = preferences[FRAME_ID_KEY],
                 phantomFrameId = preferences[PHANTOM_FRAME_ID_KEY],
-                showHistogram = preferences[SHOW_HISTOGRAM] ?: true,
+                showHistogram = preferences[SHOW_HISTOGRAM] ?: false,
                 showGrid = preferences[SHOW_GRID] ?: false,
                 gridStyle = GridStyle.fromPersistedName(preferences[GRID_STYLE]),
                 showLevelIndicator = preferences[SHOW_LEVEL_INDICATOR] ?: false,
