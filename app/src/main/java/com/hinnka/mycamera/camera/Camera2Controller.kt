@@ -4932,7 +4932,11 @@ class Camera2Controller(private val context: Context) {
                 zoomRatio = zoomRatio,
                 activeRect = activeRect,
                 zoomRatioRange = zoomRatioRange,
-                resetCropAtUnitZoom = false
+                resetCropAtUnitZoom = false,
+                panX = state.zoomPanX,
+                panY = state.zoomPanY,
+                useFreeformPan = state.zoomPanEnabled &&
+                    state.getCurrentCameraInfo()?.supportsFreeformZoomPan == true,
             )
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to apply zoom settings", e)
@@ -4954,8 +4958,24 @@ class Camera2Controller(private val context: Context) {
         zoomRatio: Float,
         activeRect: Rect?,
         zoomRatioRange: android.util.Range<Float>?,
-        resetCropAtUnitZoom: Boolean
+        resetCropAtUnitZoom: Boolean,
+        panX: Float = 0f,
+        panY: Float = 0f,
+        useFreeformPan: Boolean = false,
     ) {
+        // Freeform SCALER_CROP_REGION must not be combined with CONTROL_ZOOM_RATIO != 1.
+        // While joystick pan is active, express zoom as a non-centred sensor crop instead.
+        if (useFreeformPan && activeRect != null) {
+            if (zoomRatioRange != null) {
+                builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, 1f)
+            }
+            builder.set(
+                CaptureRequest.SCALER_CROP_REGION,
+                buildZoomPanCropRegion(activeRect, zoomRatio, panX, panY)
+            )
+            return
+        }
+
         if (shouldUseControlZoomRatio(zoomRatioRange)) {
             builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoomRatio)
             return
@@ -4968,6 +4988,23 @@ class Camera2Controller(private val context: Context) {
             builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, 1f)
         }
         builder.set(CaptureRequest.SCALER_CROP_REGION, buildCenteredCropRegion(activeRect, zoomRatio))
+    }
+
+    private fun buildZoomPanCropRegion(activeRect: Rect, zoomRatio: Float, panX: Float, panY: Float): Rect {
+        val safeZoom = zoomRatio.coerceAtLeast(1f)
+        val cropWidth = (activeRect.width() / safeZoom).roundToInt()
+            .coerceIn(1, activeRect.width())
+        val cropHeight = (activeRect.height() / safeZoom).roundToInt()
+            .coerceIn(1, activeRect.height())
+        val travelX = (activeRect.width() - cropWidth) / 2f
+        val travelY = (activeRect.height() - cropHeight) / 2f
+        val centeredLeft = activeRect.left + (activeRect.width() - cropWidth) / 2f
+        val centeredTop = activeRect.top + (activeRect.height() - cropHeight) / 2f
+        val cropLeft = (centeredLeft + panX.coerceIn(-1f, 1f) * travelX)
+            .roundToInt().coerceIn(activeRect.left, activeRect.right - cropWidth)
+        val cropTop = (centeredTop + panY.coerceIn(-1f, 1f) * travelY)
+            .roundToInt().coerceIn(activeRect.top, activeRect.bottom - cropHeight)
+        return Rect(cropLeft, cropTop, cropLeft + cropWidth, cropTop + cropHeight)
     }
 
     private fun shouldUseControlZoomRatio(zoomRatioRange: android.util.Range<Float>?): Boolean {
@@ -6299,7 +6336,12 @@ class Camera2Controller(private val context: Context) {
             return
         }
         val requestedRatio = sanitizeZoomRatio(ratio)
-        _state.value = _state.value.copy(zoomRatio = requestedRatio)
+        _state.value = _state.value.copy(
+            zoomRatio = requestedRatio,
+            zoomPanX = if (requestedRatio <= 1.001f) 0f else _state.value.zoomPanX,
+            zoomPanY = if (requestedRatio <= 1.001f) 0f else _state.value.zoomPanY,
+            zoomPanEnabled = requestedRatio > 1.001f && _state.value.zoomPanEnabled,
+        )
         val builder = previewRequestBuilder ?: return
         val openCameraId = activeOpenCameraId.takeIf { it.isNotEmpty() } ?: return
 
@@ -6311,7 +6353,14 @@ class Camera2Controller(private val context: Context) {
             val maxSupportedZoom = zoomRatioRange?.upper ?: maxZoom
             val clampedRatio = requestedRatio.coerceIn(minZoom, maxSupportedZoom)
 
-            _state.value = _state.value.copy(zoomRatio = clampedRatio)
+            val stateBeforeClamp = _state.value
+            val keepZoomPan = clampedRatio > 1.001f && stateBeforeClamp.zoomPanEnabled
+            _state.value = stateBeforeClamp.copy(
+                zoomRatio = clampedRatio,
+                zoomPanX = if (keepZoomPan) stateBeforeClamp.zoomPanX else 0f,
+                zoomPanY = if (keepZoomPan) stateBeforeClamp.zoomPanY else 0f,
+                zoomPanEnabled = keepZoomPan,
+            )
             if (recreateSessionForPhysicalZoomIfNeeded(_state.value)) {
                 PLog.d(TAG, "setZoomRatio: $ratio -> $clampedRatio (physical output session recreated)")
                 return
@@ -6324,7 +6373,11 @@ class Camera2Controller(private val context: Context) {
                     zoomRatio = clampedRatio,
                     activeRect = activeRect,
                     zoomRatioRange = zoomRatioRange,
-                    resetCropAtUnitZoom = true
+                    resetCropAtUnitZoom = true,
+                    panX = _state.value.zoomPanX,
+                    panY = _state.value.zoomPanY,
+                    useFreeformPan = _state.value.zoomPanEnabled &&
+                        _state.value.getCurrentCameraInfo()?.supportsFreeformZoomPan == true,
                 )
             }
             if (_state.value.meteringPoint != null) {
@@ -6345,6 +6398,47 @@ class Camera2Controller(private val context: Context) {
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to set zoom", e)
         }
+    }
+
+    /**
+     * Move the active digital-zoom crop without moving the phone.
+     *
+     * Crop changes are applied to the Camera2 repeating request and reused by
+     * still/video capture requests through applyBaseCameraSettings().
+     */
+    fun panZoomBy(deltaX: Float, deltaY: Float) {
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { panZoomBy(deltaX, deltaY) }
+            return
+        }
+        if (!deltaX.isFinite() || !deltaY.isFinite()) return
+
+        val current = _state.value
+        if (current.zoomRatio <= 1.001f ||
+            current.getCurrentCameraInfo()?.supportsFreeformZoomPan != true
+        ) {
+            return
+        }
+
+        val next = current.copy(
+            zoomPanX = (current.zoomPanX + deltaX).coerceIn(-1f, 1f),
+            zoomPanY = (current.zoomPanY + deltaY).coerceIn(-1f, 1f),
+            zoomPanEnabled = true,
+        )
+        if (next.zoomPanX == current.zoomPanX &&
+            next.zoomPanY == current.zoomPanY &&
+            current.zoomPanEnabled
+        ) {
+            return
+        }
+        _state.value = next
+        val builder = previewRequestBuilder ?: return
+        builder.apply {
+            applyBaseCameraSettings(this, isCapture = false, currentState = next)
+            updatePreview()
+        }
+        PLog.d(TAG, "Zoom joystick pan: x=${next.zoomPanX}, y=${next.zoomPanY}, zoom=${next.zoomRatio}")
     }
 
     private fun sanitizeZoomRatio(ratio: Float): Float {
@@ -6371,6 +6465,23 @@ class Camera2Controller(private val context: Context) {
         _enginePreviewSource.value = null
         createPreviewSession(openGeneration = cameraOpenGeneration)
         return true
+    }
+
+    /** Reset joystick panning to the centred crop. Safe to call repeatedly. */
+    fun resetZoomPan() {
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { resetZoomPan() }
+            return
+        }
+        val current = _state.value
+        if (!current.zoomPanEnabled && current.zoomPanX == 0f && current.zoomPanY == 0f) return
+        val next = current.copy(zoomPanX = 0f, zoomPanY = 0f, zoomPanEnabled = false)
+        _state.value = next
+        previewRequestBuilder?.apply {
+            applyBaseCameraSettings(this, isCapture = false, currentState = next)
+            updatePreview()
+        }
     }
 
     /**

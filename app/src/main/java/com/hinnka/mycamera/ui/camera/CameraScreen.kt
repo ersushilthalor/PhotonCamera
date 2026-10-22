@@ -274,6 +274,7 @@ fun CameraScreen(
     var captureAnimationJob by remember { mutableStateOf<Job?>(null) }
     var cameraScreenBounds by remember { mutableStateOf<Rect?>(null) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
+    var zoomJoystickOpen by remember { mutableStateOf(false) }
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
     var zoomBarBounds by remember { mutableStateOf<Rect?>(null) }
     var filterButtonBounds by remember { mutableStateOf<Rect?>(null) }
@@ -847,6 +848,22 @@ fun CameraScreen(
 
         val isVideoMode = state.captureMode == CaptureMode.VIDEO
         val isPhotoStyleMode = state.captureMode != CaptureMode.VIDEO
+        val zoomJoystickSupported =
+            !state.useRaw &&
+                (state.captureMode == CaptureMode.PHOTO || state.captureMode == CaptureMode.VIDEO) &&
+                state.zoomRatio > 2f &&
+                state.getCurrentCameraInfo()?.supportsFreeformZoomPan == true
+        val canShowZoomJoystick = activePanel == ActivePanel.NONE && zoomJoystickSupported
+
+        LaunchedEffect(canShowZoomJoystick) {
+            if (!canShowZoomJoystick) zoomJoystickOpen = false
+        }
+        LaunchedEffect(zoomJoystickSupported) {
+            if (!zoomJoystickSupported) {
+                zoomJoystickOpen = false
+                viewModel.resetZoomPan()
+            }
+        }
         val onParameterClick: (CameraParameter) -> Unit = { parameter ->
             val wasSelected = selectedParameter == parameter
             selectedParameter = parameter
@@ -1626,6 +1643,34 @@ fun CameraScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         zoomBar()
+                    }
+                }
+                if (canShowZoomJoystick) {
+                    Box(
+                        modifier = Modifier
+                            .width(cardWidth)
+                            .height(cardHeight)
+                            .align(Alignment.Center)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(end = 12.dp)
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.68f))
+                                .border(1.dp, Color.White.copy(alpha = 0.78f), CircleShape)
+                                .clickable { zoomJoystickOpen = !zoomJoystickOpen },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("🕹", fontSize = 23.sp)
+                        }
+                        if (zoomJoystickOpen) {
+                            ZoomPanJoystick(
+                                modifier = Modifier.align(Alignment.Center),
+                                onPanBy = viewModel::panZoomBy,
+                            )
+                        }
                     }
                 }
             }

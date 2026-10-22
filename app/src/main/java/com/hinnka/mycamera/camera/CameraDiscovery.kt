@@ -1537,6 +1537,9 @@ class CameraDiscovery(private val context: Context) {
             zoomSteps = listOf(1f),
             intrinsicZoomRatio = intrinsicZoomRatio,
             hardwareLevel = hardwareLevel,
+            supportsFreeformZoomPan = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M &&
+                characteristics.get(CameraCharacteristics.SCALER_CROPPING_TYPE) ==
+                    android.hardware.camera2.CameraMetadata.SCALER_CROPPING_TYPE_FREEFORM,
             supportsManualProcessing = checkManualProcessingSupport(characteristics),
             supportsRaw = CameraUtils.getRawCaptureOutput(characteristics) != null,
             isCustomLensId = isCustomLensId,
