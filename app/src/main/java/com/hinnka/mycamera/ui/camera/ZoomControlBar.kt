@@ -22,6 +22,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -173,22 +175,14 @@ fun ZoomControlBar(
                         }
                     },
                     onDragEnd = {
-                        val shouldCloseContinuousZoomBar = isContinuousZooming && !viewModel.isZooming
                         isDragging = false
                         dragAccumulated = 0f
                         lastInteractionTime = System.currentTimeMillis()
-                        if (shouldCloseContinuousZoomBar) {
-                            closeContinuousZoomBar()
-                        }
                     },
                     onDragCancel = {
-                        val shouldCloseContinuousZoomBar = isContinuousZooming && !viewModel.isZooming
                         isDragging = false
                         dragAccumulated = 0f
                         lastInteractionTime = System.currentTimeMillis()
-                        if (shouldCloseContinuousZoomBar) {
-                            closeContinuousZoomBar()
-                        }
                     }
                 )
             },
@@ -265,6 +259,10 @@ fun ZoomControlBar(
                     maxZoom = maxZoom,
                     mainCamera = mainCamera,
                     displayMode = displayMode,
+                    onClose = {
+                        lastInteractionTime = System.currentTimeMillis()
+                        closeContinuousZoomBar()
+                    },
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
@@ -371,136 +369,118 @@ fun ZoomContinuousRuler(
     maxZoom: Float,
     mainCamera: CameraInfo?,
     displayMode: ZoomDisplayMode,
+    onClose: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val accentColor = AccentColor
-    val textMeasurer = rememberTextMeasurer()
+    val rulerYellow = Color(0xFFFFD52A)
+    val closeDescription = stringResource(R.string.close)
+    val currentText = when (displayMode) {
+        ZoomDisplayMode.ZOOM_RATIO -> formatZoomRatioLabel(zoomRatio)
+        ZoomDisplayMode.FOCAL_LENGTH -> zoomRatioToFocalLength(zoomRatio, mainCamera) + "mm"
+    }
 
-    Box(modifier = modifier) {
-        Canvas(modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 4.dp)) {
-            val width = size.width
-            val height = size.height
-            val accent = accentColor
-            
-            // 绘制刻度。在当前 Zoom 附近绘制。
-            // 我们在尺子上每隔一定的比例（比如 1.1倍）画一个大刻度。
-            val zoomStep = 1.1f
-            val visibleRatioRange = 1.5f // 屏幕宽度覆盖的变焦倍率范围 (约 1.5x)
-            
-            // 计算尺子上每像素对应的变焦倍率对数
-            // ln(zoomRatio) 映射到中心。
-            // ln(z) = ln(zoomRatio) + (x - center) * logRangePerPixel
-            val logRangePerPixel = ln(visibleRatioRange.toDouble()) / width
-            
-            fun zoomToX(z: Float): Float {
-                return (width / 2 + (ln(z.toDouble() / zoomRatio.toDouble()) / logRangePerPixel)).toFloat()
-            }
-            
-            fun xToZoom(x: Float): Float {
-                return (zoomRatio * exp((x - width / 2) * logRangePerPixel)).toFloat()
-            }
+    Box(modifier = modifier.fillMaxSize()) {
+        // The track uses the same 33dp parent height as ZoomPresetPill.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(CircleShape)
+                .background(Color(0xFF292929))
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val safeZoom = zoomRatio.coerceAtLeast(0.001f).toDouble()
+                val centerX = size.width / 2f
+                val centerY = size.height / 2f
+                val halfTickRange = (size.width / 2f - 48.dp.toPx()).coerceAtLeast(0f)
+                if (halfTickRange > 0f) {
+                    // Logarithmic ticks glide beneath the fixed center indicator as zoom changes.
+                    val logRangePerPixel = ln(1.5) / (halfTickRange * 2.0)
+                    val visibleMin = maxOf(
+                        minZoom.toDouble(),
+                        safeZoom * exp(-halfTickRange * logRangePerPixel)
+                    )
+                    val visibleMax = minOf(
+                        maxZoom.toDouble(),
+                        safeZoom * exp(halfTickRange * logRangePerPixel)
+                    )
+                    val tickLogStep = ln(1.01)
+                    if (visibleMin > 0.0 && visibleMax >= visibleMin) {
+                        val firstTick = kotlin.math.ceil(ln(visibleMin) / tickLogStep).toInt()
+                        val lastTick = kotlin.math.floor(ln(visibleMax) / tickLogStep).toInt()
+                        for (tickIndex in firstTick..lastTick) {
+                            val tickZoom = exp(tickIndex * tickLogStep)
+                            val x = centerX +
+                                (ln(tickZoom / safeZoom) / logRangePerPixel).toFloat()
+                            if (x < centerX - halfTickRange || x > centerX + halfTickRange) continue
 
-            // 绘制主要刻度 (0.1, 0.5, 1, 2, 5, 10, etc.)
-            // 为了简单，我们绘制 1.0, 2.0, 3.0 等整数，以及 0.5 的倍数
-            val minVisibleZoom = xToZoom(0f)
-            val maxVisibleZoom = xToZoom(width)
-            
-            val majorSteps = listOf(0.5f, 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, 12f, 15f, 20f, 30f, 50f)
-            majorSteps.forEach { stepValue ->
-                if (stepValue in minVisibleZoom..maxVisibleZoom) {
-                    val x = zoomToX(stepValue)
-                    val tickHeight = 12.dp.toPx()
-                    val tickWidth = 1.5.dp.toPx()
-                    
-                    drawRect(
-                        color = Color.White.copy(alpha = 0.8f),
-                        topLeft = Offset(x - tickWidth / 2f, height - tickHeight),
-                        size = Size(tickWidth, tickHeight)
-                    )
-                    
-                    val text = when (displayMode) {
-                        ZoomDisplayMode.ZOOM_RATIO -> formatZoomRatioLabel(stepValue)
-                        ZoomDisplayMode.FOCAL_LENGTH -> zoomRatioToFocalLength(stepValue, mainCamera)
-                    }
-                    
-                    val textLayoutResult = textMeasurer.measure(
-                        text = text,
-                        style = androidx.compose.ui.text.TextStyle(
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color.White,
-                            textAlign = TextAlign.Center,
-                            shadow = ViewfinderTextShadow
-                        )
-                    )
-                    
-                    drawText(
-                        textLayoutResult = textLayoutResult,
-                        topLeft = Offset(
-                            x - textLayoutResult.size.width / 2f,
-                            y = 0f
-                        )
-                    )
-                }
-            }
-
-            // 绘制细刻度 (0.1x 的倍数)
-            var minor = (Math.floor(minVisibleZoom * 10.0) / 10.0).toFloat()
-            while (minor <= maxVisibleZoom) {
-                if (minor >= minZoom && minor <= maxZoom) {
-                    val x = zoomToX(minor)
-                    if (x in 0f..width) {
-                        val isMajor = majorSteps.any { abs(it - minor) < 0.01f }
-                        if (!isMajor) {
-                            val tickHeight = 6.dp.toPx()
-                            val tickWidth = 1.dp.toPx()
-                            drawRect(
-                                color = Color.White.copy(alpha = 0.4f),
-                                topLeft = Offset(x - tickWidth / 2f, height - tickHeight),
-                                size = Size(tickWidth, tickHeight)
+                            val majorTick = tickIndex % 5 == 0
+                            val tickHeight = if (majorTick) 17.dp.toPx() else 11.dp.toPx()
+                            drawLine(
+                                color = Color.White.copy(alpha = if (majorTick) 0.86f else 0.58f),
+                                start = Offset(x, centerY - tickHeight / 2f),
+                                end = Offset(x, centerY + tickHeight / 2f),
+                                strokeWidth = if (majorTick) 1.35.dp.toPx() else 1.dp.toPx()
                             )
                         }
                     }
                 }
-                minor += 0.1f
             }
-            
-            // 绘制中心指示灯 (固定在中心)
-            val centerX = width / 2f
-            val indicatorWidth = 2.dp.toPx()
-            
-            // 绘制指示器背景发光
-            drawCircle(
-                color = accent.copy(alpha = 0.2f),
-                center = Offset(centerX, height - 6.dp.toPx()),
-                radius = 8.dp.toPx()
-            )
-            
-            drawRect(
-                color = accent,
-                topLeft = Offset(centerX - indicatorWidth / 2f, height - 15.dp.toPx()),
-                size = Size(indicatorWidth, 15.dp.toPx())
+
+            // Fixed yellow indicator and close control, matching the reference screenshot.
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .width(2.5.dp)
+                    .height(22.dp)
+                    .clip(CircleShape)
+                    .background(rulerYellow)
             )
 
-            // 显示当前数值 (在尺子上方的浮窗感)
-            val currentText = when (displayMode) {
-                ZoomDisplayMode.ZOOM_RATIO -> formatZoomRatioLabel(zoomRatio)
-                ZoomDisplayMode.FOCAL_LENGTH -> zoomRatioToFocalLength(zoomRatio, mainCamera) + "mm"
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 6.dp)
+                    .size(25.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF3A3A3A))
+                    .clickable(onClick = onClose)
+                    .semantics { contentDescription = closeDescription },
+                contentAlignment = Alignment.Center
+            ) {
+                Canvas(modifier = Modifier.size(11.dp)) {
+                    val stroke = 1.7.dp.toPx()
+                    val inset = size.width * 0.22f
+                    drawLine(
+                        color = Color.White.copy(alpha = 0.94f),
+                        start = Offset(inset, inset),
+                        end = Offset(size.width - inset, size.height - inset),
+                        strokeWidth = stroke
+                    )
+                    drawLine(
+                        color = Color.White.copy(alpha = 0.94f),
+                        start = Offset(size.width - inset, inset),
+                        end = Offset(inset, size.height - inset),
+                        strokeWidth = stroke
+                    )
+                }
             }
-            val currentTextLayout = textMeasurer.measure(
-                text = currentText,
-                style = androidx.compose.ui.text.TextStyle(
-                    fontSize = 14.sp,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                    color = accent,
-                    shadow = ViewfinderTextShadow
-                )
-            )
-            drawText(
-                currentTextLayout,
-                topLeft = Offset(centerX - currentTextLayout.size.width / 2f, -18.dp.toPx())
-            )
         }
+
+        // Keep the live zoom readout just above the pill, as in the screenshot.
+        Text(
+            text = currentText,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .offset(y = (-20).dp),
+            style = TextStyle(
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = rulerYellow,
+                shadow = ViewfinderTextShadow
+            ),
+            maxLines = 1,
+            softWrap = false
+        )
     }
 }
 
