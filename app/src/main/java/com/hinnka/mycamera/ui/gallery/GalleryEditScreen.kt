@@ -1606,6 +1606,7 @@ fun GalleryEditScreen(
                                             onValueChange = { value ->
                                                 val latestRecipe = viewModel.editPhotoRecipeParams.value
                                                     ?: viewModel.editLutRecipeParams.value
+                                                    ?: effectiveRecipe
                                                 viewModel.setPhotoRecipeParams(
                                                     latestRecipe.copy(washedOutRecovery = value.coerceIn(0f, 1f))
                                                 )
