@@ -48,6 +48,8 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -993,7 +995,8 @@ fun CameraScreen(
                         .fillMaxWidth()
                         .onGloballyPositioned { coordinates ->
                             zoomBarBounds = coordinates.boundsInRoot()
-                        }
+                        },
+                    iphoneStyle = uiStyle == "IPHONE"
                 )
             } else {
                 SideEffect {
@@ -1615,7 +1618,13 @@ fun CameraScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .paint(backgroundPainter, contentScale = ContentScale.Crop)
+                .then(
+                    if (uiStyle == "IPHONE") {
+                        Modifier.background(Color.Black)
+                    } else {
+                        Modifier.paint(backgroundPainter, contentScale = ContentScale.Crop)
+                    }
+                )
                 .navigationBarsPadding(),
         ) {
             // The viewfinder is always the bottom layer. Its selected aspect ratio is fitted
@@ -1632,7 +1641,7 @@ fun CameraScreen(
                 contentAlignment = Alignment.Center
             ) {
                 viewfinder()
-                if (uiStyle == "OPPO" && activePanel == ActivePanel.NONE && !isXpan) {
+                if ((uiStyle == "OPPO" || uiStyle == "IPHONE") && activePanel == ActivePanel.NONE && !isXpan) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
@@ -1682,7 +1691,7 @@ fun CameraScreen(
                 zoomBar = {
                     // Panel visibility changes the zoom content, not the space used to
                     // position the parameter row beneath it. XPAN has no horizontal bar.
-                    if (uiStyle != "OPPO" || isXpan) {
+                    if ((uiStyle != "OPPO" && uiStyle != "IPHONE") || isXpan) {
                         Box(
                             modifier = if (isXpan) Modifier else Modifier
                                 .fillMaxWidth()
@@ -2070,6 +2079,7 @@ private fun Controls(
     val captureButtonImagePath by viewModel.captureButtonImagePath.collectAsState()
     val captureProcessingState by viewModel.captureProcessingState.collectAsState()
     val capturedThumbnail by viewModel.capturedThumbnail.collectAsState()
+    val iphoneStyle = uiStyle == "IPHONE"
 
     Box(
         modifier = modifier,
@@ -2078,9 +2088,25 @@ private fun Controls(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = CameraControlsLayoutDefaults.BottomPadding),
+                .padding(
+                    bottom = if (iphoneStyle) 18.dp else CameraControlsLayoutDefaults.BottomPadding
+                ),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            if (iphoneStyle) {
+                IPhoneCaptureModeSwitcher(
+                    shootingMode = if (state.captureMode == CaptureMode.VIDEO) {
+                        CameraShootingMode.VIDEO
+                    } else {
+                        CameraShootingMode.PHOTO
+                    },
+                    enabled = modeSwitchEnabled &&
+                        !state.videoRecordingState.isRecording &&
+                        !state.videoRecordingState.isProcessing,
+                    onModeSelected = onCaptureModeSelected
+                )
+                Spacer(modifier = Modifier.height(18.dp))
+            }
             Box(
                 modifier = Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.Center
@@ -2099,7 +2125,8 @@ private fun Controls(
                         viewModel = galleryViewModel,
                         capturedThumbnail = capturedThumbnail,
                         onCapturedThumbnailLoaded = viewModel::acknowledgeCapturedThumbnail,
-                        onClick = onGalleryClick
+                        onClick = onGalleryClick,
+                        iphoneStyle = iphoneStyle
                     )
                     key(capturedThumbnail?.captureId) {
                         GalleryProcessingOverlay(
@@ -2130,10 +2157,12 @@ private fun Controls(
                     multipleExposureEnabled = useMultipleExposure && state.captureMode == CaptureMode.PHOTO,
                     multipleExposureProgress = multipleExposureState.capturedCount.toFloat() /
                             multipleExposureState.targetCount.coerceAtLeast(1).toFloat(),
-                    customStyle = if (uiStyle == "OPPO" && state.captureMode != CaptureMode.VIDEO) {
-                        CaptureButtonStyle.COLOR
-                    } else {
-                        captureButtonStyle
+                    customStyle = when {
+                        uiStyle == "OPPO" && state.captureMode != CaptureMode.VIDEO ->
+                            CaptureButtonStyle.COLOR
+                        iphoneStyle && state.captureMode != CaptureMode.VIDEO ->
+                            CaptureButtonStyle.DEFAULT
+                        else -> captureButtonStyle
                     },
                     customColor = if (uiStyle == "OPPO" && state.captureMode != CaptureMode.VIDEO) {
                         0xFFFF8500.toInt()
@@ -2147,6 +2176,7 @@ private fun Controls(
                     modifier = Modifier.onGloballyPositioned { coordinates ->
                         onCaptureButtonBoundsChanged(coordinates.boundsInRoot())
                     },
+                    iphoneStyle = iphoneStyle
                 )
 
                 if (state.videoRecordingState.isRecording) {
@@ -2201,34 +2231,40 @@ private fun Controls(
                             .autoRotate(),
                         shape = CircleShape
                     ) {
-                        Icon(
-                            imageVector = AppIcons.Cameraswitch,
-                            contentDescription = stringResource(R.string.switch_camera),
-                            tint = Color.White.copy(
-                                alpha = if (state.videoRecordingState.isProcessing) 0.35f else 1f
-                            ),
-                            modifier = Modifier.size(24.dp)
-                        )
+                        if (iphoneStyle) {
+                            IPhoneCameraSwitchIcon(Modifier.size(27.dp))
+                        } else {
+                            Icon(
+                                imageVector = AppIcons.Cameraswitch,
+                                contentDescription = stringResource(R.string.switch_camera),
+                                tint = Color.White.copy(
+                                    alpha = if (state.videoRecordingState.isProcessing) 0.35f else 1f
+                                ),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(CameraControlsLayoutDefaults.ModeSwitcherSpacing))
+            if (!iphoneStyle) {
+                Spacer(modifier = Modifier.height(CameraControlsLayoutDefaults.ModeSwitcherSpacing))
 
-            CaptureModeSwitcher(
-                oppoStyle = uiStyle == "OPPO",
-                // Pro/RAW remains an internal capture option, but is no longer a
-                // separate item in the visible Photo/Video mode switcher.
-                shootingMode = if (state.captureMode == CaptureMode.VIDEO) {
-                    CameraShootingMode.VIDEO
-                } else {
-                    CameraShootingMode.PHOTO
-                },
-                enabled = modeSwitchEnabled &&
-                    !state.videoRecordingState.isRecording &&
-                    !state.videoRecordingState.isProcessing,
-                onModeSelected = onCaptureModeSelected
-            )
+                CaptureModeSwitcher(
+                    oppoStyle = uiStyle == "OPPO",
+                    // Pro/RAW remains an internal capture option, but is no longer a
+                    // separate item in the visible Photo/Video mode switcher.
+                    shootingMode = if (state.captureMode == CaptureMode.VIDEO) {
+                        CameraShootingMode.VIDEO
+                    } else {
+                        CameraShootingMode.PHOTO
+                    },
+                    enabled = modeSwitchEnabled &&
+                        !state.videoRecordingState.isRecording &&
+                        !state.videoRecordingState.isProcessing,
+                    onModeSelected = onCaptureModeSelected
+                )
+            }
         }
     }
 }
@@ -2336,8 +2372,10 @@ fun CaptureButton(
     onTap: () -> Unit,
     onLongPressStart: () -> Unit,
     onLongPressEnd: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    iphoneStyle: Boolean = false
 ) {
+    val iphonePhotoStyle = iphoneStyle && captureMode == CaptureMode.PHOTO
     val progressColor = AccentColor
     val showMultipleExposureProgress = captureMode == CaptureMode.PHOTO && multipleExposureEnabled
     val showCaptureProgress = captureMode == CaptureMode.PHOTO && isCapturing
@@ -2437,8 +2475,8 @@ fun CaptureButton(
             modifier = Modifier
                 .fillMaxSize()
                 .border(
-                    width = 1.dp,
-                    color = ringColor,
+                    width = if (iphonePhotoStyle) 2.dp else 1.dp,
+                    color = if (iphonePhotoStyle) Color.White.copy(alpha = 0.96f) else ringColor,
                     shape = CircleShape
                 )
         )
@@ -2448,6 +2486,7 @@ fun CaptureButton(
             targetValue = when {
                 captureMode == CaptureMode.VIDEO && isVideoRecording -> 19.dp
                 progressRingCount > 0 -> CaptureProgressRingDefaults.contentPadding(progressRingCount)
+                iphonePhotoStyle -> 6.dp
                 else -> 2.dp
             },
             animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow),
@@ -2468,6 +2507,7 @@ fun CaptureButton(
                     )
                 )
             }
+            iphonePhotoStyle -> Modifier.background(Color(0xFFF2EFF0))
             isProfessionalMode -> Modifier.background(AccentColor)
             else -> {
                 Modifier.background(
@@ -2493,6 +2533,17 @@ fun CaptureButton(
                 .fillMaxSize()
                 .clip(RoundedCornerShape(centerCorner))
                 .then(centerBackgroundModifier)
+                .then(
+                    if (iphonePhotoStyle) {
+                        Modifier.border(
+                            width = 1.dp,
+                            color = Color(0xFFD1CACE),
+                            shape = RoundedCornerShape(centerCorner)
+                        )
+                    } else {
+                        Modifier
+                    }
+                )
         ) {
             if (
                 useCustomAppearance &&
@@ -2612,6 +2663,127 @@ private fun CaptureModeSwitcher(
                 selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.Black
             )
         }
+    }
+}
+
+@Composable
+private fun IPhoneCaptureModeSwitcher(
+    shootingMode: CameraShootingMode,
+    enabled: Boolean,
+    onModeSelected: (CameraShootingMode) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .width(228.dp)
+            .height(28.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IPhoneModeOption(
+            label = stringResource(R.string.capture_mode_video).uppercase(),
+            selected = shootingMode == CameraShootingMode.VIDEO,
+            enabled = enabled,
+            onClick = { onModeSelected(CameraShootingMode.VIDEO) }
+        )
+        Spacer(modifier = Modifier.width(28.dp))
+        IPhoneModeOption(
+            label = stringResource(R.string.capture_mode_photo).uppercase(),
+            selected = shootingMode != CameraShootingMode.VIDEO,
+            enabled = enabled,
+            onClick = { onModeSelected(CameraShootingMode.PHOTO) }
+        )
+    }
+}
+
+@Composable
+private fun IPhoneModeOption(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Text(
+        text = label,
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        color = if (selected) Color(0xFFE6A783) else Color.White.copy(alpha = 0.92f),
+        fontSize = 15.sp,
+        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+        letterSpacing = 0.3.sp,
+        maxLines = 1,
+        softWrap = false
+    )
+}
+
+@Composable
+private fun IPhoneCameraSwitchIcon(modifier: Modifier = Modifier) {
+    val description = stringResource(R.string.switch_camera)
+    Canvas(
+        modifier = modifier.semantics {
+            contentDescription = description
+        }
+    ) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val radius = minOf(size.width, size.height) * 0.32f
+        val strokeWidth = minOf(size.width, size.height) * 0.075f
+        val boundsTopLeft = Offset(center.x - radius, center.y - radius)
+        val arcSize = androidx.compose.ui.geometry.Size(radius * 2f, radius * 2f)
+        val stroke = androidx.compose.ui.graphics.drawscope.Stroke(
+            width = strokeWidth,
+            cap = androidx.compose.ui.graphics.StrokeCap.Round
+        )
+
+        drawArc(
+            color = Color.White,
+            startAngle = -35f,
+            sweepAngle = 145f,
+            useCenter = false,
+            topLeft = boundsTopLeft,
+            size = arcSize,
+            style = stroke
+        )
+        drawArc(
+            color = Color.White,
+            startAngle = 145f,
+            sweepAngle = 145f,
+            useCenter = false,
+            topLeft = boundsTopLeft,
+            size = arcSize,
+            style = stroke
+        )
+
+        fun point(angleDegrees: Float, distance: Float): Offset {
+            val radians = angleDegrees * Math.PI / 180.0
+            return Offset(
+                x = center.x + kotlin.math.cos(radians).toFloat() * distance,
+                y = center.y + kotlin.math.sin(radians).toFloat() * distance
+            )
+        }
+
+        fun drawArrowHead(angleDegrees: Float) {
+            val tip = point(angleDegrees, radius)
+            val tangent = angleDegrees + 90f
+            val armLength = radius * 0.38f
+            val left = Offset(
+                x = tip.x + kotlin.math.cos((tangent + 150f) * Math.PI / 180.0).toFloat() * armLength,
+                y = tip.y + kotlin.math.sin((tangent + 150f) * Math.PI / 180.0).toFloat() * armLength
+            )
+            val right = Offset(
+                x = tip.x + kotlin.math.cos((tangent - 150f) * Math.PI / 180.0).toFloat() * armLength,
+                y = tip.y + kotlin.math.sin((tangent - 150f) * Math.PI / 180.0).toFloat() * armLength
+            )
+            val path = Path().apply {
+                moveTo(left.x, left.y)
+                lineTo(tip.x, tip.y)
+                lineTo(right.x, right.y)
+            }
+            drawPath(path, Color.White, style = stroke)
+        }
+
+        drawArrowHead(110f)
+        drawArrowHead(290f)
     }
 }
 

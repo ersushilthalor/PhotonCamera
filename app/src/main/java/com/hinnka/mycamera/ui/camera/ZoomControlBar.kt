@@ -70,9 +70,14 @@ fun ZoomControlBar(
     onLensSwitch: (String) -> Unit,
     onFilterClick: () -> Unit,
     onFilterButtonBoundsChanged: (Rect) -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    iphoneStyle: Boolean = false
 ) {
     val displayMode by viewModel.zoomDisplayMode.collectAsState()
+
+    LaunchedEffect(iphoneStyle) {
+        if (iphoneStyle) onFilterButtonBoundsChanged(Rect.Zero)
+    }
 
     val currentCamera = availableCameras.find { it.cameraId == currentCameraId }
     val isCameraReady = currentCamera != null
@@ -210,7 +215,7 @@ fun ZoomControlBar(
         }
 
         AnimatedVisibility(
-            visible = !isContinuousZooming,
+            visible = !iphoneStyle && !isContinuousZooming,
             enter = fadeIn() + expandHorizontally(),
             exit = fadeOut() + shrinkHorizontally(),
             modifier = Modifier.align(Alignment.CenterEnd)
@@ -239,7 +244,7 @@ fun ZoomControlBar(
         Box(
             modifier = Modifier
                 .fillMaxHeight()
-                .padding(horizontal = if (isContinuousZooming) 0.dp else 40.dp)
+                .padding(horizontal = if (isContinuousZooming || iphoneStyle) 0.dp else 40.dp)
                 .fillMaxWidth(),
             contentAlignment = Alignment.Center
         ) {
@@ -265,6 +270,7 @@ fun ZoomControlBar(
             } else {
                 ZoomPresetPill(
                     zoomRatio = internalZoomRatio,
+                    iphoneStyle = iphoneStyle,
                     onPresetClick = { preset ->
                         val matchingLensCameras = availableCameras
                             .filter { camera ->
@@ -305,17 +311,20 @@ fun ZoomControlBar(
 private fun ZoomPresetPill(
     zoomRatio: Float,
     onPresetClick: (Float) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    iphoneStyle: Boolean = false
 ) {
-    val basePresets = listOf(0.6f, 1f, 2f, 3f)
-    val visiblePresets = if (zoomRatio >= 3f) basePresets + listOf(5f, 10f) else basePresets
+    val basePresets = if (iphoneStyle) listOf(0.5f, 1f, 2f) else listOf(0.6f, 1f, 2f, 3f)
+    val visiblePresets = if (!iphoneStyle && zoomRatio >= 3f) basePresets + listOf(5f, 10f) else basePresets
     val selectedPreset = visiblePresets.firstOrNull { abs(it - zoomRatio) <= 0.05f }
 
     Row(
         modifier = modifier
             .clip(CircleShape)
-            .background(Color(0xFF25242C))
-            .padding(horizontal = 4.dp, vertical = 2.dp),
+            .background(
+                if (iphoneStyle) Color(0xFF6D6668).copy(alpha = 0.62f) else Color(0xFF25242C)
+            )
+            .padding(horizontal = if (iphoneStyle) 5.dp else 4.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -323,8 +332,8 @@ private fun ZoomPresetPill(
             val selected = selectedPreset != null && abs(selectedPreset - preset) <= 0.01f
             Box(
                 modifier = Modifier
-                    .width(37.dp)
-                    .height(29.dp)
+                    .width(if (iphoneStyle) 39.dp else 37.dp)
+                    .height(if (iphoneStyle) 29.dp else 29.dp)
                     .clickable { onPresetClick(preset) },
                 contentAlignment = Alignment.Center
             ) {
@@ -333,10 +342,15 @@ private fun ZoomPresetPill(
                         modifier = Modifier
                             .size(29.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF484651))
+                            .background(
+                                if (iphoneStyle) Color(0xFF292629) else Color(0xFF484651)
+                            )
                     )
                 }
                 val label = when {
+                    iphoneStyle && abs(preset - 0.5f) <= 0.01f -> "0,5"
+                    iphoneStyle && abs(preset - 1f) <= 0.01f -> "1"
+                    iphoneStyle -> preset.toInt().toString()
                     abs(preset - 0.6f) <= 0.01f -> ".6"
                     else -> preset.toInt().toString()
                 }
@@ -345,7 +359,7 @@ private fun ZoomPresetPill(
                     style = TextStyle(
                         fontSize = if (selected) 14.sp else 13.sp,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                        color = Color.White,
+                        color = if (iphoneStyle && selected) Color(0xFFE6A783) else Color.White,
                         textAlign = TextAlign.Center
                     ),
                     maxLines = 1,

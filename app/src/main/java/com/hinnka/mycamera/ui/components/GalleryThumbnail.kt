@@ -39,12 +39,13 @@ fun GalleryThumbnail(
     onClick: () -> Unit,
     capturedThumbnail: CapturedThumbnail? = null,
     onCapturedThumbnailLoaded: (Long) -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    iphoneStyle: Boolean = false
 ) {
     val context = LocalContext.current
     val refreshKey = latestPhoto?.id?.let { viewModel.getPreparedPhotoThumbnailRefreshKey(it) } ?: 0L
-    val buttonShape = RoundedCornerShape(10.dp)
-    val thumbnailShape = RoundedCornerShape(7.dp)
+    val buttonShape = RoundedCornerShape(if (iphoneStyle) 4.dp else 10.dp)
+    val thumbnailShape = RoundedCornerShape(if (iphoneStyle) 4.dp else 7.dp)
     var finalThumbnailLoaded by remember(capturedThumbnail?.captureId) { mutableStateOf(false) }
     val finalCaptureId = capturedThumbnail?.takeIf {
         it.processingFinished && it.savedPhotoId == latestPhoto?.id
@@ -53,9 +54,10 @@ fun GalleryThumbnail(
 
     PhysicalButton(
         modifier = modifier
-            .size(48.dp),
+            .size(if (iphoneStyle) 52.dp else 48.dp),
         onClick = onClick,
         shape = buttonShape,
+        backgroundColor = if (iphoneStyle && latestPhoto == null) Color(0xFFF1EEF0) else PhysicalButtonDefaults.BackgroundColor,
         contentShape = thumbnailShape
     ) {
         if (latestPhoto != null) {
@@ -103,7 +105,7 @@ fun GalleryThumbnail(
             Icon(
                 imageVector = AppIcons.PhotoLibrary,
                 contentDescription = "Gallery",
-                tint = Color.White.copy(alpha = 0.7f),
+                tint = if (iphoneStyle) Color(0xFF252225) else Color.White.copy(alpha = 0.7f),
                 modifier = Modifier.size(24.dp)
             )
         }
