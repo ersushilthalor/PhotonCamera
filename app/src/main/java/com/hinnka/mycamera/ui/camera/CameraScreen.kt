@@ -2211,6 +2211,8 @@ private fun Controls(
                         modifier = Modifier.size(24.dp)
                     )
                 }
+            }
+
             Spacer(modifier = Modifier.height(CameraControlsLayoutDefaults.ModeSwitcherSpacing))
 
             CaptureModeSwitcher(
