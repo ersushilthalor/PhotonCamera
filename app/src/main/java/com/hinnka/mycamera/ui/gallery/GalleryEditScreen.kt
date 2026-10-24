@@ -1596,6 +1596,23 @@ fun GalleryEditScreen(
                                         },
                                         modifier = Modifier.fillMaxWidth()
                                     )
+                                    if (currentPhoto.isVideo) {
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        SliderSettingItem(
+                                            title = stringResource(R.string.video_washed_out_recovery),
+                                            description = stringResource(R.string.video_washed_out_recovery_description),
+                                            value = effectiveRecipe.washedOutRecovery.coerceIn(0f, 1f),
+                                            valueRange = 0f..1f,
+                                            onValueChange = { value ->
+                                                val latestRecipe = viewModel.editPhotoRecipeParams.value
+                                                    ?: viewModel.editLutRecipeParams.value
+                                                viewModel.setPhotoRecipeParams(
+                                                    latestRecipe.copy(washedOutRecovery = value.coerceIn(0f, 1f))
+                                                )
+                                            },
+                                            onValueChangeFinished = { }
+                                        )
+                                    }
                                 }
                                 EDIT_TAB_DETAIL -> {
                                     Spacer(modifier = Modifier.height(16.dp))
