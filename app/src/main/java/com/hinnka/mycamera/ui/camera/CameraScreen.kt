@@ -2187,29 +2187,29 @@ private fun Controls(
                             modifier = Modifier.size(32.dp)
                         )
                     }
-                } else {
-                    PhysicalButton(
-                        onClick = {
-                            if (!state.videoRecordingState.isProcessing) {
-                                onSwitchCameraClick()
-                            }
-                        },
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = sideControlInset ?: 40.dp)
-                            .size(CameraControlsLayoutDefaults.SideButtonSize)
-                            .autoRotate(),
-                        shape = CircleShape
-                    ) {
-                        Icon(
-                            imageVector = AppIcons.Cameraswitch,
-                            contentDescription = stringResource(R.string.switch_camera),
-                            tint = Color.White.copy(
-                                alpha = if (state.videoRecordingState.isProcessing) 0.35f else 1f
-                            ),
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
+                }
+
+                PhysicalButton(
+                    onClick = {
+                        if (!state.videoRecordingState.isProcessing) {
+                            onSwitchCameraClick()
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = sideControlInset ?: 40.dp)
+                        .size(CameraControlsLayoutDefaults.SideButtonSize)
+                        .autoRotate(),
+                    shape = CircleShape
+                ) {
+                    Icon(
+                        imageVector = AppIcons.Cameraswitch,
+                        contentDescription = stringResource(R.string.switch_camera),
+                        tint = Color.White.copy(
+                            alpha = if (state.videoRecordingState.isProcessing) 0.35f else 1f
+                        ),
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
             }
 
