@@ -6857,7 +6857,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         .stateIn(viewModelScope, SharingStarted.Eagerly, "ORIGINAL")
 
     fun setUiStyle(style: String) {
-        if (style !in setOf("ORIGINAL", "OPPO", "ONE_UI", "CUSTOM")) return
+        if (style !in setOf("ORIGINAL", "OPPO", "ONE_UI", "IPHONE", "CUSTOM")) return
         viewModelScope.launch { userPreferencesRepository.saveUiStyle(style) }
     }
 
