@@ -6282,7 +6282,7 @@ fun DefaultFocalLengthSetting(
  */
 @Composable
 private fun UiStyleSetting(currentStyle: String, onStyleSelected: (String) -> Unit) {
-    val options = listOf("ORIGINAL" to "Original", "OPPO" to "OPPO", "ONE_UI" to "One UI", "CUSTOM" to "Custom")
+    val options = listOf("ORIGINAL" to "Original", "OPPO" to "OPPO", "ONE_UI" to "One UI", "IPHONE" to "iPhone", "CUSTOM" to "Custom")
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         Text("UI Style", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         Text("Choose the camera interface layout", color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
@@ -6290,7 +6290,7 @@ private fun UiStyleSetting(currentStyle: String, onStyleSelected: (String) -> Un
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 rowOptions.forEach { (style, label) ->
                     val selected = currentStyle == style
-                    Box(modifier = Modifier.weight(1f).padding(bottom = 8.dp).clip(RoundedCornerShape(12.dp))
+                    Box(modifier = Modifier.weight(if (rowOptions.size == 1) 2f else 1f).padding(bottom = 8.dp).clip(RoundedCornerShape(12.dp))
                         .background(if (selected) AccentColor.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f))
                         .border(if (selected) 1.5.dp else 1.dp, if (selected) AccentColor else Color.White.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
                         .clickable { onStyleSelected(style) }.padding(vertical = 16.dp, horizontal = 12.dp), contentAlignment = Alignment.Center) {
