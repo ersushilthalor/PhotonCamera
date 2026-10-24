@@ -2151,6 +2151,22 @@ private fun Controls(
 
                 if (state.videoRecordingState.isRecording) {
                     IconButton(
+                        onClick = { viewModel.captureVideoFrame() },
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = sideControlInset ?: 40.dp)
+                            .size(CameraControlsLayoutDefaults.SideButtonSize)
+                            .autoRotate()
+                    ) {
+                        Icon(
+                            imageVector = AppIcons.CameraAlt,
+                            contentDescription = stringResource(R.string.take_photo),
+                            tint = Color.White,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+
+                    IconButton(
                         onClick = {
                             if (state.videoRecordingState.isPaused) {
                                 viewModel.resumeVideoRecording()
