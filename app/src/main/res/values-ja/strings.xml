@@ -1182,4 +1182,7 @@
     <string name="settings_raw_leica_color_matrix_m9">M9</string>
     <string name="camera_focus_point_label">フォーカス</string>
     <string name="camera_metering_point_label">測光点</string>
+    <!-- Video editor: independent color recovery with contrast preserved -->
+    <string name="video_washed_out_recovery">色あせ補正</string>
+    <string name="video_washed_out_recovery_description">画像の輝度と現在のコントラスト設定を維持しながら、明るい階調の色あせを補正します。</string>
 </resources>

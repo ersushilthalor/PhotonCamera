@@ -357,4 +357,7 @@
     <string name="settings_raw_leica_color_matrix_m9">M9</string>
     <string name="camera_focus_point_label">Fokus</string>
     <string name="camera_metering_point_label">Pengukuran</string>
+    <!-- Video editor: independent color recovery with contrast preserved -->
+    <string name="video_washed_out_recovery">Pemulihan Warna Pudar</string>
+    <string name="video_washed_out_recovery_description">Pulihkan warna yang pudar pada area terang tanpa mengubah luminans gambar atau pengaturan kontras yang ada.</string>
 </resources>
