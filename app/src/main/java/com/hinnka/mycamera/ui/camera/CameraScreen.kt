@@ -227,6 +227,19 @@ fun CameraScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
+    val floatingUiPreferences by viewModel.userPreferences.collectAsState()
+    val floatingWindowBackdrop = rememberLiquidGlassBackdrop()
+    val floatingWindowAppearance = remember(
+        floatingUiPreferences.floatingWindowTransparency,
+        floatingUiPreferences.floatingWindowBlurRadius,
+        floatingUiPreferences.liquidGlassEnabled
+    ) {
+        FloatingWindowAppearance(
+            transparency = floatingUiPreferences.floatingWindowTransparency,
+            blurRadius = floatingUiPreferences.floatingWindowBlurRadius,
+            liquidGlassEnabled = floatingUiPreferences.liquidGlassEnabled
+        )
+    }
     val uiStyle by viewModel.uiStyle.collectAsState()
     val isCameraInitialized by viewModel.isInitialized.collectAsState()
     val latestPhoto by galleryViewModel.latestPhoto.collectAsState()
@@ -1312,7 +1325,7 @@ fun CameraScreen(
                                 state.videoConfig.enhancedStabilizationStrength,
                             videoPreviewStabilizationLookahead =
                                 state.videoConfig.enhancedStabilizationLookahead,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier.fillMaxSize().liquidGlassBackdropSource(floatingWindowBackdrop)
                         )
                     }
 
@@ -1364,10 +1377,16 @@ fun CameraScreen(
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             if (showLivePhotoIndicator) {
-                                Surface(
-                                    color = Color.Black.copy(alpha = 0.8f),
-                                    shape = CircleShape
+                                Box(
+                                    modifier = Modifier.clip(CircleShape),
+                                    contentAlignment = Alignment.Center
                                 ) {
+                                    FloatingWindowSurface(
+                                        backdrop = floatingWindowBackdrop,
+                                        modifier = Modifier.matchParentSize(),
+                                        cornerRadius = 13.dp,
+                                        appearance = floatingWindowAppearance
+                                    )
                                     Icon(
                                         painterResource(R.drawable.ic_live_photo),
                                         contentDescription = null,
@@ -1379,10 +1398,15 @@ fun CameraScreen(
                                 }
                             }
                             if (showVirtualApertureIndicator) {
-                                Surface(
-                                    color = Color.Black.copy(alpha = 0.2f),
-                                    shape = RoundedCornerShape(8.dp)
+                                Box(
+                                    modifier = Modifier.clip(RoundedCornerShape(8.dp))
                                 ) {
+                                    FloatingWindowSurface(
+                                        backdrop = floatingWindowBackdrop,
+                                        modifier = Modifier.matchParentSize(),
+                                        cornerRadius = 8.dp,
+                                        appearance = floatingWindowAppearance
+                                    )
                                     Text(
                                         text = stringResource(
                                             R.string.virtual_aperture_viewfinder_hint,
@@ -1428,7 +1452,9 @@ fun CameraScreen(
                                     )
                                     .size(80.dp, 40.dp)
                                     .align(Alignment.TopStart)
-                                    .autoRotate(dx = -20.dp, dy = 20.dp)
+                                    .autoRotate(dx = -20.dp, dy = 20.dp),
+                                backdrop = floatingWindowBackdrop,
+                                appearance = floatingWindowAppearance
                             )
                         }
 
@@ -1657,16 +1683,23 @@ fun CameraScreen(
                                 .padding(end = 12.dp)
                                 .size(44.dp)
                                 .clip(CircleShape)
-                                .background(Color.Black.copy(alpha = 0.68f))
                                 .border(1.dp, Color.White.copy(alpha = 0.78f), CircleShape)
                                 .clickable { zoomJoystickOpen = !zoomJoystickOpen },
                             contentAlignment = Alignment.Center
                         ) {
+                            FloatingWindowSurface(
+                                backdrop = floatingWindowBackdrop,
+                                modifier = Modifier.matchParentSize(),
+                                cornerRadius = 22.dp,
+                                appearance = floatingWindowAppearance
+                            )
                             Text("🕹", fontSize = 23.sp)
                         }
                         if (zoomJoystickOpen) {
                             ZoomPanJoystick(
                                 modifier = Modifier.align(Alignment.Center),
+                                backdrop = floatingWindowBackdrop,
+                                appearance = floatingWindowAppearance,
                                 onPanBy = viewModel::panZoomBy,
                             )
                         }
