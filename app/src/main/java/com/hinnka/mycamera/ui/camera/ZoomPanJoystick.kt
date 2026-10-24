@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -27,6 +28,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hinnka.mycamera.ui.components.FloatingWindowAppearance
+import com.hinnka.mycamera.ui.components.FloatingWindowSurface
+import com.hinnka.mycamera.ui.components.LiquidGlassBackdrop
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -39,6 +43,8 @@ import kotlin.math.roundToInt
 @Composable
 internal fun ZoomPanJoystick(
     modifier: Modifier = Modifier,
+    backdrop: LiquidGlassBackdrop? = null,
+    appearance: FloatingWindowAppearance = FloatingWindowAppearance(),
     onPanBy: (Float, Float) -> Unit,
 ) {
     val density = LocalDensity.current
@@ -60,48 +66,58 @@ internal fun ZoomPanJoystick(
     }
 
     Box(
-        modifier = modifier
-            .size(116.dp)
-            .clip(CircleShape)
-            .background(Color.Black.copy(alpha = 0.72f))
-            .border(1.5.dp, Color.White.copy(alpha = 0.88f), CircleShape)
-            .pointerInput(maxTravelPx) {
-                fun clampOffset(offset: Offset): Offset {
-                    val distance = hypot(offset.x, offset.y)
-                    if (distance <= maxTravelPx || distance == 0f) return offset
-                    val scale = maxTravelPx / distance
-                    return Offset(offset.x * scale, offset.y * scale)
-                }
-                detectDragGestures(
-                    onDragStart = { start ->
-                        knobOffset = clampOffset(start - Offset(size.width / 2f, size.height / 2f))
-                        isDragging = true
-                    },
-                    onDragEnd = {
-                        isDragging = false
-                        knobOffset = Offset.Zero
-                    },
-                    onDragCancel = {
-                        isDragging = false
-                        knobOffset = Offset.Zero
-                    },
-                ) { change, dragAmount ->
-                    change.consume()
-                    knobOffset = clampOffset(knobOffset + dragAmount)
-                }
-            },
+        modifier = modifier.size(116.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text("▲", modifier = Modifier.align(Alignment.TopCenter).padding(top = 7.dp), color = Color.White.copy(alpha = 0.86f), fontSize = 11.sp)
-        Text("▼", modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 7.dp), color = Color.White.copy(alpha = 0.86f), fontSize = 11.sp)
-        Text("◀", modifier = Modifier.align(Alignment.CenterStart).padding(start = 7.dp), color = Color.White.copy(alpha = 0.86f), fontSize = 11.sp)
-        Text("▶", modifier = Modifier.align(Alignment.CenterEnd).padding(end = 7.dp), color = Color.White.copy(alpha = 0.86f), fontSize = 11.sp)
+        FloatingWindowSurface(
+            backdrop = backdrop,
+            modifier = Modifier.fillMaxSize(),
+            cornerRadius = 58.dp,
+            appearance = appearance,
+        )
         Box(
             modifier = Modifier
-                .size(25.dp)
-                .border(2.dp, Color.White.copy(alpha = 0.92f), CircleShape)
-                .background(MaterialTheme.colorScheme.primary, CircleShape)
-                .offset { IntOffset(knobOffset.x.roundToInt(), knobOffset.y.roundToInt()) },
-        )
+                .fillMaxSize()
+                .clip(CircleShape)
+                .border(1.5.dp, Color.White.copy(alpha = 0.88f), CircleShape)
+                .pointerInput(maxTravelPx) {
+                    fun clampOffset(offset: Offset): Offset {
+                        val distance = hypot(offset.x, offset.y)
+                        if (distance <= maxTravelPx || distance == 0f) return offset
+                        val scale = maxTravelPx / distance
+                        return Offset(offset.x * scale, offset.y * scale)
+                    }
+                    detectDragGestures(
+                        onDragStart = { start ->
+                            knobOffset = clampOffset(start - Offset(size.width / 2f, size.height / 2f))
+                            isDragging = true
+                        },
+                        onDragEnd = {
+                            isDragging = false
+                            knobOffset = Offset.Zero
+                        },
+                        onDragCancel = {
+                            isDragging = false
+                            knobOffset = Offset.Zero
+                        },
+                    ) { change, dragAmount ->
+                        change.consume()
+                        knobOffset = clampOffset(knobOffset + dragAmount)
+                    }
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("▲", modifier = Modifier.align(Alignment.TopCenter).padding(top = 7.dp), color = Color.White.copy(alpha = 0.86f), fontSize = 11.sp)
+            Text("▼", modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 7.dp), color = Color.White.copy(alpha = 0.86f), fontSize = 11.sp)
+            Text("◀", modifier = Modifier.align(Alignment.CenterStart).padding(start = 7.dp), color = Color.White.copy(alpha = 0.86f), fontSize = 11.sp)
+            Text("▶", modifier = Modifier.align(Alignment.CenterEnd).padding(end = 7.dp), color = Color.White.copy(alpha = 0.86f), fontSize = 11.sp)
+            Box(
+                modifier = Modifier
+                    .size(25.dp)
+                    .border(2.dp, Color.White.copy(alpha = 0.92f), CircleShape)
+                    .background(MaterialTheme.colorScheme.primary, CircleShape)
+                    .offset { IntOffset(knobOffset.x.roundToInt(), knobOffset.y.roundToInt()) },
+            )
+        }
     }
 }

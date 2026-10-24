@@ -164,6 +164,9 @@ data class UserPreferences(
     val frameId: String? = null,
     val phantomFrameId: String? = null,
     val showHistogram: Boolean = false,
+    val floatingWindowTransparency: Float = 0.6f,
+    val floatingWindowBlurRadius: Float = 0f,
+    val liquidGlassEnabled: Boolean = false,
     val showGrid: Boolean = false,  // 网格线显示
     val gridStyle: GridStyle = GridStyle.THIRDS,
     val showLevelIndicator: Boolean = false,  // 水平仪显示
@@ -428,6 +431,9 @@ class UserPreferencesRepository(private val context: Context) {
         private val FRAME_ID_KEY = stringPreferencesKey("frame_id")
         private val PHANTOM_FRAME_ID_KEY = stringPreferencesKey("phantom_frame_id")
         private val SHOW_HISTOGRAM = booleanPreferencesKey("show_histogram")
+        private val FLOATING_WINDOW_TRANSPARENCY = floatPreferencesKey("floating_window_transparency")
+        private val FLOATING_WINDOW_BLUR_RADIUS = floatPreferencesKey("floating_window_blur_radius")
+        private val LIQUID_GLASS_ENABLED = booleanPreferencesKey("liquid_glass_enabled")
         private val SHOW_GRID = booleanPreferencesKey("show_grid")
         private val GRID_STYLE = stringPreferencesKey("grid_style")
         private val SHOW_LEVEL_INDICATOR = booleanPreferencesKey("show_level_indicator")
@@ -745,6 +751,9 @@ class UserPreferencesRepository(private val context: Context) {
                 frameId = preferences[FRAME_ID_KEY],
                 phantomFrameId = preferences[PHANTOM_FRAME_ID_KEY],
                 showHistogram = preferences[SHOW_HISTOGRAM] ?: false,
+                floatingWindowTransparency = (preferences[FLOATING_WINDOW_TRANSPARENCY] ?: 0.6f).coerceIn(0f, 0.95f),
+                floatingWindowBlurRadius = (preferences[FLOATING_WINDOW_BLUR_RADIUS] ?: 0f).coerceIn(0f, 24f),
+                liquidGlassEnabled = preferences[LIQUID_GLASS_ENABLED] ?: false,
                 showGrid = preferences[SHOW_GRID] ?: false,
                 gridStyle = GridStyle.fromPersistedName(preferences[GRID_STYLE]),
                 showLevelIndicator = preferences[SHOW_LEVEL_INDICATOR] ?: false,
@@ -1560,6 +1569,24 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun saveShowHistogram(show: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[SHOW_HISTOGRAM] = show
+        }
+    }
+
+    suspend fun saveFloatingWindowTransparency(value: Float) {
+        context.dataStore.edit { preferences ->
+            preferences[FLOATING_WINDOW_TRANSPARENCY] = value.coerceIn(0f, 0.95f)
+        }
+    }
+
+    suspend fun saveFloatingWindowBlurRadius(value: Float) {
+        context.dataStore.edit { preferences ->
+            preferences[FLOATING_WINDOW_BLUR_RADIUS] = value.coerceIn(0f, 24f)
+        }
+    }
+
+    suspend fun saveLiquidGlassEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[LIQUID_GLASS_ENABLED] = enabled
         }
     }
 

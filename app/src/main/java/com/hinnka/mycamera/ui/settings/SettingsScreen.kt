@@ -1164,6 +1164,59 @@ fun SettingsScreen(
                                 .isCurrentCameraSupported,
                         )
                     }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    SettingsSection(
+                        title = stringResource(R.string.settings_floating_window_appearance)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.settings_floating_window_appearance_description),
+                            color = Color.White.copy(alpha = 0.65f),
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        SwitchSettingItem(
+                            title = stringResource(R.string.settings_liquid_glass),
+                            description = stringResource(R.string.settings_liquid_glass_description),
+                            checked = userPreferences.liquidGlassEnabled,
+                            onCheckedChange = viewModel::setLiquidGlassEnabled
+                        )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+
+                        SliderSettingItem(
+                            title = stringResource(R.string.settings_floating_window_transparency),
+                            description = stringResource(R.string.settings_floating_window_transparency_description),
+                            value = userPreferences.floatingWindowTransparency,
+                            valueRange = 0f..0.95f,
+                            onValueChange = viewModel::setFloatingWindowTransparency,
+                            valueTextFormatter = { "${(it * 100).roundToInt()}%" },
+                            resetValue = 0.6f
+                        )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+
+                        SliderSettingItem(
+                            title = stringResource(R.string.settings_floating_window_blur),
+                            description = stringResource(R.string.settings_floating_window_blur_description),
+                            value = userPreferences.floatingWindowBlurRadius,
+                            valueRange = 0f..24f,
+                            onValueChange = viewModel::setFloatingWindowBlurRadius,
+                            valueTextFormatter = { "${it.roundToInt()} dp" },
+                            resetValue = 0f,
+                            enabled = !userPreferences.liquidGlassEnabled
+                        )
+                    }
                 }
 
                 SettingsPage.FOCUS_LENS -> {

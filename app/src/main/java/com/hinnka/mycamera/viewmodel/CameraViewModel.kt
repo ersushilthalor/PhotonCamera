@@ -4956,6 +4956,24 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun setFloatingWindowTransparency(value: Float) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveFloatingWindowTransparency(value)
+        }
+    }
+
+    fun setFloatingWindowBlurRadius(value: Float) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveFloatingWindowBlurRadius(value)
+        }
+    }
+
+    fun setLiquidGlassEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveLiquidGlassEnabled(enabled)
+        }
+    }
+
     // ==================== 延时拍摄和网格线相关方法 ====================
 
     /** 拍照模式：YUV 多帧降噪。 */
