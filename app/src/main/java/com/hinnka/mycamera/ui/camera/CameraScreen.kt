@@ -2676,7 +2676,7 @@ private fun IPhoneCaptureModeSwitcher(
         modifier = Modifier
             .width(228.dp)
             .height(28.dp),
-        horizontalArrangement = Arrangement.spacedBy(28.dp),
+        horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
         IPhoneModeOption(
@@ -2685,6 +2685,7 @@ private fun IPhoneCaptureModeSwitcher(
             enabled = enabled,
             onClick = { onModeSelected(CameraShootingMode.VIDEO) }
         )
+        Spacer(modifier = Modifier.width(28.dp))
         IPhoneModeOption(
             label = stringResource(R.string.capture_mode_photo).uppercase(),
             selected = shootingMode != CameraShootingMode.VIDEO,
