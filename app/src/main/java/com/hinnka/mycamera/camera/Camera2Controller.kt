@@ -7324,7 +7324,6 @@ class Camera2Controller(private val context: Context) {
         videoCaptureStatsWindowStartMs = 0L
         videoCaptureStatsFrames = 0
         videoCaptureStatsFirstTimestampNs = 0L
-        val isFrontCamera = isCurrentCameraFrontFacing()
         val useEnhancedStabilization = shouldUseVideoEnhancedStabilization()
         val cameraInputSize = if (useEnhancedStabilization) {
             _state.value.videoCapabilities.enhancedStabilizationInputSizesByResolution[
@@ -7339,7 +7338,8 @@ class Camera2Controller(private val context: Context) {
             _state.value.videoCapabilities.openGatePortraitAspectRatio,
             cameraInputSize
         )
-        val shouldFlipEncodedFrame = isFrontCamera && mirrorFrontCameraEnabled
+        // The Selfie Mirror preference is for still photos only; never mirror encoded video.
+        val shouldFlipEncodedFrame = false
         val logProfile = _state.value.videoConfig.logProfile
         val monitorOnly = logProfile.isEnabled &&
             _state.value.videoConfig.logLutMode == VideoLogLutMode.MONITOR_ONLY
