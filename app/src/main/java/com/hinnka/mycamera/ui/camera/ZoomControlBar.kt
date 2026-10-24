@@ -75,6 +75,10 @@ fun ZoomControlBar(
 ) {
     val displayMode by viewModel.zoomDisplayMode.collectAsState()
 
+    LaunchedEffect(iphoneStyle) {
+        if (iphoneStyle) onFilterButtonBoundsChanged(Rect.Zero)
+    }
+
     val currentCamera = availableCameras.find { it.cameraId == currentCameraId }
     val isCameraReady = currentCamera != null
 
@@ -211,7 +215,7 @@ fun ZoomControlBar(
         }
 
         AnimatedVisibility(
-            visible = !isContinuousZooming,
+            visible = !iphoneStyle && !isContinuousZooming,
             enter = fadeIn() + expandHorizontally(),
             exit = fadeOut() + shrinkHorizontally(),
             modifier = Modifier.align(Alignment.CenterEnd)
@@ -240,7 +244,7 @@ fun ZoomControlBar(
         Box(
             modifier = Modifier
                 .fillMaxHeight()
-                .padding(horizontal = if (isContinuousZooming) 0.dp else 40.dp)
+                .padding(horizontal = if (isContinuousZooming || iphoneStyle) 0.dp else 40.dp)
                 .fillMaxWidth(),
             contentAlignment = Alignment.Center
         ) {
