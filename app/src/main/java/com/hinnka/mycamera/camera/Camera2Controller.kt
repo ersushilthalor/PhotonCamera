@@ -2705,6 +2705,22 @@ class Camera2Controller(private val context: Context) {
                 }
                 surfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height)
 
+                // The encoder stays at its original output resolution, but the front camera may
+                // expose a different valid input stream. Resize the recording SurfaceTexture before
+                // creating the replacement Camera2 session, then recompute its crop on the next frame.
+                if (
+                    preserveVideoRecording &&
+                    captureMode == CaptureMode.VIDEO &&
+                    _state.value.videoRecordingState.isRecording
+                ) {
+                    val switchedVideoState = _state.value
+                    val switchedInputSize =
+                        switchedVideoState.videoCapabilities.cameraInputSizesByResolution[
+                            switchedVideoState.videoConfig.resolution
+                        ] ?: resolvedVideoPreviewSize
+                    videoRecorder.updateCameraInputSize(switchedInputSize)
+                }
+
                 if (_state.value.useLivePhoto && captureMode == CaptureMode.PHOTO) {
                     livePhotoRecorder.startRecording()
                 }
