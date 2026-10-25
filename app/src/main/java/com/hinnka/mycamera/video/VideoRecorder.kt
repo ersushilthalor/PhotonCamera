@@ -350,9 +350,12 @@ class VideoRecorder(
         ) return
         if (size.width <= 0 || size.height <= 0) return
         requestedCameraInputSize = size
-        // Refresh before configuring the replacement Camera2 session so its first frames use
-        // the new camera's supported stream dimensions and matching crop geometry.
-        renderer?.updateCameraInputSize(size)
+        // Serialize buffer-size and transform-geometry changes with the realtime render loop.
+        // Updating SurfaceTexture/crop state from the camera handler can otherwise race the first
+        // frame from the replacement lens and leave the encoder using stale crop geometry.
+        runBlocking(renderDispatcher) {
+            renderer?.updateCameraInputSize(size)
+        }
         PLog.i(
             TAG,
             "Recording input size refreshed after camera switch: ${size.width}x${size.height}, " +
