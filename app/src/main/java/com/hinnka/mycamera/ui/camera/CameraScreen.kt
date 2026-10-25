@@ -1932,6 +1932,7 @@ fun CameraScreen(
                 initialParams = previewRecipeParamsOverride ?: currentRecipeParams,
                 onParamsPreviewChange = { previewRecipeParamsOverride = it },
                 showEffects = true,
+                replaceVignetteWithWashedOutRecovery = state.captureMode == CaptureMode.VIDEO,
                 onDismiss = {
                     previewRecipeParamsOverride = null
                     activePanel = ActivePanel.NONE
