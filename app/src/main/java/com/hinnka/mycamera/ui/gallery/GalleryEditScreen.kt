@@ -1523,6 +1523,25 @@ fun GalleryEditScreen(
                                     val effectiveRecipe = editPhotoRecipeParams ?: editLutRecipeParams
                                     val applyEffectsToVideo by viewModel.editApplyEffectsToVideo.collectAsState()
 
+                                    if (currentPhoto.isVideo) {
+                                        SliderSettingItem(
+                                            title = stringResource(R.string.video_washed_out_recovery),
+                                            description = stringResource(R.string.video_washed_out_recovery_description),
+                                            value = effectiveRecipe.washedOutRecovery.coerceIn(0f, 1f),
+                                            valueRange = 0f..1f,
+                                            onValueChange = { value ->
+                                                val latestRecipe = viewModel.editPhotoRecipeParams.value
+                                                    ?: viewModel.editLutRecipeParams.value
+                                                    ?: effectiveRecipe
+                                                viewModel.setPhotoRecipeParams(
+                                                    latestRecipe.copy(washedOutRecovery = value.coerceIn(0f, 1f))
+                                                )
+                                            },
+                                            onValueChangeFinished = { }
+                                        )
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                    }
+
                                     ColorRecipePanel(
                                         currentParams = effectiveRecipe,
                                         onParamChange = { param, value ->
@@ -1596,24 +1615,7 @@ fun GalleryEditScreen(
                                         },
                                         modifier = Modifier.fillMaxWidth()
                                     )
-                                    if (currentPhoto.isVideo) {
-                                        Spacer(modifier = Modifier.height(10.dp))
-                                        SliderSettingItem(
-                                            title = stringResource(R.string.video_washed_out_recovery),
-                                            description = stringResource(R.string.video_washed_out_recovery_description),
-                                            value = effectiveRecipe.washedOutRecovery.coerceIn(0f, 1f),
-                                            valueRange = 0f..1f,
-                                            onValueChange = { value ->
-                                                val latestRecipe = viewModel.editPhotoRecipeParams.value
-                                                    ?: viewModel.editLutRecipeParams.value
-                                                    ?: effectiveRecipe
-                                                viewModel.setPhotoRecipeParams(
-                                                    latestRecipe.copy(washedOutRecovery = value.coerceIn(0f, 1f))
-                                                )
-                                            },
-                                            onValueChangeFinished = { }
-                                        )
-                                    }
+
                                 }
                                 EDIT_TAB_DETAIL -> {
                                     Spacer(modifier = Modifier.height(16.dp))
