@@ -335,16 +335,29 @@ class VideoRecorder(
      * A camera switch can expose a different supported SurfaceTexture stream size/aspect ratio.
      * Update the input surface and crop geometry while keeping the encoder's output size fixed.
      */
-    fun updateCameraInputSize(size: Size) {
-        if (!isRecording || stopRequested || requestedEnhancedStabilization) return
+    fun updateCameraInputSize(
+        size: Size,
+        currentCameraUsesEnhancedStabilization: Boolean,
+    ) {
+        // The renderer can start with EIS on the rear camera but fall back to its ordinary
+        // SurfaceTexture input on a switched front camera. Only keep the old buffer geometry
+        // when the current camera is still using the EIS input path; the recording-start flag
+        // alone must not block the front-camera input-size refresh.
+        if (
+            !isRecording ||
+            stopRequested ||
+            (requestedEnhancedStabilization && currentCameraUsesEnhancedStabilization)
+        ) return
         if (size.width <= 0 || size.height <= 0) return
         requestedCameraInputSize = size
-        // This runs before the replacement Camera2 session is configured, so the same Surface
-        // is ready with the new camera's supported stream dimensions.
+        // Refresh before configuring the replacement Camera2 session so its first frames use
+        // the new camera's supported stream dimensions and matching crop geometry.
         renderer?.updateCameraInputSize(size)
         PLog.i(
             TAG,
-            "Recording input size refreshed after camera switch: ${size.width}x${size.height}",
+            "Recording input size refreshed after camera switch: ${size.width}x${size.height}, " +
+                "recordingStartedWithEis=$requestedEnhancedStabilization, " +
+                "currentCameraUsesEis=$currentCameraUsesEnhancedStabilization",
         )
     }
 
