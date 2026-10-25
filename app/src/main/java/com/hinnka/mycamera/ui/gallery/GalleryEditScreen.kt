@@ -375,6 +375,12 @@ fun GalleryEditScreen(
     var isZoomed by remember { mutableStateOf(false) }
     val editTabsScrollState = rememberScrollState()
     val editPanelScrollState = rememberScrollState()
+
+    // This scroll state is shared by every edit tab and media item. Reset it when either
+    // changes so video-only controls at the top (such as Washed-Out Recovery) remain visible.
+    LaunchedEffect(currentPhoto?.id, editTab) {
+        editPanelScrollState.scrollTo(0)
+    }
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
     var topBarHeightPx by remember { mutableIntStateOf(0) }
     var editPanelHeightPx by remember { mutableIntStateOf(0) }
