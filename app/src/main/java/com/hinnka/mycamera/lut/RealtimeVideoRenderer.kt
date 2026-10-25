@@ -246,7 +246,9 @@ class RealtimeVideoRenderer(
         var sourceTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
         var sourceTextureId = cameraTextureId
         var sourceStMatrix = stMatrix
-        var sourceCropRect = cameraCropRect
+        // Resolve the crop only after acquiring the frame: that operation updates the
+        // SurfaceTexture matrix and may recompute cameraCropRect for a newly switched lens.
+        var sourceCropRect = fullCropRect
         var timestampNs = cameraTimestampNs
 
         val session = stabilizationSession
@@ -272,6 +274,7 @@ class RealtimeVideoRenderer(
             timestampNs = rendered.timestampNs
         } else {
             if (!cameraFrameUpdated || cameraTimestampNs <= 0L) return null
+            sourceCropRect = cameraCropRect
         }
         if (timestampNs <= 0L) return null
         val presentationTimeNs = mapPresentationTimeNs(timestampNs)
