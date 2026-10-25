@@ -395,7 +395,12 @@ class RealtimeVideoRenderer(
         } else {
             Size(safeWidth, safeHeight)
         }
-        return resolveCenterCropRect(orientedInputSize, encoderOutputSize)
+        val orientedCropRect = resolveCenterCropRect(orientedInputSize, encoderOutputSize)
+        // Crop coordinates are applied to the raw OES coordinates before uSTMatrix in the shader.
+        // When the SurfaceTexture rotates the input by 90/270 degrees, swap the crop axes back
+        // to raw-texture space; otherwise a portrait crop can be applied to the raw X axis and
+        // stretch the final portrait video.
+        return mapOrientedCropRectToTextureCoordinates(orientedCropRect, axesSwapped)
     }
 
     private fun updateCameraTransformGeometry(presentationMatrix: FloatArray) {
@@ -1019,6 +1024,16 @@ class RealtimeVideoRenderer(
         eglDisplay = EGL14.EGL_NO_DISPLAY
         initialized = false
     }
+}
+
+internal fun mapOrientedCropRectToTextureCoordinates(
+    cropRect: FloatArray,
+    axesSwapped: Boolean,
+): FloatArray {
+    if (!axesSwapped) return cropRect
+    // Center-crop bounds are symmetric, so swapping X/Y also maps the bounds correctly
+    // regardless of whether the quarter-turn is clockwise or counter-clockwise.
+    return floatArrayOf(cropRect[1], cropRect[0], cropRect[3], cropRect[2])
 }
 
 internal fun isTextureTransformAxesSwapped(matrix: FloatArray): Boolean {
