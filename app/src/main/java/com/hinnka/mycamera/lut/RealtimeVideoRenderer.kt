@@ -38,7 +38,7 @@ import kotlin.math.max
  */
 class RealtimeVideoRenderer(
     context: Context,
-    private val cameraInputSize: Size,
+    @Volatile private var cameraInputSize: Size = cameraInputSize,
     private val encoderOutputSize: Size,
     private val sensorOrientationDegrees: Int,
     colorLayers: List<VideoColorEffectLayer>,
@@ -108,7 +108,7 @@ class RealtimeVideoRenderer(
     }
     private val fullCropRect = floatArrayOf(0f, 0f, 1f, 1f)
     private var cameraCropRect = fullCropRect
-    private var cameraTransformAxesSwapped: Boolean? = null
+    @Volatile private var cameraTransformAxesSwapped: Boolean? = null
     private val stMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
     private val mgcEisPresentationTransform = MgcEisPresentationTransform()
 
@@ -137,6 +137,24 @@ class RealtimeVideoRenderer(
 
     fun setCameraInputHlg10Source(enabled: Boolean) {
         cameraInputAlreadyHlg10 = enabled
+    }
+
+    /**
+     * Keep the encoder resolution fixed while adapting the camera input stream when
+     * recording continues across a front/rear camera switch.
+     */
+    fun updateCameraInputSize(size: Size) {
+        if (size.width <= 0 || size.height <= 0) return
+        cameraInputSize = size
+        cameraSurfaceTexture?.setDefaultBufferSize(size.width, size.height)
+        // The next frame may carry a different transform even when its axes have not swapped.
+        // Force crop geometry to be recalculated against the new camera's input dimensions.
+        cameraTransformAxesSwapped = null
+        PLog.i(
+            TAG,
+            "Camera input geometry refreshed: input=${size.width}x${size.height}, " +
+                "encoder=${encoderOutputSize.width}x${encoderOutputSize.height}",
+        )
     }
 
     fun initialize(
