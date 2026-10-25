@@ -331,6 +331,23 @@ class VideoRecorder(
         }
     }
 
+    /**
+     * A camera switch can expose a different supported SurfaceTexture stream size/aspect ratio.
+     * Update the input surface and crop geometry while keeping the encoder's output size fixed.
+     */
+    fun updateCameraInputSize(size: Size) {
+        if (!isRecording || stopRequested || requestedEnhancedStabilization) return
+        if (size.width <= 0 || size.height <= 0) return
+        requestedCameraInputSize = size
+        // This runs before the replacement Camera2 session is configured, so the same Surface
+        // is ready with the new camera's supported stream dimensions.
+        renderer?.updateCameraInputSize(size)
+        PLog.i(
+            TAG,
+            "Recording input size refreshed after camera switch: ${size.width}x${size.height}",
+        )
+    }
+
     fun onCameraInputStarted(): Boolean {
         if (!isRecording || stopRequested || cameraInputStarted) return false
         cameraInputStarted = true
