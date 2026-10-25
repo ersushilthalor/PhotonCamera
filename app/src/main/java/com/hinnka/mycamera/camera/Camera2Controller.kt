@@ -2718,7 +2718,10 @@ class Camera2Controller(private val context: Context) {
                         switchedVideoState.videoCapabilities.cameraInputSizesByResolution[
                             switchedVideoState.videoConfig.resolution
                         ] ?: resolvedVideoPreviewSize
-                    videoRecorder.updateCameraInputSize(switchedInputSize)
+                    videoRecorder.updateCameraInputSize(
+                        size = switchedInputSize,
+                        currentCameraUsesEnhancedStabilization = shouldUseVideoEnhancedStabilization(),
+                    )
                 }
 
                 if (_state.value.useLivePhoto && captureMode == CaptureMode.PHOTO) {
