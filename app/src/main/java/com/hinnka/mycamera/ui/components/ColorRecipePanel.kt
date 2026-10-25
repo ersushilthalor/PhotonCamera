@@ -134,10 +134,10 @@ fun ColorRecipePanel(
     showLutIntensity: Boolean = false,
     currentEffects: EffectParams? = null,
     onEffectsChange: ((EffectParams) -> Unit)? = null,
-    replaceVignetteWithWashedOutRecovery: Boolean = false,
     headerControls: (@Composable () -> Unit)? = null,
     containerShape: Shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    replaceVignetteWithWashedOutRecovery: Boolean = false
 ) {
     val isBakeable: (RecipeParam) -> Boolean = { param ->
         param != RecipeParam.VIGNETTE &&
