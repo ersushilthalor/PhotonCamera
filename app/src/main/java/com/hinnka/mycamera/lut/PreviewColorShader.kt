@@ -60,6 +60,7 @@ internal object PreviewColorShader {
             uniform float uFilmGrainPixelScale;
             """ else ""}
             uniform float uVignette;
+            uniform float uWashedOutRecovery;
             uniform float uFlash;
             uniform float uBleachBypass;
             uniform float uChromaticAberration;
@@ -343,6 +344,26 @@ internal object PreviewColorShader {
                     // 保留大于 1.0 的混合权重，沿 LUT 色差外推以支持最高 200% 强度。
                     color.rgb = mix(color.rgb, lutColor.rgb, effectiveLutIntensity);
                     color.rgb = sanitizeColor(color.rgb);
+                }
+
+                // Keep washed-out recovery independent of contrast/exposure controls and LUT mode.
+                // This final chroma pass is also active when recovery is the only adjustment.
+                if (uWashedOutRecovery > 0.001) {
+                    vec3 recoveryBase = clamp(color.rgb, 0.0, 1.0);
+                    float recoveryLuma = getLuma(recoveryBase);
+                    float recoveryMask = smoothstep(0.28, 0.62, recoveryLuma) *
+                        (1.0 - smoothstep(0.86, 0.98, recoveryLuma));
+                    vec3 recoveryDelta = recoveryBase - vec3(recoveryLuma);
+                    float scaleLimit = 1000.0;
+                    if (recoveryDelta.r > 0.00001) scaleLimit = min(scaleLimit, (1.0 - recoveryLuma) / recoveryDelta.r);
+                    else if (recoveryDelta.r < -0.00001) scaleLimit = min(scaleLimit, recoveryLuma / -recoveryDelta.r);
+                    if (recoveryDelta.g > 0.00001) scaleLimit = min(scaleLimit, (1.0 - recoveryLuma) / recoveryDelta.g);
+                    else if (recoveryDelta.g < -0.00001) scaleLimit = min(scaleLimit, recoveryLuma / -recoveryDelta.g);
+                    if (recoveryDelta.b > 0.00001) scaleLimit = min(scaleLimit, (1.0 - recoveryLuma) / recoveryDelta.b);
+                    else if (recoveryDelta.b < -0.00001) scaleLimit = min(scaleLimit, recoveryLuma / -recoveryDelta.b);
+                    float requestedScale = 1.0 + uWashedOutRecovery * 2.25 * recoveryMask;
+                    float chromaScale = min(requestedScale, max(1.0, scaleLimit));
+                    color.rgb = sanitizeColor(vec3(recoveryLuma) + recoveryDelta * chromaScale);
                 }
 
                 ${if (variant.includeSpatialRecipeEffects) """
