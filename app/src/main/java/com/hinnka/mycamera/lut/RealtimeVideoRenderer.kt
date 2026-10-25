@@ -38,7 +38,7 @@ import kotlin.math.max
  */
 class RealtimeVideoRenderer(
     context: Context,
-    @Volatile private var cameraInputSize: Size = cameraInputSize,
+    cameraInputSize: Size,
     private val encoderOutputSize: Size,
     private val sensorOrientationDegrees: Int,
     colorLayers: List<VideoColorEffectLayer>,
@@ -117,6 +117,7 @@ class RealtimeVideoRenderer(
     private var encoderEglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
     private var cameraTextureId = 0
     private var cameraSurfaceTexture: SurfaceTexture? = null
+    @Volatile private var currentCameraInputSize: Size = cameraInputSize
     private var cameraSurface: Surface? = null
     private var intermediateTextureId = 0
     private var intermediateFboId = 0
@@ -145,7 +146,7 @@ class RealtimeVideoRenderer(
      */
     fun updateCameraInputSize(size: Size) {
         if (size.width <= 0 || size.height <= 0) return
-        cameraInputSize = size
+        currentCameraInputSize = size
         cameraSurfaceTexture?.setDefaultBufferSize(size.width, size.height)
         // The next frame may carry a different transform even when its axes have not swapped.
         // Force crop geometry to be recalculated against the new camera's input dimensions.
@@ -181,7 +182,7 @@ class RealtimeVideoRenderer(
         cameraTextureId = GlUtils.createOESTexture()
         check(cameraTextureId != 0) { "Cannot create realtime video OES texture" }
         cameraSurfaceTexture = SurfaceTexture(cameraTextureId).apply {
-            setDefaultBufferSize(cameraInputSize.width, cameraInputSize.height)
+            setDefaultBufferSize(currentCameraInputSize.width, currentCameraInputSize.height)
             setOnFrameAvailableListener {
                 cameraFramePending.set(true)
                 if (!enhancedStabilizationEnabled ||
@@ -204,8 +205,8 @@ class RealtimeVideoRenderer(
             stabilizationSession = stabilizationCoordinator?.createSession(
                 useCase = StabilizationUseCase.VIDEO,
                 strength = enhancedStabilizationStrength,
-                frameWidth = cameraInputSize.width,
-                frameHeight = cameraInputSize.height,
+                frameWidth = currentCameraInputSize.width,
+                frameHeight = currentCameraInputSize.height,
                 lookaheadFrames = enhancedStabilizationLookahead,
                 onFrameAvailable = onFrameAvailable,
             )
@@ -213,7 +214,7 @@ class RealtimeVideoRenderer(
         initialized = true
         PLog.i(
             TAG,
-            "Initialized: camera=${cameraInputSize.width}x${cameraInputSize.height}, " +
+            "Initialized: camera=${currentCameraInputSize.width}x${currentCameraInputSize.height}, " +
                 "encoder=${encoderOutputSize.width}x${encoderOutputSize.height}, " +
                 "sensorOrientation=$sensorOrientationDegrees, " +
                 "layers=${layers.size}, log=${videoLogProfile.name}, " +
@@ -404,14 +405,14 @@ class RealtimeVideoRenderer(
         cameraTransformAxesSwapped = axesSwapped
         cameraCropRect = resolveCameraCropRect(
             presentationMatrix = presentationMatrix,
-            inputWidth = cameraInputSize.width,
-            inputHeight = cameraInputSize.height,
+            inputWidth = currentCameraInputSize.width,
+            inputHeight = currentCameraInputSize.height,
         )
         PLog.i(
             TAG,
             "Camera texture transform: axesSwapped=$axesSwapped, " +
-                "effectiveInput=${if (axesSwapped) cameraInputSize.height else cameraInputSize.width}x" +
-                "${if (axesSwapped) cameraInputSize.width else cameraInputSize.height}, " +
+                "effectiveInput=${if (axesSwapped) currentCameraInputSize.height else currentCameraInputSize.width}x" +
+                "${if (axesSwapped) currentCameraInputSize.width else currentCameraInputSize.height}, " +
                 "crop=${cameraCropRect.joinToString(prefix = "[", postfix = "]")}, " +
                 "matrix=${presentationMatrix.joinToString(prefix = "[", postfix = "]")}"
         )
