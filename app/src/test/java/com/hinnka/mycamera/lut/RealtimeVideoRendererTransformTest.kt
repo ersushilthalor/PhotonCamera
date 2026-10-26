@@ -122,29 +122,20 @@ class RealtimeVideoRendererTransformTest {
     }
 
     @Test
-    fun quarterTurnMapsOrientedCropBackToRawTextureAxes() {
-        // A 4:3 landscape input becomes 3:4 after a quarter-turn. Cropping that
-        // oriented frame to 9:16 crops its X axis, which is the raw texture's Y axis.
+    fun quarterTurnKeepsCenterCropInOutputQuadAxes() {
+        // The center-crop is defined in oriented output axes and applied to aTexCoord
+        // before the texture transform. For a 4:3 source rotated to portrait 9:16,
+        // crop the oriented X axis; never swap it to the orthogonal Y axis.
         val orientedCrop = resolveCenterCropRect(
-            sourceWidth = 1440,
-            sourceHeight = 1920,
-            targetWidth = 1080,
-            targetHeight = 1920,
+            sourceWidth = 2448,
+            sourceHeight = 3264,
+            targetWidth = 2160,
+            targetHeight = 3840,
         )
         assertArrayEquals(
-            floatArrayOf(0f, 0.125f, 1f, 0.875f),
-            mapOrientedCropRectToTextureCoordinates(orientedCrop, axesSwapped = true),
+            floatArrayOf(0.125f, 0f, 0.875f, 1f),
+            orientedCrop,
             0.0001f,
-        )
-    }
-
-    @Test
-    fun nonRotatedCropKeepsItsTextureAxes() {
-        val crop = floatArrayOf(0f, 0.125f, 1f, 0.875f)
-        assertArrayEquals(
-            crop,
-            mapOrientedCropRectToTextureCoordinates(crop, axesSwapped = false),
-            0f,
         )
     }
 
