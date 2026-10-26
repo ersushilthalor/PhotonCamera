@@ -64,29 +64,78 @@ class RealtimeVideoRendererTransformTest {
     }
 
     @Test
-    fun quarterTurnMapsOrientedCropBackToRawTextureAxes() {
-        // A 4:3 landscape input becomes 3:4 after a quarter-turn. Cropping that
-        // oriented frame to 9:16 crops its X axis, which is the raw texture's Y axis.
-        val orientedCrop = resolveCenterCropRect(
-            sourceWidth = 1440,
-            sourceHeight = 1920,
-            targetWidth = 1080,
-            targetHeight = 1920,
+    fun eightMpFourThreeLandscapeInputUsesSensorRotationForPortrait4k() {
+        val identityMatrix = floatArrayOf(
+            1f, 0f, 0f, 0f,
+            0f, 1f, 0f, 0f,
+            0f, 0f, 1f, 0f,
+            0f, 0f, 0f, 1f,
         )
-        assertArrayEquals(
-            floatArrayOf(0f, 0.125f, 1f, 0.875f),
-            mapOrientedCropRectToTextureCoordinates(orientedCrop, axesSwapped = true),
-            0.0001f,
+
+        assertTrue(
+            shouldApplySensorOrientationFallback(
+                inputWidth = 3264,
+                inputHeight = 2448,
+                targetWidth = 2160,
+                targetHeight = 3840,
+                sensorOrientationDegrees = 270,
+                textureTransformMatrix = identityMatrix,
+            )
         )
     }
 
     @Test
-    fun nonRotatedCropKeepsItsTextureAxes() {
-        val crop = floatArrayOf(0f, 0.125f, 1f, 0.875f)
+    fun sensorOrientationFallbackDoesNotDoubleRotateOrApplyToUnrelatedStreams() {
+        val quarterTurnMatrix = floatArrayOf(
+            0f, 1f, 0f, 0f,
+            1f, 0f, 0f, 0f,
+            0f, 0f, 1f, 0f,
+            0f, 0f, 0f, 1f,
+        )
+        val identityMatrix = floatArrayOf(
+            1f, 0f, 0f, 0f,
+            0f, 1f, 0f, 0f,
+            0f, 0f, 1f, 0f,
+            0f, 0f, 0f, 1f,
+        )
+
+        assertFalse(
+            shouldApplySensorOrientationFallback(
+                3264, 2448, 2160, 3840, 270, quarterTurnMatrix,
+            )
+        )
+        assertFalse(
+            shouldApplySensorOrientationFallback(
+                1920, 1080, 2160, 3840, 270, identityMatrix,
+            )
+        )
+        assertFalse(
+            shouldApplySensorOrientationFallback(
+                3264, 2448, 3840, 2160, 270, identityMatrix,
+            )
+        )
+        assertFalse(
+            shouldApplySensorOrientationFallback(
+                3264, 2448, 2160, 3840, 0, identityMatrix,
+            )
+        )
+    }
+
+    @Test
+    fun quarterTurnKeepsCenterCropInOutputQuadAxes() {
+        // The center-crop is defined in oriented output axes and applied to aTexCoord
+        // before the texture transform. For a 4:3 source rotated to portrait 9:16,
+        // crop the oriented X axis; never swap it to the orthogonal Y axis.
+        val orientedCrop = resolveCenterCropRect(
+            sourceWidth = 2448,
+            sourceHeight = 3264,
+            targetWidth = 2160,
+            targetHeight = 3840,
+        )
         assertArrayEquals(
-            crop,
-            mapOrientedCropRectToTextureCoordinates(crop, axesSwapped = false),
-            0f,
+            floatArrayOf(0.125f, 0f, 0.875f, 1f),
+            orientedCrop,
+            0.0001f,
         )
     }
 

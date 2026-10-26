@@ -109,7 +109,10 @@ class RealtimeVideoRenderer(
     private val fullCropRect = floatArrayOf(0f, 0f, 1f, 1f)
     private var cameraCropRect = fullCropRect
     @Volatile private var cameraTransformAxesSwapped: Boolean? = null
+    @Volatile private var currentCameraSensorOrientationDegrees = sensorOrientationDegrees
+    @Volatile private var cameraSensorOrientationFallbackApplied = false
     private val stMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
+    private val cameraPresentationMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
     private val mgcEisPresentationTransform = MgcEisPresentationTransform()
 
     private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
@@ -144,9 +147,14 @@ class RealtimeVideoRenderer(
      * Keep the encoder resolution fixed while adapting the camera input stream when
      * recording continues across a front/rear camera switch.
      */
-    fun updateCameraInputSize(size: Size) {
+    fun updateCameraInputSize(
+        size: Size,
+        sensorOrientationDegrees: Int = currentCameraSensorOrientationDegrees,
+    ) {
         if (size.width <= 0 || size.height <= 0) return
         currentCameraInputSize = size
+        currentCameraSensorOrientationDegrees = sensorOrientationDegrees
+        cameraSensorOrientationFallbackApplied = false
         cameraSurfaceTexture?.setDefaultBufferSize(size.width, size.height)
         // The next frame may carry a different transform even when its axes have not swapped.
         // Force crop geometry to be recalculated against the new camera's input dimensions.
@@ -245,7 +253,7 @@ class RealtimeVideoRenderer(
         var sourceTextureSource = PreviewColorTextureSource.EXTERNAL_OES
         var sourceTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
         var sourceTextureId = cameraTextureId
-        var sourceStMatrix = stMatrix
+        var sourceStMatrix = if (enhancedStabilizationEnabled) stMatrix else cameraPresentationMatrix
         // Resolve the crop only after acquiring the frame: that operation updates the
         // SurfaceTexture matrix and may recompute cameraCropRect for a newly switched lens.
         var sourceCropRect = fullCropRect
@@ -357,7 +365,7 @@ class RealtimeVideoRenderer(
                 if (enhancedStabilizationEnabled) {
                     mgcEisPresentationTransform.matrix
                 } else {
-                    stMatrix
+                    resolveCameraPresentationMatrix(stMatrix)
                 },
             )
             true
@@ -399,11 +407,45 @@ class RealtimeVideoRenderer(
             Size(safeWidth, safeHeight)
         }
         val orientedCropRect = resolveCenterCropRect(orientedInputSize, encoderOutputSize)
-        // Crop coordinates are applied to the raw OES coordinates before uSTMatrix in the shader.
-        // When the SurfaceTexture rotates the input by 90/270 degrees, swap the crop axes back
-        // to raw-texture space; otherwise a portrait crop can be applied to the raw X axis and
-        // stretch the final portrait video.
-        return mapOrientedCropRectToTextureCoordinates(orientedCropRect, axesSwapped)
+        // uCropRect is interpolated across the output quad before uSTMatrix is applied.
+        // Therefore the center-crop must stay in the oriented quad's axes. Swapping X/Y here
+        // crops the orthogonal output axis for quarter-turned front-camera streams and can
+        // stretch the resulting portrait video.
+        return orientedCropRect
+    }
+
+    private fun resolveCameraPresentationMatrix(sourceMatrix: FloatArray): FloatArray {
+        System.arraycopy(sourceMatrix, 0, cameraPresentationMatrix, 0, cameraPresentationMatrix.size)
+
+        val shouldApplySensorRotation = shouldApplySensorOrientationFallback(
+            inputWidth = currentCameraInputSize.width,
+            inputHeight = currentCameraInputSize.height,
+            targetWidth = encoderOutputSize.width,
+            targetHeight = encoderOutputSize.height,
+            sensorOrientationDegrees = currentCameraSensorOrientationDegrees,
+            textureTransformMatrix = sourceMatrix,
+        )
+        if (!shouldApplySensorRotation) {
+            cameraSensorOrientationFallbackApplied = false
+            return cameraPresentationMatrix
+        }
+
+        val sensorRotation = resolveMgcEisPresentationMatrix(currentCameraSensorOrientationDegrees)
+        if (sensorRotation == null) {
+            cameraSensorOrientationFallbackApplied = false
+            return cameraPresentationMatrix
+        }
+
+        // Some front sensors deliver the 8 MP 4:3 stream without a quarter-turn in the
+        // SurfaceTexture matrix. Compose SENSOR_ORIENTATION only for this known geometry
+        // and only when the producer has not already swapped axes, avoiding double rotation.
+        Matrix.multiplyMM(
+            cameraPresentationMatrix, 0,
+            sourceMatrix, 0,
+            sensorRotation, 0,
+        )
+        cameraSensorOrientationFallbackApplied = true
+        return cameraPresentationMatrix
     }
 
     private fun updateCameraTransformGeometry(presentationMatrix: FloatArray) {
@@ -422,6 +464,7 @@ class RealtimeVideoRenderer(
                 "effectiveInput=${if (axesSwapped) currentCameraInputSize.height else currentCameraInputSize.width}x" +
                 "${if (axesSwapped) currentCameraInputSize.width else currentCameraInputSize.height}, " +
                 "crop=${cameraCropRect.joinToString(prefix = "[", postfix = "]")}, " +
+                "sensorOrientationFallback=$cameraSensorOrientationFallbackApplied, " +
                 "matrix=${presentationMatrix.joinToString(prefix = "[", postfix = "]")}"
         )
     }
@@ -1029,14 +1072,33 @@ class RealtimeVideoRenderer(
     }
 }
 
-internal fun mapOrientedCropRectToTextureCoordinates(
-    cropRect: FloatArray,
-    axesSwapped: Boolean,
-): FloatArray {
-    if (!axesSwapped) return cropRect
-    // Center-crop bounds are symmetric, so swapping X/Y also maps the bounds correctly
-    // regardless of whether the quarter-turn is clockwise or counter-clockwise.
-    return floatArrayOf(cropRect[1], cropRect[0], cropRect[3], cropRect[2])
+internal fun shouldApplySensorOrientationFallback(
+    inputWidth: Int,
+    inputHeight: Int,
+    targetWidth: Int,
+    targetHeight: Int,
+    sensorOrientationDegrees: Int,
+    textureTransformMatrix: FloatArray,
+): Boolean {
+    if (
+        inputWidth <= 0 ||
+        inputHeight <= 0 ||
+        targetWidth <= 0 ||
+        targetHeight <= 0 ||
+        inputWidth <= inputHeight ||
+        targetWidth >= targetHeight ||
+        sensorOrientationDegrees % 180 == 0 ||
+        isTextureTransformAxesSwapped(textureTransformMatrix)
+    ) {
+        return false
+    }
+
+    val pixelCount = inputWidth.toLong() * inputHeight.toLong()
+    val portraitAspect = minOf(inputWidth, inputHeight).toFloat() /
+        maxOf(inputWidth, inputHeight).toFloat()
+    return pixelCount >= 7_500_000L &&
+        pixelCount < 12_000_000L &&
+        abs(portraitAspect - (3f / 4f)) <= 0.04f
 }
 
 internal fun isTextureTransformAxesSwapped(matrix: FloatArray): Boolean {
