@@ -398,20 +398,13 @@ class RealtimeVideoRenderer(
         inputWidth: Int,
         inputHeight: Int,
     ): FloatArray {
-        val safeWidth = inputWidth.coerceAtLeast(1)
-        val safeHeight = inputHeight.coerceAtLeast(1)
-        val axesSwapped = isTextureTransformAxesSwapped(presentationMatrix)
-        val orientedInputSize = if (axesSwapped) {
-            Size(safeHeight, safeWidth)
-        } else {
-            Size(safeWidth, safeHeight)
-        }
-        val orientedCropRect = resolveCenterCropRect(orientedInputSize, encoderOutputSize)
-        // uCropRect is interpolated across the output quad before uSTMatrix is applied.
-        // Therefore the center-crop must stay in the oriented quad's axes. Swapping X/Y here
-        // crops the orthogonal output axis for quarter-turned front-camera streams and can
-        // stretch the resulting portrait video.
-        return orientedCropRect
+        return resolveOutputQuadCropRect(
+            presentationMatrix = presentationMatrix,
+            inputWidth = inputWidth,
+            inputHeight = inputHeight,
+            targetWidth = encoderOutputSize.width,
+            targetHeight = encoderOutputSize.height,
+        )
     }
 
     private fun resolveCameraPresentationMatrix(sourceMatrix: FloatArray): FloatArray {
@@ -1070,6 +1063,34 @@ class RealtimeVideoRenderer(
         eglDisplay = EGL14.EGL_NO_DISPLAY
         initialized = false
     }
+}
+
+/**
+ * Resolves the center-crop rectangle in output-quad coordinates for the exact path used by
+ * [RealtimeVideoRenderer]. Do not swap this rectangle's X/Y bounds afterward: the vertex shader
+ * interpolates uCropRect across aTexCoord first and applies the SurfaceTexture matrix second.
+ * Regression tests cover the rotated 8 MP 4:3 front-camera -> portrait 4K path.
+ */
+internal fun resolveOutputQuadCropRect(
+    presentationMatrix: FloatArray,
+    inputWidth: Int,
+    inputHeight: Int,
+    targetWidth: Int,
+    targetHeight: Int,
+): FloatArray {
+    val safeWidth = inputWidth.coerceAtLeast(1)
+    val safeHeight = inputHeight.coerceAtLeast(1)
+    val axesSwapped = isTextureTransformAxesSwapped(presentationMatrix)
+    val orientedInputSize = if (axesSwapped) {
+        Size(safeHeight, safeWidth)
+    } else {
+        Size(safeWidth, safeHeight)
+    }
+
+    // IMPORTANT: return this crop in the oriented output-quad axes. Never remap
+    // floatArrayOf(left, top, right, bottom) by swapping X and Y; that is a regression
+    // which makes rotated portrait video crop the orthogonal axis and appear stretched.
+    return resolveCenterCropRect(orientedInputSize.width, orientedInputSize.height, targetWidth, targetHeight)
 }
 
 internal fun shouldApplySensorOrientationFallback(
