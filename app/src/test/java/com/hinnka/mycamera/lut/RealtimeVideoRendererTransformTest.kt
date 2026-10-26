@@ -122,19 +122,66 @@ class RealtimeVideoRendererTransformTest {
     }
 
     @Test
-    fun quarterTurnKeepsCenterCropInOutputQuadAxes() {
-        // The center-crop is defined in oriented output axes and applied to aTexCoord
-        // before the texture transform. For a 4:3 source rotated to portrait 9:16,
-        // crop the oriented X axis; never swap it to the orthogonal Y axis.
-        val orientedCrop = resolveCenterCropRect(
-            sourceWidth = 2448,
-            sourceHeight = 3264,
-            targetWidth = 2160,
-            targetHeight = 3840,
+    fun frontEightMpFourThreeToPortrait4kKeepsCropInOutputQuadAxes() {
+        val quarterTurnMatrix = floatArrayOf(
+            0f, 1f, 0f, 0f,
+            1f, 0f, 0f, 0f,
+            0f, 0f, 1f, 0f,
+            0f, 0f, 0f, 1f,
         )
+        // The actual renderer helper must crop the oriented 3:4 source horizontally
+        // in output-quad space. Swapping this result into a Y crop is a regression.
         assertArrayEquals(
             floatArrayOf(0.125f, 0f, 0.875f, 1f),
-            orientedCrop,
+            resolveOutputQuadCropRect(
+                presentationMatrix = quarterTurnMatrix,
+                inputWidth = 3264,
+                inputHeight = 2448,
+                targetWidth = 2160,
+                targetHeight = 3840,
+            ),
+            0.0001f,
+        )
+    }
+
+    @Test
+    fun unrotatedEightMpSourceUsesItsUnrotatedCropGeometry() {
+        val identityMatrix = floatArrayOf(
+            1f, 0f, 0f, 0f,
+            0f, 1f, 0f, 0f,
+            0f, 0f, 1f, 0f,
+            0f, 0f, 0f, 1f,
+        )
+        assertArrayEquals(
+            floatArrayOf(0.2890625f, 0f, 0.7109375f, 1f),
+            resolveOutputQuadCropRect(
+                presentationMatrix = identityMatrix,
+                inputWidth = 3264,
+                inputHeight = 2448,
+                targetWidth = 2160,
+                targetHeight = 3840,
+            ),
+            0.0001f,
+        )
+    }
+
+    @Test
+    fun landscapeRearCameraCropRemainsUnchanged() {
+        val identityMatrix = floatArrayOf(
+            1f, 0f, 0f, 0f,
+            0f, 1f, 0f, 0f,
+            0f, 0f, 1f, 0f,
+            0f, 0f, 0f, 1f,
+        )
+        assertArrayEquals(
+            floatArrayOf(0f, 0.125f, 1f, 0.875f),
+            resolveOutputQuadCropRect(
+                presentationMatrix = identityMatrix,
+                inputWidth = 3264,
+                inputHeight = 2448,
+                targetWidth = 3840,
+                targetHeight = 2160,
+            ),
             0.0001f,
         )
     }
