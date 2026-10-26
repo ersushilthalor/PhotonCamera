@@ -2721,6 +2721,9 @@ class Camera2Controller(private val context: Context) {
                     videoRecorder.updateCameraInputSize(
                         size = switchedInputSize,
                         currentCameraUsesEnhancedStabilization = shouldUseVideoEnhancedStabilization(),
+                        sensorOrientationDegrees = openCharacteristics.get(
+                            CameraCharacteristics.SENSOR_ORIENTATION
+                        ) ?: cachedSensorOrientation,
                     )
                 }
 
