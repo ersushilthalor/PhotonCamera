@@ -338,6 +338,7 @@ class VideoRecorder(
     fun updateCameraInputSize(
         size: Size,
         currentCameraUsesEnhancedStabilization: Boolean,
+        sensorOrientationDegrees: Int = requestedSensorOrientationDegrees,
     ) {
         // The renderer can start with EIS on the rear camera but fall back to its ordinary
         // SurfaceTexture input on a switched front camera. Only keep the old buffer geometry
@@ -350,15 +351,17 @@ class VideoRecorder(
         ) return
         if (size.width <= 0 || size.height <= 0) return
         requestedCameraInputSize = size
+        requestedSensorOrientationDegrees = sensorOrientationDegrees
         // Serialize buffer-size and transform-geometry changes with the realtime render loop.
         // Updating SurfaceTexture/crop state from the camera handler can otherwise race the first
         // frame from the replacement lens and leave the encoder using stale crop geometry.
         runBlocking(renderDispatcher) {
-            renderer?.updateCameraInputSize(size)
+            renderer?.updateCameraInputSize(size, sensorOrientationDegrees)
         }
         PLog.i(
             TAG,
             "Recording input size refreshed after camera switch: ${size.width}x${size.height}, " +
+                "sensorOrientation=$sensorOrientationDegrees, " +
                 "recordingStartedWithEis=$requestedEnhancedStabilization, " +
                 "currentCameraUsesEis=$currentCameraUsesEnhancedStabilization",
         )
