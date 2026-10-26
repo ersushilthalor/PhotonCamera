@@ -38,6 +38,15 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Verify front-camera crop regression guard
+        run: |
+          test_file="app/src/test/java/com/hinnka/mycamera/lut/RealtimeVideoRendererTransformTest.kt"
+          renderer_file="app/src/main/java/com/hinnka/mycamera/lut/RealtimeVideoRenderer.kt"
+          grep -Fq 'fun frontEightMpFourThreeToPortrait4kKeepsCropInOutputQuadAxes()' "$test_file"
+          grep -Fq 'fun unrotatedEightMpSourceUsesItsUnrotatedCropGeometry()' "$test_file"
+          grep -Fq 'fun landscapeRearCameraCropRemainsUnchanged()' "$test_file"
+          grep -Fq 'return resolveOutputQuadCropRect(' "$renderer_file"
+
       - name: Run video transform regression tests
         run: |
           chmod +x ./gradlew
