@@ -64,6 +64,64 @@ class RealtimeVideoRendererTransformTest {
     }
 
     @Test
+    fun eightMpFourThreeLandscapeInputUsesSensorRotationForPortrait4k() {
+        val identityMatrix = floatArrayOf(
+            1f, 0f, 0f, 0f,
+            0f, 1f, 0f, 0f,
+            0f, 0f, 1f, 0f,
+            0f, 0f, 0f, 1f,
+        )
+
+        assertTrue(
+            shouldApplySensorOrientationFallback(
+                inputWidth = 3264,
+                inputHeight = 2448,
+                targetWidth = 2160,
+                targetHeight = 3840,
+                sensorOrientationDegrees = 270,
+                textureTransformMatrix = identityMatrix,
+            )
+        )
+    }
+
+    @Test
+    fun sensorOrientationFallbackDoesNotDoubleRotateOrApplyToUnrelatedStreams() {
+        val quarterTurnMatrix = floatArrayOf(
+            0f, 1f, 0f, 0f,
+            1f, 0f, 0f, 0f,
+            0f, 0f, 1f, 0f,
+            0f, 0f, 0f, 1f,
+        )
+        val identityMatrix = floatArrayOf(
+            1f, 0f, 0f, 0f,
+            0f, 1f, 0f, 0f,
+            0f, 0f, 1f, 0f,
+            0f, 0f, 0f, 1f,
+        )
+
+        assertFalse(
+            shouldApplySensorOrientationFallback(
+                3264, 2448, 2160, 3840, 270, quarterTurnMatrix,
+            )
+        )
+        assertFalse(
+            shouldApplySensorOrientationFallback(
+                1920, 1080, 2160, 3840, 270, identityMatrix,
+            )
+        )
+        assertFalse(
+            shouldApplySensorOrientationFallback(
+                3264, 2448, 3840, 2160, 270, identityMatrix,
+            )
+        )
+        assertFalse(
+            shouldApplySensorOrientationFallback(
+                3264, 2448, 2160, 3840, 0, identityMatrix,
+            )
+        )
+    }
+
+    @Test
     fun quarterTurnMapsOrientedCropBackToRawTextureAxes() {
         // A 4:3 landscape input becomes 3:4 after a quarter-turn. Cropping that
         // oriented frame to 9:16 crops its X axis, which is the raw texture's Y axis.
