@@ -42,15 +42,24 @@ jobs:
         run: |
           test_file="app/src/test/java/com/hinnka/mycamera/lut/RealtimeVideoRendererTransformTest.kt"
           renderer_file="app/src/main/java/com/hinnka/mycamera/lut/RealtimeVideoRenderer.kt"
+          controller_file="app/src/main/java/com/hinnka/mycamera/camera/Camera2Controller.kt"
+          preview_renderer_file="app/src/main/java/com/hinnka/mycamera/lut/LutRenderer.kt"
+          stabilization_test_file="app/src/test/java/com/hinnka/mycamera/stabilization/RealtimeStabilizationMathTest.kt"
           grep -Fq 'fun frontEightMpFourThreeToPortrait4kKeepsCropInOutputQuadAxes()' "$test_file"
           grep -Fq 'fun unrotatedEightMpSourceUsesItsUnrotatedCropGeometry()' "$test_file"
           grep -Fq 'fun landscapeRearCameraCropRemainsUnchanged()' "$test_file"
           grep -Fq 'return resolveOutputQuadCropRect(' "$renderer_file"
+          grep -Fq 'val shouldFlipEncodedFrame = false' "$controller_file"
+          grep -Fq 'if (oesFrameUpdated) useCurrentOesFrame()' "$preview_renderer_file"
+          grep -Fq 'fun enhancedStabilizationSupportsFrontAndRearCamerasOnly()' "$stabilization_test_file"
 
       - name: Run video transform regression tests
         run: |
           chmod +x ./gradlew
-          ./gradlew --no-daemon :app:testDefaultDebugUnitTest --tests com.hinnka.mycamera.lut.RealtimeVideoRendererTransformTest --stacktrace
+          ./gradlew --no-daemon :app:testDefaultDebugUnitTest \
+            --tests com.hinnka.mycamera.lut.RealtimeVideoRendererTransformTest \
+            --tests com.hinnka.mycamera.stabilization.RealtimeStabilizationMathTest \
+            --stacktrace
 
       - name: Build default debug APK
         run: |

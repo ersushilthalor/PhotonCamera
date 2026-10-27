@@ -1,10 +1,21 @@
 package com.hinnka.mycamera.stabilization
 
+import android.hardware.camera2.CameraCharacteristics
 import com.hinnka.mycamera.lut.MgcEisMesh
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RealtimeStabilizationMathTest {
+    @Test
+    fun enhancedStabilizationSupportsFrontAndRearCamerasOnly() {
+        assertTrue(isMgcStabilizationLensFacingSupported(CameraCharacteristics.LENS_FACING_FRONT))
+        assertTrue(isMgcStabilizationLensFacingSupported(CameraCharacteristics.LENS_FACING_BACK))
+        assertFalse(isMgcStabilizationLensFacingSupported(CameraCharacteristics.LENS_FACING_EXTERNAL))
+        assertFalse(isMgcStabilizationLensFacingSupported(null))
+    }
+
     @Test
     fun stabilizationLookaheadAllowsZeroAndCapsAtTen() {
         assertEquals(0, normalizeStabilizationLookahead(0))

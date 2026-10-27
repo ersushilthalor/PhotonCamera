@@ -5083,8 +5083,12 @@ class Camera2Controller(private val context: Context) {
                 val mode = state.videoConfig.stabilizationMode
                 val enhancedSelected = mode == VideoStabilizationMode.ENHANCED
                 val requestedVideoMode = if (enhancedSelected) {
+                    // EIS+ performs the warp itself. Some front HALs omit OFF from their
+                    // advertised mode list while still accepting the explicit request key.
                     CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF.takeIf {
-                        availableVideoStabilizationModes.contains(it)
+                        isCaptureRequestKeyAvailable(
+                            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE.name
+                        )
                     }
                 } else {
                     resolveVideoStabilizationRequestMode(mode)
@@ -5134,10 +5138,7 @@ class Camera2Controller(private val context: Context) {
             // otherwise leave vendor stabilization active, which the coordinator correctly
             // interprets as a double-stabilization conflict and shuts EIS+ down for.
             if (enhancedPhotoPreview &&
-                isCaptureRequestKeyAvailable(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE.name) &&
-                availableVideoStabilizationModes.contains(
-                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF,
-                )
+                isCaptureRequestKeyAvailable(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE.name)
             ) {
                 builder.set(
                     CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
@@ -7360,9 +7361,9 @@ class Camera2Controller(private val context: Context) {
             _state.value.videoCapabilities.openGatePortraitAspectRatio,
             cameraInputSize
         )
-        // Correct the mirrored front-camera input in the encoder path so saved video is unmirrored.
-        // Keep this separate from the still-photo Selfie Mirror preference.
-        val shouldFlipEncodedFrame = isCurrentCameraFrontFacing()
+        // Encoded video must not inherit the front-preview selfie mirror.
+        // The Selfie Mirror preference applies to still photos only.
+        val shouldFlipEncodedFrame = false
         val logProfile = _state.value.videoConfig.logProfile
         val monitorOnly = logProfile.isEnabled &&
             _state.value.videoConfig.logLutMode == VideoLogLutMode.MONITOR_ONLY
@@ -7460,7 +7461,6 @@ class Camera2Controller(private val context: Context) {
             state.captureMode == CaptureMode.VIDEO &&
             VideoStabilizationMode.ENHANCED in
                 state.videoCapabilities.availableStabilizationModes &&
-            !isCurrentCameraFrontFacing() &&
             realtimeStabilizationCoordinator.isCurrentCameraSupported
     }
 
