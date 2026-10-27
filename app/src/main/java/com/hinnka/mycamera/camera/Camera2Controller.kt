@@ -5083,8 +5083,13 @@ class Camera2Controller(private val context: Context) {
                 val mode = state.videoConfig.stabilizationMode
                 val enhancedSelected = mode == VideoStabilizationMode.ENHANCED
                 val requestedVideoMode = if (enhancedSelected) {
+                    // EIS+ owns the frame warp, so explicitly ask Camera2 to disable its own
+                    // EIS whenever the request key is exposed. Some front-camera HALs omit OFF
+                    // from the advertised modes but still honor an explicit OFF request.
                     CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF.takeIf {
-                        availableVideoStabilizationModes.contains(it)
+                        isCaptureRequestKeyAvailable(
+                            CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE.name
+                        )
                     }
                 } else {
                     resolveVideoStabilizationRequestMode(mode)
@@ -5134,10 +5139,7 @@ class Camera2Controller(private val context: Context) {
             // otherwise leave vendor stabilization active, which the coordinator correctly
             // interprets as a double-stabilization conflict and shuts EIS+ down for.
             if (enhancedPhotoPreview &&
-                isCaptureRequestKeyAvailable(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE.name) &&
-                availableVideoStabilizationModes.contains(
-                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF,
-                )
+                isCaptureRequestKeyAvailable(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE.name)
             ) {
                 builder.set(
                     CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
