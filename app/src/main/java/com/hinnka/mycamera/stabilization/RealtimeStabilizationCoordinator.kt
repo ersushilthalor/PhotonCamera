@@ -36,6 +36,15 @@ fun normalizeStabilizationStrength(strength: Float): Float =
 fun normalizeStabilizationLookahead(lookahead: Int): Int =
     lookahead.coerceIn(MIN_VIDEO_STABILIZATION_LOOKAHEAD, MAX_VIDEO_STABILIZATION_LOOKAHEAD)
 
+/**
+ * MGC's native engine accepts an explicit front-facing flag and remaps front-camera gyro axes.
+ * Keep both standard-facing cameras eligible; timestamp synchronization and runtime HAL-conflict
+ * checks still decide whether enhanced stabilization can actually run for the selected camera.
+ */
+internal fun isMgcStabilizationLensFacingSupported(lensFacing: Int?): Boolean =
+    lensFacing == CameraCharacteristics.LENS_FACING_BACK ||
+        lensFacing == CameraCharacteristics.LENS_FACING_FRONT
+
 enum class StabilizationUseCase(
     internal val defaultStrength: Float,
 ) {
@@ -299,7 +308,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
             val current = calibration
             return !halStabilizationConflictDetected &&
                 isGyroscopeAvailable && current != null &&
-                current.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+                isMgcStabilizationLensFacingSupported(current.lensFacing) &&
                 current.timestampSource ==
                 CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
         }
@@ -316,7 +325,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
         val activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
         val physicalSize = characteristics.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
         return isGyroscopeAvailable && activeArray != null && physicalSize != null &&
-            lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+            isMgcStabilizationLensFacingSupported(lensFacing) &&
             timestampSource == CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
     }
 
