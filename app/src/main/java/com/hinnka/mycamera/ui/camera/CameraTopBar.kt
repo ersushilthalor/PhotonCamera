@@ -55,6 +55,8 @@ fun CameraTopBar(
     onVideoStabilizationModeChange: (VideoStabilizationMode) -> Unit,
     onVideoResolutionClick: () -> Unit,
     onVideoFpsClick: () -> Unit,
+    videoHdrEnabled: Boolean,
+    onVideoHdrToggle: () -> Unit,
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -68,6 +70,8 @@ fun CameraTopBar(
             onVideoStabilizationModeChange = onVideoStabilizationModeChange,
             onVideoResolutionClick = onVideoResolutionClick,
             onVideoFpsClick = onVideoFpsClick,
+            videoHdrEnabled = videoHdrEnabled,
+            onVideoHdrToggle = onVideoHdrToggle,
             onSettingsClick = onSettingsClick,
             modifier = modifier
         )
@@ -202,6 +206,16 @@ private fun VideoTopBar(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    IconButton(onClick = onVideoHdrToggle) {
+                        Text(
+                            text = "HDR",
+                            color = Color.White.copy(alpha = if (videoHdrEnabled) 1f else 0.65f),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.autoRotate()
+                        )
+                    }
+
                     VideoActionIcon(
                         icon = if (videoConfig.torchEnabled) AppIcons.FlashlightOn else AppIcons.FlashlightOff,
                         active = videoConfig.torchEnabled,
