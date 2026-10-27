@@ -636,6 +636,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     var currentBaselineLutConfig: LutConfig? by mutableStateOf(null)
         private set
 
+    private val _videoHdrEnabled = MutableStateFlow(false)
+    val videoHdrEnabled: StateFlow<Boolean> = _videoHdrEnabled.asStateFlow()
+
     private val _currentEnginePreviewPlan = MutableStateFlow<RawEnginePreviewPlan?>(null)
     val currentEnginePreviewPlan = _currentEnginePreviewPlan.asStateFlow()
 
@@ -845,8 +848,25 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         )
     }
 
+    fun setVideoHdrEnabled(enabled: Boolean) {
+        if (state.value.videoRecordingState.isRecording ||
+            state.value.videoRecordingState.isProcessing
+        ) return
+        _videoHdrEnabled.value = enabled
+    }
+
     fun getMergedRecipeParams(recipe: ColorRecipeParams = currentRecipeParams.value): ColorRecipeParams {
-        return recipe
+        if (state.value.captureMode != CaptureMode.VIDEO || !_videoHdrEnabled.value) {
+            return recipe
+        }
+        // Match the existing Edit Control Panel display values: tonality +10, contrast -1,
+        // exposure +0.3 EV, and shadows +10. Keep this as a render-time override only.
+        return recipe.copy(
+            tonality = 1f,
+            contrast = 0.95f,
+            exposure = 0.3f,
+            shadows = 1f,
+        )
     }
 
     fun applyPreset(preset: com.hinnka.mycamera.model.CameraPreset?) {
