@@ -7360,8 +7360,9 @@ class Camera2Controller(private val context: Context) {
             _state.value.videoCapabilities.openGatePortraitAspectRatio,
             cameraInputSize
         )
-        // The Selfie Mirror preference is for still photos only; never mirror encoded video.
-        val shouldFlipEncodedFrame = false
+        // Correct the mirrored front-camera input in the encoder path so saved video is unmirrored.
+        // Keep this separate from the still-photo Selfie Mirror preference.
+        val shouldFlipEncodedFrame = isCurrentCameraFrontFacing()
         val logProfile = _state.value.videoConfig.logProfile
         val monitorOnly = logProfile.isEnabled &&
             _state.value.videoConfig.logLutMode == VideoLogLutMode.MONITOR_ONLY
