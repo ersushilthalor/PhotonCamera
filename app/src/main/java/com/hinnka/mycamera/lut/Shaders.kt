@@ -1805,6 +1805,20 @@ object Shaders {
         }
     """.trimIndent()
 
+    // Style-specific shader variants used by the offline shader regression tests.
+    // Keep the shader source unchanged apart from its compile-time style define.
+    fun compactBokehHighlightFragmentShader(soapBubbleStyle: Boolean): String =
+        COMPACT_BOKEH_HIGHLIGHT_FRAGMENT_SHADER
+            .withBokehStyleDefine("SOAP_BUBBLE_BOKEH", soapBubbleStyle)
+
+    fun analyticBokehHighlightVertexShader(soapBubbleStyle: Boolean): String =
+        ANALYTIC_BOKEH_HIGHLIGHT_VERTEX_SHADER
+            .withBokehStyleDefine("SOAP_BUBBLE_BOKEH", soapBubbleStyle)
+
+    fun analyticBokehHighlightFragmentShader(soapBubbleStyle: Boolean): String =
+        ANALYTIC_BOKEH_HIGHLIGHT_FRAGMENT_SHADER
+            .withBokehStyleDefine("SOAP_BUBBLE_BOKEH", soapBubbleStyle)
+
     fun psfSplatFragmentShader(
         naturalStyle: Boolean,
         soapBubbleStyle: Boolean = false,
@@ -1813,10 +1827,14 @@ object Shaders {
             .withBokehStyleDefine("NATURAL_BOKEH", naturalStyle)
             .withBokehStyleDefine("SOAP_BUBBLE_BOKEH", soapBubbleStyle)
 
-    private fun String.withBokehStyleDefine(define: String, enabled: Boolean): String =
-        if (enabled) {
-            replace("#define $define 0", "#define $define 1")
-        } else {
-            this
+    private fun String.withBokehStyleDefine(define: String, enabled: Boolean): String {
+        val defineZero = "#define $define 0"
+        val defineOne = "#define $define 1"
+        return when {
+            contains(defineZero) -> replace(defineZero, if (enabled) defineOne else defineZero)
+            contains(defineOne) -> replace(defineOne, if (enabled) defineOne else defineZero)
+            enabled -> replaceFirst("#version 300 es", "#version 300 es\n$defineOne")
+            else -> replaceFirst("#version 300 es", "#version 300 es\n$defineZero")
         }
+    }
 }
