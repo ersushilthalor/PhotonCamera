@@ -7461,7 +7461,6 @@ class Camera2Controller(private val context: Context) {
             state.captureMode == CaptureMode.VIDEO &&
             VideoStabilizationMode.ENHANCED in
                 state.videoCapabilities.availableStabilizationModes &&
-            !isCurrentCameraFrontFacing() &&
             realtimeStabilizationCoordinator.isCurrentCameraSupported
     }
 

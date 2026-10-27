@@ -227,6 +227,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private var stabilizationSession: RealtimeStabilizationCoordinator.Session? = null
     @Volatile
     private var stabilizationSessionStarted = false
+    @Volatile
+    private var stabilizationOutputAvailable = false
     private var previewStabilizationUseCase: StabilizationUseCase? = null
     private var previewStabilizationStrength = 0f
     private var currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
@@ -539,7 +541,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             setOnFrameAvailableListener {
                 frameAvailable.set(true)
                 if (previewStabilizationUseCase == null ||
-                    stabilizationCoordinator?.isCurrentCameraSupported != true
+                    stabilizationCoordinator?.isCurrentCameraSupported != true ||
+                    !stabilizationOutputAvailable
                 ) {
                     onRequestRender?.invoke()
                 }
@@ -584,6 +587,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
         currentCameraTextureMatrix = stMatrix
         currentFrameTimestampNs = 0L
+        stabilizationOutputAvailable = false
         lutTextureId = 0
         baselineLutTextureId = 0
         basicToneTextures.reset()
@@ -1035,6 +1039,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                     } else {
                         renderMgcEisFrame(completedFrame)?.let { rendered ->
                             currentCameraTextureSource = PreviewColorTextureSource.TEXTURE_2D
+                            stabilizationOutputAvailable = true
                             currentCameraTextureTarget = GLES30.GL_TEXTURE_2D
                             currentCameraTextureId = rendered.textureId
                             currentCameraTextureMatrix = mgcEisPresentationTransform.matrix
@@ -1048,9 +1053,9 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 }
             }
             if (currentCameraTextureSource != PreviewColorTextureSource.TEXTURE_2D) {
-                GLES30.glClearColor(0f, 0f, 0f, 1f)
-                GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
-                return
+                // Keep showing the real Camera2 preview while EIS+ waits for its first
+                // timestamp-matched result. EIS+ remains enabled and keeps processing frames.
+                if (oesFrameUpdated) useCurrentOesFrame()
             }
         } else if (cameraFrameUpdated) {
             useCurrentOesFrame()
@@ -2424,6 +2429,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
 
     private fun recreatePreviewStabilizationSession() {
         stabilizationSession?.stop()
+        stabilizationOutputAvailable = false
         mgcEisPresentationTransform.reset()
         stabilizationSession = previewStabilizationUseCase?.let { useCase ->
             stabilizationCoordinator?.createSession(
