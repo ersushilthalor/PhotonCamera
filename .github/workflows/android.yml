@@ -49,7 +49,7 @@ jobs:
           grep -Fq 'fun unrotatedEightMpSourceUsesItsUnrotatedCropGeometry()' "$test_file"
           grep -Fq 'fun landscapeRearCameraCropRemainsUnchanged()' "$test_file"
           grep -Fq 'return resolveOutputQuadCropRect(' "$renderer_file"
-          grep -Fq 'val shouldFlipEncodedFrame = false' "$controller_file"
+          grep -Fq 'val shouldFlipEncodedFrame = isCurrentCameraFrontFacing()' "$controller_file"
           grep -Fq 'if (oesFrameUpdated) useCurrentOesFrame()' "$preview_renderer_file"
           grep -Fq 'fun enhancedStabilizationSupportsFrontAndRearCamerasOnly()' "$stabilization_test_file"
 

@@ -7363,7 +7363,7 @@ class Camera2Controller(private val context: Context) {
         )
         // Encoded video must not inherit the front-preview selfie mirror.
         // The Selfie Mirror preference applies to still photos only.
-        val shouldFlipEncodedFrame = false
+        val shouldFlipEncodedFrame = isCurrentCameraFrontFacing()
         val logProfile = _state.value.videoConfig.logProfile
         val monitorOnly = logProfile.isEnabled &&
             _state.value.videoConfig.logLutMode == VideoLogLutMode.MONITOR_ONLY
