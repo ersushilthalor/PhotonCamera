@@ -237,6 +237,7 @@ fun CameraScreen(
     val currentLutId by viewModel.currentLutId.collectAsState()
     val lutNameOverlayState = rememberLutNameOverlayState()
     val currentRecipeParams by viewModel.currentRecipeParams.collectAsState()
+    val videoHdrEnabled by viewModel.videoHdrEnabled.collectAsState()
     val lutSelectorMode by viewModel.lutSelectorMode.collectAsState()
     val activePresetId by viewModel.activePresetId.collectAsState()
     val activePresetModified by viewModel.isActivePresetModified.collectAsState()
@@ -270,6 +271,9 @@ fun CameraScreen(
     var previewRecipeParamsOverride by remember(currentLutId, activePresetId) {
         mutableStateOf<ColorRecipeParams?>(null)
     }
+    val effectiveRecipeParams = viewModel.getMergedRecipeParams(
+        previewRecipeParamsOverride ?: currentRecipeParams
+    )
     var pendingCaptureAnimationBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var captureAnimationJob by remember { mutableStateOf<Job?>(null) }
     var cameraScreenBounds by remember { mutableStateOf<Rect?>(null) }
@@ -957,6 +961,8 @@ fun CameraScreen(
                 onVideoFpsClick = {
                     cycleVideoFps(state)?.let(viewModel::setVideoFps)
                 },
+                videoHdrEnabled = videoHdrEnabled,
+                onVideoHdrToggle = { viewModel.setVideoHdrEnabled(!videoHdrEnabled) },
                 onSettingsClick = {
                     activePanel = if (activePanel == ActivePanel.SETTINGS) ActivePanel.NONE else ActivePanel.SETTINGS
                 },
@@ -1230,7 +1236,7 @@ fun CameraScreen(
                             currentLut = viewModel.currentLutConfig,
                             enginePreviewPlan = viewModel.currentEnginePreviewPlan,
                             baselineColorRecipeParams = currentBaselineRecipeParams,
-                            colorRecipeParams = previewRecipeParamsOverride ?: currentRecipeParams,
+                            colorRecipeParams = effectiveRecipeParams,
                             focusPoint = state.focusPoint,
                             meteringPoint = state.meteringPoint,
                             canMoveMeteringPoint = state.supportsPointMetering &&
@@ -1929,7 +1935,7 @@ fun CameraScreen(
         if (activePanel == ActivePanel.EDIT) {
             LutEditBottomSheet(
                 lutId = currentLutId,
-                initialParams = previewRecipeParamsOverride ?: currentRecipeParams,
+                initialParams = effectiveRecipeParams,
                 onParamsPreviewChange = { previewRecipeParamsOverride = it },
                 showEffects = true,
                 replaceVignetteWithWashedOutRecovery = state.captureMode == CaptureMode.VIDEO,
