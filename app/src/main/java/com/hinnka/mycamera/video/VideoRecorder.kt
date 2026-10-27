@@ -323,11 +323,27 @@ class VideoRecorder(
      * Explicitly restart its renderer session after Camera2 swaps physical lenses; no encoder
      * SurfaceTexture callback is guaranteed to wake a stopped EIS session.
      */
-    fun onCameraSwitched(sensorOrientationDegrees: Int) {
-        if (!isRecording || isPaused || stopRequested || !requestedEnhancedStabilization) return
+    fun onCameraSwitched(
+        sensorOrientationDegrees: Int,
+        frontFacing: Boolean,
+        restartStabilization: Boolean,
+    ) {
+        if (!isRecording || stopRequested) return
+
+        requestedFlipEncodedFrame = frontFacing
+        val mirrorHorizontally = frontFacing && requestedOrientationHintDegrees % 180 == 0
+        val mirrorVertically = frontFacing && requestedOrientationHintDegrees % 180 != 0
+
         scope.launch(renderDispatcher) {
-            if (!isRecording || isPaused || stopRequested) return@launch
-            renderer?.restartStabilizationForCameraSwitch(sensorOrientationDegrees)
+            if (!isRecording || stopRequested) return@launch
+
+            // The encoder stays alive across lens switches, so update only the frame mirror
+            // transform for the newly active lens. Do not restart or alter the recording pipeline.
+            renderer?.updateMirrorTransform(mirrorHorizontally, mirrorVertically)
+
+            if (restartStabilization && !isPaused && requestedEnhancedStabilization) {
+                renderer?.restartStabilizationForCameraSwitch(sensorOrientationDegrees)
+            }
         }
     }
 

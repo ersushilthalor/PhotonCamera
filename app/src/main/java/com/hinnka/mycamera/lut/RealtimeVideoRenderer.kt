@@ -43,8 +43,8 @@ class RealtimeVideoRenderer(
     private val sensorOrientationDegrees: Int,
     colorLayers: List<VideoColorEffectLayer>,
     private val videoLogProfile: VideoLogProfile,
-    private val mirrorHorizontally: Boolean,
-    private val mirrorVertically: Boolean,
+    @Volatile private var mirrorHorizontally: Boolean,
+    @Volatile private var mirrorVertically: Boolean,
     private val encoderColorConfig: VideoEncoderColorConfig,
     private val stabilizationCoordinator: RealtimeStabilizationCoordinator?,
     private val enhancedStabilizationEnabled: Boolean,
@@ -142,6 +142,36 @@ class RealtimeVideoRenderer(
     fun setCameraInputHlg10Source(enabled: Boolean) {
         cameraInputAlreadyHlg10 = enabled
     }
+    /**
+     * A single recording may span multiple lenses. Refresh the output mirror in place instead of
+     * retaining the facing of the camera that started the recording.
+     *
+     * The caller serializes this update on the render dispatcher with frame drawing.
+     */
+    fun updateMirrorTransform(mirrorHorizontally: Boolean, mirrorVertically: Boolean) {
+        if (this.mirrorHorizontally == mirrorHorizontally &&
+            this.mirrorVertically == mirrorVertically
+        ) return
+
+        this.mirrorHorizontally = mirrorHorizontally
+        this.mirrorVertically = mirrorVertically
+        Matrix.setIdentityM(firstPassMvpMatrix, 0)
+        if (mirrorHorizontally || mirrorVertically) {
+            Matrix.scaleM(
+                firstPassMvpMatrix,
+                0,
+                if (mirrorHorizontally) -1f else 1f,
+                if (mirrorVertically) -1f else 1f,
+                1f,
+            )
+        }
+        PLog.i(
+            TAG,
+            "Recording mirror transform updated: mirrorH=$mirrorHorizontally, " +
+                "mirrorV=$mirrorVertically",
+        )
+    }
+
 
     /**
      * Keep the encoder resolution fixed while adapting the camera input stream when

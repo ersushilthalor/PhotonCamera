@@ -2606,8 +2606,12 @@ class Camera2Controller(private val context: Context) {
                     characteristics = capabilityCharacteristics,
                     timingCharacteristics = openCharacteristics,
                 )
-                if (stabilizationCameraChanged && _state.value.videoRecordingState.isRecording) {
-                    videoRecorder.onCameraSwitched(cachedSensorOrientation)
+                if (_state.value.videoRecordingState.isRecording) {
+                    videoRecorder.onCameraSwitched(
+                        sensorOrientationDegrees = cachedSensorOrientation,
+                        frontFacing = isCurrentCameraFrontFacing(),
+                        restartStabilization = stabilizationCameraChanged,
+                    )
                 }
                 if (_state.value.captureMode == CaptureMode.PHOTO &&
                     _state.value.photoPreviewStabilizationEnabled &&
