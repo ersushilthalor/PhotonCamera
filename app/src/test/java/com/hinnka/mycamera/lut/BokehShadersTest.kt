@@ -183,37 +183,28 @@ class BokehShadersTest {
     }
 
     @Test
-    fun analyticHighlightsUseTheSameFieldDependentBiotarShapeAsBackgroundBokeh() {
+    fun analyticAndSoapBubbleHighlightsUseTheirDedicatedShaderVariants() {
         val vertexShader = Shaders.ANALYTIC_BOKEH_HIGHLIGHT_VERTEX_SHADER
         val fragmentShader = Shaders.ANALYTIC_BOKEH_HIGHLIGHT_FRAGMENT_SHADER
+        val bubbleVertexShader = Shaders.SOAP_BUBBLE_VERTEX_SHADER
+        val bubbleFragmentShader = Shaders.SOAP_BUBBLE_FRAGMENT_SHADER
 
         assertTrue(vertexShader.contains("vec2 field = (aCenterUv * 2.0 - 1.0)"))
         assertTrue(vertexShader.contains("vec2 tangential = vec2(-radial.y, radial.x)"))
         assertTrue(vertexShader.contains("smoothstep(0.12, 1.15, fieldRadius)"))
         assertTrue(vertexShader.contains("float radialScale = mix(1.0, 0.54, fieldStrength)"))
         assertTrue(vertexShader.contains("float tangentialScale = mix(1.0, 1.08, fieldStrength)"))
-        assertTrue(vertexShader.contains("float radialScale = mix(1.0, 0.78, fieldStrength)"))
-        assertTrue(vertexShader.contains("float tangentialScale = mix(1.0, 1.02, fieldStrength)"))
         assertTrue(fragmentShader.contains("smoothstep(0.38, 1.0, normalizedDistance)"))
         assertTrue(fragmentShader.contains("float shoulderStrength = mix(0.025, 0.045, vFieldStrength)"))
-        assertTrue(fragmentShader.contains("transparentCore + innerGlow * 0.12"))
-        assertTrue(fragmentShader.contains("flat in float vBubblePhase"))
-        assertTrue(fragmentShader.contains("vec3(0.24)"))
-        assertTrue(fragmentShader.contains("0.44 * transmission"))
-        assertTrue(fragmentShader.contains("float sourceTransmission = mix("))
-        assertTrue(fragmentShader.contains("float profileVariation = 0.5"))
-        assertTrue(fragmentShader.contains("vec3(0.93, 1.02, 1.08)"))
+        assertTrue(fragmentShader.contains("float normalizedDistance = length(vAperturePosition)"))
         assertFalse(fragmentShader.contains("float irregularDistance"))
         assertFalse(vertexShader.contains("uniform int uBokehStyle"))
         assertFalse(fragmentShader.contains("uniform int uBokehStyle"))
-        assertTrue(
-            Shaders.analyticBokehHighlightVertexShader(true)
-                .contains("#define SOAP_BUBBLE_BOKEH 1")
-        )
-        assertTrue(
-            Shaders.analyticBokehHighlightFragmentShader(true)
-                .contains("#define SOAP_BUBBLE_BOKEH 1")
-        )
+
+        assertTrue(bubbleVertexShader.contains("flat out vec4 vShapePhase"))
+        assertTrue(bubbleVertexShader.contains("flat out vec2 vShapeStrength"))
+        assertTrue(bubbleFragmentShader.contains("flat in vec4 vShapePhase"))
+        assertTrue(bubbleFragmentShader.contains("float localRimWidth = rimWidth * mix("))
         assertFalse(fragmentShader.contains("smoothstep(0.86, 1.0, normalizedDistance)"))
     }
 
@@ -374,7 +365,7 @@ class BokehShadersTest {
             "frag" to Shaders.DEPTH_READBACK_FRAGMENT_SHADER,
             "frag" to Shaders.BOKEH_LAYER_COLOR_FRAGMENT_SHADER,
             "frag" to Shaders.COMPACT_BOKEH_HIGHLIGHT_FRAGMENT_SHADER,
-            "frag" to Shaders.compactBokehHighlightFragmentShader(true),
+            "frag" to Shaders.BUBBLE_SOURCE_FRAGMENT_SHADER,
             "frag" to Shaders.PSF_SPLAT_FRAGMENT_SHADER,
             "frag" to Shaders.psfSplatFragmentShader(true),
             "frag" to Shaders.psfSplatFragmentShader(
@@ -383,8 +374,8 @@ class BokehShadersTest {
             ),
             "vert" to Shaders.ANALYTIC_BOKEH_HIGHLIGHT_VERTEX_SHADER,
             "frag" to Shaders.ANALYTIC_BOKEH_HIGHLIGHT_FRAGMENT_SHADER,
-            "vert" to Shaders.analyticBokehHighlightVertexShader(true),
-            "frag" to Shaders.analyticBokehHighlightFragmentShader(true),
+            "vert" to Shaders.SOAP_BUBBLE_VERTEX_SHADER,
+            "frag" to Shaders.SOAP_BUBBLE_FRAGMENT_SHADER,
             "frag" to Shaders.BOKEH_COMPOSITE_FRAGMENT_SHADER,
         )
         shaders.forEachIndexed { index, (stage, shader) ->
