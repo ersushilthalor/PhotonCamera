@@ -1081,16 +1081,16 @@ internal fun resolveOutputQuadCropRect(
     val safeWidth = inputWidth.coerceAtLeast(1)
     val safeHeight = inputHeight.coerceAtLeast(1)
     val axesSwapped = isTextureTransformAxesSwapped(presentationMatrix)
-    val orientedInputSize = if (axesSwapped) {
-        Size(safeHeight, safeWidth)
-    } else {
-        Size(safeWidth, safeHeight)
-    }
+    // Keep this geometry helper independent of android.util.Size. Android's framework
+    // Size constructor is a mocked stub in local JVM unit tests, causing RuntimeException
+    // before the crop regression assertions can run.
+    val orientedWidth = if (axesSwapped) safeHeight else safeWidth
+    val orientedHeight = if (axesSwapped) safeWidth else safeHeight
 
     // IMPORTANT: return this crop in the oriented output-quad axes. Never remap
     // floatArrayOf(left, top, right, bottom) by swapping X and Y; that is a regression
     // which makes rotated portrait video crop the orthogonal axis and appear stretched.
-    return resolveCenterCropRect(orientedInputSize.width, orientedInputSize.height, targetWidth, targetHeight)
+    return resolveCenterCropRect(orientedWidth, orientedHeight, targetWidth, targetHeight)
 }
 
 internal fun shouldApplySensorOrientationFallback(

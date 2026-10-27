@@ -50,7 +50,10 @@ jobs:
       - name: Run video transform regression tests
         run: |
           chmod +x ./gradlew
-          ./gradlew --no-daemon :app:testDefaultDebugUnitTest --tests com.hinnka.mycamera.lut.RealtimeVideoRendererTransformTest --stacktrace
+          ./gradlew --no-daemon :app:testDefaultDebugUnitTest \
+            --tests com.hinnka.mycamera.lut.RealtimeVideoRendererTransformTest \
+            --tests com.hinnka.mycamera.stabilization.RealtimeStabilizationMathTest \
+            --stacktrace
 
       - name: Build default debug APK
         run: |
