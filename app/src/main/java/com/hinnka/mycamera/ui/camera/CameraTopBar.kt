@@ -172,6 +172,8 @@ private fun VideoTopBar(
     onVideoStabilizationModeChange: (VideoStabilizationMode) -> Unit,
     onVideoResolutionClick: () -> Unit,
     onVideoFpsClick: () -> Unit,
+    videoHdrEnabled: Boolean,
+    onVideoHdrToggle: () -> Unit,
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
