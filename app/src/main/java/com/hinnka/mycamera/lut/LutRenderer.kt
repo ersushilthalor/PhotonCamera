@@ -2457,7 +2457,13 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             return hardwareRendered
         }
         return mgcEisYuvRenderer.render(frame)?.let { rendered ->
-            MgcEisHardwareBufferRenderer.Frame(rendered.timestampNs, rendered.textureId, rendered.width, rendered.height)
+            // Preserve the fallback texture dimensions required by the shared EGL frame type.
+            MgcEisHardwareBufferRenderer.Frame(
+                timestampNs = rendered.timestampNs,
+                textureId = rendered.textureId,
+                width = rendered.width,
+                height = rendered.height,
+            )
         }
     }
 
