@@ -119,6 +119,7 @@ class Camera2Controller(private val context: Context) {
         private const val FOCUS_LOCK_SETTLE_FRAMES = 5        // 对焦锁定后等待镜头稳定的帧数
         private const val SCENE_CHANGE_CONFIRM_FRAMES = 3     // 连续 N 帧检测到变化才确认
         private const val EYE_TARGET_RECENT_MS = 1_500L
+        private const val POINT_EXPOSURE_LOCK_TIMEOUT_MS = 1_200L
         private const val AF_REGION_WIDTH_FRACTION = 0.10f
         private const val AF_REGION_HEIGHT_FRACTION = 0.10f
         private const val SPOT_AE_REGION_FRACTION = 0.06f
@@ -504,6 +505,8 @@ class Camera2Controller(private val context: Context) {
     private var focusLockSettleFrames = 0       // 对焦锁定后等待镜头稳定的帧数
     private var sceneChangeFrameCount = 0
     private var eyeTargetLastSeenElapsedMs = 0L
+    private var pendingPointExposureLock = false
+    private var pendingPointExposureLockStartedElapsedMs = 0L
     private var focusModeBeforeHyperfocal: Boolean? = null
     private var focusDistanceBeforeHyperfocal: Float? = null
 
@@ -1193,6 +1196,9 @@ class Camera2Controller(private val context: Context) {
                     }
                 }
             }
+
+            // Wait for the newly selected point's AE measurement to settle before locking it.
+            applyPendingPointExposureLock(result)
 
             // 独立测光会主动改变曝光，期间保留用户选定的 AF 点，直到重新点按或解锁。
             // 其余状态在对焦后持续监测曝光变化和焦距跳变。
@@ -6079,7 +6085,16 @@ class Camera2Controller(private val context: Context) {
     private fun applyMeteringRegions() {
         val builder = previewRequestBuilder ?: return
         val currentState = _state.value
-        val mode = currentState.effectiveMeteringMode
+        val selectedMode = currentState.effectiveMeteringMode
+        val hasManualFocusPoint = currentState.focusPoint != null &&
+            currentState.focusPointSource == FocusPointSource.MANUAL
+        // In system-default mode, a tap-to-focus point must also become the AE metering point.
+        // Explicit user-selected metering modes retain their existing behavior.
+        val mode = if (selectedMode == MeteringMode.SYSTEM_DEFAULT && hasManualFocusPoint) {
+            MeteringMode.SPOT
+        } else {
+            selectedMode
+        }
         if (mode == MeteringMode.SYSTEM_DEFAULT) {
             clearCustomAeRegions(builder)
             return
@@ -6100,6 +6115,7 @@ class Camera2Controller(private val context: Context) {
                     MeteringMode.SPOT -> SPOT_AE_REGION_FRACTION
                     MeteringMode.CENTER_WEIGHTED -> CENTER_WEIGHTED_AE_REGION_FRACTION
                     MeteringMode.HIGHLIGHT_PRIORITY -> HIGHLIGHT_AE_REGION_FRACTION
+                    MeteringMode.SYSTEM_DEFAULT -> return
                 }
                 PreviewMeteringMapper.buildCenteredRegion(mapping, fraction)
             }
@@ -6763,6 +6779,65 @@ class Camera2Controller(private val context: Context) {
         focusLockedReferenceDistance = result.get(CaptureResult.LENS_FOCUS_DISTANCE) ?: 0f
     }
 
+    private fun applyPendingPointExposureLock(result: TotalCaptureResult) {
+        if (!pendingPointExposureLock) return
+        val currentState = _state.value
+        if (!currentState.isFocusLocked) {
+            pendingPointExposureLock = false
+            return
+        }
+        if (currentState.isFocusing) return
+
+        val builder = previewRequestBuilder ?: return
+        val aeMode = builder.get(CaptureRequest.CONTROL_AE_MODE)
+        if (aeMode == null || aeMode == CaptureRequest.CONTROL_AE_MODE_OFF) {
+            // Manual exposure is already fixed by the user's ISO/shutter settings.
+            pendingPointExposureLock = false
+            return
+        }
+
+        val aeLockAvailable = getActiveOpenCameraCharacteristics()
+            ?.get(CameraCharacteristics.CONTROL_AE_LOCK_AVAILABLE) == true
+        val aeState = result.get(CaptureResult.CONTROL_AE_STATE)
+        val exposureSettled = aeState == CaptureResult.CONTROL_AE_STATE_CONVERGED ||
+            aeState == CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED ||
+            aeState == CaptureResult.CONTROL_AE_STATE_LOCKED
+        val timedOut = SystemClock.elapsedRealtime() - pendingPointExposureLockStartedElapsedMs >=
+            POINT_EXPOSURE_LOCK_TIMEOUT_MS
+        if (!exposureSettled && !timedOut) return
+
+        if (aeLockAvailable) {
+            builder.set(CaptureRequest.CONTROL_AE_LOCK, true)
+            pendingPointExposureLock = false
+            PLog.i(TAG, "Point focus locked: AE_LOCK=true, aeState=$aeState")
+            updatePreview()
+            return
+        }
+
+        // Some HALs do not expose AE_LOCK. If manual sensor control is available, freeze the
+        // converged exposure values instead of leaving auto exposure free to drift.
+        val iso = result.get(CaptureResult.SENSOR_SENSITIVITY)
+        val exposureTimeNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME)
+        if (isManualSensorSupported &&
+            availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_OFF) &&
+            iso != null && iso > 0 && exposureTimeNs != null && exposureTimeNs > 0L
+        ) {
+            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+            builder.set(CaptureRequest.CONTROL_AE_LOCK, false)
+            builder.set(CaptureRequest.SENSOR_SENSITIVITY, iso)
+            builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureTimeNs)
+            PLog.i(
+                TAG,
+                "Point focus locked with manual exposure fallback: ISO=$iso, exposureNs=$exposureTimeNs",
+            )
+            pendingPointExposureLock = false
+            updatePreview()
+        } else {
+            PLog.w(TAG, "AE lock unavailable and manual exposure fallback unsupported")
+            pendingPointExposureLock = false
+        }
+    }
+
     private fun restoreContinuousAf() {
         if (isCaptureFocusFrozen) {
             PLog.d(TAG, "Continuous AF restore deferred while multi-frame focus is frozen")
@@ -6770,7 +6845,9 @@ class Camera2Controller(private val context: Context) {
         }
         clearPointFocusState()
         previewRequestBuilder?.apply {
-            // 解锁触屏 AF 不能改变用户选择的手动对焦模式。
+            // Release both focus/exposure locks and restore the configured AE/AF modes.
+            set(CaptureRequest.CONTROL_AE_LOCK, false)
+            applyExposureSettings(this, _state.value, isCapture = false)
             applyFocusSettings(this, _state.value)
             clearCustomAfRegions(this)
             applyMeteringRegions()
@@ -6797,6 +6874,8 @@ class Camera2Controller(private val context: Context) {
         focusLockedReferenceDistance = 0f
         focusLockSettleFrames = 0
         eyeTargetLastSeenElapsedMs = 0L
+        pendingPointExposureLock = false
+        pendingPointExposureLockStartedElapsedMs = 0L
         _state.value = _state.value.copy(
             focusPoint = null,
             meteringPoint = null,
@@ -6881,8 +6960,9 @@ class Camera2Controller(private val context: Context) {
             PLog.d(TAG, "Ignoring focus update while capture focus is frozen")
             return
         }
-        if (!_state.value.isAutoFocus) {
-            PLog.d(TAG, "Ignoring point-focus AF trigger while manual focus is active: source=$source")
+        val autoFocusEnabled = _state.value.isAutoFocus
+        if (!autoFocusEnabled && source == FocusPointSource.EYE) {
+            PLog.d(TAG, "Ignoring eye-focus AF trigger while manual focus is active")
             return
         }
         if (
@@ -6919,15 +6999,21 @@ class Camera2Controller(private val context: Context) {
             val mapping = mapPreviewMeteringPoint(normalizedX, normalizedY, previewViewAspectRatio) ?: return
             if (source == FocusPointSource.MANUAL && !preserveMeteringPoint) {
                 pointMeteringViewAspectRatio = previewViewAspectRatio
+                // A new tap begins a fresh exposure measurement. Lock only after AE has settled
+                // when the user is holding the point.
+                builder.set(CaptureRequest.CONTROL_AE_LOCK, false)
+                pendingPointExposureLock = lockFocus
+                pendingPointExposureLockStartedElapsedMs =
+                    if (lockFocus) SystemClock.elapsedRealtime() else 0L
             }
 
-            // 存储UI坐标用于显示对焦框
+            // Store the touch position for the on-screen indicator.
             _state.value = _state.value.copy(
                 focusPoint = Pair(normalizedX, normalizedY),
                 meteringPoint = if (preserveMeteringPoint) _state.value.meteringPoint else null,
                 focusPointSource = source,
                 isFocusLocked = lockFocus,
-                isFocusing = triggerFocus,
+                isFocusing = triggerFocus && autoFocusEnabled,
                 focusSuccess = null
             )
             // AF 区域保持为可见画面的 10%，避免 SCALER_CROP_REGION 变焦后区域相对画面膨胀。
@@ -6951,20 +7037,26 @@ class Camera2Controller(private val context: Context) {
                 )
             }
 
-            if (maxAfRegions > 0) {
+            if (autoFocusEnabled && maxAfRegions > 0) {
                 builder.set(CaptureRequest.CONTROL_AF_REGIONS, arrayOf(afRegion))
             }
             // 人眼跟踪只接管 AF，不移动用户当前的测光区域。
             if (source == FocusPointSource.MANUAL && !preserveMeteringPoint) {
                 applyMeteringRegions()
             }
-            val afMode = CaptureRequest.CONTROL_AF_MODE_AUTO
-            _state.value = _state.value.copy(currentAfMode = afMode)
-            if (!triggerFocus) {
+            if (!autoFocusEnabled) {
+                // Manual-focus mode still supports tap-to-meter and long-press exposure lock;
+                // do not override the user's manual focus settings with an AF trigger.
                 updatePreview()
-            } else if (!submitOneShotAfTrigger(afMode, "point focus")) {
-                PLog.w(TAG, "Unable to submit point-focus AF trigger")
-                _state.value = _state.value.copy(isFocusing = false, focusSuccess = false)
+            } else {
+                val afMode = CaptureRequest.CONTROL_AF_MODE_AUTO
+                _state.value = _state.value.copy(currentAfMode = afMode)
+                if (!triggerFocus) {
+                    updatePreview()
+                } else if (!submitOneShotAfTrigger(afMode, "point focus")) {
+                    PLog.w(TAG, "Unable to submit point-focus AF trigger")
+                    _state.value = _state.value.copy(isFocusing = false, focusSuccess = false)
+                }
             }
 
             // 对焦后通过场景变化检测自动恢复连续对焦（不再使用固定延迟）
