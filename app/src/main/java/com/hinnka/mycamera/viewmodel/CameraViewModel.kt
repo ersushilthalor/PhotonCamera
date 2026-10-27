@@ -855,8 +855,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _videoHdrEnabled.value = enabled
     }
 
-    fun getMergedRecipeParams(recipe: ColorRecipeParams = currentRecipeParams.value): ColorRecipeParams {
-        if (state.value.captureMode != CaptureMode.VIDEO || !_videoHdrEnabled.value) {
+    fun getMergedRecipeParams(
+        recipe: ColorRecipeParams = currentRecipeParams.value,
+        forVideo: Boolean = false,
+    ): ColorRecipeParams {
+        if (!forVideo || !_videoHdrEnabled.value) {
             return recipe
         }
         // Match the existing Edit Control Panel display values: tonality +10, contrast -1,
@@ -3487,7 +3490,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 ] ?: 0
                 cameraController.startVideoRecording(
                     creativeLutConfig = currentLutConfig.takeIf { currentState.lutEnabled },
-                    creativeRecipeParams = getMergedRecipeParams(),
+                    creativeRecipeParams = getMergedRecipeParams(forVideo = true),
                     orientationOffsetDegrees = orientationOffset
                 )
             }
