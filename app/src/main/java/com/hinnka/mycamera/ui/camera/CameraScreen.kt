@@ -272,7 +272,8 @@ fun CameraScreen(
         mutableStateOf<ColorRecipeParams?>(null)
     }
     val effectiveRecipeParams = viewModel.getMergedRecipeParams(
-        previewRecipeParamsOverride ?: currentRecipeParams
+        previewRecipeParamsOverride ?: currentRecipeParams,
+        forVideo = state.captureMode == CaptureMode.VIDEO
     )
     var pendingCaptureAnimationBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var captureAnimationJob by remember { mutableStateOf<Job?>(null) }
