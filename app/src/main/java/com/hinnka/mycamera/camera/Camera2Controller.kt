@@ -299,6 +299,9 @@ class Camera2Controller(private val context: Context) {
     private var standbyPreviewRequestBuilder: CaptureRequest.Builder? = null
     private var standbyCaptureImageReader: ImageReader? = null
     private var standbyImageReader: ImageReader? = null
+    // Separate timestamped YUV input for the warm EIS+ camera. Its listener drains frames
+    // until that camera is promoted, then routes only the new active reader into MGC.
+    private var standbyStabilizationImageReader: StabilizationImageReader? = null
     private var standbyCameraOpenId: String? = null
     private var standbyIsUltraWide = false
     private var standbyGeneration = 0L
@@ -2084,13 +2087,14 @@ class Camera2Controller(private val context: Context) {
 
     private fun promoteWarmStandbyCameraOnHandler(cameraId: String): Boolean {
         val currentState = _state.value
+        val enhancedStabilizationHandoff =
+            currentState.captureMode == CaptureMode.VIDEO && shouldUseVideoEnhancedStabilization()
         if (!keepUltraWideReadyEnabled ||
             cameraDeviceLifecycle != CameraDeviceLifecycle.OPEN ||
             !currentState.isPreviewActive ||
-            currentState.videoRecordingState.isRecording ||
+            (currentState.videoRecordingState.isRecording && !enhancedStabilizationHandoff) ||
             currentState.videoRecordingState.isProcessing ||
-            currentState.isCapturing ||
-            currentState.captureMode == CaptureMode.VIDEO && shouldUseVideoEnhancedStabilization()
+            currentState.isCapturing
         ) {
             return false
         }
@@ -2108,11 +2112,25 @@ class Camera2Controller(private val context: Context) {
         val oldBuilder = previewRequestBuilder ?: return false
         val oldSurface = previewSurface ?: return false
         val oldImageReader = imageReader
+        val oldStabilizationImageReader = stabilizationImageReader
         val targetCamera = standbyCameraDevice ?: return false
         val targetSession = standbyCaptureSession ?: return false
         val targetBuilder = standbyPreviewRequestBuilder ?: return false
         val targetSurface = standbyPreviewSurface?.takeIf { it.isValid } ?: return false
         val targetImageReader = standbyCaptureImageReader
+        val targetStabilizationImageReader = standbyStabilizationImageReader
+
+        // EIS+ may promote only when the standby session already has a matching timestamped
+        // YUV output. Never fall back to displaying/encoding its unprocessed OES frames.
+        if (enhancedStabilizationHandoff &&
+            (oldStabilizationImageReader == null ||
+                targetStabilizationImageReader == null ||
+                oldStabilizationImageReader.width != targetStabilizationImageReader.width ||
+                oldStabilizationImageReader.height != targetStabilizationImageReader.height)
+        ) {
+            PLog.w(TAG, "EIS+ warm promotion skipped: matching active/standby YUV inputs are not ready")
+            return false
+        }
 
         // A still-photo session must already include its own capture reader. Sharing the
         // outgoing reader between two concurrently running sessions is not Camera2-safe.
@@ -2136,6 +2154,10 @@ class Camera2Controller(private val context: Context) {
         imageReader = targetImageReader
         previewSurface = targetSurface
         previewSurfaceOwnedByController = oldStandbySurfaceOwned
+        if (targetStabilizationImageReader != null) {
+            stabilizationImageReader = targetStabilizationImageReader
+            standbyStabilizationImageReader = oldStabilizationImageReader
+        }
 
         standbyCameraDevice = oldCamera
         standbyCaptureSession = oldSession
@@ -2208,6 +2230,39 @@ class Camera2Controller(private val context: Context) {
         }
         refreshActiveFocusLimit()
 
+        // Rebind the single MGC timeline to the newly active physical sensor before its queued
+        // CaptureResults/YUV callbacks are handled on cameraHandler. The preview and recorder
+        // sessions remain attached to the coordinator and resume from timestamp-matched frames.
+        val stabilizationCameraChanged = if (enhancedStabilizationHandoff && targetCharacteristics != null) {
+            val calibrationCameraId = targetInfo.outputPhysicalCameraId
+                ?.takeIf { it.isNotBlank() } ?: targetOpenId
+            val calibrationCharacteristics = if (calibrationCameraId == targetOpenId) {
+                targetCharacteristics
+            } else {
+                runCatching { getCameraCharacteristicsCached(calibrationCameraId) }.getOrNull()
+            }
+            if (calibrationCharacteristics != null) {
+                realtimeStabilizationCoordinator.configureCamera(
+                    cameraId = calibrationCameraId,
+                    characteristics = calibrationCharacteristics,
+                    timingCharacteristics = targetCharacteristics,
+                )
+            } else {
+                PLog.w(TAG, "EIS+ warm promotion has no target calibration for $calibrationCameraId")
+                false
+            }
+        } else {
+            false
+        }
+        if (currentState.videoRecordingState.isRecording) {
+            videoRecorder.onCameraSwitched(
+                sensorOrientationDegrees = cachedSensorOrientation,
+                frontFacing = isCurrentCameraFrontFacing(),
+                restartStabilization = stabilizationCameraChanged,
+                ultraWide = targetInfo.lensType == LensType.BACK_ULTRA_WIDE,
+            )
+        }
+
         // Both CameraCaptureSessions are already running their repeating requests.
         // Keep the original callbacks and outputs attached: standbyCaptureCallback forwards
         // results once its session becomes active, while previewCallback ignores the outgoing
@@ -2217,7 +2272,9 @@ class Camera2Controller(private val context: Context) {
             TAG,
             "0ms warm-session pointer promotion: target=$cameraId open=$targetOpenId, " +
                 "outgoing=$oldOpenId, activeSurfaceUsesStandby=$activePreviewUsesStandbySurface, " +
-                "captureReader=${targetImageReader?.imageFormat}; repeating streams kept running"
+                "captureReader=${targetImageReader?.imageFormat}, " +
+                "eisYuv=${stabilizationImageReader?.let { "${it.width}x${it.height}" } ?: "off"}, " +
+                "eisCameraChanged=$stabilizationCameraChanged; repeating streams kept running"
         )
         return true
     }
@@ -3736,22 +3793,39 @@ class Camera2Controller(private val context: Context) {
             size.height,
             RealtimeStabilizationCoordinator.STABILIZATION_IMAGE_READER_MAX_IMAGES,
         ).also { reader ->
-            reader.setOnImageAvailableListener(handler) { source ->
-                while (true) {
-                    val image = try {
-                        source.acquireNextImage()
-                    } catch (error: IllegalStateException) {
-                        PLog.e(TAG, "Cannot acquire MGC YUV image", error)
-                        null
-                    } ?: break
-                    logStabilizationInputStats(image)
-                    realtimeStabilizationCoordinator.submitStabilizationImage(image)
-                }
-            }
+            installStabilizationImageReaderListener(reader, handler)
             stabilizationImageReader = reader
             stabilizationInputStatsFirstTimestampNs = 0L
             stabilizationInputStatsFrames = 0
             PLog.i(TAG, "MGC YUV input configured: ${size.width}x${size.height}")
+        }
+    }
+
+    /**
+     * The warm standby camera is deliberately drained, not submitted to MGC, until promotion.
+     * Its CaptureResults still belong to the outgoing calibration and cannot be mixed into the
+     * current native timeline. Pointer promotion changes which reader is considered active.
+     */
+    private fun installStabilizationImageReaderListener(
+        reader: StabilizationImageReader,
+        handler: Handler,
+    ) {
+        reader.setOnImageAvailableListener(handler) { source ->
+            while (true) {
+                val image = try {
+                    source.acquireNextImage()
+                } catch (error: IllegalStateException) {
+                    PLog.e(TAG, "Cannot acquire MGC YUV image", error)
+                    null
+                } ?: break
+
+                if (stabilizationImageReader === source) {
+                    logStabilizationInputStats(image)
+                    realtimeStabilizationCoordinator.submitStabilizationImage(image)
+                } else {
+                    image.close()
+                }
+            }
         }
     }
 
@@ -9553,7 +9627,22 @@ class Camera2Controller(private val context: Context) {
         } ?: return
         val targetOpenId = runCatching { target.getOpenCameraId() }.getOrNull() ?: return
         val targetIsUltraWide = target.lensType == LensType.BACK_ULTRA_WIDE
-        if (standbyCameraOpenId == targetOpenId && standbyCameraDevice != null) return
+        val enhancedStabilizationStandbyRequired =
+            _state.value.captureMode == CaptureMode.VIDEO && shouldUseVideoEnhancedStabilization()
+        val activeStabilizationReader = if (enhancedStabilizationStandbyRequired) {
+            ensureStabilizationImageReader()
+        } else {
+            null
+        }
+        if (standbyCameraOpenId == targetOpenId && standbyCameraDevice != null) {
+            val existingEisReader = standbyStabilizationImageReader
+            val existingEisReaderMatches = activeStabilizationReader != null &&
+                existingEisReader != null &&
+                existingEisReader.width == activeStabilizationReader.width &&
+                existingEisReader.height == activeStabilizationReader.height
+            if (!enhancedStabilizationStandbyRequired || existingEisReaderMatches) return
+            closeStandbyCamera("rebuilding standby with matching EIS+ YUV output")
+        }
 
         val concurrent = runCatching { cameraManager.concurrentCameraIds }.getOrDefault(emptySet())
         val concurrentPairSupported = concurrent.any { pair ->
@@ -9580,6 +9669,27 @@ class Camera2Controller(private val context: Context) {
             val characteristics = getCameraCharacteristicsCached(targetOpenId)
             val streamMap = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
             val yuvOutputSizes = streamMap?.getOutputSizes(ImageFormat.YUV_420_888).orEmpty().toList()
+            val standbyStabilizationReader = activeStabilizationReader
+                ?.takeIf { activeReader ->
+                    yuvOutputSizes.any { it.width == activeReader.width && it.height == activeReader.height }
+                }
+                ?.let { activeReader ->
+                    StabilizationImageReader(
+                        activeReader.width,
+                        activeReader.height,
+                        RealtimeStabilizationCoordinator.STABILIZATION_IMAGE_READER_MAX_IMAGES,
+                    )
+                }
+            standbyStabilizationImageReader = standbyStabilizationReader
+            standbyStabilizationReader?.let { installStabilizationImageReaderListener(it, handler) }
+            if (enhancedStabilizationStandbyRequired && standbyStabilizationReader == null) {
+                PLog.w(
+                    TAG,
+                    "EIS+ standby unavailable: $targetOpenId does not expose active YUV input " +
+                        "${activeStabilizationReader?.width}x${activeStabilizationReader?.height}",
+                )
+            }
+
             val standbySize = yuvOutputSizes.minByOrNull { size ->
                 abs(size.width - STANDBY_PREVIEW_WIDTH) + abs(size.height - STANDBY_PREVIEW_HEIGHT)
             } ?: Size(STANDBY_PREVIEW_WIDTH, STANDBY_PREVIEW_HEIGHT)
@@ -9644,6 +9754,7 @@ class Camera2Controller(private val context: Context) {
             standbyCaptureImageReader = standbyStillReader
             val standbyOutputSurfaces = buildList<Surface> {
                 standbyPreviewOutput?.let(::add)
+                standbyStabilizationReader?.surface?.takeIf { it.isValid }?.let(::add)
                 standbyStillReader?.surface?.takeIf { it.isValid }?.let(::add)
                 recordingRelaySurface?.let(::add)
                 if (isEmpty()) add(reader.surface)
@@ -9676,8 +9787,12 @@ class Camera2Controller(private val context: Context) {
                                             // The still ImageReader is configured in the session but is targeted
                                             // only by an actual still-capture request after promotion.
                                             standbyPreviewOutput?.let(::addTarget)
+                                            standbyStabilizationReader?.surface?.let(::addTarget)
                                             recordingRelaySurface?.let(::addTarget)
-                                            if (standbyPreviewOutput == null && recordingRelaySurface == null) {
+                                            if (standbyPreviewOutput == null &&
+                                                standbyStabilizationReader == null &&
+                                                recordingRelaySurface == null
+                                            ) {
                                                 addTarget(reader.surface)
                                             }
 
@@ -9730,6 +9845,7 @@ class Camera2Controller(private val context: Context) {
                                                 "output=${standbyOutputSurfaces.size} surface(s), " +
                                                 "livePreview=${standbyPreviewOutput != null}, " +
                                                 "recordingRelay=${recordingRelaySurface != null}, " +
+                                                "eisYuv=${standbyStabilizationReader?.let { "${it.width}x${it.height}" } ?: "off"}, " +
                                                 "size=${if (recordingRelaySurface != null) relaySize else standbySize}"
                                         )
                                     } catch (error: Exception) {
@@ -9800,11 +9916,28 @@ class Camera2Controller(private val context: Context) {
             handler.post { reconfigureStandbySessionForRecording() }
             return
         }
-        if (_state.value.captureMode != CaptureMode.VIDEO ||
-            !videoRecorder.isRecording() ||
-            !videoRecorder.supportsDualCameraInput ||
-            shouldUseVideoEnhancedStabilization()
-        ) return
+        if (_state.value.captureMode != CaptureMode.VIDEO || !videoRecorder.isRecording()) return
+
+        if (shouldUseVideoEnhancedStabilization()) {
+            val activeReader = stabilizationImageReader
+            val standbyReader = standbyStabilizationImageReader
+            if (activeReader != null && standbyReader != null &&
+                activeReader.width == standbyReader.width &&
+                activeReader.height == standbyReader.height
+            ) {
+                PLog.i(
+                    TAG,
+                    "EIS+ recording standby already has matching timestamped YUV input: " +
+                        "${standbyReader.width}x${standbyReader.height}",
+                )
+                return
+            }
+            PLog.w(TAG, "Rebuilding EIS+ standby session because its YUV input is not ready")
+            closeStandbyCamera("EIS+ recording requires timestamped standby input")
+            startStandbyCameraIfPossible()
+            return
+        }
+        if (!videoRecorder.supportsDualCameraInput) return
 
         val camera = standbyCameraDevice ?: return
         val targetSurface = videoRecorder.cameraInputSurfaceForLens(standbyIsUltraWide) ?: return
@@ -9925,23 +10058,88 @@ class Camera2Controller(private val context: Context) {
         ) {
             return false
         }
-        if (_state.value.captureMode == CaptureMode.PHOTO &&
-            (_state.value.photoPreviewStabilizationEnabled || standbyCaptureImageReader == null)
+        val state = _state.value
+        if (state.captureMode == CaptureMode.PHOTO &&
+            (state.photoPreviewStabilizationEnabled || standbyCaptureImageReader == null)
         ) {
             return false
         }
+
+        if (state.captureMode == CaptureMode.VIDEO && shouldUseVideoEnhancedStabilization()) {
+            return isStandbyEisInputReady(cameraOpenId, requireActiveReader = true)
+        }
+
         val recordingRelayMustBeReady =
-            _state.value.captureMode == CaptureMode.VIDEO &&
+            state.captureMode == CaptureMode.VIDEO &&
                 videoRecorder.isRecording() &&
-                videoRecorder.supportsDualCameraInput &&
-                !shouldUseVideoEnhancedStabilization()
+                videoRecorder.supportsDualCameraInput
         return !recordingRelayMustBeReady ||
             videoRecorder.hasCameraSourceFrames(standbyIsUltraWide)
+    }
+
+    /**
+     * Validate the standby's MGC input before either pointer promotion or the prewarmed-device
+     * reopen path. On the reopen path the outgoing active reader may already have been retired,
+     * so only require it for the in-place session swap.
+     */
+    private fun isStandbyEisInputReady(
+        cameraOpenId: String,
+        requireActiveReader: Boolean,
+    ): Boolean {
+        val state = _state.value
+        val targetReader = standbyStabilizationImageReader ?: return false
+        val activeReader = stabilizationImageReader
+        if (requireActiveReader && activeReader == null) return false
+        if (activeReader != null &&
+            (activeReader.width != targetReader.width || activeReader.height != targetReader.height)
+        ) {
+            return false
+        }
+        val requiredSize = state.videoCapabilities
+            .enhancedStabilizationInputSizesByResolution[state.videoConfig.resolution]
+            ?: return false
+        if (targetReader.width != requiredSize.width || targetReader.height != requiredSize.height) {
+            return false
+        }
+
+        val targetInfo = state.availableCameras.firstOrNull { candidate ->
+            runCatching { candidate.getOpenCameraId() == cameraOpenId }.getOrDefault(false)
+        } ?: return false
+        val timingCharacteristics = runCatching {
+            getCameraCharacteristicsCached(cameraOpenId)
+        }.getOrNull() ?: return false
+        val calibrationCameraId = targetInfo.outputPhysicalCameraId
+            ?.takeIf { it.isNotBlank() } ?: cameraOpenId
+        val calibrationCharacteristics = if (calibrationCameraId == cameraOpenId) {
+            timingCharacteristics
+        } else {
+            runCatching { getCameraCharacteristicsCached(calibrationCameraId) }.getOrNull()
+                ?: return false
+        }
+        if (!realtimeStabilizationCoordinator.isCameraSupported(
+                calibrationCharacteristics,
+                timingCharacteristics,
+            )
+        ) {
+            PLog.w(TAG, "EIS+ warm promotion skipped: target camera $calibrationCameraId is unsupported")
+            return false
+        }
+        return true
     }
 
     private fun takeStandbyCamera(cameraOpenId: String): CameraDevice? {
         if (standbyCameraOpenId != cameraOpenId) return null
         val device = standbyCameraDevice ?: return null
+
+        val enhancedStabilizationHandoff =
+            _state.value.captureMode == CaptureMode.VIDEO && shouldUseVideoEnhancedStabilization()
+        if (enhancedStabilizationHandoff &&
+            !isStandbyEisInputReady(cameraOpenId, requireActiveReader = false)
+        ) {
+            PLog.w(TAG, "EIS+ prewarmed-camera promotion skipped: standby YUV/calibration is not ready")
+            closeStandbyCamera("EIS+ prewarmed camera has no matching stabilization input")
+            return null
+        }
 
         val recordingRelayMustBeReady =
             _state.value.captureMode == CaptureMode.VIDEO &&
@@ -9975,12 +10173,19 @@ class Camera2Controller(private val context: Context) {
         standbyImageReader?.setOnImageAvailableListener(null, null)
         try { standbyImageReader?.close() } catch (_: Exception) {}
         standbyImageReader = null
+        val targetStabilizationReader = standbyStabilizationImageReader
+        if (targetStabilizationReader != null) {
+            val outgoingStabilizationReader = stabilizationImageReader
+            stabilizationImageReader = targetStabilizationReader
+            standbyStabilizationImageReader = outgoingStabilizationReader
+        }
         standbyCameraDevice = null
         standbyCameraOpenId = null
         PLog.i(
             TAG,
             "Standby camera promoted from configured session: camera=${device.id}, " +
-                "captureFrames=$standbyFrameCount"
+                "captureFrames=$standbyFrameCount, " +
+                "eisYuv=${stabilizationImageReader?.let { "${it.width}x${it.height}" } ?: "off"}"
         )
         return device
     }
@@ -10002,6 +10207,11 @@ class Camera2Controller(private val context: Context) {
         standbyImageReader?.setOnImageAvailableListener(null, null)
         try { standbyImageReader?.close() } catch (_: Exception) {}
         standbyImageReader = null
+        standbyStabilizationImageReader?.let { reader ->
+            standbyStabilizationImageReader = null
+            reader.close()
+            realtimeStabilizationCoordinator.discardStabilizationImages(reader)
+        }
         val device = standbyCameraDevice
         standbyCameraDevice = null
         standbyCameraOpenId = null
