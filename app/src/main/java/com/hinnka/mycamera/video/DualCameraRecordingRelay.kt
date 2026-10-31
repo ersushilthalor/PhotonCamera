@@ -138,11 +138,30 @@ internal class DualCameraRecordingRelay(
     }
 
     fun updateBufferSize(isUltraWide: Boolean, width: Int, height: Int) {
-        if (width <= 0 || height <= 0) return
-        handler.post {
+        if (width <= 0 || height <= 0 || released.get()) return
+        if (Thread.currentThread() === thread) {
             val target = if (isUltraWide) ultraSt else mainSt
             runCatching { target?.setDefaultBufferSize(width, height) }
                 .onFailure { PLog.w(TAG, "Unable to update relay input size: ${it.message}") }
+            return
+        }
+        val latch = CountDownLatch(1)
+        handler.post {
+            try {
+                val target = if (isUltraWide) ultraSt else mainSt
+                target?.setDefaultBufferSize(width, height)
+            } catch (error: Exception) {
+                PLog.w(TAG, "Unable to update relay input size: ${error.message}")
+            } finally {
+                latch.countDown()
+            }
+        }
+        try {
+            if (!latch.await(750L, TimeUnit.MILLISECONDS)) {
+                PLog.w(TAG, "Timed out updating relay input buffer size: ${width}x$height")
+            }
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
         }
     }
 
