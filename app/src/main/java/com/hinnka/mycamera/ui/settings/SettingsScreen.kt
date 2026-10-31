@@ -326,6 +326,7 @@ fun SettingsScreen(
     val showLevelIndicator by viewModel.showLevelIndicator.collectAsState(initial = false)
     val focusPeakingEnabled by viewModel.focusPeakingEnabled.collectAsState(initial = true)
     val eyeFocusEnabled by viewModel.eyeFocusEnabled.collectAsState()
+    val keepUltraWideReady by viewModel.keepUltraWideReady.collectAsState()
     val showGrid = state.showGrid
     val shutterSoundEnabled by viewModel.shutterSoundEnabled.collectAsState(initial = true)
     val vibrationEnabled by viewModel.vibrationEnabled.collectAsState(initial = true)
@@ -1176,6 +1177,13 @@ fun SettingsScreen(
                             description = stringResource(R.string.settings_eye_focus_description),
                             checked = eyeFocusEnabled,
                             onCheckedChange = viewModel::setEyeFocusEnabled
+                        )
+
+                        SwitchSettingItem(
+                            title = "Keep ultra-wide camera ready",
+                            description = "Keep the supported alternate rear lens open in the background for faster switching.",
+                            checked = keepUltraWideReady,
+                            onCheckedChange = viewModel::setKeepUltraWideReady
                         )
                     }
 
