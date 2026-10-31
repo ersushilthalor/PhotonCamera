@@ -32,13 +32,21 @@ internal class LensSwitchTransitionState(
     private data class Request(
         val cameraId: String,
         val targetZoom: Float,
+        val forceImmediateHandoff: Boolean,
+        val onComplete: (() -> Unit)?,
         val onSwitch: () -> Unit,
     )
     private var pendingRequest: Request? = null
 
-    fun switchLens(cameraId: String, targetZoom: Float, onSwitch: () -> Unit) {
+    fun switchLens(
+        cameraId: String,
+        targetZoom: Float,
+        forceImmediateHandoff: Boolean = false,
+        onComplete: (() -> Unit)? = null,
+        onSwitch: () -> Unit,
+    ) {
         require(targetZoom.isFinite() && targetZoom > 0f)
-        pendingRequest = Request(cameraId, targetZoom, onSwitch)
+        pendingRequest = Request(cameraId, targetZoom, forceImmediateHandoff, onComplete, onSwitch)
         if (switchPending && job?.isActive == true) return
 
         job?.cancel()
@@ -46,6 +54,8 @@ internal class LensSwitchTransitionState(
         switchPending = true
         job = scope.launch {
             var livePreview: CameraGLSurfaceView? = null
+            var transitionCompleted = false
+            var completedRequest: Request? = null
             try {
                 val request = pendingRequest
                 pendingRequest = null
@@ -54,6 +64,7 @@ internal class LensSwitchTransitionState(
                     switchPending = false
                     return@launch
                 }
+                completedRequest = request
 
                 val before = viewModel.state.value
                 val startingZoomByMain = viewModel.zoomRatioByMain
@@ -87,7 +98,9 @@ internal class LensSwitchTransitionState(
                         abs(startingZoomByMain - 1f) < 0.05f &&
                         abs(request.targetZoom - targetStopZoom) < 0.05f
                 val isDirectImmediateLensTap =
-                    isDirectUltraWideToMainTap || isDirectMainToUltraWideTap
+                    request.forceImmediateHandoff ||
+                        isDirectUltraWideToMainTap ||
+                        isDirectMainToUltraWideTap
                 val overlapDurationFrames = if (isDirectImmediateLensTap) {
                     1
                 } else {
@@ -169,6 +182,7 @@ internal class LensSwitchTransitionState(
                         }
                     }
                 }
+                transitionCompleted = true
             } catch (error: CancellationException) {
                 livePreview?.cancelLiveLensHandoff()
                 throw error
@@ -188,9 +202,24 @@ internal class LensSwitchTransitionState(
                         // The camera switch already promoted this lens; only the zoom value changed.
                         // Replaying the switch would close and cold-open the same camera again.
                         viewModel.setZoomRatio(next.targetZoom)
+                        next.onComplete?.invoke()
                     } else {
-                        switchLens(next.cameraId, next.targetZoom, next.onSwitch)
+                        switchLens(
+                            cameraId = next.cameraId,
+                            targetZoom = next.targetZoom,
+                            forceImmediateHandoff = next.forceImmediateHandoff,
+                            onComplete = next.onComplete,
+                        ) {
+                            next.onSwitch()
+                        }
                     }
+                }
+            }
+            if (transitionCompleted) {
+                try {
+                    completedRequest?.onComplete?.invoke()
+                } catch (error: Exception) {
+                    PLog.e("LensSwitchTransition", "Lens switch completion callback failed", error)
                 }
             }
         }
