@@ -598,56 +598,19 @@ fun CameraScreen(
         cancelZoomStopAnimation()
         lensSwitchTransition.cancelPendingSwitch()
 
-        if (isUltraWideToMain) {
-            zoomStopAnimationJob = scope.launch {
-                animateCurrentLensToZoomStopAndWait(
-                    targetZoom = targetStopZoom,
-                    durationMillis = 300,
-                )
-                delay(200L)
-
-                if (viewModel.state.value.currentCameraId != currentCamera.cameraId ||
-                    viewModel.isVideoLensLocked()
-                ) {
-                    return@launch
-                }
-
-                lensSwitchTransition.switchLens(
-                    cameraId = targetCamera.cameraId,
-                    targetZoom = targetStopZoom,
-                    forceImmediateHandoff = true,
-                ) {
-                    viewModel.switchToLensAndSetZoomRatio(
-                        targetCamera.cameraId,
-                        targetStopZoom,
-                    )
-                }
-            }
-        } else {
-            // The incoming ultra-wide standby request is configured at this same global 1x
-            // crop. Promote it without a crossfade, then perform the visible 1x -> 0.5x zoom.
-            val matchingOneXZoom = 1f
-            lensSwitchTransition.switchLens(
-                cameraId = targetCamera.cameraId,
-                targetZoom = matchingOneXZoom,
-                forceImmediateHandoff = true,
-                onComplete = {
-                    if (viewModel.state.value.currentCameraId == targetCamera.cameraId) {
-                        zoomStopAnimationJob = scope.launch {
-                            animateCurrentLensToZoomStopAndWait(
-                                targetZoom = targetStopZoom,
-                                durationMillis = 300,
-                            )
-                            delay(200L)
-                        }
-                    }
-                },
-            ) {
-                viewModel.switchToLensAndSetZoomRatio(
-                    targetCamera.cameraId,
-                    matchingOneXZoom,
-                )
-            }
+        // Direct main/ultra-wide stop taps are a lens promotion, not a zoom animation on
+        // the outgoing camera. Request the target's native visible stop immediately; the live
+        // standby SurfaceTexture is already displaying the incoming camera while Camera2
+        // promotes its already-running session.
+        lensSwitchTransition.switchLens(
+            cameraId = targetCamera.cameraId,
+            targetZoom = targetStopZoom,
+            forceImmediateHandoff = true,
+        ) {
+            viewModel.switchToLensAndSetZoomRatio(
+                targetCamera.cameraId,
+                targetStopZoom,
+            )
         }
         return true
     }

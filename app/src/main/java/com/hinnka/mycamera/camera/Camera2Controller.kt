@@ -1179,6 +1179,7 @@ class Camera2Controller(private val context: Context) {
             timestamp: Long,
             frameNumber: Long
         ) {
+            if (session !== captureSession) return
             super.onCaptureStarted(session, request, timestamp, frameNumber)
             val tag = request.tag as? StillFlashRequestTag ?: return
             val pending = stillFlashPrecapture ?: return
@@ -1192,6 +1193,7 @@ class Camera2Controller(private val context: Context) {
             request: CaptureRequest,
             failure: CaptureFailure,
         ) {
+            if (session !== captureSession) return
             val flashTag = request.tag as? StillFlashRequestTag
             if (flashTag != null) {
                 val pending = stillFlashPrecapture ?: return
@@ -1218,8 +1220,12 @@ class Camera2Controller(private val context: Context) {
             result: TotalCaptureResult
         ) {
             super.onCaptureCompleted(session, request, result)
+            if (session !== captureSession) {
+                if (session === standbyCaptureSession) standbyFrameCount += 1L
+                return
+            }
 
-            if (session === captureSession && _state.value.previewFirstFrameTimestampNs == null) {
+            if (_state.value.previewFirstFrameTimestampNs == null) {
                 result.get(CaptureResult.SENSOR_TIMESTAMP)?.let { timestamp ->
                     _state.update { it.copy(previewFirstFrameTimestampNs = timestamp) }
                 }
@@ -2202,43 +2208,18 @@ class Camera2Controller(private val context: Context) {
         }
         refreshActiveFocusLimit()
 
-        try {
-            // Retarget callbacks only; both repeating streams and their configured outputs remain alive.
-            targetSession.setRepeatingRequest(targetBuilder.build(), previewCallback, cameraHandler)
-            oldSession.setRepeatingRequest(oldBuilder.build(), standbyCaptureCallback, cameraHandler)
-            PLog.i(
-                TAG,
-                "0ms warm-session promotion: target=$cameraId open=$targetOpenId, " +
-                    "outgoing=$oldOpenId, activeSurfaceUsesStandby=$activePreviewUsesStandbySurface, " +
-                    "captureReader=${targetImageReader?.imageFormat}"
-            )
-            return true
-        } catch (error: Exception) {
-            PLog.e(TAG, "Warm-session pointer swap could not resume repeating requests; falling back", error)
-            cameraDevice = oldCamera
-            captureSession = oldSession
-            previewRequestBuilder = oldBuilder
-            imageReader = oldImageReader
-            previewSurface = oldSurface
-            previewSurfaceOwnedByController = oldSurfaceOwned
-            standbyCameraDevice = targetCamera
-            standbyCaptureSession = targetSession
-            standbyPreviewRequestBuilder = targetBuilder
-            standbyCaptureImageReader = targetImageReader
-            standbyPreviewSurface = targetSurface
-            standbyPreviewSurfaceOwnedByController = oldStandbySurfaceOwned
-            standbyCameraOpenId = targetOpenId
-            standbyIsUltraWide = targetInfo.lensType == LensType.BACK_ULTRA_WIDE
-            activeOpenCameraId = oldOpenId
-            activeSessionCameraId = currentState.currentCameraId
-            activeOutputPhysicalCameraId = null
-            activePreviewUsesStandbySurface = !activePreviewUsesStandbySurface
-            cameraDeviceLifecycle = CameraDeviceLifecycle.OPEN
-            _state.value = currentState
-            runCatching { oldSession.setRepeatingRequest(oldBuilder.build(), previewCallback, cameraHandler) }
-            runCatching { targetSession.setRepeatingRequest(targetBuilder.build(), standbyCaptureCallback, cameraHandler) }
-            return false
-        }
+        // Both CameraCaptureSessions are already running their repeating requests.
+        // Keep the original callbacks and outputs attached: standbyCaptureCallback forwards
+        // results once its session becomes active, while previewCallback ignores the outgoing
+        // session after it becomes standby. No stopRepeating(), setRepeatingRequest(), or
+        // session reconfiguration is needed for the handoff.
+        PLog.i(
+            TAG,
+            "0ms warm-session pointer promotion: target=$cameraId open=$targetOpenId, " +
+                "outgoing=$oldOpenId, activeSurfaceUsesStandby=$activePreviewUsesStandbySurface, " +
+                "captureReader=${targetImageReader?.imageFormat}; repeating streams kept running"
+        )
+        return true
     }
 
     fun setStandbyPreviewSurface(surface: Surface?) {
@@ -9579,8 +9560,15 @@ class Camera2Controller(private val context: Context) {
             pair.contains(activeOpenId) && pair.contains(targetOpenId)
         }
         if (!concurrentPairSupported) {
-            PLog.d(TAG, "Standby lens skipped: camera pair is not reported as concurrent ($activeOpenId, $targetOpenId)")
-            return
+            // Match VCamera's persistent-dual-session strategy: the platform's advertised
+            // concurrent list is not exhaustive on every OEM HAL. Attempt the second open
+            // as a best-effort warm standby; CameraDevice error callbacks close it safely
+            // when the HAL really cannot keep both devices open.
+            PLog.i(
+                TAG,
+                "Standby pair is not advertised as concurrent; attempting persistent dual-session open " +
+                    "as a best-effort capability probe ($activeOpenId, $targetOpenId)"
+            )
         }
 
         closeStandbyCamera("replacing standby target")
