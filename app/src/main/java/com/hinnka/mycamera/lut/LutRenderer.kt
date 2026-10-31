@@ -223,6 +223,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     // 相机 SurfaceTexture
     private var surfaceTexture: SurfaceTexture? = null
     private val frameAvailable = AtomicBoolean(false)
+    @Volatile private var mainFrameTimestampNs = 0L
+    @Volatile private var activeCameraUsesStandbyInput = false
 
     // Dedicated second rear-camera input used only while a live lens handoff is requested.
     private var standbyCameraTextureId = 0
@@ -231,7 +233,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private val standbyFrameAvailable = AtomicBoolean(false)
     private val standbyStMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
     @Volatile private var standbyFrameTimestampNs = 0L
-    @Volatile private var liveHandoffPhase = 0 // 0=idle, 1=blend to standby, 2=hold standby, 3=blend back
+    @Volatile private var liveHandoffPhase = 0 // 0=idle, 1=blend to target, 2=hold target, 3=blend back
+    @Volatile private var liveHandoffTargetUsesStandbyInput = true
     private var liveHandoffProgress = 0
     @Volatile private var liveHandoffFrameCount = 9
     private var liveHandoffLastStandbyTimestampNs = 0L
@@ -515,7 +518,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     val standbyCameraInputSurface: Surface?
         get() = standbyCameraSurface?.takeIf { it.isValid }
     val hasStandbyCameraFrame: Boolean
-        get() = standbyFrameTimestampNs > 0L
+        get() = if (activeCameraUsesStandbyInput) mainFrameTimestampNs > 0L else standbyFrameTimestampNs > 0L
     val canUseLiveLensHandoff: Boolean
         get() = hasStandbyCameraFrame && previewStabilizationUseCase == null
     var onRequestRender: (() -> Unit)? = null
@@ -1062,14 +1065,15 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         }
         val oesFrameUpdated = frameAvailable.getAndSet(false) && acquireLatestCameraFrame()
         val standbyFrameUpdated = standbyFrameAvailable.getAndSet(false) && acquireLatestStandbyCameraFrame()
+        val activeFrameUpdated = if (activeCameraUsesStandbyInput) standbyFrameUpdated else oesFrameUpdated
+        val targetFrameUpdated = if (activeCameraUsesStandbyInput) oesFrameUpdated else standbyFrameUpdated
         liveBlendFrameActive = false
-        var cameraFrameUpdated = oesFrameUpdated
+        var cameraFrameUpdated = activeFrameUpdated
 
-        // Handoff warm-up must count frames acquired from the active primary camera only.
-        // Standby-only redraws are valid display updates, but they are not target-camera frames.
-        var primaryPreviewFrameUpdated = oesFrameUpdated && !delayedStabilizationEnabled
+        // Only frames from the currently promoted lens count as active preview frames.
+        var primaryPreviewFrameUpdated = activeFrameUpdated && !delayedStabilizationEnabled
         var primaryPreviewFrameTimestampNs =
-            if (primaryPreviewFrameUpdated) surfaceTexture?.timestamp ?: 0L else 0L
+            if (primaryPreviewFrameUpdated) activeCameraFrameTimestampNs() else 0L
 
         if (delayedStabilizationEnabled) {
             val session = stabilizationSession
@@ -1115,13 +1119,13 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             if (currentCameraTextureSource != PreviewColorTextureSource.TEXTURE_2D) {
                 // Keep showing the real Camera2 preview while EIS+ waits for its first
                 // timestamp-matched result. EIS+ remains enabled and keeps processing frames.
-                if (oesFrameUpdated) useCurrentOesFrame()
+                if (activeFrameUpdated) useCurrentOesFrame()
             }
         } else if (cameraFrameUpdated) {
             useCurrentOesFrame()
         }
 
-        if (applyLiveLensHandoffFrame(oesFrameUpdated, standbyFrameUpdated)) {
+        if (applyLiveLensHandoffFrame(activeFrameUpdated, targetFrameUpdated)) {
             cameraFrameUpdated = true
         }
 
@@ -1377,12 +1381,31 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         )
     }
 
-    private fun useCurrentOesFrame() {
+    private fun activeCameraFrameTimestampNs(): Long =
+        if (activeCameraUsesStandbyInput) standbyFrameTimestampNs else mainFrameTimestampNs
+
+    private fun setCurrentOesInput(useStandbyInput: Boolean) {
         currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
         currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
-        currentCameraTextureId = cameraTextureId
-        currentCameraTextureMatrix = stMatrix
-        currentFrameTimestampNs = surfaceTexture?.timestamp ?: 0L
+        if (useStandbyInput) {
+            currentCameraTextureId = standbyCameraTextureId
+            currentCameraTextureMatrix = standbyStMatrix
+            currentFrameTimestampNs = standbyFrameTimestampNs
+        } else {
+            currentCameraTextureId = cameraTextureId
+            currentCameraTextureMatrix = stMatrix
+            currentFrameTimestampNs = mainFrameTimestampNs
+        }
+    }
+
+    private fun useCurrentOesFrame() {
+        setCurrentOesInput(activeCameraUsesStandbyInput)
+    }
+
+    fun setActiveCameraInputUsesStandby(usesStandbyInput: Boolean) {
+        activeCameraUsesStandbyInput = usesStandbyInput
+        useCurrentOesFrame()
+        onRequestRender?.invoke()
     }
 
     private fun acquireLatestStandbyCameraFrame(): Boolean {
@@ -1405,37 +1428,47 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         if (liveHandoffPhase == 0 || previewStabilizationUseCase != null) return false
         when (liveHandoffPhase) {
             1 -> {
-                if (standbyUpdated && standbyFrameTimestampNs > liveHandoffLastStandbyTimestampNs) {
-                    liveHandoffLastStandbyTimestampNs = standbyFrameTimestampNs
-                    liveHandoffProgress = (liveHandoffProgress + 1).coerceAtMost(liveHandoffFrameCount)
-                    if (liveHandoffProgress == liveHandoffFrameCount) {
-                        liveHandoffPhase = 2
-                        onLiveStandbyHandoffReady?.invoke()
-                        onLiveStandbyHandoffReady = null
+                if (standbyUpdated) {
+                    val targetTimestamp = if (liveHandoffTargetUsesStandbyInput) {
+                        standbyFrameTimestampNs
+                    } else {
+                        mainFrameTimestampNs
+                    }
+                    if (targetTimestamp > liveHandoffLastStandbyTimestampNs) {
+                        liveHandoffLastStandbyTimestampNs = targetTimestamp
+                        liveHandoffProgress = (liveHandoffProgress + 1).coerceAtMost(liveHandoffFrameCount)
+                        if (liveHandoffProgress == liveHandoffFrameCount) {
+                            liveHandoffPhase = 2
+                            onLiveStandbyHandoffReady?.invoke()
+                            onLiveStandbyHandoffReady = null
+                        }
                     }
                 }
-                if (standbyFrameTimestampNs <= 0L) return primaryUpdated
-                return drawLiveLensBlend(liveHandoffProgress / liveHandoffFrameCount.toFloat())
+                val targetTimestamp = if (liveHandoffTargetUsesStandbyInput) {
+                    standbyFrameTimestampNs
+                } else {
+                    mainFrameTimestampNs
+                }
+                if (targetTimestamp <= 0L) return primaryUpdated
+                val progress = liveHandoffProgress / liveHandoffFrameCount.toFloat()
+                val targetMix = if (liveHandoffTargetUsesStandbyInput) progress else 1f - progress
+                return drawLiveLensBlend(targetMix)
             }
             2 -> {
-                // Hold the last acquired standby frame throughout Camera2 session promotion.
-                // The standby capture session may be closed while the promoted CameraDevice
-                // configures its full-resolution primary outputs; keep the visible image stable.
-                if (standbyFrameTimestampNs <= 0L) return primaryUpdated
-                currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
-                currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
-                currentCameraTextureId = standbyCameraTextureId
-                currentCameraTextureMatrix = standbyStMatrix
-                currentFrameTimestampNs = if (primaryUpdated) {
-                    surfaceTexture?.timestamp ?: standbyFrameTimestampNs
-                } else {
+                // Keep the selected incoming SurfaceTexture visible while Camera2 promotes its
+                // already-running session. The source can be either GL input after a prior swap.
+                val targetTimestamp = if (liveHandoffTargetUsesStandbyInput) {
                     standbyFrameTimestampNs
+                } else {
+                    mainFrameTimestampNs
                 }
+                if (targetTimestamp <= 0L) return primaryUpdated
+                setCurrentOesInput(liveHandoffTargetUsesStandbyInput)
                 return true
             }
             3 -> {
-                if (primaryUpdated && currentFrameTimestampNs > liveHandoffLastPrimaryTimestampNs) {
-                    liveHandoffLastPrimaryTimestampNs = currentFrameTimestampNs
+                if (primaryUpdated && activeCameraFrameTimestampNs() > liveHandoffLastPrimaryTimestampNs) {
+                    liveHandoffLastPrimaryTimestampNs = activeCameraFrameTimestampNs()
                     liveHandoffProgress = (liveHandoffProgress + 1).coerceAtMost(liveHandoffFrameCount)
                 }
                 if (liveHandoffProgress >= liveHandoffFrameCount) {
@@ -1445,7 +1478,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                     useCurrentOesFrame()
                     return true
                 }
-                return drawLiveLensBlend(1f - liveHandoffProgress / liveHandoffFrameCount.toFloat())
+                val progress = liveHandoffProgress / liveHandoffFrameCount.toFloat()
+                val activeMix = if (activeCameraUsesStandbyInput) 1f else 0f
+                val outgoingMix = 1f - activeMix
+                return drawLiveLensBlend(outgoingMix + (activeMix - outgoingMix) * progress)
             }
         }
         return false
@@ -1593,14 +1629,17 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             return
         }
 
+        liveHandoffTargetUsesStandbyInput = !activeCameraUsesStandbyInput
+        if (liveHandoffTargetUsesStandbyInput) {
+            if (standbyFrameAvailable.getAndSet(false)) acquireLatestStandbyCameraFrame()
+            liveHandoffLastStandbyTimestampNs = standbyFrameTimestampNs
+        } else {
+            if (frameAvailable.getAndSet(false)) acquireLatestCameraFrame()
+            liveHandoffLastStandbyTimestampNs = mainFrameTimestampNs
+        }
         liveHandoffPhase = 2
         liveHandoffProgress = 0
-        liveHandoffLastStandbyTimestampNs = standbyFrameTimestampNs
-        currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
-        currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
-        currentCameraTextureId = standbyCameraTextureId
-        currentCameraTextureMatrix = standbyStMatrix
-        currentFrameTimestampNs = standbyFrameTimestampNs
+        setCurrentOesInput(liveHandoffTargetUsesStandbyInput)
         onRequestRender?.invoke()
         onStandbyReady?.invoke()
     }
@@ -1610,9 +1649,14 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             onStandbyReady?.invoke()
             return
         }
+        liveHandoffTargetUsesStandbyInput = !activeCameraUsesStandbyInput
         liveHandoffPhase = 1
         liveHandoffProgress = 0
-        liveHandoffLastStandbyTimestampNs = standbyFrameTimestampNs
+        liveHandoffLastStandbyTimestampNs = if (liveHandoffTargetUsesStandbyInput) {
+            standbyFrameTimestampNs
+        } else {
+            mainFrameTimestampNs
+        }
         onLiveStandbyHandoffReady = onStandbyReady
         onRequestRender?.invoke()
     }
@@ -1634,7 +1678,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         }
         liveHandoffPhase = 3
         liveHandoffProgress = 0
-        liveHandoffLastPrimaryTimestampNs = surfaceTexture?.timestamp ?: currentFrameTimestampNs
+        liveHandoffLastPrimaryTimestampNs = activeCameraFrameTimestampNs()
         onLivePrimaryHandoffReady = onPrimaryReady
         onRequestRender?.invoke()
     }
@@ -1651,6 +1695,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         return try {
             surfaceTexture?.updateTexImage()
             surfaceTexture?.getTransformMatrix(stMatrix)
+            mainFrameTimestampNs = surfaceTexture?.timestamp ?: mainFrameTimestampNs
             if (previewStabilizationUseCase != null &&
                 !mgcEisPresentationTransform.captureFromOes(stMatrix)
             ) {
