@@ -240,7 +240,7 @@ data class UserPreferences(
     val videoResolution: VideoResolutionPreset = VideoResolutionPreset.FHD_1080P,
     val videoFps: VideoFpsPreset = VideoFpsPreset.FPS_30,
     val videoAspectRatio: VideoAspectRatio = VideoAspectRatio.RATIO_16_9,
-    val videoLogProfile: VideoLogProfile = VideoLogProfile.NATURAL,
+    val videoLogProfile: VideoLogProfile = VideoLogProfile.OFF,
     val videoLogLutMode: VideoLogLutMode = VideoLogLutMode.MONITOR_ONLY,
     val videoBitrate: VideoBitratePreset = VideoBitratePreset.P5,
     val videoAudioInputId: String = VIDEO_AUDIO_INPUT_AUTO,
