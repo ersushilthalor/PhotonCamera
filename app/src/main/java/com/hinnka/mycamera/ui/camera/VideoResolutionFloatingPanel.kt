@@ -46,7 +46,7 @@ import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.video.VideoFpsPreset
 import com.hinnka.mycamera.video.VideoResolutionPreset
 
-private val ResolutionPanelShape = RoundedCornerShape(26.dp)
+private val ResolutionPanelShape = RoundedCornerShape(22.dp)
 private val ResolutionPanelAccent = Color(0xFFFFC107)
 
 @Composable
@@ -96,7 +96,7 @@ internal fun VideoResolutionFloatingPanel(
     ) {
         Box(
             modifier = Modifier
-                .widthIn(min = 280.dp, max = 340.dp)
+                .widthIn(min = 260.dp, max = 316.dp)
                 .fillMaxWidth(0.92f)
                 .shadow(18.dp, ResolutionPanelShape)
                 .clip(ResolutionPanelShape)
@@ -150,7 +150,7 @@ internal fun VideoResolutionFloatingPanel(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 18.dp, vertical = 14.dp)
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 SelectorRow(label = "Size") {
                     resolutionOptions.forEach { option ->
@@ -167,7 +167,7 @@ internal fun VideoResolutionFloatingPanel(
                             Text(
                                 text = label,
                                 color = if (selected) ResolutionPanelAccent else Color.White.copy(alpha = 0.94f),
-                                fontSize = 14.5.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
                                 letterSpacing = 0.2.sp,
                                 modifier = Modifier
@@ -184,7 +184,7 @@ internal fun VideoResolutionFloatingPanel(
                     }
                 }
 
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(8.dp))
 
                 SelectorRow(label = "FPS") {
                     fpsOptions.forEach { option ->
@@ -196,7 +196,7 @@ internal fun VideoResolutionFloatingPanel(
                             Text(
                                 text = option.fps.toString(),
                                 color = if (selected) ResolutionPanelAccent else Color.White.copy(alpha = 0.94f),
-                                fontSize = 14.5.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
                                 letterSpacing = 0.2.sp,
                                 modifier = Modifier
@@ -213,7 +213,7 @@ internal fun VideoResolutionFloatingPanel(
                     }
                 }
 
-                Spacer(Modifier.height(11.dp))
+                Spacer(Modifier.height(9.dp))
 
                 Text(
                     text = when (selectedResolution) {
@@ -247,7 +247,7 @@ private fun SelectorRow(
             color = Color.White.copy(alpha = 0.72f),
             fontSize = 13.5.sp,
             fontWeight = FontWeight.Medium,
-            modifier = Modifier.width(46.dp)
+            modifier = Modifier.width(42.dp)
         )
         Row(
             modifier = Modifier.weight(1f),

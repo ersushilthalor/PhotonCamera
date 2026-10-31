@@ -69,7 +69,7 @@ internal fun OppoLogLutFloatingWindow(
 ) {
     var showIntensity by remember { mutableStateOf(false) }
     val backdropImage = remember(backdrop) { backdrop?.takeUnless { it.isRecycled }?.asImageBitmap() }
-    val shape = RoundedCornerShape(26.dp)
+    val shape = RoundedCornerShape(22.dp)
     AnimatedVisibility(
         visible = isOpen,
         modifier = modifier,
@@ -77,7 +77,7 @@ internal fun OppoLogLutFloatingWindow(
         exit = fadeOut() + scaleOut(targetScale = 0.96f, animationSpec = spring(dampingRatio = 0.86f))
     ) {
         Box(
-            modifier = Modifier.fillMaxWidth().widthIn(min = 292.dp, max = 380.dp)
+            modifier = Modifier.fillMaxWidth(0.9f).widthIn(min = 260.dp, max = 332.dp)
                 .shadow(20.dp, shape).clip(shape)
                 .border(1.dp, Color.White.copy(alpha = 0.14f), shape)
         ) {
@@ -97,53 +97,53 @@ internal fun OppoLogLutFloatingWindow(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    IconButton(onClick = { showIntensity = !showIntensity }, modifier = Modifier.size(36.dp)) {
+                    IconButton(onClick = { showIntensity = !showIntensity }, modifier = Modifier.size(32.dp)) {
                         Icon(
                             AppIcons.Tune, contentDescription = stringResource(R.string.filter_intensity),
                             tint = if (showIntensity) AccentColor else Color.White,
-                            modifier = Modifier.size(19.dp)
+                            modifier = Modifier.size(17.dp)
                         )
                     }
                     Row(
                         Modifier.weight(1f).horizontalScroll(rememberScrollState()),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Text(
                             stringResource(R.string.video_option_off),
                             color = if (selectedLutId == "none") AccentColor else Color.White.copy(alpha = 0.78f),
-                            fontSize = 14.sp,
+                            fontSize = 13.sp,
                             fontWeight = if (selectedLutId == "none") FontWeight.Bold else FontWeight.Medium,
                             maxLines = 1,
                             modifier = Modifier.clip(CircleShape).clickable { onLutSelected("none") }
-                                .padding(horizontal = 4.dp, vertical = 8.dp)
+                                .padding(horizontal = 4.dp, vertical = 7.dp)
                         )
                         availableLuts.forEach { lut ->
                             val selected = lut.id == selectedLutId
                             Text(
                                 lut.getName(),
                                 color = if (selected) AccentColor else Color.White.copy(alpha = 0.82f),
-                                fontSize = 14.sp,
+                                fontSize = 13.sp,
                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                                 maxLines = 1,
                                 softWrap = false,
                                 overflow = TextOverflow.Clip,
                                 modifier = Modifier.clip(RoundedCornerShape(8.dp))
                                     .clickable { onLutSelected(lut.id) }
-                                    .padding(horizontal = 5.dp, vertical = 8.dp)
+                                    .padding(horizontal = 5.dp, vertical = 7.dp)
                             )
                         }
                     }
                     Spacer(Modifier.width(2.dp))
-                    IconButton(onClick = onDismissRequest, modifier = Modifier.size(34.dp)) {
+                    IconButton(onClick = onDismissRequest, modifier = Modifier.size(32.dp)) {
                         Icon(
                             Icons.Default.Close, contentDescription = stringResource(R.string.close),
-                            tint = Color.White.copy(alpha = 0.9f), modifier = Modifier.size(18.dp)
+                            tint = Color.White.copy(alpha = 0.9f), modifier = Modifier.size(17.dp)
                         )
                     }
                 }
                 AnimatedVisibility(visible = showIntensity) {
-                    Column(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, bottom = 12.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 9.dp)) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text(stringResource(R.string.filter_intensity), color = Color.White.copy(alpha = 0.86f), fontSize = 12.sp)
                             Spacer(Modifier.weight(1f))

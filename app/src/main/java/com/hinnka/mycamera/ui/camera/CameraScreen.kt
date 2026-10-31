@@ -1032,7 +1032,15 @@ fun CameraScreen(
                     cycleVideoFps(state)?.let(viewModel::setVideoFps)
                 },
                 videoHdrEnabled = videoHdrEnabled,
-                onVideoHdrToggle = { viewModel.setVideoHdrEnabled(!videoHdrEnabled) },
+                onVideoHdrToggle = {
+                    if (state.videoConfig.logProfile.isEnabled) {
+                        showVideoResolutionPanel = false
+                        activePanel = ActivePanel.NONE
+                        showOppoLogLutWindow = !showOppoLogLutWindow
+                    } else {
+                        viewModel.setVideoHdrEnabled(!videoHdrEnabled)
+                    }
+                },
                 onSettingsClick = {
                     activePanel = if (activePanel == ActivePanel.SETTINGS) ActivePanel.NONE else ActivePanel.SETTINGS
                 },
@@ -1812,7 +1820,7 @@ fun CameraScreen(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .statusBarsPadding()
-                        .padding(top = 56.dp)
+                        .padding(top = 88.dp)
                 )
 
                 if (showOppoLogLutWindow) {

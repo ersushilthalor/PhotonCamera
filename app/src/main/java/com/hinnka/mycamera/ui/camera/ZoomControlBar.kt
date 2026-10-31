@@ -213,7 +213,7 @@ fun ZoomControlBar(
         }
 
         AnimatedVisibility(
-            visible = !isContinuousZooming,
+            visible = !isContinuousZooming && !isLogVideo,
             enter = fadeIn() + expandHorizontally(),
             exit = fadeOut() + shrinkHorizontally(),
             modifier = Modifier.align(Alignment.CenterEnd)
