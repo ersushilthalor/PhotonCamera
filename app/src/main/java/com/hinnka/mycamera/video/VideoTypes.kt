@@ -121,9 +121,11 @@ enum class VideoLogProfile(
 
     companion object {
         fun fromPersistedName(name: String?): VideoLogProfile =
-            entries.firstOrNull { it.name == name && it in SELECTABLE_PROFILES } ?: NATURAL
+            entries.firstOrNull { it.name == name && it in SELECTABLE_PROFILES } ?: OFF
 
-        val SELECTABLE_PROFILES: List<VideoLogProfile> = listOf(APPLE_LOG2, NATURAL, HLG10)
+        // Keep OFF first so a user can explicitly disable the Log/profile processing.
+        val SELECTABLE_PROFILES: List<VideoLogProfile> =
+            listOf(OFF, APPLE_LOG2, NATURAL, HLG10)
     }
 }
 
@@ -136,7 +138,7 @@ data class VideoConfig(
     val resolution: VideoResolutionPreset = VideoResolutionPreset.FHD_1080P,
     val fps: VideoFpsPreset = VideoFpsPreset.FPS_30,
     val aspectRatio: VideoAspectRatio = VideoAspectRatio.RATIO_16_9,
-    val logProfile: VideoLogProfile = VideoLogProfile.NATURAL,
+    val logProfile: VideoLogProfile = VideoLogProfile.OFF,
     val logLutMode: VideoLogLutMode = VideoLogLutMode.MONITOR_ONLY,
     val bitrate: VideoBitratePreset = VideoBitratePreset.P5,
     val codec: VideoCodec = VideoCodec.H264,
