@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 import kotlin.math.roundToInt
@@ -133,6 +134,19 @@ internal class LensSwitchTransitionState(
                         rendered.await()
                     } finally {
                         waiter.cancel()
+                    }
+                    // Match VCamera's frame-gated handoff: keep the outgoing frame visible
+                    // through two warm-up frames plus sixteen distinct incoming preview frames.
+                    // A bounded timeout guarantees the UI cannot remain covered indefinitely
+                    // on devices whose HAL delivers sparse or irregular timestamps.
+                    val handoffPreview = viewModel.glSurfaceView
+                    if (handoffPreview != null) {
+                        withTimeoutOrNull(900L) {
+                            handoffPreview.awaitPreviewFrames(
+                                minimumTimestampNs = readyState.previewFirstFrameTimestampNs!!,
+                                requiredFrameCount = 18,
+                            )
+                        }
                     }
                     animation.join()
                 }
