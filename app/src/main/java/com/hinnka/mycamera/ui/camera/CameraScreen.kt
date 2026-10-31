@@ -1833,7 +1833,7 @@ fun CameraScreen(
                     selectedLutId = currentLutId,
                     intensity = effectiveRecipeParams.lutIntensity,
                     backdrop = videoResolutionBackdrop,
-                    onLutSelected = viewModel::setLut,
+                    onLutSelected = { lutId -> viewModel.setLut(lutId) },
                     onIntensityChange = viewModel::updateLutIntensity,
                     onDismissRequest = { showOppoLogLutWindow = false },
                     modifier = Modifier
