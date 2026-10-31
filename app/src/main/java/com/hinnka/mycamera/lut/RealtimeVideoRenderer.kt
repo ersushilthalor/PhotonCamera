@@ -1032,6 +1032,8 @@ class RealtimeVideoRenderer(
     fun updateStabilizationPresentationForCameraSwitch(sensorOrientationDegrees: Int) {
         if (!initialized || !enhancedStabilizationEnabled) return
 
+        currentCameraSensorOrientationDegrees = sensorOrientationDegrees
+        cameraSensorOrientationFallbackApplied = false
         mgcEisPresentationTransform.reset()
         if (mgcEisPresentationTransform.captureFromSensorOrientation(sensorOrientationDegrees)) {
             cameraTransformAxesSwapped = null
