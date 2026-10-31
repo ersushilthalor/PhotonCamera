@@ -283,6 +283,11 @@ class Camera2Controller(private val context: Context) {
     // A low-resolution, drained stream keeps the alternate rear lens opened and producing
     // frames while the active camera remains untouched. Promotion reuses this CameraDevice.
     @Volatile private var keepUltraWideReadyEnabled = true
+    @Volatile private var autoSwitchToUltraWideEnabled = false
+    private var autoMacroActive = false
+    private var closeSubjectUnfocusedFrames = 0
+    private var subjectFarFrames = 0
+    private var lastAutoSwitchTimestampMs = 0L
     private var standbyCameraDevice: CameraDevice? = null
     private var standbyCaptureSession: CameraCaptureSession? = null
     @Volatile private var standbyPreviewSurface: Surface? = null
@@ -1186,6 +1191,12 @@ class Camera2Controller(private val context: Context) {
 
             // 监听对焦状态
             val afState = result.get(CaptureResult.CONTROL_AF_STATE)
+            if (session === captureSession) {
+                evaluateAutoUltraWideSwitch(
+                    result = result,
+                    afState = afState ?: CaptureResult.CONTROL_AF_STATE_INACTIVE,
+                )
+            }
             val afStateChanged = afState != null && afState != lastAfState
             if (afStateChanged) {
                 lastAfState = afState
@@ -2008,6 +2019,15 @@ class Camera2Controller(private val context: Context) {
             }
         } else if (normalized != null) {
             startStandbyCameraIfPossible()
+        }
+    }
+
+    fun setAutoSwitchToUltraWideEnabled(enabled: Boolean) {
+        autoSwitchToUltraWideEnabled = enabled
+        if (!enabled) {
+            autoMacroActive = false
+            closeSubjectUnfocusedFrames = 0
+            subjectFarFrames = 0
         }
     }
 
@@ -5712,6 +5732,101 @@ class Camera2Controller(private val context: Context) {
             )
         } ?: PLog.w(TAG, "Camera with ID $cameraId not found")
     }
+
+    private fun evaluateAutoUltraWideSwitch(
+        result: TotalCaptureResult,
+        afState: Int,
+    ) {
+        if (!autoSwitchToUltraWideEnabled) return
+        val currentState = _state.value
+        if (
+            currentState.captureMode != CaptureMode.PHOTO ||
+            currentState.videoRecordingState.isRecording ||
+            currentState.videoRecordingState.isProcessing ||
+            currentState.isCapturing ||
+            currentState.isFocusLocked
+        ) return
+
+        val currentCamera = currentState.getCurrentCameraInfo() ?: return
+        if (currentCamera.lensFacing != CameraCharacteristics.LENS_FACING_BACK) return
+        val backCameras = currentState.availableCameras.filter {
+            it.lensFacing == CameraCharacteristics.LENS_FACING_BACK && !it.isVirtualIszLens
+        }
+        val ultraWide = backCameras.firstOrNull { it.lensType == LensType.BACK_ULTRA_WIDE } ?: return
+        val main = backCameras.firstOrNull {
+            it.lensType == LensType.BACK_MAIN && abs(it.intrinsicZoomRatio - 1f) <= 0.05f
+        } ?: backCameras.firstOrNull { it.lensType == LensType.BACK_MAIN } ?: return
+
+        val focusDistance = result.get(CaptureResult.LENS_FOCUS_DISTANCE) ?: 0f
+        val characteristics = runCatching {
+            getCameraCharacteristicsCached(currentCamera.getOpenCameraId())
+        }.getOrNull()
+        val minFocusDistance = characteristics
+            ?.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE)
+            ?.takeIf { it > 0f } ?: 10f
+        val nowMs = SystemClock.elapsedRealtime()
+
+        if (currentCamera.lensType == LensType.BACK_MAIN) {
+            val isSubjectVeryClose =
+                focusDistance >= minFocusDistance * 0.70f || focusDistance >= 6f
+            val isAfStruggling =
+                afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED ||
+                    afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_UNFOCUSED ||
+                    (focusDistance >= minFocusDistance * 0.85f &&
+                        (afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN ||
+                            afState == CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN))
+
+            if (isSubjectVeryClose && isAfStruggling && currentState.zoomRatio in 0.9f..1.6f) {
+                closeSubjectUnfocusedFrames += 1
+                subjectFarFrames = 0
+            } else {
+                closeSubjectUnfocusedFrames = (closeSubjectUnfocusedFrames - 1).coerceAtLeast(0)
+            }
+
+            if (closeSubjectUnfocusedFrames >= 10 &&
+                nowMs - lastAutoSwitchTimestampMs >= 2_000L
+            ) {
+                val previewTexture = previewSurfaceTexture ?: return
+                lastAutoSwitchTimestampMs = nowMs
+                closeSubjectUnfocusedFrames = 0
+                autoMacroActive = true
+                PLog.i(
+                    TAG,
+                    "Auto lens switch: main AF struggling on close subject; switching to ultra-wide",
+                )
+                switchToCameraId(ultraWide.cameraId)
+                videoRecorder.setActiveCameraSource(isUltraWide = true)
+                openCamera(previewTexture, preserveVideoRecording = false)
+            }
+        } else if (
+            currentCamera.lensType == LensType.BACK_ULTRA_WIDE &&
+            autoMacroActive
+        ) {
+            val isSubjectFarAway = focusDistance < 4f ||
+                ((afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED ||
+                    afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED) && focusDistance < 5f)
+            if (isSubjectFarAway) {
+                subjectFarFrames += 1
+                closeSubjectUnfocusedFrames = 0
+            } else {
+                subjectFarFrames = (subjectFarFrames - 1).coerceAtLeast(0)
+            }
+
+            if (subjectFarFrames >= 14 &&
+                nowMs - lastAutoSwitchTimestampMs >= 2_000L
+            ) {
+                val previewTexture = previewSurfaceTexture ?: return
+                lastAutoSwitchTimestampMs = nowMs
+                subjectFarFrames = 0
+                autoMacroActive = false
+                PLog.i(TAG, "Auto lens switch: subject moved away; switching back to main")
+                switchToCameraId(main.cameraId)
+                videoRecorder.setActiveCameraSource(isUltraWide = false)
+                openCamera(previewTexture, preserveVideoRecording = false)
+            }
+        }
+    }
+
 
 // ==================== 曝光控制 ====================
 
