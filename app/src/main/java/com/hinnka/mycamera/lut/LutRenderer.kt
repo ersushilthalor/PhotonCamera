@@ -1065,6 +1065,12 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         liveBlendFrameActive = false
         var cameraFrameUpdated = oesFrameUpdated
 
+        // Handoff warm-up must count frames acquired from the active primary camera only.
+        // Standby-only redraws are valid display updates, but they are not target-camera frames.
+        var primaryPreviewFrameUpdated = oesFrameUpdated && !delayedStabilizationEnabled
+        var primaryPreviewFrameTimestampNs =
+            if (primaryPreviewFrameUpdated) surfaceTexture?.timestamp ?: 0L else 0L
+
         if (delayedStabilizationEnabled) {
             val session = stabilizationSession
             if (!stabilizationSessionStarted) {
@@ -1096,6 +1102,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                             currentCameraTextureId = rendered.textureId
                             currentCameraTextureMatrix = mgcEisPresentationTransform.matrix
                             currentFrameTimestampNs = rendered.timestampNs
+                            primaryPreviewFrameUpdated = true
+                            primaryPreviewFrameTimestampNs = rendered.timestampNs
                             cameraFrameUpdated = true
                         }
                     }
@@ -1345,10 +1353,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             firstFrameRendered = true
             onFirstFrameRendered?.invoke()
         }
-        // Notify waiters only after a new camera frame has actually been acquired
-        // and rendered. onDrawFrame() can also run for UI/FBO work with no new frame.
-        if (cameraFrameUpdated && currentFrameTimestampNs > 0L) {
-            onPreviewFrameRendered?.invoke(currentFrameTimestampNs)
+        // Notify waiters only after a newly acquired primary-camera frame has completed
+        // the preview render path. Standby-only redraws must never satisfy lens hand-off waits.
+        if (primaryPreviewFrameUpdated && primaryPreviewFrameTimestampNs > 0L) {
+            onPreviewFrameRendered?.invoke(primaryPreviewFrameTimestampNs)
         }
     }
 

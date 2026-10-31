@@ -9551,18 +9551,26 @@ class Camera2Controller(private val context: Context) {
     private fun takeStandbyCamera(cameraOpenId: String): CameraDevice? {
         if (standbyCameraOpenId != cameraOpenId) return null
         val device = standbyCameraDevice ?: return null
-        val standbyStreamReady = if (
+
+        val recordingRelayMustBeReady =
             _state.value.captureMode == CaptureMode.VIDEO &&
-            videoRecorder.isRecording() &&
-            videoRecorder.supportsDualCameraInput &&
-            !shouldUseVideoEnhancedStabilization()
-        ) {
+                videoRecorder.isRecording() &&
+                videoRecorder.supportsDualCameraInput &&
+                !shouldUseVideoEnhancedStabilization()
+        // For preview promotion, a configured session with an active repeating request is
+        // already warm. Requiring two CaptureCallbacks races the GL SurfaceTexture frame
+        // used by the instant path and can close/re-open an otherwise ready CameraDevice.
+        // Keep the stricter source-frame requirement only for an active dual-video relay.
+        val standbyStreamReady = !recordingRelayMustBeReady ||
             videoRecorder.hasCameraSourceFrames(standbyIsUltraWide)
-        } else {
-            standbyFrameCount >= 2L
-        }
         if (standbyCaptureSession == null || !standbyStreamReady) {
-            closeStandbyCamera("standby stream has not produced two frames")
+            closeStandbyCamera(
+                if (standbyCaptureSession == null) {
+                    "standby session is not configured"
+                } else {
+                    "standby recording relay has not produced a source frame"
+                }
+            )
             return null
         }
         standbyGeneration++
@@ -9574,7 +9582,11 @@ class Camera2Controller(private val context: Context) {
         standbyImageReader = null
         standbyCameraDevice = null
         standbyCameraOpenId = null
-        PLog.i(TAG, "Standby camera promoted after $standbyFrameCount drained frames: ${device.id}")
+        PLog.i(
+            TAG,
+            "Standby camera promoted from configured session: camera=${device.id}, " +
+                "captureFrames=$standbyFrameCount"
+        )
         return device
     }
 

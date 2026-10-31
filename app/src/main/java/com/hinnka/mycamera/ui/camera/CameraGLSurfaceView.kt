@@ -452,9 +452,9 @@ class CameraGLSurfaceView @JvmOverloads constructor(
     }
 
     /**
-     * Wait for distinct sensor-timestamped frames to finish the complete preview render path.
-     * This prevents the outgoing lens frame from being removed after only the first incoming
-     * frame, which can still be a warm-up frame with unsettled exposure and focus.
+     * Wait for distinct incoming primary-camera frames to finish the complete preview render path.
+     * Standby-only redraws are excluded so the outgoing image stays visible until the target
+     * camera has produced the requested number of real preview frames.
      */
     suspend fun awaitPreviewFrames(requiredFrameCount: Int) {
         val targetCount = requiredFrameCount.coerceAtLeast(1)
