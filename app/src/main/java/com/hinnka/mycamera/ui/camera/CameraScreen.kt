@@ -372,7 +372,7 @@ fun CameraScreen(
 
     // Sample the existing GL preview only while the resolution selector is visible.
     // The low-resolution frames are used only as the panel's frosted backdrop.
-    LaunchedEffect(showVideoResolutionPanel, state.captureMode) {
+    LaunchedEffect(showVideoResolutionPanel, state.captureMode, state.previewFirstFrameTimestampNs) {
         if (!showVideoResolutionPanel || state.captureMode != CaptureMode.VIDEO) {
             videoResolutionBackdrop?.recycleIfAlive()
             videoResolutionBackdrop = null
