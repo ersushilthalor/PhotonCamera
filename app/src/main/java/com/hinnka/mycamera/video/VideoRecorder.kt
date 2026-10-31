@@ -117,6 +117,7 @@ class VideoRecorder(
     private var renderer: RealtimeVideoRenderer? = null
     private var dualCameraRelay: DualCameraRecordingRelay? = null
     private var requestedInitialUltraWide = false
+    private var requestedCurrentUltraWide = false
     private var requestedBitrateMbps: Int = 30
     private var requestedCodecMime: String = MediaFormat.MIMETYPE_VIDEO_AVC
     private var preferredEncoderCodecName: String? = null
@@ -255,6 +256,7 @@ class VideoRecorder(
         requestedColorConfig = colorConfig
         requestedCameraInputIsHlg10 = cameraInputIsHlg10
         requestedInitialUltraWide = initialUltraWide
+        requestedCurrentUltraWide = initialUltraWide
         if (hlg10Encoder != null) {
             PLog.i(
                 TAG,
@@ -368,6 +370,7 @@ class VideoRecorder(
         if (!isRecording || stopRequested) return
 
         requestedFlipEncodedFrame = frontFacing
+        requestedCurrentUltraWide = ultraWide
         dualCameraRelay?.setActiveSource(ultraWide)
         val mirrorHorizontally = frontFacing && requestedOrientationHintDegrees % 180 == 0
         val mirrorVertically = frontFacing && requestedOrientationHintDegrees % 180 != 0
@@ -407,7 +410,7 @@ class VideoRecorder(
         requestedCameraInputSize = size
         requestedSensorOrientationDegrees = sensorOrientationDegrees
         dualCameraRelay?.updateBufferSize(
-            isUltraWide = requestedInitialUltraWide,
+            isUltraWide = requestedCurrentUltraWide,
             width = size.width,
             height = size.height,
         )
