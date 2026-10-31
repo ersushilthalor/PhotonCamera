@@ -1425,6 +1425,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         primaryUpdated: Boolean,
         standbyUpdated: Boolean,
     ): Boolean {
+        // This overlap shader blends the two raw OES sources. With MGC EIS+ active those are not
+        // the frames users see: mixing them would bypass timestamp-matched metadata and gyro
+        // stabilization. Keep the last fully stabilized output on screen until the promoted
+        // camera's own stabilized frame is ready; never crossfade an uncorrected standby frame.
         if (liveHandoffPhase == 0 || previewStabilizationUseCase != null) return false
         when (liveHandoffPhase) {
             1 -> {
