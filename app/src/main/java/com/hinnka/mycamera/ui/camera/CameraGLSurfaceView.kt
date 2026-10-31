@@ -122,6 +122,46 @@ class CameraGLSurfaceView @JvmOverloads constructor(
     /**
      * 设置预览尺寸
      */
+    val standbyCameraInputSurface: Surface?
+        get() = renderer.standbyCameraInputSurface
+
+    val canUseLiveLensHandoff: Boolean
+        get() = renderer.canUseLiveLensHandoff
+
+    suspend fun beginLiveLensHandoffAndWait() {
+        suspendCancellableCoroutine<Unit> { continuation ->
+            queueEvent {
+                if (continuation.isActive) {
+                    renderer.beginLiveLensHandoff {
+                        if (continuation.isActive) continuation.resume(Unit)
+                    }
+                }
+            }
+            continuation.invokeOnCancellation {
+                queueEvent { renderer.cancelLiveLensHandoff() }
+            }
+        }
+    }
+
+    suspend fun finishLiveLensHandoffAndWait() {
+        suspendCancellableCoroutine<Unit> { continuation ->
+            queueEvent {
+                if (continuation.isActive) {
+                    renderer.finishLiveLensHandoff {
+                        if (continuation.isActive) continuation.resume(Unit)
+                    }
+                }
+            }
+            continuation.invokeOnCancellation {
+                queueEvent { renderer.cancelLiveLensHandoff() }
+            }
+        }
+    }
+
+    fun cancelLiveLensHandoff() {
+        queueEvent { renderer.cancelLiveLensHandoff() }
+    }
+
     fun setPreviewSize(width: Int, height: Int) {
         queueEvent {
             renderer.setPreviewSize(width, height)
