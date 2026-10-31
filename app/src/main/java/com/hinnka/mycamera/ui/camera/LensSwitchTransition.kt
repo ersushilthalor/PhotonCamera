@@ -1,183 +1,136 @@
 package com.hinnka.mycamera.ui.camera
 
-import android.graphics.Bitmap
-import android.os.Handler
-import android.os.Looper
-import android.view.PixelCopy
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.Box
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.withFrameNanos
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asAndroidBitmap
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
-import com.hinnka.mycamera.utils.GaussianBlur
+import com.hinnka.mycamera.camera.LensType
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.viewmodel.CameraViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
-import kotlin.math.roundToInt
+import kotlin.math.abs
 
-private const val SnapshotMaxLongEdge = 1440
-private const val BlurWorkingMaxLongEdge = 320
-// Four blended levels are sufficient for the short ramp and halve prefiltering work.
-private const val BlurLevelCount = 4
-private const val BlurSigma = 5f
-private const val BlurEnterDurationMillis = 80
-private const val BlurExitDurationMillis = 240
-
-private fun isHalfXZoom(zoom: Float): Boolean = kotlin.math.abs(zoom - 0.5f) < 0.025f
-
-private fun isTelephotoPresetZoom(zoom: Float): Boolean =
-    kotlin.math.abs(zoom - 2.0f) < 0.05f || kotlin.math.abs(zoom - 3.0f) < 0.05f
-
-private fun isFrameBasedHandoffEligible(fromZoom: Float, targetZoom: Float): Boolean =
-    (isHalfXZoom(fromZoom) && isTelephotoPresetZoom(targetZoom)) ||
-        (isTelephotoPresetZoom(fromZoom) && isHalfXZoom(targetZoom))
-
-/** Owns the frozen viewfinder independently of camera / SurfaceView recreation. */
+/**
+ * Coordinates lens handoff using the live secondary Camera2 stream.
+ *
+ * There is deliberately no PixelCopy/snapshot overlay here. On devices which support the
+ * simultaneous main/ultra-wide pair, the renderer first blends to the warm standby stream,
+ * then Camera2 promotes that device, and finally the renderer blends back to the newly active
+ * primary stream. Unsupported camera pairs fall back to a direct switch and first-frame wait.
+ */
 internal class LensSwitchTransitionState(
     private val scope: CoroutineScope,
     private val viewModel: CameraViewModel,
 ) {
-    var snapshot by mutableStateOf<ImageBitmap?>(null)
+    var isActive: Boolean = false
         private set
-    var isActive by mutableStateOf(false)
-        private set
-    val opacity = Animatable(1f)
-    var scale by mutableFloatStateOf(1f)
-        private set
-    val blurProgress = Animatable(0f)
-    var blurFrames by mutableStateOf<List<ImageBitmap>>(emptyList())
-        private set
-    private var snapshotZoom = 1f
+
     private var job: Job? = null
     private var switchPending = false
-    private data class Request(val cameraId: String, val targetZoom: Float, val onSwitch: () -> Unit)
+    private data class Request(
+        val cameraId: String,
+        val targetZoom: Float,
+        val onSwitch: () -> Unit,
+    )
     private var pendingRequest: Request? = null
-    private var awaitedCameraId: String? = null
-    private var previousTimestamp: Long? = null
 
     fun switchLens(cameraId: String, targetZoom: Float, onSwitch: () -> Unit) {
         require(targetZoom.isFinite() && targetZoom > 0f)
-        // Coalesce gestures while the screenshot is being prepared. Once a switch has
-        // started, replace its waiter but keep the frozen frame across subsequent switches.
         pendingRequest = Request(cameraId, targetZoom, onSwitch)
         if (switchPending && job?.isActive == true) return
+
         job?.cancel()
         isActive = true
         switchPending = true
         job = scope.launch {
+            var livePreview: CameraGLSurfaceView? = null
             try {
-                opacity.snapTo(1f)
-                if (snapshot == null) {
-                    snapshotZoom = viewModel.zoomRatioByMain
-                    scale = 1f
-                    blurProgress.snapTo(0f)
-                    blurFrames = emptyList()
-                    val bitmap = viewModel.glSurfaceView?.captureLastFrame()
-                    ensureActive()
-                    snapshot = bitmap?.asImageBitmap()
-                }
-                // Let Compose submit the overlay before the camera can release its surface.
-                withFrameNanos { }
-                withFrameNanos { }
                 val request = pendingRequest
                 pendingRequest = null
-                switchPending = false
-                if (request != null) {
-                    previousTimestamp = viewModel.state.value.previewFirstFrameTimestampNs
-                    awaitedCameraId = request.cameraId
-                    request.onSwitch()
-                }
-                if (awaitedCameraId == null) {
-                    clearSnapshot()
+                if (request == null) {
                     isActive = false
+                    switchPending = false
                     return@launch
                 }
-                coroutineScope {
-                    val animation = launch {
-                        animateSnapshotTo(request?.targetZoom ?: viewModel.zoomRatioByMain)
-                    }
-                    val readyState = viewModel.state.first {
-                        it.currentCameraId == awaitedCameraId && it.isPreviewActive &&
+
+                val before = viewModel.state.value
+                val currentCamera = before.getCurrentCameraInfo()
+                val targetCamera = before.availableCameras.firstOrNull {
+                    it.cameraId == request.cameraId
+                }
+                val isRearMainOrUltraWide =
+                    currentCamera?.lensType in setOf(LensType.BACK_MAIN, LensType.BACK_ULTRA_WIDE) &&
+                        targetCamera?.lensType in setOf(LensType.BACK_MAIN, LensType.BACK_ULTRA_WIDE) &&
+                        currentCamera?.lensType != targetCamera?.lensType
+                livePreview = viewModel.glSurfaceView
+                val useLiveHandoff = isRearMainOrUltraWide &&
+                    livePreview?.canUseLiveLensHandoff == true
+
+                val previousTimestamp = before.previewFirstFrameTimestampNs
+                if (useLiveHandoff) {
+                    livePreview?.beginLiveLensHandoffAndWait()
+                }
+
+                request.onSwitch()
+
+                val readyState = withTimeoutOrNull(3_500L) {
+                    viewModel.state.first {
+                        it.currentCameraId == request.cameraId &&
+                            it.isPreviewActive &&
                             it.previewFirstFrameTimestampNs != null &&
                             it.previewFirstFrameTimestampNs != previousTimestamp
                     }
-                    // Follow the current SurfaceView if preview dimensions change.
-                    val rendered = CompletableDeferred<Unit>()
-                    val waiter = launch {
-                        snapshotFlow { viewModel.glSurfaceView }.collectLatest { preview ->
-                            if (preview != null) {
-                                preview.awaitPreviewFrame(readyState.previewFirstFrameTimestampNs!!)
-                                rendered.complete(Unit)
-                            }
-                        }
+                }
+                if (readyState == null) {
+                    PLog.w("LensSwitchTransition", "Timed out waiting for active preview: ${request.cameraId}")
+                    livePreview?.cancelLiveLensHandoff()
+                    isActive = false
+                    switchPending = false
+                    return@launch
+                }
+
+                val preview = livePreview ?: viewModel.glSurfaceView
+                if (preview != null) {
+                    withTimeout(1_500L) {
+                        preview.awaitPreviewFrame(readyState.previewFirstFrameTimestampNs!!)
                     }
-                    try {
-                        rendered.await()
-                    } finally {
-                        waiter.cancel()
-                    }
-                    // Match VCamera's frame-gated handoff: keep the outgoing frame visible
-                    // through two warm-up frames plus sixteen distinct incoming preview frames.
-                    // A bounded timeout guarantees the UI cannot remain covered indefinitely
-                    // on devices whose HAL delivers sparse or irregular timestamps.
-                    val targetZoom = request?.targetZoom ?: viewModel.zoomRatioByMain
-                    if (isFrameBasedHandoffEligible(snapshotZoom, targetZoom)) {
-                        val handoffPreview = viewModel.glSurfaceView
-                        if (handoffPreview != null) {
+
+                    if (useLiveHandoff) {
+                        // Match VCamera's 16-frame warm-up requirement on the direct 0.5x ↔
+                        // 2x/3x handoff. Other lens transitions use the same live crossfade
+                        // without imposing this additional delay.
+                        if (isFrameBasedHandoffEligible(before.zoomRatio, request.targetZoom)) {
                             withTimeoutOrNull(900L) {
-                                handoffPreview.awaitPreviewFrames(
+                                preview.awaitPreviewFrames(
                                     minimumTimestampNs = readyState.previewFirstFrameTimestampNs!!,
                                     requiredFrameCount = 18,
                                 )
                             }
                         }
+                        withTimeoutOrNull(1_500L) {
+                            preview.finishLiveLensHandoffAndWait()
+                        }
                     }
-                    animation.join()
                 }
-                // Renderer callbacks run before GLSurfaceView swaps buffers.
-                withFrameNanos { }
-                withFrameNanos { }
-                opacity.animateTo(0f, tween(160))
-                clearSnapshot()
-                isActive = false
-                awaitedCameraId = null
             } catch (error: CancellationException) {
+                livePreview?.cancelLiveLensHandoff()
                 throw error
             } catch (error: Exception) {
-                PLog.e("LensSwitchTransition", "Lens preview transition failed", error)
-                clearSnapshot()
+                PLog.e("LensSwitchTransition", "Live lens handoff failed", error)
+                livePreview?.cancelLiveLensHandoff()
+            } finally {
                 isActive = false
                 switchPending = false
-                awaitedCameraId = null
-                pendingRequest = null
+                job = null
+                // A rapid later selection replaces the pending target while this switch is
+                // running. Start that request only after the current camera state is settled.
+                val next = pendingRequest
+                if (next != null && scope.coroutineContext[kotlinx.coroutines.Job]?.isActive == true) {
+                    switchLens(next.cameraId, next.targetZoom, next.onSwitch)
+                }
             }
         }
     }
@@ -185,135 +138,21 @@ internal class LensSwitchTransitionState(
     fun cancel() {
         job?.cancel()
         job = null
-        clearSnapshot()
-        isActive = false
-        switchPending = false
         pendingRequest = null
-        awaitedCameraId = null
+        switchPending = false
+        isActive = false
+        viewModel.glSurfaceView?.cancelLiveLensHandoff()
     }
 
     fun cancelPendingSwitch() {
         pendingRequest = null
     }
 
-    private fun clearSnapshot() {
-        snapshot = null
-        blurFrames = emptyList()
-    }
-
-    private suspend fun animateSnapshotTo(targetZoom: Float) = coroutineScope {
-        val bitmap = snapshot ?: return@coroutineScope
-        val visibleZoom = snapshotZoom * scale
-        if (targetZoom >= visibleZoom) {
-            // A frozen wide frame contains the narrower field of view. Retarget from the
-            // currently displayed scale so rapid lens changes do not restart the zoom.
-            launch { blurProgress.animateTo(0f, tween(BlurExitDurationMillis)) }
-            val startScale = scale
-            val progress = Animatable(0f)
-            progress.animateTo(
-                1f,
-                tween(resolveZoomStopAnimationDurationMillis(visibleZoom, targetZoom), easing = FastOutSlowInEasing),
-            ) {
-                // Logarithmic interpolation matches the existing in-lens zoom animation.
-                scale = interpolateZoomRatio(startScale, targetZoom / snapshotZoom, value)
-            }
-            scale = targetZoom / snapshotZoom
-        } else {
-            // A telephoto frame cannot supply a wider field of view. Increase the Gaussian
-            // radius instead; adjacent prefiltered levels blend smoothly on Android 11 too.
-            if (blurFrames.isEmpty()) {
-                blurFrames = createBlurFrames(bitmap.asAndroidBitmap())
-            }
-            blurProgress.animateTo(1f, tween(BlurEnterDurationMillis, easing = LinearOutSlowInEasing))
-            // Keep maximum blur while switchLens waits for the new preview frame.
-        }
-    }
-
-}
-
-@Composable
-internal fun LensSwitchTransitionOverlay(state: LensSwitchTransitionState, modifier: Modifier = Modifier) {
-    state.snapshot?.let { bitmap ->
-        Box(modifier.clipToBounds().graphicsLayer { alpha = state.opacity.value }) {
-            Box(Modifier.matchParentSize().graphicsLayer {
-                scaleX = state.scale
-                scaleY = state.scale
-            }) {
-                val level = state.blurProgress.value * state.blurFrames.size
-                val lower = level.toInt().coerceIn(0, state.blurFrames.size)
-                Image(
-                    bitmap = if (lower == 0) bitmap else state.blurFrames[lower - 1],
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.matchParentSize(),
-                )
-                if (lower < state.blurFrames.size && level > lower) {
-                    Image(
-                        bitmap = state.blurFrames[lower],
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.matchParentSize().graphicsLayer { alpha = level - lower },
-                    )
-                }
-            }
-        }
-    }
-}
-
-private suspend fun CameraGLSurfaceView.captureLastFrame(): Bitmap? {
-    if (width <= 0 || height <= 0 || !holder.surface.isValid) return null
-    val scale = minOf(1f, SnapshotMaxLongEdge.toFloat() / maxOf(width, height))
-    val bitmap = Bitmap.createBitmap(
-        (width * scale).roundToInt().coerceAtLeast(1),
-        (height * scale).roundToInt().coerceAtLeast(1),
-        Bitmap.Config.ARGB_8888,
-    )
-    var retained = false
-    try {
-        // PixelCopy captures the last presented, fully graded frame. Wait for its callback
-        // even on cancellation: recycling the destination while the copy runs is unsafe.
-        val result = suspendCoroutine<Int> { continuation ->
-            PixelCopy.request(this, bitmap, { continuation.resume(it) }, Handler(Looper.getMainLooper()))
-        }
-        if (result != PixelCopy.SUCCESS) {
-            PLog.w("LensSwitchTransition", "Last preview frame unavailable: PixelCopy=$result")
-            return null
-        }
-        retained = true
-        return bitmap
-    } catch (error: CancellationException) {
-        throw error
-    } catch (error: Exception) {
-        PLog.e("LensSwitchTransition", "Failed to capture last preview frame", error)
-        return null
-    } finally {
-        // Displayed ImageBitmaps are left to GC because Compose may still reference them.
-        if (!retained) bitmap.recycle()
-    }
-}
-
-private suspend fun createBlurFrames(source: Bitmap): List<ImageBitmap> = withContext(Dispatchers.Default) {
-    val workingScale = minOf(1f, BlurWorkingMaxLongEdge.toFloat() / maxOf(source.width, source.height))
-    val working = Bitmap.createScaledBitmap(
-        source,
-        (source.width * workingScale).roundToInt().coerceAtLeast(1),
-        (source.height * workingScale).roundToInt().coerceAtLeast(1),
-        true,
-    )
-    val frames = mutableListOf<Bitmap>()
-    try {
-        repeat(BlurLevelCount) { index ->
-            ensureActive()
-            val frame = working.copy(Bitmap.Config.ARGB_8888, true)
-            frames += frame
-            val sigma = BlurSigma * (index + 1) / BlurLevelCount
-            GaussianBlur.blur(frame, sigma, sigma)
-        }
-        frames.map(Bitmap::asImageBitmap)
-    } catch (error: Exception) {
-        frames.forEach(Bitmap::recycle)
-        throw error
-    } finally {
-        if (working !== source) working.recycle()
+    private fun isFrameBasedHandoffEligible(fromZoom: Float, targetZoom: Float): Boolean {
+        fun isHalfX(value: Float) = abs(value - 0.5f) < 0.025f
+        fun isTele(value: Float) =
+            abs(value - 2f) < 0.05f || abs(value - 3f) < 0.05f
+        return (isHalfX(fromZoom) && isTele(targetZoom)) ||
+            (isTele(fromZoom) && isHalfX(targetZoom))
     }
 }
