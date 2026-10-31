@@ -1345,7 +1345,9 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             firstFrameRendered = true
             onFirstFrameRendered?.invoke()
         }
-        if (currentFrameTimestampNs > 0L) {
+        // Notify waiters only after a new camera frame has actually been acquired
+        // and rendered. onDrawFrame() can also run for UI/FBO work with no new frame.
+        if (cameraFrameUpdated && currentFrameTimestampNs > 0L) {
             onPreviewFrameRendered?.invoke(currentFrameTimestampNs)
         }
     }

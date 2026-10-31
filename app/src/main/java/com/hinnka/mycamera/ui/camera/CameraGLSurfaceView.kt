@@ -456,16 +456,17 @@ class CameraGLSurfaceView @JvmOverloads constructor(
      * This prevents the outgoing lens frame from being removed after only the first incoming
      * frame, which can still be a warm-up frame with unsettled exposure and focus.
      */
-    suspend fun awaitPreviewFrames(minimumTimestampNs: Long, requiredFrameCount: Int) {
+    suspend fun awaitPreviewFrames(requiredFrameCount: Int) {
         val targetCount = requiredFrameCount.coerceAtLeast(1)
         var listener: ((Long) -> Unit)? = null
         try {
             suspendCancellableCoroutine<Unit> { continuation ->
-                var lastTimestampNs = minimumTimestampNs - 1L
                 var receivedFrames = 0
+                // LutRenderer now calls this only when a newly acquired camera frame has
+                // completed the preview render path. Count frame events, not sensor
+                // timestamps: timestamps can jump/reset when Camera2 changes physical IDs.
                 val callback: (Long) -> Unit = { timestamp ->
-                    if (timestamp >= minimumTimestampNs && timestamp > lastTimestampNs) {
-                        lastTimestampNs = timestamp
+                    if (timestamp > 0L) {
                         receivedFrames += 1
                         if (receivedFrames >= targetCount) {
                             renderer.onPreviewFrameRendered = null

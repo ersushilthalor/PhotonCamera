@@ -132,10 +132,26 @@ internal class LensSwitchTransitionState(
                         // 2x/3x handoff. Other lens transitions use the same live crossfade
                         // without imposing this additional delay.
                         if (isFrameBasedHandoffEligible(startingZoomByMain, request.targetZoom)) {
-                            withTimeoutOrNull(900L) {
-                                preview.awaitPreviewFrames(
-                                    minimumTimestampNs = readyState.previewFirstFrameTimestampNs!!,
-                                    requiredFrameCount = 18,
+                            // The first target-lens frame was already confirmed above. Hold
+                            // the outgoing image until 16 additional, genuinely rendered
+                            // target-camera frames have completed the preview pipeline.
+                            // 900 ms was too short on slower/high-resolution preview paths
+                            // and the old timeout result was ignored, so the hand-off often
+                            // proceeded without completing its frame warm-up.
+                            val frameWarmupCompleted = withTimeoutOrNull(3_000L) {
+                                preview.awaitPreviewFrames(requiredFrameCount = 16)
+                                true
+                            } ?: false
+                            if (!frameWarmupCompleted) {
+                                PLog.w(
+                                    "LensSwitchTransition",
+                                    "Frame-based handoff timed out before 16 target-camera preview frames; " +
+                                        "continuing with the normal live handoff"
+                                )
+                            } else {
+                                PLog.d(
+                                    "LensSwitchTransition",
+                                    "Frame-based handoff completed after 16 target-camera preview frames"
                                 )
                             }
                         }
