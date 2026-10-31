@@ -198,6 +198,9 @@ class VideoRecorder(
         return renderer?.inputSurface
     }
 
+    val supportsDualCameraInput: Boolean
+        get() = isRecording && !stopRequested && dualCameraRelay?.isReady == true
+
     fun setActiveCameraSource(isUltraWide: Boolean) {
         dualCameraRelay?.setActiveSource(isUltraWide)
     }
