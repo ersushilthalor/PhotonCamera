@@ -58,6 +58,8 @@ import com.hinnka.mycamera.video.VideoCapabilitiesResolver
 import com.hinnka.mycamera.video.VideoFpsPreset
 import com.hinnka.mycamera.video.VideoEncoderColorRequest
 import com.hinnka.mycamera.video.VideoLogProfile
+import com.hinnka.mycamera.video.OppoNaturalVideoEngine
+import com.hinnka.mycamera.video.OppoHlg10AutoExposureEngine
 import com.hinnka.mycamera.video.VideoLogLutMode
 import com.hinnka.mycamera.video.VideoRecorder
 import com.hinnka.mycamera.video.VideoRecordingPath
@@ -373,6 +375,10 @@ class Camera2Controller(private val context: Context) {
     }
 
     @Volatile private var videoCameraHlg10InputActive: Boolean = false
+    private val oppoNaturalVideoEngine = OppoNaturalVideoEngine()
+    private val oppoHlg10AutoExposureEngine = OppoHlg10AutoExposureEngine()
+    private var lastOppoVideoProfileIspUpdateMs = 0L
+    private var lastAppliedVideoProfile: VideoLogProfile? = null
     private var videoRecordingStartElapsedMs: Long = 0L
     private var videoRecordingPausedMs: Long = 0L
     private var videoRecordingPauseStartElapsedMs: Long = 0L
@@ -1164,7 +1170,10 @@ class Camera2Controller(private val context: Context) {
 
             lastCaptureResult = result
             logVideoCaptureStats(result)
-            if (session === captureSession) updateEnginePreviewSource(result)
+            if (session === captureSession) {
+                updateEnginePreviewSource(result)
+                updateOppoVideoProfileForFrame(result)
+            }
 
             // 处理拍照状态机
             processStillFlashPrecapture(request, result)
@@ -4051,6 +4060,7 @@ class Camera2Controller(private val context: Context) {
         }
         applyVendorCaptureSettings(builder, isCapture)
         applyCustomVendorCaptureRequestKeys(builder, isCapture)
+        applyVideoProfileColorProcessing(builder, currentState)
         if (isCapture) {
             PLog.i(
                 TAG,
@@ -4062,6 +4072,160 @@ class Camera2Controller(private val context: Context) {
                     "requestDistortion=${builder.get(CaptureRequest.DISTORTION_CORRECTION_MODE)}"
             )
         }
+    }
+
+    /**
+     * Apply the same ISP processing path used by OppoCam's Natural and HLG10 profiles.
+     * This request is shared by the preview and encoder surfaces, so the live viewfinder
+     * and final recording receive the same camera-side tone and colour transform.
+     */
+    private fun applyVideoProfileColorProcessing(
+        builder: CaptureRequest.Builder,
+        state: CameraState
+    ) {
+        val profile = if (state.captureMode == CaptureMode.VIDEO) {
+            state.videoConfig.logProfile
+        } else {
+            VideoLogProfile.OFF
+        }
+        val characteristics = getActiveOpenCameraCharacteristics()
+        val colorModes = characteristics?.get(CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_MODES)
+            ?: intArrayOf()
+        val maxCurvePoints = (characteristics?.get(CameraCharacteristics.TONEMAP_MAX_CURVE_POINTS) ?: 64)
+            .coerceIn(2, 64)
+
+        when (profile) {
+            VideoLogProfile.NATURAL -> {
+                if (availableTonemapModes.contains(CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)) {
+                    builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
+                    builder.set(
+                        CaptureRequest.TONEMAP_CURVE,
+                        oppoNaturalVideoEngine.getTonemapCurve(maxCurvePoints)
+                    )
+                } else if (availableTonemapModes.contains(CaptureRequest.TONEMAP_MODE_GAMMA_VALUE)) {
+                    builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_GAMMA_VALUE)
+                    builder.set(CaptureRequest.TONEMAP_GAMMA, 2.2f)
+                } else if (availableTonemapModes.contains(CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)) {
+                    builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_HIGH_QUALITY)
+                }
+
+                // OppoCam Natural: neutral D65 gains and its Rec.709 colour transform.
+                if (colorModes.contains(CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)) {
+                    builder.set(
+                        CaptureRequest.COLOR_CORRECTION_MODE,
+                        CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX
+                    )
+                    builder.set(
+                        CaptureRequest.COLOR_CORRECTION_TRANSFORM,
+                        oppoNaturalVideoEngine.neutralColorTransform()
+                    )
+                    builder.set(
+                        CaptureRequest.COLOR_CORRECTION_GAINS,
+                        oppoNaturalVideoEngine.neutralWhiteGains()
+                    )
+                } else if (colorModes.contains(CaptureRequest.COLOR_CORRECTION_MODE_HIGH_QUALITY)) {
+                    builder.set(
+                        CaptureRequest.COLOR_CORRECTION_MODE,
+                        CaptureRequest.COLOR_CORRECTION_MODE_HIGH_QUALITY
+                    )
+                }
+            }
+
+            VideoLogProfile.HLG10 -> {
+                if (videoCameraHlg10InputActive) {
+                    // Camera HAL is already producing the HLG10 source for the encoder.
+                    // Apply OppoCam's adaptive ARIB curve in the ISP and do not encode it again in GL.
+                    if (availableTonemapModes.contains(CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)) {
+                        builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
+                        builder.set(
+                            CaptureRequest.TONEMAP_CURVE,
+                            oppoHlg10AutoExposureEngine.getTonemapCurve(maxCurvePoints)
+                        )
+                    } else if (availableTonemapModes.contains(CaptureRequest.TONEMAP_MODE_GAMMA_VALUE)) {
+                        builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_GAMMA_VALUE)
+                        builder.set(CaptureRequest.TONEMAP_GAMMA, 2.2f)
+                    }
+                } else {
+                    // SDR camera input is encoded to HLG by Photon's existing GL renderer.
+                    // Keep the camera source display-referred here to prevent a double HLG OETF.
+                    val sourceMode = when {
+                        availableTonemapModes.contains(CaptureRequest.TONEMAP_MODE_HIGH_QUALITY) ->
+                            CaptureRequest.TONEMAP_MODE_HIGH_QUALITY
+                        availableTonemapModes.contains(CaptureRequest.TONEMAP_MODE_FAST) ->
+                            CaptureRequest.TONEMAP_MODE_FAST
+                        else -> null
+                    }
+                    sourceMode?.let { builder.set(CaptureRequest.TONEMAP_MODE, it) }
+                }
+
+                // Match OppoCam's HLG path: preserve factory-calibrated AWB to avoid colour casts.
+                val correctionMode = when {
+                    colorModes.contains(CaptureRequest.COLOR_CORRECTION_MODE_HIGH_QUALITY) ->
+                        CaptureRequest.COLOR_CORRECTION_MODE_HIGH_QUALITY
+                    colorModes.contains(CaptureRequest.COLOR_CORRECTION_MODE_FAST) ->
+                        CaptureRequest.COLOR_CORRECTION_MODE_FAST
+                    else -> null
+                }
+                correctionMode?.let { builder.set(CaptureRequest.COLOR_CORRECTION_MODE, it) }
+            }
+
+            else -> {
+                // Apple Log remains on Photon's existing Log renderer. Also clear a previously
+                // installed Oppo ISP curve when the user changes away from Natural / HLG10.
+                if (lastAppliedVideoProfile == VideoLogProfile.NATURAL ||
+                    lastAppliedVideoProfile == VideoLogProfile.HLG10
+                ) {
+                    val tonemapMode = when {
+                        availableTonemapModes.contains(CaptureRequest.TONEMAP_MODE_HIGH_QUALITY) ->
+                            CaptureRequest.TONEMAP_MODE_HIGH_QUALITY
+                        availableTonemapModes.contains(CaptureRequest.TONEMAP_MODE_FAST) ->
+                            CaptureRequest.TONEMAP_MODE_FAST
+                        else -> null
+                    }
+                    tonemapMode?.let { builder.set(CaptureRequest.TONEMAP_MODE, it) }
+                    val correctionMode = when {
+                        colorModes.contains(CaptureRequest.COLOR_CORRECTION_MODE_HIGH_QUALITY) ->
+                            CaptureRequest.COLOR_CORRECTION_MODE_HIGH_QUALITY
+                        colorModes.contains(CaptureRequest.COLOR_CORRECTION_MODE_FAST) ->
+                            CaptureRequest.COLOR_CORRECTION_MODE_FAST
+                        else -> null
+                    }
+                    correctionMode?.let { builder.set(CaptureRequest.COLOR_CORRECTION_MODE, it) }
+                }
+            }
+        }
+        lastAppliedVideoProfile = profile
+    }
+
+    private fun updateOppoVideoProfileForFrame(result: TotalCaptureResult) {
+        val state = _state.value
+        if (state.captureMode != CaptureMode.VIDEO) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastOppoVideoProfileIspUpdateMs < 66L) return
+
+        val shouldUpdate = when (state.videoConfig.logProfile) {
+            VideoLogProfile.NATURAL -> {
+                oppoNaturalVideoEngine.onFrameCaptured(result)
+                oppoNaturalVideoEngine.hasSignificantChangeSinceLastIspUpdate()
+            }
+            VideoLogProfile.HLG10 -> {
+                oppoHlg10AutoExposureEngine.onFrameCaptured(result)
+                oppoHlg10AutoExposureEngine.hasSignificantChangeSinceLastIspUpdate()
+            }
+            else -> false
+        }
+        if (!shouldUpdate) return
+
+        lastOppoVideoProfileIspUpdateMs = now
+        when (state.videoConfig.logProfile) {
+            VideoLogProfile.NATURAL -> oppoNaturalVideoEngine.markIspUpdated()
+            VideoLogProfile.HLG10 -> oppoHlg10AutoExposureEngine.markIspUpdated()
+            else -> return
+        }
+
+        val builder = previewRequestBuilder ?: return
+        applyVideoProfileColorProcessing(builder, state)
+        updatePreview()
     }
 
     private fun forcedVendorSessionParameterValues(state: CameraState): Map<VendorCaptureKey, Int> {
@@ -7219,6 +7383,11 @@ class Camera2Controller(private val context: Context) {
 
     fun setVideoLogProfile(logProfile: VideoLogProfile) {
         val previousProfile = _state.value.videoConfig.logProfile
+        if (previousProfile != logProfile) {
+            oppoNaturalVideoEngine.reset()
+            oppoHlg10AutoExposureEngine.reset()
+            lastOppoVideoProfileIspUpdateMs = 0L
+        }
         val resolvedProfile = if (_state.value.captureMode == CaptureMode.VIDEO) {
             logProfile
         } else {

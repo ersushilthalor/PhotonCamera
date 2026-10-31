@@ -103,23 +103,27 @@ enum class VideoLogProfile(
     val colorSpace: ColorSpace
 ) {
     OFF("Off", TransferCurve.SRGB, ColorSpace.SRGB),
+    APPLE_LOG2("Apple Log", TransferCurve.APPLE_LOG, ColorSpace.AppleLog2),
+    NATURAL("Natural", TransferCurve.SRGB, ColorSpace.SRGB),
     HLG10("HLG10", TransferCurve.HLG, ColorSpace.BT2020),
-    APPLE_LOG2("Apple-Log2", TransferCurve.APPLE_LOG, ColorSpace.AppleLog2),
     FLOG2_BT2020("F-Log2", TransferCurve.FLOG2, ColorSpace.BT2020),
     V_LOG("V-Log", TransferCurve.VLOG, ColorSpace.VGamut),
     LOGC4_ARRI4("LogC4", TransferCurve.LOGC4, ColorSpace.ARRI4),
     LOG3G10_RED("Log3G10", TransferCurve.LOG3G10, ColorSpace.RED),
     LLOG_BT2020("L-Log", TransferCurve.LLOG, ColorSpace.BT2020);
 
+    // Natural is an already-processed BT.709 camera profile, not a Log transfer.
     val isEnabled: Boolean
-        get() = this != OFF
+        get() = this != OFF && this != NATURAL
 
     fun matchesLut(curve: TransferCurve?, gamut: ColorSpace?): Boolean =
         !isEnabled || (curve == logCurve && gamut == colorSpace)
 
     companion object {
         fun fromPersistedName(name: String?): VideoLogProfile =
-            entries.firstOrNull { it.name == name } ?: OFF
+            entries.firstOrNull { it.name == name && it in SELECTABLE_PROFILES } ?: NATURAL
+
+        val SELECTABLE_PROFILES: List<VideoLogProfile> = listOf(APPLE_LOG2, NATURAL, HLG10)
     }
 }
 
@@ -132,7 +136,7 @@ data class VideoConfig(
     val resolution: VideoResolutionPreset = VideoResolutionPreset.FHD_1080P,
     val fps: VideoFpsPreset = VideoFpsPreset.FPS_30,
     val aspectRatio: VideoAspectRatio = VideoAspectRatio.RATIO_16_9,
-    val logProfile: VideoLogProfile = VideoLogProfile.OFF,
+    val logProfile: VideoLogProfile = VideoLogProfile.NATURAL,
     val logLutMode: VideoLogLutMode = VideoLogLutMode.MONITOR_ONLY,
     val bitrate: VideoBitratePreset = VideoBitratePreset.P5,
     val codec: VideoCodec = VideoCodec.H264,
@@ -171,7 +175,7 @@ data class VideoCapabilities(
     val availableResolutions: List<VideoResolutionPreset> = emptyList(),
     val availableFps: List<VideoFpsPreset> = emptyList(),
     val availableAspectRatios: List<VideoAspectRatio> = VideoAspectRatio.entries.toList(),
-    val availableLogProfiles: List<VideoLogProfile> = listOf(VideoLogProfile.OFF),
+    val availableLogProfiles: List<VideoLogProfile> = VideoLogProfile.SELECTABLE_PROFILES,
     val availableBitrates: List<VideoBitratePreset> = VideoBitratePreset.entries.toList(),
     val availableCodecs: List<VideoCodec> = VideoCodec.entries.toList(),
     val cameraInputSizesByResolution: Map<VideoResolutionPreset, Size> = emptyMap(),

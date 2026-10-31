@@ -59,6 +59,7 @@ jobs:
           ./gradlew --no-daemon :app:testDefaultDebugUnitTest \
             --tests com.hinnka.mycamera.lut.RealtimeVideoRendererTransformTest \
             --tests com.hinnka.mycamera.stabilization.RealtimeStabilizationMathTest \
+            --tests com.hinnka.mycamera.video.VideoLogProfileTest \
             --stacktrace
 
       - name: Build default debug APK
