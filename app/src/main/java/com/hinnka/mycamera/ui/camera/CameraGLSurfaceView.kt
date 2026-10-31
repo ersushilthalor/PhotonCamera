@@ -181,6 +181,13 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         queueEvent { renderer.setLiveHandoffFrameCount(frameCount) }
     }
 
+    fun setActiveCameraInputUsesStandby(usesStandbyInput: Boolean) {
+        queueEvent {
+            renderer.setActiveCameraInputUsesStandby(usesStandbyInput)
+            requestRender()
+        }
+    }
+
     fun setPreviewSize(width: Int, height: Int) {
         queueEvent {
             renderer.setPreviewSize(width, height)
