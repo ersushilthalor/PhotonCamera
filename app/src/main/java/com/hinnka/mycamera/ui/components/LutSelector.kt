@@ -197,6 +197,7 @@ fun LutSelector(
     onSavePresetClick: () -> Unit = {},
     onPresetManagementClick: () -> Unit = {},
     onEditClick: (() -> Unit)? = null,
+    showEditButtonWhenNoLut: Boolean = false,
     onManageClick: ((String) -> Unit)? = null,
     categoryOrder: List<String> = emptyList(),
     headerContent: (@Composable () -> Unit)? = null,
@@ -333,7 +334,7 @@ fun LutSelector(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            if (onEditClick != null && activeLutId != null) {
+                            if (onEditClick != null && (activeLutId != null || showEditButtonWhenNoLut)) {
                                 LutEditButton(onClick = onEditClick)
                             }
 
