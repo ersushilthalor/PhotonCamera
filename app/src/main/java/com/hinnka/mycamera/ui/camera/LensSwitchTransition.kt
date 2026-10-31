@@ -71,19 +71,24 @@ internal class LensSwitchTransitionState(
                         currentLensType != targetLensType
                 livePreview = viewModel.glSurfaceView
                 val overlapEnabled = viewModel.lensSwitchOverlapAnimationEnabled.value
-                // A direct 0.5x -> 1x tap displays the already-acquired standby frame
-                // immediately. The renderer then holds that frame while Camera2 promotes
-                // the target device and waits only for its first real primary preview frame.
-                val isDirectOneXHalfXTap =
-                    (currentLensType == LensType.BACK_ULTRA_WIDE &&
+                // A direct ultra-wide/main stop tap can use the already-acquired standby frame
+                // immediately. The renderer holds it while Camera2 promotes the target device
+                // and waits for the first real primary preview frame.
+                // Ultra-wide's visible stop comes from its physical focal length (for example
+                // 0.54x or 0.6x), so never hard-code 0.5x for this handoff.
+                val targetStopZoom = targetCamera?.displayIntrinsicZoomRatio?.takeIf { it > 0f } ?: 1f
+                val isDirectUltraWideToMainTap =
+                    currentLensType == LensType.BACK_ULTRA_WIDE &&
                         targetLensType == LensType.BACK_MAIN &&
-                        abs(startingZoomByMain - 0.5f) < 0.025f &&
-                        abs(request.targetZoom - 1f) < 0.05f) ||
-                    (currentLensType == LensType.BACK_MAIN &&
+                        abs(request.targetZoom - targetStopZoom) < 0.05f
+                val isDirectMainToUltraWideTap =
+                    currentLensType == LensType.BACK_MAIN &&
                         targetLensType == LensType.BACK_ULTRA_WIDE &&
                         abs(startingZoomByMain - 1f) < 0.05f &&
-                        abs(request.targetZoom - 0.5f) < 0.025f)
-                val overlapDurationFrames = if (isDirectOneXHalfXTap) {
+                        abs(request.targetZoom - targetStopZoom) < 0.05f
+                val isDirectImmediateLensTap =
+                    isDirectUltraWideToMainTap || isDirectMainToUltraWideTap
+                val overlapDurationFrames = if (isDirectImmediateLensTap) {
                     1
                 } else {
                     (viewModel.lensSwitchOverlapDurationSec.value * 30f).roundToInt().coerceIn(2, 30)
@@ -95,7 +100,7 @@ internal class LensSwitchTransitionState(
                 val previousTimestamp = before.previewFirstFrameTimestampNs
                 val useLiveHandoff = if (canStartLiveHandoff) {
                     withTimeoutOrNull(900L) {
-                        if (isDirectOneXHalfXTap) {
+                        if (isDirectImmediateLensTap) {
                             livePreview?.beginImmediateLiveLensHandoffAndWait()
                         } else {
                             livePreview?.beginLiveLensHandoffAndWait()
@@ -178,7 +183,14 @@ internal class LensSwitchTransitionState(
                 // running. Start that request only after the current camera state is settled.
                 val next = pendingRequest
                 if (next != null && scope.coroutineContext[kotlinx.coroutines.Job]?.isActive == true) {
-                    switchLens(next.cameraId, next.targetZoom, next.onSwitch)
+                    pendingRequest = null
+                    if (viewModel.state.value.currentCameraId == next.cameraId) {
+                        // The camera switch already promoted this lens; only the zoom value changed.
+                        // Replaying the switch would close and cold-open the same camera again.
+                        viewModel.setZoomRatio(next.targetZoom)
+                    } else {
+                        switchLens(next.cameraId, next.targetZoom, next.onSwitch)
+                    }
                 }
             }
         }
