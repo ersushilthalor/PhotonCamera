@@ -131,6 +131,12 @@ class RealtimeVideoRenderer(
     private var indexBuffer: ShortBuffer? = null
     private var initialized = false
     private val cameraFramePending = AtomicBoolean(false)
+    private var lastSourceTextureSource = PreviewColorTextureSource.EXTERNAL_OES
+    private var lastSourceTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
+    private var lastSourceTextureId = 0
+    private var lastSourceStMatrix = FloatArray(16)
+    private var lastSourceCropRect = fullCropRect.copyOf()
+    private var lastRenderedPresentationTimeNs = 0L
     @Volatile
     private var stabilizationSession: RealtimeStabilizationCoordinator.Session? = null
     @Volatile
@@ -318,20 +324,42 @@ class RealtimeVideoRenderer(
         val presentationTimeNs = mapPresentationTimeNs(timestampNs)
         if (presentationTimeNs <= 0L) return null
 
-        val firstLayer = layers.first()
+        lastSourceTextureSource = sourceTextureSource
+        lastSourceTextureTarget = sourceTextureTarget
+        lastSourceTextureId = sourceTextureId
+        lastSourceStMatrix = sourceStMatrix.copyOf()
+        lastSourceCropRect = sourceCropRect.copyOf()
+        return renderCachedSourceFrame(presentationTimeNs, timestampNs)
+    }
+
+    /**
+     * Re-submit the last fully processed camera frame while Camera2 swaps sessions.
+     * This keeps the encoded track continuous until the promoted lens supplies its first frame.
+     */
+    fun renderHeldFrame(presentationTimeNs: Long): Long? {
+        if (lastSourceTextureId == 0 || presentationTimeNs <= lastRenderedPresentationTimeNs) return null
+        return renderCachedSourceFrame(presentationTimeNs, presentationTimeNs)
+    }
+
+    private fun renderCachedSourceFrame(
+        presentationTimeNs: Long,
+        shaderTimestampNs: Long,
+    ): Long? {
+        if (!initialized || !makeCurrent()) return null
+        val firstLayer = layers.firstOrNull() ?: return null
         val grainEnabled = finalFilmGrainEnabled
         val firstTargetFbo = if (layers.size > 1 || grainEnabled) intermediateFboId else 0
         drawLayer(
             layer = firstLayer,
             targetFboId = firstTargetFbo,
-            textureSource = sourceTextureSource,
-            textureTarget = sourceTextureTarget,
-            textureId = sourceTextureId,
-            sourceStMatrix = sourceStMatrix,
-            cropRect = sourceCropRect,
+            textureSource = lastSourceTextureSource,
+            textureTarget = lastSourceTextureTarget,
+            textureId = lastSourceTextureId,
+            sourceStMatrix = lastSourceStMatrix,
+            cropRect = lastSourceCropRect,
             mvpMatrix = firstPassMvpMatrix,
             enableVideoLog = videoLogProfile.isEnabled && !cameraInputAlreadyHlg10,
-            presentationTimeNs = timestampNs,
+            presentationTimeNs = shaderTimestampNs,
         )
 
         if (layers.size > 1) {
@@ -351,21 +379,21 @@ class RealtimeVideoRenderer(
                     cropRect = fullCropRect,
                     mvpMatrix = identityMatrix,
                     enableVideoLog = false,
-                    presentationTimeNs = timestampNs,
+                    presentationTimeNs = shaderTimestampNs,
                 )
             }
         }
 
         if (grainEnabled) {
-            val sourceTextureId = if (layers.size > 1) finalColorTextureId else intermediateTextureId
+            val finalSourceTextureId = if (layers.size > 1) finalColorTextureId else intermediateTextureId
             check(
                 filmGrainGl.drawToFramebuffer(
                     targetFramebufferId = 0,
-                    sourceTextureId = sourceTextureId,
+                    sourceTextureId = finalSourceTextureId,
                     width = encoderOutputSize.width,
                     height = encoderOutputSize.height,
                     amount = filmGrainAmount,
-                    frameSeed = FilmGrainShaders.frameSeed(timestampNs),
+                    frameSeed = FilmGrainShaders.frameSeed(shaderTimestampNs),
                     drawQuad = ::drawSimpleQuad,
                 )
             ) {
@@ -379,6 +407,7 @@ class RealtimeVideoRenderer(
                 "Realtime video eglSwapBuffers failed: 0x${Integer.toHexString(EGL14.eglGetError())}"
             )
         }
+        lastRenderedPresentationTimeNs = presentationTimeNs
         return presentationTimeNs
     }
 
