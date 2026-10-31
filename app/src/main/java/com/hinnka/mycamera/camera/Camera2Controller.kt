@@ -2001,8 +2001,14 @@ class Camera2Controller(private val context: Context) {
         val normalized = surface?.takeIf { it.isValid }
         if (standbyPreviewSurface === normalized) return
         standbyPreviewSurface = normalized
-        if (standbyCameraDevice != null) closeStandbyCamera("standby preview surface changed")
-        if (normalized != null) startStandbyCameraIfPossible()
+        if (standbyCameraDevice != null) {
+            closeStandbyCamera("standby preview surface changed")
+            if (normalized != null) {
+                handler?.postDelayed({ startStandbyCameraIfPossible() }, 200L)
+            }
+        } else if (normalized != null) {
+            startStandbyCameraIfPossible()
+        }
     }
 
     fun setKeepUltraWideReadyEnabled(enabled: Boolean) {
