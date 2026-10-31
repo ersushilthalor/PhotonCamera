@@ -1065,6 +1065,14 @@ fun CameraScreen(
                             showVideoResolutionPanel = false
                             activePanel = ActivePanel.NONE
                             showOppoLogLutWindow = !showOppoLogLutWindow
+                        } else if (isVideoMode) {
+                            // Show LUT choices first; the selector's Edit action opens adjustments.
+                            showOppoLogLutWindow = false
+                            activePanel = if (activePanel == ActivePanel.FILTERS) {
+                                ActivePanel.NONE
+                            } else {
+                                ActivePanel.FILTERS
+                            }
                         } else {
                             showOppoLogLutWindow = false
                             activePanel = if (activePanel == ActivePanel.EDIT) ActivePanel.NONE else ActivePanel.EDIT
@@ -1615,6 +1623,14 @@ fun CameraScreen(
                                     showVideoResolutionPanel = false
                                     activePanel = ActivePanel.NONE
                                     showOppoLogLutWindow = !showOppoLogLutWindow
+                                } else if (isVideoMode) {
+                                    // Show LUT choices first; the selector's Edit action opens adjustments.
+                                    showOppoLogLutWindow = false
+                                    activePanel = if (activePanel == ActivePanel.FILTERS) {
+                                        ActivePanel.NONE
+                                    } else {
+                                        ActivePanel.FILTERS
+                                    }
                                 } else {
                                     showOppoLogLutWindow = false
                                     activePanel = if (activePanel == ActivePanel.EDIT) ActivePanel.NONE else ActivePanel.EDIT
@@ -2051,6 +2067,7 @@ fun CameraScreen(
                     onEditClick = {
                         activePanel = ActivePanel.EDIT
                     },
+                    showEditButtonWhenNoLut = isVideoMode,
                     onManageClick = { lutId ->
                         activePanel = ActivePanel.NONE
                         onFilterManagementClick(lutId)
