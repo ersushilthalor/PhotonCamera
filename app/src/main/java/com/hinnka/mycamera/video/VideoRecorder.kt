@@ -212,6 +212,9 @@ class VideoRecorder(
         dualCameraRelay?.updateBufferSize(isUltraWide, width, height)
     }
 
+    val requestedRecordingCameraInputSize: Size
+        get() = requestedCameraInputSize
+
     fun startRecording(
         size: Size,
         cameraInputSize: Size = size,
@@ -403,6 +406,11 @@ class VideoRecorder(
         if (size.width <= 0 || size.height <= 0) return
         requestedCameraInputSize = size
         requestedSensorOrientationDegrees = sensorOrientationDegrees
+        dualCameraRelay?.updateBufferSize(
+            isUltraWide = requestedInitialUltraWide,
+            width = size.width,
+            height = size.height,
+        )
         // Serialize buffer-size and transform-geometry changes with the realtime render loop.
         // Updating SurfaceTexture/crop state from the camera handler can otherwise race the first
         // frame from the replacement lens and leave the encoder using stale crop geometry.
