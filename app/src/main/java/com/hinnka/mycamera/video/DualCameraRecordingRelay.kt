@@ -58,6 +58,7 @@ internal class DualCameraRecordingRelay(
     @Volatile private var activeUltraWide = initialUltraWide
     @Volatile private var pendingUltraWide: Boolean? = null
     @Volatile private var handoffFrame = 0
+    @Volatile private var lastHandoffInputTimestampNs = 0L
     @Volatile private var lastMainTimestampNs = 0L
     @Volatile private var lastUltraTimestampNs = 0L
     @Volatile private var mainFrames = 0L
@@ -129,12 +130,10 @@ internal class DualCameraRecordingRelay(
             if (current == isUltraWide) return@post
             pendingUltraWide = isUltraWide
             handoffFrame = 0
+            lastHandoffInputTimestampNs = if (isUltraWide) lastUltraTimestampNs else lastMainTimestampNs
             pendingSwitchDeadlineMs = SystemClock.elapsedRealtime() + HANDOFF_TIMEOUT_MS
-            // If the standby stream is already live, begin from its latest latched frame.
-            if ((if (isUltraWide) lastUltraTimestampNs else lastMainTimestampNs) > 0L) {
-                PLog.i(TAG, "Starting recording source handoff to ${if (isUltraWide) "ultra-wide" else "main"}")
-                renderCurrentFrame()
-            }
+            PLog.i(TAG, "Waiting for distinct incoming frames from ${if (isUltraWide) "ultra-wide" else "main"}")
+            scheduleNextTick()
         }
     }
 
@@ -272,7 +271,9 @@ internal class DualCameraRecordingRelay(
                     mainFrames += 1L
                 }
             }
-            renderCurrentFrame()
+            // Input streams are only latched here. The fixed-FPS output tick owns presentation,
+            // so two concurrent camera callbacks cannot accidentally drive a 2x/3x encoder rate.
+            scheduleNextTick()
         } catch (error: Throwable) {
             PLog.w(TAG, "Could not update ${if (isUltraWide) "ultra-wide" else "main"} relay texture: ${error.message}")
         }
@@ -285,8 +286,10 @@ internal class DualCameraRecordingRelay(
 
         val pending = pendingUltraWide
         if (pending != null) {
-            val targetReady = if (pending) lastUltraTimestampNs > 0L else lastMainTimestampNs > 0L
-            if (targetReady) {
+            val targetTimestamp = if (pending) lastUltraTimestampNs else lastMainTimestampNs
+            val targetReady = targetTimestamp > 0L
+            if (targetReady && targetTimestamp > lastHandoffInputTimestampNs) {
+                lastHandoffInputTimestampNs = targetTimestamp
                 handoffFrame += 1
                 if (handoffFrame >= MAX_HANDOFF_FRAMES) {
                     activeUltraWide = pending
