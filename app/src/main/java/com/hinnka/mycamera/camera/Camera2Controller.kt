@@ -9100,6 +9100,7 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    @SuppressLint("MissingPermission", "NewApi")
     private fun startStandbyCameraIfPossible() {
         val handler = cameraHandler ?: return
         if (Looper.myLooper() != handler.looper) {
