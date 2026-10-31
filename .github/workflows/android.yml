@@ -50,7 +50,8 @@ jobs:
           grep -Fq 'fun landscapeRearCameraCropRemainsUnchanged()' "$test_file"
           grep -Fq 'return resolveOutputQuadCropRect(' "$renderer_file"
           grep -Fq 'val shouldFlipEncodedFrame = isCurrentCameraFrontFacing()' "$controller_file"
-          grep -Fq 'if (oesFrameUpdated) useCurrentOesFrame()' "$preview_renderer_file"
+          grep -Fq 'val activeFrameUpdated = if (activeCameraUsesStandbyInput) standbyFrameUpdated else oesFrameUpdated' "$preview_renderer_file"
+          grep -Fq '} else if (cameraFrameUpdated) {' "$preview_renderer_file"
           grep -Fq 'fun enhancedStabilizationSupportsFrontAndRearCamerasOnly()' "$stabilization_test_file"
 
       - name: Run video transform regression tests
