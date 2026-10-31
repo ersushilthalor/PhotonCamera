@@ -9398,6 +9398,42 @@ class Camera2Controller(private val context: Context) {
                                             else CameraDevice.TEMPLATE_PREVIEW
                                         ).apply {
                                             standbyOutputSurfaces.forEach(::addTarget)
+
+                                            // Keep the warm standby stream at the same global 1x
+                                            // field of view as the main camera. This makes main ->
+                                            // ultra-wide promotion a source swap, not a visible
+                                            // framing jump; after promotion the UI animates from
+                                            // this crop out to the ultra-wide's native 0.5x stop.
+                                            val displayIntrinsicZoom = target.displayIntrinsicZoomRatio
+                                                .takeIf { it > 0f } ?: 1f
+                                            val matchingMainOneXZoom = (1f / displayIntrinsicZoom)
+                                                .coerceAtLeast(1f)
+                                            val standbyZoomRange = characteristics.readMetadataOrNull(
+                                                CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE
+                                            )
+                                            val maximumDigitalZoom = characteristics.get(
+                                                CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM
+                                            ) ?: 1f
+                                            val maximumStandbyZoom = standbyZoomRange?.upper
+                                                ?: maximumDigitalZoom
+                                            val standbyZoom = matchingMainOneXZoom.coerceIn(
+                                                standbyZoomRange?.lower ?: 1f,
+                                                maximumStandbyZoom.coerceAtLeast(1f),
+                                            )
+                                            applyZoomRequestSettings(
+                                                builder = this,
+                                                zoomRatio = standbyZoom,
+                                                activeRect = characteristics.get(
+                                                    CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE
+                                                ),
+                                                zoomRatioRange = standbyZoomRange,
+                                                resetCropAtUnitZoom = true,
+                                            )
+                                            PLog.d(
+                                                TAG,
+                                                "Standby preview framed for global 1x: lens=$targetType, " +
+                                                    "displayIntrinsic=$displayIntrinsicZoom, localZoom=$standbyZoom"
+                                            )
                                         }
                                         standbyCaptureSession = session
                                         session.setRepeatingRequest(
