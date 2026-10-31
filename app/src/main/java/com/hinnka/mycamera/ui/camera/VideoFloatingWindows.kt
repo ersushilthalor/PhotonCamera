@@ -26,7 +26,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -49,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.R
+import com.hinnka.mycamera.ui.icons.AppIcons
 import com.hinnka.mycamera.lut.LutInfo
 import com.hinnka.mycamera.video.VideoFloatingWindowAppearance
 import com.hinnka.mycamera.video.VideoFloatingWindowGlassStyle
@@ -90,7 +90,7 @@ internal fun VideoLogFloatingWindow(
                 contentDescription = stringResource(R.string.video_floating_window_options)
             ) {
                 Icon(
-                    imageVector = Icons.Outlined.Tune,
+                    imageVector = AppIcons.Tune,
                     contentDescription = null,
                     tint = if (optionsExpanded) VideoFloatingAccent else VideoFloatingText,
                     modifier = Modifier.size(17.dp)
@@ -183,7 +183,7 @@ internal fun VideoLutFloatingWindow(
                 contentDescription = stringResource(R.string.video_floating_window_options)
             ) {
                 Icon(
-                    imageVector = Icons.Outlined.Tune,
+                    imageVector = AppIcons.Tune,
                     contentDescription = null,
                     tint = if (optionsExpanded) VideoFloatingAccent else VideoFloatingText,
                     modifier = Modifier.size(17.dp)

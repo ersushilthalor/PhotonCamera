@@ -11,7 +11,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -244,7 +243,7 @@ private fun VideoTopBar(
                         label = stringResource(R.string.video_pro_lut_button),
                         selected = isVideoLutWindowOpen || currentVideoLutId != "none",
                         onClick = onVideoLutWindowClick,
-                        icon = Icons.Outlined.Palette
+                        icon = AppIcons.Palette
                     )
                     VideoModePill(
                         label = "HDR",
