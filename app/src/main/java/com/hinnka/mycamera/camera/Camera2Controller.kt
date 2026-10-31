@@ -5747,7 +5747,8 @@ class Camera2Controller(private val context: Context) {
             currentState.videoRecordingState.isRecording ||
             currentState.videoRecordingState.isProcessing ||
             currentState.isCapturing ||
-            currentState.isFocusLocked
+            currentState.isFocusLocked ||
+            !currentState.isAutoFocus
         ) return
 
         val currentCamera = currentState.getCurrentCameraInfo() ?: return
