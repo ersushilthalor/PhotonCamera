@@ -1412,7 +1412,13 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
                 currentCameraTextureId = standbyCameraTextureId
                 currentCameraTextureMatrix = standbyStMatrix
-                currentFrameTimestampNs = standbyFrameTimestampNs
+                // Keep the frame callback clock tied to the promoted primary camera. The
+                // displayed pixels remain the standby frame until the reverse crossfade starts.
+                currentFrameTimestampNs = if (primaryUpdated) {
+                    surfaceTexture?.timestamp ?: standbyFrameTimestampNs
+                } else {
+                    standbyFrameTimestampNs
+                }
                 return true
             }
             3 -> {
