@@ -1190,8 +1190,8 @@ class RealtimeStabilizationCoordinator(context: Context) {
         private val coordinator: RealtimeStabilizationCoordinator,
         private val sessionId: Long,
         private val strength: Float,
-        private val frameWidth: Int,
-        private val frameHeight: Int,
+        private var frameWidth: Int,
+        private var frameHeight: Int,
         private val lookaheadFrames: Int,
         private val onFrameAvailable: (() -> Unit)?,
     ) {
@@ -1204,6 +1204,18 @@ class RealtimeStabilizationCoordinator(context: Context) {
 
         val isOperational: Boolean
             get() = active && coordinator.isSessionActive(sessionId)
+
+        /**
+         * Keep the active session alive across a lens switch while updating the dimensions used
+         * if it is paused and resumed later. The coordinator reconfigures its active native
+         * pipeline from the first ImageReader frame that arrives from the new camera.
+         */
+        @Synchronized
+        fun updateInputSize(width: Int, height: Int) {
+            if (width <= 0 || height <= 0) return
+            frameWidth = width
+            frameHeight = height
+        }
 
         @Synchronized
         fun start(): Boolean {
