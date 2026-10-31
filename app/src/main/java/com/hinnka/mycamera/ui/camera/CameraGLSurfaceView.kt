@@ -162,6 +162,10 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         queueEvent { renderer.cancelLiveLensHandoff() }
     }
 
+    fun setLiveHandoffFrameCount(frameCount: Int) {
+        queueEvent { renderer.setLiveHandoffFrameCount(frameCount) }
+    }
+
     fun setPreviewSize(width: Int, height: Int) {
         queueEvent {
             renderer.setPreviewSize(width, height)
