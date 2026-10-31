@@ -117,7 +117,7 @@ class VideoRecorder(
     private var renderer: RealtimeVideoRenderer? = null
     private var dualCameraRelay: DualCameraRecordingRelay? = null
     private var requestedInitialUltraWide = false
-    private var requestedCurrentUltraWide = false
+    @Volatile private var requestedCurrentUltraWide = false
     private var requestedBitrateMbps: Int = 30
     private var requestedCodecMime: String = MediaFormat.MIMETYPE_VIDEO_AVC
     private var preferredEncoderCodecName: String? = null
@@ -203,6 +203,7 @@ class VideoRecorder(
         get() = isRecording && !stopRequested && dualCameraRelay?.isReady == true
 
     fun setActiveCameraSource(isUltraWide: Boolean) {
+        requestedCurrentUltraWide = isUltraWide
         dualCameraRelay?.setActiveSource(isUltraWide)
     }
 
