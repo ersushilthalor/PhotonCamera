@@ -9210,12 +9210,32 @@ class Camera2Controller(private val context: Context) {
 
                 override fun onDisconnected(camera: CameraDevice) {
                     PLog.w(TAG, "Standby camera disconnected: ${camera.id}")
-                    if (generation == standbyGeneration) closeStandbyCamera("standby disconnected") else camera.close()
+                    if (cameraDevice === camera) {
+                        handleCameraDeviceUnavailable(camera, "promoted camera disconnected: ${camera.id}")
+                    } else if (generation == standbyGeneration) {
+                        closeStandbyCamera("standby disconnected")
+                    } else {
+                        camera.close()
+                    }
                 }
 
                 override fun onError(camera: CameraDevice, error: Int) {
                     PLog.w(TAG, "Standby camera open error: camera=${camera.id}, error=$error")
-                    if (generation == standbyGeneration) closeStandbyCamera("standby open error") else camera.close()
+                    if (cameraDevice === camera) {
+                        handleCameraDeviceUnavailable(camera, "promoted camera error=$error")
+                    } else if (generation == standbyGeneration) {
+                        closeStandbyCamera("standby open error")
+                    } else {
+                        camera.close()
+                    }
+                }
+
+                override fun onClosed(camera: CameraDevice) {
+                    if (cameraDevice === camera) {
+                        handleCameraDeviceClosed(camera)
+                    } else if (standbyCameraDevice === camera) {
+                        standbyCameraDevice = null
+                    }
                 }
             }, handler)
         } catch (error: Exception) {
@@ -9227,6 +9247,10 @@ class Camera2Controller(private val context: Context) {
     private fun takeStandbyCamera(cameraOpenId: String): CameraDevice? {
         if (standbyCameraOpenId != cameraOpenId) return null
         val device = standbyCameraDevice ?: return null
+        if (standbyCaptureSession == null || standbyFrameCount < 2L) {
+            closeStandbyCamera("standby stream has not produced two frames")
+            return null
+        }
         standbyGeneration++
         try { standbyCaptureSession?.stopRepeating() } catch (_: Exception) {}
         try { standbyCaptureSession?.close() } catch (_: Exception) {}
