@@ -1179,12 +1179,7 @@ fun SettingsScreen(
                             onCheckedChange = viewModel::setEyeFocusEnabled
                         )
 
-                        SwitchSettingItem(
-                            title = "Keep ultra-wide camera ready",
-                            description = "Keep the supported alternate rear lens open in the background for faster switching.",
-                            checked = keepUltraWideReady,
-                            onCheckedChange = viewModel::setKeepUltraWideReady
-                        )
+
                     }
 
                     Spacer(modifier = Modifier.height(24.dp))
@@ -1196,6 +1191,13 @@ fun SettingsScreen(
                             viewModel = viewModel,
                             currentFocalLength = defaultFocalLength,
                             onFocalLengthSelected = { viewModel.setDefaultFocalLength(it) }
+                        )
+
+                        SwitchSettingItem(
+                            title = "Keep ultra-wide camera ready",
+                            description = "Keep the supported alternate rear lens open in the background for faster switching.",
+                            checked = keepUltraWideReady,
+                            onCheckedChange = viewModel::setKeepUltraWideReady
                         )
 
                         if (mainCameraIdOptions.size > 1) {
