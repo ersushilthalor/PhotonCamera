@@ -1889,6 +1889,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val keepUltraWideReady: StateFlow<Boolean> = userPreferencesRepository.userPreferences
         .map { it.keepUltraWideReady }
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val autoSwitchToUltraWide: StateFlow<Boolean> = userPreferencesRepository.userPreferences
+        .map { it.autoSwitchToUltraWide }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val lensSwitchOverlapAnimationEnabled: StateFlow<Boolean> =
+        userPreferencesRepository.userPreferences
+            .map { it.lensSwitchOverlapAnimationEnabled }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val lensSwitchOverlapDurationSec: StateFlow<Float> = userPreferencesRepository.userPreferences
+        .map { it.lensSwitchOverlapDurationSec }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0.3f)
     val videoWhiteBalanceLockEnabled: StateFlow<Boolean> = userPreferencesRepository.userPreferences
         .map { it.videoWhiteBalanceLockEnabled }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
@@ -2910,6 +2920,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     suspend fun prepareCamera(): Boolean {
         val startupPreferences = userPreferencesRepository.userPreferences.firstOrNull()
         cameraController.setKeepUltraWideReadyEnabled(startupPreferences?.keepUltraWideReady ?: true)
+        cameraController.setAutoSwitchToUltraWideEnabled(startupPreferences?.autoSwitchToUltraWide ?: false)
         if (!cameraController.prepareCameras()) return false
         if (!hasAppliedDefaultFocalLength) {
             val defaultFocalLength = startupPreferences?.defaultFocalLength ?: 0f
@@ -4170,6 +4181,25 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.setKeepUltraWideReadyEnabled(enabled)
         viewModelScope.launch {
             userPreferencesRepository.saveKeepUltraWideReady(enabled)
+        }
+    }
+
+    fun setAutoSwitchToUltraWide(enabled: Boolean) {
+        cameraController.setAutoSwitchToUltraWideEnabled(enabled)
+        viewModelScope.launch {
+            userPreferencesRepository.saveAutoSwitchToUltraWide(enabled)
+        }
+    }
+
+    fun setLensSwitchOverlapAnimationEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveLensSwitchOverlapAnimationEnabled(enabled)
+        }
+    }
+
+    fun setLensSwitchOverlapDurationSec(value: Float) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveLensSwitchOverlapDurationSec(value)
         }
     }
 
