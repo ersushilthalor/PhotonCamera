@@ -337,7 +337,11 @@ class RealtimeVideoRenderer(
      * This keeps the encoded track continuous until the promoted lens supplies its first frame.
      */
     fun renderHeldFrame(presentationTimeNs: Long): Long? {
-        if (lastSourceTextureId == 0 || presentationTimeNs <= lastRenderedPresentationTimeNs) return null
+        // Stabilization output textures are owned by the EIS frame pipeline and may be recycled
+        // as soon as its input session changes. Only hold the persistent Camera2 OES texture.
+        if (enhancedStabilizationEnabled || lastSourceTextureSource != PreviewColorTextureSource.EXTERNAL_OES ||
+            lastSourceTextureId == 0 || presentationTimeNs <= lastRenderedPresentationTimeNs
+        ) return null
         return renderCachedSourceFrame(presentationTimeNs, presentationTimeNs)
     }
 
