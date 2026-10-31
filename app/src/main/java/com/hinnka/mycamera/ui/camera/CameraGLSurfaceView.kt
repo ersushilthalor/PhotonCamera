@@ -143,6 +143,21 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         }
     }
 
+    suspend fun beginImmediateLiveLensHandoffAndWait() {
+        suspendCancellableCoroutine<Unit> { continuation ->
+            queueEvent {
+                if (continuation.isActive) {
+                    renderer.beginImmediateLiveLensHandoff {
+                        if (continuation.isActive) continuation.resume(Unit)
+                    }
+                }
+            }
+            continuation.invokeOnCancellation {
+                queueEvent { renderer.cancelLiveLensHandoff() }
+            }
+        }
+    }
+
     suspend fun finishLiveLensHandoffAndWait() {
         suspendCancellableCoroutine<Unit> { continuation ->
             queueEvent {

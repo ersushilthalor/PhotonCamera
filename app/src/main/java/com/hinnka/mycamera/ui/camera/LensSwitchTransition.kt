@@ -71,17 +71,16 @@ internal class LensSwitchTransitionState(
                         currentLensType != targetLensType
                 livePreview = viewModel.glSurfaceView
                 val overlapEnabled = viewModel.lensSwitchOverlapAnimationEnabled.value
-                // A direct 0.5x -> 1x tap is the fast ultra-wide-to-main path.
-                // Do not make it wait for the general configurable crossfade duration:
-                // the standby stream is already warm, so two fresh frames are enough
-                // before handing control to the main-camera session.
+                // A direct 0.5x -> 1x tap displays the already-acquired standby frame
+                // immediately. The renderer then holds that frame while Camera2 promotes
+                // the target device and waits only for its first real primary preview frame.
                 val isDirectUltraWideToOneXTap =
                     currentLensType == LensType.BACK_ULTRA_WIDE &&
                         targetLensType == LensType.BACK_MAIN &&
                         abs(startingZoomByMain - 0.5f) < 0.025f &&
                         abs(request.targetZoom - 1f) < 0.05f
                 val overlapDurationFrames = if (isDirectUltraWideToOneXTap) {
-                    2
+                    1
                 } else {
                     (viewModel.lensSwitchOverlapDurationSec.value * 30f).roundToInt().coerceIn(2, 30)
                 }
@@ -92,7 +91,11 @@ internal class LensSwitchTransitionState(
                 val previousTimestamp = before.previewFirstFrameTimestampNs
                 val useLiveHandoff = if (canStartLiveHandoff) {
                     withTimeoutOrNull(900L) {
-                        livePreview?.beginLiveLensHandoffAndWait()
+                        if (isDirectUltraWideToOneXTap) {
+                            livePreview?.beginImmediateLiveLensHandoffAndWait()
+                        } else {
+                            livePreview?.beginLiveLensHandoffAndWait()
+                        }
                         true
                     } ?: false
                 } else false

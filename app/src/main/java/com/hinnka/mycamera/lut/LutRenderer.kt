@@ -1408,13 +1408,14 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 return drawLiveLensBlend(liveHandoffProgress / liveHandoffFrameCount.toFloat())
             }
             2 -> {
-                if (!standbyUpdated && !primaryUpdated) return false
+                // Hold the last acquired standby frame throughout Camera2 session promotion.
+                // The standby capture session may be closed while the promoted CameraDevice
+                // configures its full-resolution primary outputs; keep the visible image stable.
+                if (standbyFrameTimestampNs <= 0L) return primaryUpdated
                 currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
                 currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
                 currentCameraTextureId = standbyCameraTextureId
                 currentCameraTextureMatrix = standbyStMatrix
-                // Keep the frame callback clock tied to the promoted primary camera. The
-                // displayed pixels remain the standby frame until the reverse crossfade starts.
                 currentFrameTimestampNs = if (primaryUpdated) {
                     surfaceTexture?.timestamp ?: standbyFrameTimestampNs
                 } else {
@@ -1566,7 +1567,32 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     }
 
     fun setLiveHandoffFrameCount(frameCount: Int) {
-        liveHandoffFrameCount = frameCount.coerceIn(2, 30)
+        liveHandoffFrameCount = frameCount.coerceIn(1, 30)
+    }
+
+    /**
+     * Immediately display the already-running standby OES stream.
+     *
+     * canUseLiveLensHandoff confirms that a standby frame has already reached this
+     * SurfaceTexture. Waiting for more crossfade frames before starting Camera2
+     * promotion only adds visible latency to the direct 0.5x -> 1x switch.
+     */
+    fun beginImmediateLiveLensHandoff(onStandbyReady: (() -> Unit)?) {
+        if (!canUseLiveLensHandoff || liveHandoffPhase != 0) {
+            onStandbyReady?.invoke()
+            return
+        }
+
+        liveHandoffPhase = 2
+        liveHandoffProgress = 0
+        liveHandoffLastStandbyTimestampNs = standbyFrameTimestampNs
+        currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
+        currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
+        currentCameraTextureId = standbyCameraTextureId
+        currentCameraTextureMatrix = standbyStMatrix
+        currentFrameTimestampNs = standbyFrameTimestampNs
+        onRequestRender?.invoke()
+        onStandbyReady?.invoke()
     }
 
     fun beginLiveLensHandoff(onStandbyReady: (() -> Unit)?) {
@@ -1584,6 +1610,16 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     fun finishLiveLensHandoff(onPrimaryReady: (() -> Unit)?) {
         if (liveHandoffPhase != 2) {
             onPrimaryReady?.invoke()
+            return
+        }
+        // The caller waits until a frame from the newly configured primary camera has
+        // completed rendering. For the instant path, do not add another crossfade frame.
+        if (liveHandoffFrameCount <= 1) {
+            liveHandoffPhase = 0
+            liveHandoffProgress = 0
+            useCurrentOesFrame()
+            onPrimaryReady?.invoke()
+            onRequestRender?.invoke()
             return
         }
         liveHandoffPhase = 3
