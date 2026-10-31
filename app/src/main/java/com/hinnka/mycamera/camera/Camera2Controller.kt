@@ -281,10 +281,11 @@ class Camera2Controller(private val context: Context) {
 
     private var previewSurface: Surface? = null
     private var previewSurfaceTexture: SurfaceTexture? = null
+    private var previewSurfaceOwnedByController = true
     private var imageReader: ImageReader? = null
 
-    // A low-resolution, drained stream keeps the alternate rear lens opened and producing
-    // frames while the active camera remains untouched. Promotion reuses this CameraDevice.
+    // Persistent dual-session handoff state. Each CameraDevice keeps its own preview surface,
+    // capture request builder and still-capture ImageReader so promotion is only a pointer swap.
     @Volatile private var keepUltraWideReadyEnabled = true
     @Volatile private var autoSwitchToUltraWideEnabled = false
     private var autoMacroActive = false
@@ -294,11 +295,15 @@ class Camera2Controller(private val context: Context) {
     private var standbyCameraDevice: CameraDevice? = null
     private var standbyCaptureSession: CameraCaptureSession? = null
     @Volatile private var standbyPreviewSurface: Surface? = null
+    private var standbyPreviewSurfaceOwnedByController = false
+    private var standbyPreviewRequestBuilder: CaptureRequest.Builder? = null
+    private var standbyCaptureImageReader: ImageReader? = null
     private var standbyImageReader: ImageReader? = null
     private var standbyCameraOpenId: String? = null
     private var standbyIsUltraWide = false
     private var standbyGeneration = 0L
     private var standbyFrameCount = 0L
+    @Volatile private var activePreviewUsesStandbySurface = false
     private var stabilizationImageReader: StabilizationImageReader? = null
 
     // 降噪等级 (0=Off, 1=Fast, 2=High Quality, 3=ZSL, 4=Minimal)
@@ -1119,6 +1124,21 @@ class Camera2Controller(private val context: Context) {
         else -> 1
     }
 
+    private fun configureCaptureImageReader(reader: ImageReader) {
+        reader.setOnImageAvailableListener({ source ->
+            try {
+                while (canAcquireImage("Too many open images")) {
+                    val image = trackImage(source.acquireNextImage()) ?: break
+                    processOrBufferImageForCaptureResult(image)
+                }
+            } catch (error: Exception) {
+                PLog.e(TAG, "Error in onImageAvailable", error)
+                photoCaptures.values.filter { it.reader === source }.toList()
+                    .forEach { failPhotoCapture(it, "image acquisition failed") }
+            }
+        }, cameraHandler)
+    }
+
     private fun canAcquireImage(logPrefix: String): Boolean {
         val openImages = openImagesCount.get()
         if (openImages >= imageReaderMaxImages) {
@@ -1126,6 +1146,30 @@ class Camera2Controller(private val context: Context) {
             return false
         }
         return true
+    }
+
+    private val standbyCaptureCallback = object : CameraCaptureSession.CaptureCallback() {
+        override fun onCaptureCompleted(
+            session: CameraCaptureSession,
+            request: CaptureRequest,
+            result: TotalCaptureResult,
+        ) {
+            if (session === captureSession) {
+                previewCallback.onCaptureCompleted(session, request, result)
+            } else if (session === standbyCaptureSession) {
+                standbyFrameCount += 1L
+            }
+        }
+
+        override fun onCaptureFailed(
+            session: CameraCaptureSession,
+            request: CaptureRequest,
+            failure: CaptureFailure,
+        ) {
+            if (session === captureSession) {
+                previewCallback.onCaptureFailed(session, request, failure)
+            }
+        }
     }
 
     private val previewCallback = object : CameraCaptureSession.CaptureCallback() {
@@ -2009,6 +2053,194 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    /**
+     * Promote an already-streaming standby camera without stopping either capture session.
+     *
+     * The old active device/session becomes the new standby pair. Both Surface outputs and
+     * per-camera still readers stay attached to their original sessions, so the visible lens
+     * change is a source/pointer swap rather than a Camera2 session rebuild.
+     */
+    fun tryPromoteWarmStandbyCamera(
+        cameraId: String,
+        onResult: (promoted: Boolean, activeUsesStandbySurface: Boolean) -> Unit,
+    ) {
+        val handler = cameraHandler
+        if (handler == null) {
+            onResult(false, activePreviewUsesStandbySurface)
+            return
+        }
+        val task = Runnable {
+            val promoted = promoteWarmStandbyCameraOnHandler(cameraId)
+            onResult(promoted, activePreviewUsesStandbySurface)
+        }
+        if (Looper.myLooper() == handler.looper) task.run() else handler.post(task)
+    }
+
+    private fun promoteWarmStandbyCameraOnHandler(cameraId: String): Boolean {
+        val currentState = _state.value
+        if (!keepUltraWideReadyEnabled ||
+            cameraDeviceLifecycle != CameraDeviceLifecycle.OPEN ||
+            !currentState.isPreviewActive ||
+            currentState.videoRecordingState.isRecording ||
+            currentState.videoRecordingState.isProcessing ||
+            currentState.isCapturing ||
+            currentState.captureMode == CaptureMode.VIDEO && shouldUseVideoEnhancedStabilization()
+        ) {
+            return false
+        }
+
+        val targetInfo = currentState.availableCameras.firstOrNull { it.cameraId == cameraId } ?: return false
+        val targetOpenId = runCatching { targetInfo.getOpenCameraId() }.getOrNull() ?: return false
+        if (targetOpenId == activeOpenCameraId ||
+            !isStandbyCameraReadyForPromotion(targetOpenId)
+        ) {
+            return false
+        }
+
+        val oldCamera = cameraDevice ?: return false
+        val oldSession = captureSession ?: return false
+        val oldBuilder = previewRequestBuilder ?: return false
+        val oldSurface = previewSurface ?: return false
+        val oldImageReader = imageReader
+        val targetCamera = standbyCameraDevice ?: return false
+        val targetSession = standbyCaptureSession ?: return false
+        val targetBuilder = standbyPreviewRequestBuilder ?: return false
+        val targetSurface = standbyPreviewSurface?.takeIf { it.isValid } ?: return false
+        val targetImageReader = standbyCaptureImageReader
+
+        // A still-photo session must already include its own capture reader. Sharing the
+        // outgoing reader between two concurrently running sessions is not Camera2-safe.
+        if (currentState.captureMode == CaptureMode.PHOTO &&
+            (oldImageReader == null || targetImageReader == null)
+        ) {
+            PLog.w(TAG, "Warm standby promotion skipped: target still-capture output is not ready")
+            return false
+        }
+
+        val oldOpenId = activeOpenCameraId
+        val oldLensType = currentState.currentLensType
+        val oldSurfaceOwned = previewSurfaceOwnedByController
+        val oldStandbySurfaceOwned = standbyPreviewSurfaceOwnedByController
+
+        // Swap the persistent session bundles. No stopRepeating(), close(), or
+        // createCaptureSession() is issued on the two streams in this path.
+        cameraDevice = targetCamera
+        captureSession = targetSession
+        previewRequestBuilder = targetBuilder
+        imageReader = targetImageReader
+        previewSurface = targetSurface
+        previewSurfaceOwnedByController = oldStandbySurfaceOwned
+
+        standbyCameraDevice = oldCamera
+        standbyCaptureSession = oldSession
+        standbyPreviewRequestBuilder = oldBuilder
+        standbyCaptureImageReader = oldImageReader
+        standbyPreviewSurface = oldSurface
+        standbyPreviewSurfaceOwnedByController = oldSurfaceOwned
+        standbyCameraOpenId = oldOpenId
+        standbyIsUltraWide = oldLensType == LensType.BACK_ULTRA_WIDE
+        standbyFrameCount = 0L
+
+        activeOpenCameraId = targetOpenId
+        activeSessionCameraId = cameraId
+        activeOutputPhysicalCameraId = targetInfo.outputPhysicalCameraId
+        activePreviewUsesStandbySurface = !activePreviewUsesStandbySurface
+        cameraDeviceLifecycle = CameraDeviceLifecycle.OPEN
+
+        val targetCharacteristics = runCatching {
+            getCameraCharacteristicsCached(targetOpenId)
+        }.getOrNull()
+        if (targetCharacteristics != null) {
+            cacheActiveCameraCharacteristics(targetOpenId, targetCharacteristics)
+            availableCaptureRequestKeyNames = loadAvailableCaptureRequestKeyNames(targetCharacteristics)
+            cachedSensorOrientation = targetCharacteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+            cachedLensFacing = targetCharacteristics.get(CameraCharacteristics.LENS_FACING)
+                ?: CameraCharacteristics.LENS_FACING_BACK
+            cachedHardwareLevel = targetCharacteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)
+                ?: CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED
+            val capabilities = targetCharacteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+                ?: intArrayOf()
+            isManualSensorSupported =
+                capabilities.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR) &&
+                    targetCharacteristics.readMetadataOrNull(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE) != null &&
+                    targetCharacteristics.readMetadataOrNull(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) != null
+            isManualPostProcessingSupported =
+                capabilities.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING)
+            isFlashSupported = targetCharacteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
+            maxAfRegions = targetCharacteristics.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AF) ?: 0
+            maxAeRegions = targetCharacteristics.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AE) ?: 0
+            availableAfModes = targetCharacteristics.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES)
+                ?: intArrayOf()
+            availableEdgeModes = targetCharacteristics.get(CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES)
+                ?: intArrayOf()
+            availableNoiseReductionModes =
+                targetCharacteristics.get(CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES)
+                    ?: intArrayOf()
+            availableTonemapModes = targetCharacteristics.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES)
+                ?: intArrayOf()
+            isRawSupported = resolveRawCaptureOutput(targetCharacteristics, null) != null
+            isP010Supported = isOutputFormatAdvertised(targetCharacteristics, ImageFormat.YCBCR_P010)
+            refreshVideoCapabilities(targetCharacteristics)
+        }
+
+        clearPointFocusState()
+        clearCaptureFocusState("warm standby camera promoted")
+        previewSessionGeneration++
+        previewUpdateScheduled.set(false)
+        _state.update {
+            it.copy(
+                currentCameraId = cameraId,
+                currentLensType = targetInfo.lensType,
+                zoomRatio = 1f,
+                isPreviewActive = true,
+                previewFirstFrameTimestampNs = null,
+                currentCaptureSize = targetImageReader?.let { reader -> Size(reader.width, reader.height) }
+                    ?: it.currentCaptureSize,
+                isRawSupported = isRawSupported,
+                isP010Supported = isP010Supported,
+            )
+        }
+        refreshActiveFocusLimit()
+
+        try {
+            // Retarget callbacks only; both repeating streams and their configured outputs remain alive.
+            targetSession.setRepeatingRequest(targetBuilder.build(), previewCallback, cameraHandler)
+            oldSession.setRepeatingRequest(oldBuilder.build(), standbyCaptureCallback, cameraHandler)
+            PLog.i(
+                TAG,
+                "0ms warm-session promotion: target=$cameraId open=$targetOpenId, " +
+                    "outgoing=$oldOpenId, activeSurfaceUsesStandby=$activePreviewUsesStandbySurface, " +
+                    "captureReader=${targetImageReader?.imageFormat}"
+            )
+            return true
+        } catch (error: Exception) {
+            PLog.e(TAG, "Warm-session pointer swap could not resume repeating requests; falling back", error)
+            cameraDevice = oldCamera
+            captureSession = oldSession
+            previewRequestBuilder = oldBuilder
+            imageReader = oldImageReader
+            previewSurface = oldSurface
+            previewSurfaceOwnedByController = oldSurfaceOwned
+            standbyCameraDevice = targetCamera
+            standbyCaptureSession = targetSession
+            standbyPreviewRequestBuilder = targetBuilder
+            standbyCaptureImageReader = targetImageReader
+            standbyPreviewSurface = targetSurface
+            standbyPreviewSurfaceOwnedByController = oldStandbySurfaceOwned
+            standbyCameraOpenId = targetOpenId
+            standbyIsUltraWide = targetInfo.lensType == LensType.BACK_ULTRA_WIDE
+            activeOpenCameraId = oldOpenId
+            activeSessionCameraId = currentState.currentCameraId
+            activeOutputPhysicalCameraId = null
+            activePreviewUsesStandbySurface = !activePreviewUsesStandbySurface
+            cameraDeviceLifecycle = CameraDeviceLifecycle.OPEN
+            _state.value = currentState
+            runCatching { oldSession.setRepeatingRequest(oldBuilder.build(), previewCallback, cameraHandler) }
+            runCatching { targetSession.setRepeatingRequest(targetBuilder.build(), standbyCaptureCallback, cameraHandler) }
+            return false
+        }
+    }
+
     fun setStandbyPreviewSurface(surface: Surface?) {
         val handler = cameraHandler
         if (handler != null && Looper.myLooper() != handler.looper) {
@@ -2017,16 +2249,22 @@ class Camera2Controller(private val context: Context) {
         }
         val normalized = surface?.takeIf { it.isValid }
         if (standbyPreviewSurface === normalized) return
-        standbyPreviewSurface = normalized
+        val previousSurface = standbyPreviewSurface
         if (standbyCameraDevice != null) {
             closeStandbyCamera("standby preview surface changed")
-            if (normalized != null) {
-                handler?.postDelayed({ startStandbyCameraIfPossible() }, 200L)
-            }
-        } else if (normalized != null) {
-            startStandbyCameraIfPossible()
+        }
+        if (standbyPreviewSurfaceOwnedByController && previousSurface !== normalized) {
+            runCatching { previousSurface?.release() }
+        }
+        standbyPreviewSurface = normalized
+        standbyPreviewSurfaceOwnedByController = false
+        if (normalized != null) {
+            if (handler != null) handler.postDelayed({ startStandbyCameraIfPossible() }, 16L)
+            else startStandbyCameraIfPossible()
         }
     }
+
+    fun isActivePreviewUsingStandbySurface(): Boolean = activePreviewUsesStandbySurface
 
     fun setAutoSwitchToUltraWideEnabled(enabled: Boolean) {
         autoSwitchToUltraWideEnabled = enabled
@@ -2252,12 +2490,16 @@ class Camera2Controller(private val context: Context) {
 
     private fun safeReleasePreviewSurface(reason: String) {
         val surface = previewSurface
+        val releaseSurface = previewSurfaceOwnedByController
         previewSurface = null
         previewSurfaceTexture = null
-        try {
-            surface?.release()
-        } catch (e: Exception) {
-            PLog.w(TAG, "Ignoring error while releasing preview surface ($reason): ${e.message}")
+        previewSurfaceOwnedByController = false
+        if (releaseSurface) {
+            try {
+                surface?.release()
+            } catch (e: Exception) {
+                PLog.w(TAG, "Ignoring error while releasing preview surface ($reason): ${e.message}")
+            }
         }
     }
 
@@ -2899,6 +3141,8 @@ class Camera2Controller(private val context: Context) {
             // 配置 SurfaceTexture
             previewSurfaceTexture = surfaceTexture
             previewSurface = Surface(surfaceTexture)
+            previewSurfaceOwnedByController = true
+            activePreviewUsesStandbySurface = false
 
             if (captureMode == CaptureMode.PHOTO) {
                 val aspectRatio = state.value.aspectRatio
@@ -2979,20 +3223,7 @@ class Camera2Controller(private val context: Context) {
                     captureSize.height,
                     captureFormat,
                     readerMaxImages
-                ).apply {
-                    setOnImageAvailableListener({ reader ->
-                        try {
-                            while (canAcquireImage("Too many open images")) {
-                                val image = trackImage(reader.acquireNextImage()) ?: break
-                                processOrBufferImageForCaptureResult(image)
-                            }
-                        } catch (e: Exception) {
-                            PLog.e(TAG, "Error in onImageAvailable", e)
-                            photoCaptures.values.filter { it.reader === reader }.toList()
-                                .forEach { failPhotoCapture(it, "image acquisition failed") }
-                        }
-                    }, cameraHandler)
-                }
+                ).also(::configureCaptureImageReader)
 
             } else {
                 safeCloseImageReader(imageReader)
@@ -9411,8 +9642,19 @@ class Camera2Controller(private val context: Context) {
                     size.width == requestedPreviewSize.width && size.height == requestedPreviewSize.height
                 }
             }
+            val standbyStillReader = if (
+                standbyPreviewOutput != null &&
+                _state.value.captureMode == CaptureMode.PHOTO &&
+                !shouldUseAlgorithmicStabilization()
+            ) {
+                createStandbyCaptureImageReader(targetOpenId, characteristics)
+            } else {
+                null
+            }
+            standbyCaptureImageReader = standbyStillReader
             val standbyOutputSurfaces = buildList<Surface> {
                 standbyPreviewOutput?.let(::add)
+                standbyStillReader?.surface?.takeIf { it.isValid }?.let(::add)
                 recordingRelaySurface?.let(::add)
                 if (isEmpty()) add(reader.surface)
             }
@@ -9479,17 +9721,10 @@ class Camera2Controller(private val context: Context) {
                                             )
                                         }
                                         standbyCaptureSession = session
+                                        standbyPreviewRequestBuilder = request
                                         session.setRepeatingRequest(
                                             request.build(),
-                                            object : CameraCaptureSession.CaptureCallback() {
-                                                override fun onCaptureCompleted(
-                                                    session: CameraCaptureSession,
-                                                    request: CaptureRequest,
-                                                    result: TotalCaptureResult,
-                                                ) {
-                                                    if (generation == standbyGeneration) standbyFrameCount += 1L
-                                                }
-                                            },
+                                            standbyCaptureCallback,
                                             handler,
                                         )
                                         PLog.i(
@@ -9638,10 +9873,63 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    private fun createStandbyCaptureImageReader(
+        cameraOpenId: String,
+        characteristics: CameraCharacteristics,
+    ): ImageReader? {
+        val activeReader = imageReader ?: return null
+        val format = activeReader.imageFormat
+        val size = when (format) {
+            ImageFormat.RAW_SENSOR, ImageFormat.RAW10 -> {
+                resolveRawCaptureOutput(characteristics, null)
+                    ?.takeIf { it.format == format }?.size
+            }
+            else -> {
+                if (!isOutputFormatAdvertised(characteristics, format)) return null
+                CameraUtils.getBestCaptureSize(
+                    characteristics,
+                    _state.value.aspectRatio,
+                    format,
+                )
+            }
+        } ?: run {
+            PLog.w(
+                TAG,
+                "Standby capture output unsupported: camera=$cameraOpenId, format=${imageFormatToString(format)}"
+            )
+            return null
+        }
+
+        return try {
+            ImageReader.newInstance(
+                size.width,
+                size.height,
+                format,
+                resolveImageReaderMaxImages(),
+            ).also(::configureCaptureImageReader).also {
+                PLog.i(
+                    TAG,
+                    "Standby still reader prepared: camera=$cameraOpenId, " +
+                        "size=${size.width}x${size.height}, format=${imageFormatToString(format)}"
+                )
+            }
+        } catch (error: Exception) {
+            PLog.w(TAG, "Unable to prepare standby still reader for $cameraOpenId", error)
+            null
+        }
+    }
+
     private fun isStandbyCameraReadyForPromotion(cameraOpenId: String): Boolean {
         if (standbyCameraOpenId != cameraOpenId ||
             standbyCameraDevice == null ||
-            standbyCaptureSession == null
+            standbyCaptureSession == null ||
+            standbyPreviewRequestBuilder == null ||
+            standbyPreviewSurface?.isValid != true
+        ) {
+            return false
+        }
+        if (_state.value.captureMode == CaptureMode.PHOTO &&
+            (_state.value.photoPreviewStabilizationEnabled || standbyCaptureImageReader == null)
         ) {
             return false
         }
@@ -9706,6 +9994,10 @@ class Camera2Controller(private val context: Context) {
         try { standbyCaptureSession?.stopRepeating() } catch (_: Exception) {}
         try { standbyCaptureSession?.close() } catch (_: Exception) {}
         standbyCaptureSession = null
+        standbyPreviewRequestBuilder = null
+        standbyCaptureImageReader?.setOnImageAvailableListener(null, null)
+        try { standbyCaptureImageReader?.close() } catch (_: Exception) {}
+        standbyCaptureImageReader = null
         standbyImageReader?.setOnImageAvailableListener(null, null)
         try { standbyImageReader?.close() } catch (_: Exception) {}
         standbyImageReader = null
