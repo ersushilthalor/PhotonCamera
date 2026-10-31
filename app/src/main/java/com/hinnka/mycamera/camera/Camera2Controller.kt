@@ -287,6 +287,7 @@ class Camera2Controller(private val context: Context) {
     private var standbyCaptureSession: CameraCaptureSession? = null
     private var standbyImageReader: ImageReader? = null
     private var standbyCameraOpenId: String? = null
+    private var standbyIsUltraWide = false
     private var standbyGeneration = 0L
     private var standbyFrameCount = 0L
     private var stabilizationImageReader: StabilizationImageReader? = null
@@ -2641,6 +2642,7 @@ class Camera2Controller(private val context: Context) {
                         sensorOrientationDegrees = cachedSensorOrientation,
                         frontFacing = isCurrentCameraFrontFacing(),
                         restartStabilization = stabilizationCameraChanged,
+                        ultraWide = _state.value.currentLensType == LensType.BACK_ULTRA_WIDE,
                     )
                 }
                 if (_state.value.captureMode == CaptureMode.PHOTO &&
@@ -3199,7 +3201,9 @@ class Camera2Controller(private val context: Context) {
             _state.value.videoRecordingState.shouldAttachCameraInput() &&
             !useEnhancedStabilization
         ) {
-            videoRecorder.cameraInputSurface
+            videoRecorder.cameraInputSurfaceForLens(
+                isUltraWide = _state.value.currentLensType == LensType.BACK_ULTRA_WIDE
+            )
         } else {
             null
         }
@@ -3913,7 +3917,9 @@ class Camera2Controller(private val context: Context) {
             }
             if (_state.value.captureMode == CaptureMode.VIDEO &&
                 _state.value.videoRecordingState.shouldAttachCameraInput() &&
-                videoRecorder.cameraInputSurface != null
+                videoRecorder.cameraInputSurfaceForLens(
+                    isUltraWide = _state.value.currentLensType == LensType.BACK_ULTRA_WIDE
+                ) != null
             ) {
                 if (videoRecorder.onCameraInputStarted()) {
                     startVideoRecordingTicker()
@@ -5663,6 +5669,9 @@ class Camera2Controller(private val context: Context) {
                 currentCameraId = cam.cameraId,
                 currentLensType = cam.lensType,
                 zoomRatio = 1f
+            )
+            videoRecorder.setActiveCameraSource(
+                isUltraWide = cam.lensType == LensType.BACK_ULTRA_WIDE
             )
         } ?: PLog.w(TAG, "Camera with lens type $lensType not found")
     }
@@ -7530,6 +7539,7 @@ class Camera2Controller(private val context: Context) {
             ),
             cameraInputIsHlg10 = cameraInputIsHlg10,
             colorLayers = colorLayers,
+            initialUltraWide = _state.value.currentLensType == LensType.BACK_ULTRA_WIDE,
             cameraTimestampSource = getActiveOpenCameraCharacteristics()
                 ?.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE)
                 ?: CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_UNKNOWN,
@@ -7554,6 +7564,7 @@ class Camera2Controller(private val context: Context) {
                 _state.value = _state.value.copy(videoRecordingState = VideoRecordingState())
                 if (cameraDevice != null && previewSurface != null) {
                     createPreviewSession(openGeneration = cameraOpenGeneration)
+                    startStandbyCameraIfPossible()
                 }
                 onVideoSaved?.invoke(uri)
             }
@@ -7567,7 +7578,11 @@ class Camera2Controller(private val context: Context) {
             videoRecordingState = VideoRecordingState(isRecording = true, elapsedMs = 0L)
         )
         videoRecordingPausedMs = 0L
+        videoRecorder.setActiveCameraSource(
+            isUltraWide = _state.value.currentLensType == LensType.BACK_ULTRA_WIDE
+        )
         createPreviewSession(openGeneration = cameraOpenGeneration)
+        reconfigureStandbySessionForRecording()
     }
 
     private fun isCurrentCameraFrontFacing(): Boolean {
@@ -7684,6 +7699,9 @@ class Camera2Controller(private val context: Context) {
             }
         }
         videoCameraHlg10InputActive = false
+        // The standby device's relay output belongs to the recording renderer. Release the
+        // standby session before that relay is torn down; it will be warmed again after finalize.
+        closeStandbyCamera("video recording stopped")
         videoRecorder.stopRecording()
         if (pendingVendorSessionParameterRestart && cameraDevice != null && previewSurface != null) {
             PLog.d(TAG, "Restarting preview session after recording for pending vendor session parameter change")
@@ -7695,7 +7713,9 @@ class Camera2Controller(private val context: Context) {
         val device = cameraDevice ?: return false
         val session = captureSession ?: return false
         val previewTarget = previewSurface ?: return false
-        val encoderTarget = videoRecorder.cameraInputSurface
+        val encoderTarget = videoRecorder.cameraInputSurfaceForLens(
+            isUltraWide = _state.value.currentLensType == LensType.BACK_ULTRA_WIDE
+        )
         if (includeVideoSurface && encoderTarget == null) return false
 
         return try {
