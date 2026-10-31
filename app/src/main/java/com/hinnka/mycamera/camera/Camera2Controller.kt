@@ -5720,6 +5720,9 @@ class Camera2Controller(private val context: Context) {
      * 切换到指定的相机 ID
      */
     fun switchToCameraId(cameraId: String) {
+        autoMacroActive = false
+        closeSubjectUnfocusedFrames = 0
+        subjectFarFrames = 0
         val cameras = _state.value.availableCameras
         val targetCamera = cameras.find { it.cameraId == cameraId }
 
