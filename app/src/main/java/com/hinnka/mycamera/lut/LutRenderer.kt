@@ -233,6 +233,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     @Volatile private var standbyFrameTimestampNs = 0L
     @Volatile private var liveHandoffPhase = 0 // 0=idle, 1=blend to standby, 2=hold standby, 3=blend back
     private var liveHandoffProgress = 0
+    @Volatile private var liveHandoffFrameCount = 9
     private var liveHandoffLastStandbyTimestampNs = 0L
     private var liveHandoffLastPrimaryTimestampNs = 0L
     private var liveBlendProgramId = 0
@@ -1396,15 +1397,15 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             1 -> {
                 if (standbyUpdated && standbyFrameTimestampNs > liveHandoffLastStandbyTimestampNs) {
                     liveHandoffLastStandbyTimestampNs = standbyFrameTimestampNs
-                    liveHandoffProgress = (liveHandoffProgress + 1).coerceAtMost(4)
-                    if (liveHandoffProgress == 4) {
+                    liveHandoffProgress = (liveHandoffProgress + 1).coerceAtMost(liveHandoffFrameCount)
+                    if (liveHandoffProgress == liveHandoffFrameCount) {
                         liveHandoffPhase = 2
                         onLiveStandbyHandoffReady?.invoke()
                         onLiveStandbyHandoffReady = null
                     }
                 }
                 if (standbyFrameTimestampNs <= 0L) return primaryUpdated
-                return drawLiveLensBlend(liveHandoffProgress / 4f)
+                return drawLiveLensBlend(liveHandoffProgress / liveHandoffFrameCount.toFloat())
             }
             2 -> {
                 if (!standbyUpdated && !primaryUpdated) return false
@@ -1426,7 +1427,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                     liveHandoffLastPrimaryTimestampNs = currentFrameTimestampNs
                     liveHandoffProgress = (liveHandoffProgress + 1).coerceAtMost(4)
                 }
-                if (liveHandoffProgress >= 4) {
+                if (liveHandoffProgress >= liveHandoffFrameCount) {
                     liveHandoffPhase = 0
                     onLivePrimaryHandoffReady?.invoke()
                     onLivePrimaryHandoffReady = null
@@ -1562,6 +1563,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         liveBlendFboId = framebuffer[0]
         liveBlendTextureId = texture[0]
         return true
+    }
+
+    fun setLiveHandoffFrameCount(frameCount: Int) {
+        liveHandoffFrameCount = frameCount.coerceIn(2, 30)
     }
 
     fun beginLiveLensHandoff(onStandbyReady: (() -> Unit)?) {
