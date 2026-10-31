@@ -34,6 +34,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -136,6 +137,7 @@ class VideoRecorder(
     private var requestedSensorOrientationDegrees = 0
     private var cameraTimestampToBoottimeOffsetNs = UNSET_TIMESTAMP
     private var timelineOriginUs = UNSET_TIMESTAMP
+    @Volatile private var lastRealtimePresentationTimeNs = UNSET_TIMESTAMP
     private var pauseIntervals = mutableListOf<PauseInterval>()
     private var activePauseStartTimeUs = UNSET_TIMESTAMP
 
@@ -165,6 +167,8 @@ class VideoRecorder(
     private var lastMuxedAudioPresentationTimeUs = Long.MIN_VALUE
     private var pendingRealtimeFrameCount = 0
     private var renderLoopRunning = false
+    @Volatile private var cameraHandoffActive = false
+    private var cameraHandoffJob: Job? = null
     private var statsWindowStartMs: Long = 0L
     private var statsIncomingFrames: Int = 0
     private var statsAcceptedFrames: Int = 0
@@ -247,6 +251,10 @@ class VideoRecorder(
         resetMuxerState()
         isPaused = false
         statsWindowStartMs = 0L
+        lastRealtimePresentationTimeNs = UNSET_TIMESTAMP
+        cameraHandoffActive = false
+        cameraHandoffJob?.cancel()
+        cameraHandoffJob = null
         statsIncomingFrames = 0
         statsAcceptedFrames = 0
         statsReplacedPendingFrames = 0
@@ -383,6 +391,51 @@ class VideoRecorder(
         )
     }
 
+    /**
+     * Re-submit the last encoded preview frame at the recording cadence while Camera2 swaps
+     * the active lens session. The hold ends immediately when the new camera delivers a frame.
+     */
+    fun beginCameraHandoff() {
+        if (!isRecording || stopRequested || isPaused) return
+        cameraHandoffActive = true
+        cameraHandoffJob?.cancel()
+        cameraHandoffJob = scope.launch(renderDispatcher) {
+            val frameIntervalNs = (1_000_000_000L / requestedFps.coerceAtLeast(1)).coerceAtLeast(1L)
+            val frameIntervalMs = (1_000L / requestedFps.coerceAtLeast(1)).coerceAtLeast(1L)
+            val deadlineMs = SystemClock.elapsedRealtime() + 900L
+            while (cameraHandoffActive && isRecording && !stopRequested && !isPaused &&
+                SystemClock.elapsedRealtime() < deadlineMs
+            ) {
+                val previous = lastRealtimePresentationTimeNs
+                val minimumNext = if (previous == UNSET_TIMESTAMP) {
+                    SystemClock.elapsedRealtimeNanos()
+                } else {
+                    previous + frameIntervalNs
+                }
+                val presentationTimeNs = maxOf(SystemClock.elapsedRealtimeNanos(), minimumNext)
+                try {
+                    val rendered = renderer?.renderHeldFrame(presentationTimeNs)
+                    if (rendered != null) {
+                        lastRealtimePresentationTimeNs = rendered
+                        statsRenderedFrames += 1
+                        establishTimelineOrigin(rendered / 1_000L)
+                    }
+                } catch (error: Exception) {
+                    PLog.w(TAG, "Unable to hold last frame during lens handoff: ${error.message}")
+                    break
+                }
+                delay(frameIntervalMs)
+            }
+            cameraHandoffActive = false
+        }
+    }
+
+    fun endCameraHandoff() {
+        cameraHandoffActive = false
+        cameraHandoffJob?.cancel()
+        cameraHandoffJob = null
+    }
+
     fun onCameraInputStarted(): Boolean {
         if (!isRecording || stopRequested || cameraInputStarted) return false
         cameraInputStarted = true
@@ -396,6 +449,7 @@ class VideoRecorder(
 
     fun stopRecording() {
         if (!isRecording || stopRequested) return
+        endCameraHandoff()
         stopRequested = true
         val completion = finishCallback
         scope.launch {
@@ -425,6 +479,7 @@ class VideoRecorder(
 
     fun forceStop() {
         if (!isRecording || stopRequested) return
+        endCameraHandoff()
         stopRequested = true
         val completion = finishCallback
         scope.launch {
@@ -436,6 +491,7 @@ class VideoRecorder(
 
     fun pauseRecording() {
         if (!isRecording || isPaused || stopRequested) return
+        endCameraHandoff()
         val nowUs = SystemClock.elapsedRealtimeNanos() / 1_000L
         synchronized(timelineLock) {
             activePauseStartTimeUs = nowUs
@@ -505,6 +561,7 @@ class VideoRecorder(
 
     private fun onRealtimeFrameAvailable() {
         if (!isRecording || stopRequested || isPaused) return
+        endCameraHandoff()
         statsIncomingFrames += 1
         synchronized(realtimeFrameLock) {
             if (pendingRealtimeFrameCount > 0) {
@@ -1001,19 +1058,24 @@ class VideoRecorder(
     }
 
     private fun mapCameraTimestampToBoottimeNs(cameraTimestampNs: Long): Long {
-        if (requestedCameraTimestampSource == CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME) {
-            return cameraTimestampNs
+        val mappedTimestampNs = if (
+            requestedCameraTimestampSource == CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
+        ) {
+            cameraTimestampNs
+        } else {
+            if (cameraTimestampToBoottimeOffsetNs == UNSET_TIMESTAMP) {
+                cameraTimestampToBoottimeOffsetNs = SystemClock.elapsedRealtimeNanos() - cameraTimestampNs
+                PLog.w(
+                    TAG,
+                    "Camera timestamp source is not REALTIME; calibrated to BOOTTIME with " +
+                        "offsetNs=$cameraTimestampToBoottimeOffsetNs"
+                )
+            }
+            cameraTimestampNs + cameraTimestampToBoottimeOffsetNs
         }
-
-        if (cameraTimestampToBoottimeOffsetNs == UNSET_TIMESTAMP) {
-            cameraTimestampToBoottimeOffsetNs = SystemClock.elapsedRealtimeNanos() - cameraTimestampNs
-            PLog.w(
-                TAG,
-                "Camera timestamp source is not REALTIME; calibrated to BOOTTIME with " +
-                    "offsetNs=$cameraTimestampToBoottimeOffsetNs"
-            )
-        }
-        return cameraTimestampNs + cameraTimestampToBoottimeOffsetNs
+        val previous = lastRealtimePresentationTimeNs
+        val minimumNext = if (previous == UNSET_TIMESTAMP) Long.MIN_VALUE else previous + 1L
+        return mappedTimestampNs.coerceAtLeast(minimumNext)
     }
 
     private fun establishTimelineOrigin(firstVideoPresentationTimeUs: Long) {
@@ -1062,6 +1124,7 @@ class VideoRecorder(
                 val presentationTimeNs = videoRenderer.renderLatestFrame(
                     mapPresentationTimeNs = ::mapCameraTimestampToBoottimeNs,
                 ) ?: continue
+                lastRealtimePresentationTimeNs = presentationTimeNs
                 establishTimelineOrigin(presentationTimeNs / 1_000L)
                 val renderCostMs = (SystemClock.elapsedRealtime() - renderStartMs).coerceAtLeast(0L)
                 statsAcceptedFrames += 1
