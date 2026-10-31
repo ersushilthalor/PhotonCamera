@@ -6,7 +6,6 @@ import com.hinnka.mycamera.viewmodel.CameraViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -66,12 +65,18 @@ internal class LensSwitchTransitionState(
                         targetCamera?.lensType in setOf(LensType.BACK_MAIN, LensType.BACK_ULTRA_WIDE) &&
                         currentCamera?.lensType != targetCamera?.lensType
                 livePreview = viewModel.glSurfaceView
-                val useLiveHandoff = isRearMainOrUltraWide &&
+                val canStartLiveHandoff = isRearMainOrUltraWide &&
                     livePreview?.canUseLiveLensHandoff == true
 
                 val previousTimestamp = before.previewFirstFrameTimestampNs
-                if (useLiveHandoff) {
-                    livePreview?.beginLiveLensHandoffAndWait()
+                val useLiveHandoff = if (canStartLiveHandoff) {
+                    withTimeoutOrNull(900L) {
+                        livePreview?.beginLiveLensHandoffAndWait()
+                        true
+                    } ?: false
+                } else false
+                if (canStartLiveHandoff && !useLiveHandoff) {
+                    livePreview?.cancelLiveLensHandoff()
                 }
 
                 request.onSwitch()
@@ -94,7 +99,7 @@ internal class LensSwitchTransitionState(
 
                 val preview = livePreview ?: viewModel.glSurfaceView
                 if (preview != null) {
-                    withTimeout(1_500L) {
+                    withTimeoutOrNull(1_500L) {
                         preview.awaitPreviewFrame(readyState.previewFirstFrameTimestampNs!!)
                     }
 
@@ -102,7 +107,7 @@ internal class LensSwitchTransitionState(
                         // Match VCamera's 16-frame warm-up requirement on the direct 0.5x ↔
                         // 2x/3x handoff. Other lens transitions use the same live crossfade
                         // without imposing this additional delay.
-                        if (isFrameBasedHandoffEligible(before.zoomRatio, request.targetZoom)) {
+                        if (isFrameBasedHandoffEligible(viewModel.zoomRatioByMain, request.targetZoom)) {
                             withTimeoutOrNull(900L) {
                                 preview.awaitPreviewFrames(
                                     minimumTimestampNs = readyState.previewFirstFrameTimestampNs!!,
