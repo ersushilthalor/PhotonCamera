@@ -6,6 +6,7 @@ import android.graphics.PointF
 import android.graphics.SurfaceTexture
 import android.opengl.*
 import android.os.SystemClock
+import android.view.Surface
 import com.hinnka.mycamera.livephoto.LivePhotoRecorder
 import com.hinnka.mycamera.livephoto.resolveLivePhotoRotationDegrees
 import com.hinnka.mycamera.preview.EyeFocusPreviewFrame
@@ -222,6 +223,26 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     // 相机 SurfaceTexture
     private var surfaceTexture: SurfaceTexture? = null
     private val frameAvailable = AtomicBoolean(false)
+
+    // Dedicated second rear-camera input used only while a live lens handoff is requested.
+    private var standbyCameraTextureId = 0
+    private var standbySurfaceTexture: SurfaceTexture? = null
+    private var standbyCameraSurface: Surface? = null
+    private val standbyFrameAvailable = AtomicBoolean(false)
+    private val standbyStMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
+    @Volatile private var standbyFrameTimestampNs = 0L
+    @Volatile private var liveHandoffPhase = 0 // 0=idle, 1=blend to standby, 2=hold standby, 3=blend back
+    private var liveHandoffProgress = 0
+    private var liveHandoffLastStandbyTimestampNs = 0L
+    private var liveHandoffLastPrimaryTimestampNs = 0L
+    private var liveBlendProgramId = 0
+    private var liveBlendFboId = 0
+    private var liveBlendTextureId = 0
+    private var liveBlendWidth = 0
+    private var liveBlendHeight = 0
+    private var liveBlendFrameActive = false
+    var onLiveStandbyHandoffReady: (() -> Unit)? = null
+    var onLivePrimaryHandoffReady: (() -> Unit)? = null
     private var stabilizationCoordinator: RealtimeStabilizationCoordinator? = null
     @Volatile
     private var stabilizationSession: RealtimeStabilizationCoordinator.Session? = null
@@ -490,6 +511,12 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
 
     // 回调
     var onSurfaceTextureAvailable: ((SurfaceTexture) -> Unit)? = null
+    val standbyCameraInputSurface: Surface?
+        get() = standbyCameraSurface?.takeIf { it.isValid }
+    val hasStandbyCameraFrame: Boolean
+        get() = standbyFrameTimestampNs > 0L
+    val canUseLiveLensHandoff: Boolean
+        get() = hasStandbyCameraFrame && previewStabilizationUseCase == null
     var onRequestRender: (() -> Unit)? = null
     var onHistogramUpdated: ((IntArray) -> Unit)? = null
     var onMeteringUpdated: ((Double, Double) -> Unit)? = null
@@ -549,6 +576,18 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             }
         }
 
+        standbyCameraTextureId = GlUtils.createOESTexture()
+        standbyFrameAvailable.set(false)
+        standbyFrameTimestampNs = 0L
+        standbySurfaceTexture = SurfaceTexture(standbyCameraTextureId).apply {
+            setDefaultBufferSize(previewWidth, previewHeight)
+            setOnFrameAvailableListener {
+                standbyFrameAvailable.set(true)
+                onRequestRender?.invoke()
+            }
+        }
+        standbyCameraSurface = standbySurfaceTexture?.let(::Surface)
+
         // 初始化测光 FBO
         initMeteringFbo()
 
@@ -582,6 +621,16 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         mgcEisHardwareBufferRenderer.resetAfterContextLoss()
         mgcEisYuvRenderer.resetAfterContextLoss()
         cameraTextureId = 0
+        standbyCameraTextureId = 0
+        liveBlendProgramId = 0
+        liveBlendFboId = 0
+        liveBlendTextureId = 0
+        liveBlendWidth = 0
+        liveBlendHeight = 0
+        standbyFrameTimestampNs = 0L
+        standbyFrameAvailable.set(false)
+        liveHandoffPhase = 0
+        liveHandoffProgress = 0
         currentCameraTextureId = 0
         currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
         currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
@@ -1011,6 +1060,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             stabilizationSessionStarted = stabilizationSession?.start() == true
         }
         val oesFrameUpdated = frameAvailable.getAndSet(false) && acquireLatestCameraFrame()
+        val standbyFrameUpdated = standbyFrameAvailable.getAndSet(false) && acquireLatestStandbyCameraFrame()
+        liveBlendFrameActive = false
         var cameraFrameUpdated = oesFrameUpdated
 
         if (delayedStabilizationEnabled) {
@@ -1059,6 +1110,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             }
         } else if (cameraFrameUpdated) {
             useCurrentOesFrame()
+        }
+
+        if (applyLiveLensHandoffFrame(oesFrameUpdated, standbyFrameUpdated)) {
+            cameraFrameUpdated = true
         }
 
         val liveRecorder = livePhotoRecorder
@@ -1298,7 +1353,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         targetWidth: Int = viewportWidth,
         targetHeight: Int = viewportHeight,
     ): FloatArray {
-        val stabilized = currentCameraTextureSource == PreviewColorTextureSource.TEXTURE_2D
+        val stabilized = currentCameraTextureSource == PreviewColorTextureSource.TEXTURE_2D &&
+            !liveBlendFrameActive
         if (targetWidth == viewportWidth && targetHeight == viewportHeight) {
             return if (stabilized) stabilizationMvpMatrix else mvpMatrix
         }
@@ -1316,6 +1372,222 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         currentCameraTextureId = cameraTextureId
         currentCameraTextureMatrix = stMatrix
         currentFrameTimestampNs = surfaceTexture?.timestamp ?: 0L
+    }
+
+    private fun acquireLatestStandbyCameraFrame(): Boolean {
+        return try {
+            val standby = standbySurfaceTexture ?: return false
+            standby.updateTexImage()
+            standby.getTransformMatrix(standbyStMatrix)
+            standbyFrameTimestampNs = standby.timestamp
+            standbyFrameTimestampNs > 0L
+        } catch (error: RuntimeException) {
+            PLog.e(TAG, "Failed to acquire standby camera frame", error)
+            false
+        }
+    }
+
+    private fun applyLiveLensHandoffFrame(
+        primaryUpdated: Boolean,
+        standbyUpdated: Boolean,
+    ): Boolean {
+        if (liveHandoffPhase == 0 || previewStabilizationUseCase != null) return false
+        when (liveHandoffPhase) {
+            1 -> {
+                if (standbyUpdated && standbyFrameTimestampNs > liveHandoffLastStandbyTimestampNs) {
+                    liveHandoffLastStandbyTimestampNs = standbyFrameTimestampNs
+                    liveHandoffProgress = (liveHandoffProgress + 1).coerceAtMost(4)
+                    if (liveHandoffProgress == 4) {
+                        liveHandoffPhase = 2
+                        onLiveStandbyHandoffReady?.invoke()
+                        onLiveStandbyHandoffReady = null
+                    }
+                }
+                if (standbyFrameTimestampNs <= 0L) return primaryUpdated
+                return drawLiveLensBlend(liveHandoffProgress / 4f)
+            }
+            2 -> {
+                if (!standbyUpdated && !primaryUpdated) return false
+                currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
+                currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
+                currentCameraTextureId = standbyCameraTextureId
+                currentCameraTextureMatrix = standbyStMatrix
+                currentFrameTimestampNs = standbyFrameTimestampNs
+                return true
+            }
+            3 -> {
+                if (primaryUpdated && currentFrameTimestampNs > liveHandoffLastPrimaryTimestampNs) {
+                    liveHandoffLastPrimaryTimestampNs = currentFrameTimestampNs
+                    liveHandoffProgress = (liveHandoffProgress + 1).coerceAtMost(4)
+                }
+                if (liveHandoffProgress >= 4) {
+                    liveHandoffPhase = 0
+                    onLivePrimaryHandoffReady?.invoke()
+                    onLivePrimaryHandoffReady = null
+                    useCurrentOesFrame()
+                    return true
+                }
+                return drawLiveLensBlend(1f - liveHandoffProgress / 4f)
+            }
+        }
+        return false
+    }
+
+    private fun drawLiveLensBlend(standbyMix: Float): Boolean {
+        if (previewWidth <= 0 || previewHeight <= 0 || cameraTextureId == 0 || standbyCameraTextureId == 0) {
+            return false
+        }
+        if (!ensureLiveLensBlendResources(previewWidth, previewHeight)) return false
+        if (liveBlendProgramId == 0 || liveBlendFboId == 0 || liveBlendTextureId == 0) return false
+
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, liveBlendFboId)
+        GLES30.glViewport(0, 0, previewWidth, previewHeight)
+        GLES30.glUseProgram(liveBlendProgramId)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, cameraTextureId)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+        GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, standbyCameraTextureId)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(liveBlendProgramId, "uPrimary"), 0)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(liveBlendProgramId, "uStandby"), 1)
+        GLES30.glUniform1f(GLES30.glGetUniformLocation(liveBlendProgramId, "uMix"), standbyMix.coerceIn(0f, 1f))
+        GLES30.glUniformMatrix4fv(
+            GLES30.glGetUniformLocation(liveBlendProgramId, "uPrimaryST"),
+            1, false, stMatrix, 0,
+        )
+        GLES30.glUniformMatrix4fv(
+            GLES30.glGetUniformLocation(liveBlendProgramId, "uStandbyST"),
+            1, false, standbyStMatrix, 0,
+        )
+        drawSimpleQuad(liveBlendProgramId)
+        val status = GLES30.glGetError()
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        if (status != GLES30.GL_NO_ERROR) {
+            PLog.e(TAG, "Live lens blend failed: glError=$status")
+            return false
+        }
+        currentCameraTextureSource = PreviewColorTextureSource.TEXTURE_2D
+        currentCameraTextureTarget = GLES30.GL_TEXTURE_2D
+        currentCameraTextureId = liveBlendTextureId
+        currentCameraTextureMatrix = identityLiveBlendMatrix
+        currentFrameTimestampNs = maxOf(
+            surfaceTexture?.timestamp ?: 0L,
+            standbyFrameTimestampNs,
+        )
+        liveBlendFrameActive = true
+        return true
+    }
+
+    private val identityLiveBlendMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
+
+    private fun ensureLiveLensBlendResources(width: Int, height: Int): Boolean {
+        if (liveBlendProgramId == 0) {
+            val vertexSource = """
+                attribute vec4 aPosition;
+                attribute vec4 aTexCoord;
+                uniform mat4 uPrimaryST;
+                uniform mat4 uStandbyST;
+                varying vec2 vPrimaryCoord;
+                varying vec2 vStandbyCoord;
+                void main() {
+                    gl_Position = aPosition;
+                    vPrimaryCoord = (uPrimaryST * aTexCoord).xy;
+                    vStandbyCoord = (uStandbyST * aTexCoord).xy;
+                }
+            """.trimIndent()
+            val fragmentSource = """
+                #extension GL_OES_EGL_image_external : require
+                precision mediump float;
+                uniform samplerExternalOES uPrimary;
+                uniform samplerExternalOES uStandby;
+                uniform float uMix;
+                varying vec2 vPrimaryCoord;
+                varying vec2 vStandbyCoord;
+                void main() {
+                    vec4 primaryColor = texture2D(uPrimary, vPrimaryCoord);
+                    vec4 standbyColor = texture2D(uStandby, vStandbyCoord);
+                    gl_FragColor = mix(primaryColor, standbyColor, uMix);
+                }
+            """.trimIndent()
+            val vertex = GlUtils.compileShader(GLES30.GL_VERTEX_SHADER, vertexSource)
+            val fragment = GlUtils.compileShader(GLES30.GL_FRAGMENT_SHADER, fragmentSource)
+            if (vertex == 0 || fragment == 0) {
+                if (vertex != 0) GLES30.glDeleteShader(vertex)
+                if (fragment != 0) GLES30.glDeleteShader(fragment)
+                return false
+            }
+            liveBlendProgramId = GlUtils.linkProgram(vertex, fragment)
+            GLES30.glDeleteShader(vertex)
+            GLES30.glDeleteShader(fragment)
+            if (liveBlendProgramId == 0) return false
+        }
+        if (liveBlendWidth == width && liveBlendHeight == height &&
+            liveBlendFboId != 0 && liveBlendTextureId != 0
+        ) return true
+
+        if (liveBlendFboId != 0) GLES30.glDeleteFramebuffers(1, intArrayOf(liveBlendFboId), 0)
+        if (liveBlendTextureId != 0) GLES30.glDeleteTextures(1, intArrayOf(liveBlendTextureId), 0)
+        val texture = IntArray(1)
+        val framebuffer = IntArray(1)
+        GLES30.glGenTextures(1, texture, 0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texture[0])
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexImage2D(
+            GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, width, height, 0,
+            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null,
+        )
+        GLES30.glGenFramebuffers(1, framebuffer, 0)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer[0])
+        GLES30.glFramebufferTexture2D(
+            GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+            GLES30.GL_TEXTURE_2D, texture[0], 0,
+        )
+        val complete = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER) ==
+            GLES30.GL_FRAMEBUFFER_COMPLETE
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        if (!complete) {
+            GLES30.glDeleteFramebuffers(1, framebuffer, 0)
+            GLES30.glDeleteTextures(1, texture, 0)
+            return false
+        }
+        liveBlendWidth = width
+        liveBlendHeight = height
+        liveBlendFboId = framebuffer[0]
+        liveBlendTextureId = texture[0]
+        return true
+    }
+
+    fun beginLiveLensHandoff(onStandbyReady: (() -> Unit)?) {
+        if (!canUseLiveLensHandoff || liveHandoffPhase != 0) {
+            onStandbyReady?.invoke()
+            return
+        }
+        liveHandoffPhase = 1
+        liveHandoffProgress = 0
+        liveHandoffLastStandbyTimestampNs = standbyFrameTimestampNs
+        onLiveStandbyHandoffReady = onStandbyReady
+        onRequestRender?.invoke()
+    }
+
+    fun finishLiveLensHandoff(onPrimaryReady: (() -> Unit)?) {
+        if (liveHandoffPhase != 2) {
+            onPrimaryReady?.invoke()
+            return
+        }
+        liveHandoffPhase = 3
+        liveHandoffProgress = 0
+        liveHandoffLastPrimaryTimestampNs = surfaceTexture?.timestamp ?: currentFrameTimestampNs
+        onLivePrimaryHandoffReady = onPrimaryReady
+        onRequestRender?.invoke()
+    }
+
+    fun cancelLiveLensHandoff() {
+        liveHandoffPhase = 0
+        liveHandoffProgress = 0
+        onLiveStandbyHandoffReady = null
+        onLivePrimaryHandoffReady = null
+        if (frameAvailable.get()) onRequestRender?.invoke()
     }
 
     private fun acquireLatestCameraFrame(): Boolean {
@@ -2369,6 +2641,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         previewWidth = width
         previewHeight = height
         surfaceTexture?.setDefaultBufferSize(width, height)
+        standbySurfaceTexture?.setDefaultBufferSize(width, height)
         if (sizeChanged && previewStabilizationUseCase != null) {
             mgcEisHardwareBufferRenderer.release()
             mgcEisYuvRenderer.release()
@@ -3312,10 +3585,34 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         GlUtils.deleteProgram(copyProgramId)
         copyProgramId = 0
 
-        // 释放 SurfaceTexture
+        // 释放主、备用 SurfaceTexture 输入
         surfaceTexture?.release()
         surfaceTexture = null
         frameAvailable.set(false)
+        standbyCameraSurface?.release()
+        standbyCameraSurface = null
+        standbySurfaceTexture?.release()
+        standbySurfaceTexture = null
+        standbyFrameAvailable.set(false)
+        standbyFrameTimestampNs = 0L
+        if (standbyCameraTextureId != 0) {
+            GlUtils.deleteTexture(standbyCameraTextureId)
+            standbyCameraTextureId = 0
+        }
+        if (liveBlendProgramId != 0) {
+            GLES30.glDeleteProgram(liveBlendProgramId)
+            liveBlendProgramId = 0
+        }
+        if (liveBlendFboId != 0) {
+            GLES30.glDeleteFramebuffers(1, intArrayOf(liveBlendFboId), 0)
+            liveBlendFboId = 0
+        }
+        if (liveBlendTextureId != 0) {
+            GLES30.glDeleteTextures(1, intArrayOf(liveBlendTextureId), 0)
+            liveBlendTextureId = 0
+        }
+        liveHandoffPhase = 0
+        liveBlendFrameActive = false
 
         // 重置状态
         surfaceReady = false
