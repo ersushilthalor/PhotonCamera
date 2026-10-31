@@ -1764,8 +1764,8 @@ fun CameraScreen(
                 }
             )
 
-            if (showVideoResolutionPanel && isVideoMode) {
-                Box(Modifier.fillMaxSize()) {
+            if (isVideoMode) {
+                if (showVideoResolutionPanel) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -1776,21 +1776,29 @@ fun CameraScreen(
                                 showVideoResolutionPanel = false
                             }
                     )
-                    VideoResolutionFloatingPanel(
-                        isOpen = true,
-                        selectedResolution = state.videoConfig.resolution,
-                        selectedFps = state.videoConfig.fps,
-                        availableResolutions = state.videoCapabilities.availableResolutions,
-                        availableFps = state.videoCapabilities.availableFps,
-                        backdrop = videoResolutionBackdrop,
-                        onResolutionSelected = viewModel::setVideoResolution,
-                        onFpsSelected = viewModel::setVideoFps,
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .statusBarsPadding()
-                            .padding(top = 56.dp)
-                    )
                 }
+                VideoResolutionFloatingPanel(
+                    isOpen = showVideoResolutionPanel,
+                    selectedResolution = state.videoConfig.resolution,
+                    selectedFps = state.videoConfig.fps,
+                    availableResolutions = state.videoCapabilities.availableResolutions,
+                    availableFps = state.videoCapabilities.availableFps,
+                    backdrop = videoResolutionBackdrop,
+                    onResolutionSelected = { resolution ->
+                        if (resolution != state.videoConfig.resolution) {
+                            viewModel.setVideoResolution(resolution)
+                        }
+                    },
+                    onFpsSelected = { fps ->
+                        if (fps != state.videoConfig.fps) {
+                            viewModel.setVideoFps(fps)
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(top = 56.dp)
+                )
             }
         }
         val panelDismissBounds = if (isXpan) {
