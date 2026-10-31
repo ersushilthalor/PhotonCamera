@@ -73,8 +73,7 @@ internal fun VideoLogFloatingWindow(
 ) {
     var optionsExpanded by remember { mutableStateOf(false) }
     val profiles = remember(availableProfiles) {
-        val distinct = availableProfiles.distinct()
-        if (distinct.any { it.isEnabled }) distinct else VideoLogProfile.entries
+        availableProfiles.distinct().ifEmpty { listOf(VideoLogProfile.OFF) }
     }
 
     VideoFloatingWindowCard(
