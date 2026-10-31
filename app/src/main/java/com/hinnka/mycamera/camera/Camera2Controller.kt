@@ -10066,35 +10066,7 @@ class Camera2Controller(private val context: Context) {
         }
 
         if (state.captureMode == CaptureMode.VIDEO && shouldUseVideoEnhancedStabilization()) {
-            val activeReader = stabilizationImageReader ?: return false
-            val targetReader = standbyStabilizationImageReader ?: return false
-            if (activeReader.width != targetReader.width || activeReader.height != targetReader.height) {
-                return false
-            }
-
-            val targetInfo = state.availableCameras.firstOrNull { candidate ->
-                runCatching { candidate.getOpenCameraId() == cameraOpenId }.getOrDefault(false)
-            } ?: return false
-            val timingCharacteristics = runCatching {
-                getCameraCharacteristicsCached(cameraOpenId)
-            }.getOrNull() ?: return false
-            val calibrationCameraId = targetInfo.outputPhysicalCameraId
-                ?.takeIf { it.isNotBlank() } ?: cameraOpenId
-            val calibrationCharacteristics = if (calibrationCameraId == cameraOpenId) {
-                timingCharacteristics
-            } else {
-                runCatching { getCameraCharacteristicsCached(calibrationCameraId) }.getOrNull()
-                    ?: return false
-            }
-            if (!realtimeStabilizationCoordinator.isCameraSupported(
-                    calibrationCharacteristics,
-                    timingCharacteristics,
-                )
-            ) {
-                PLog.w(TAG, "EIS+ warm promotion skipped: target camera $calibrationCameraId is unsupported")
-                return false
-            }
-            return true
+            return isStandbyEisInputReady(cameraOpenId, requireActiveReader = true)
         }
 
         val recordingRelayMustBeReady =
@@ -10105,9 +10077,69 @@ class Camera2Controller(private val context: Context) {
             videoRecorder.hasCameraSourceFrames(standbyIsUltraWide)
     }
 
+    /**
+     * Validate the standby's MGC input before either pointer promotion or the prewarmed-device
+     * reopen path. On the reopen path the outgoing active reader may already have been retired,
+     * so only require it for the in-place session swap.
+     */
+    private fun isStandbyEisInputReady(
+        cameraOpenId: String,
+        requireActiveReader: Boolean,
+    ): Boolean {
+        val state = _state.value
+        val targetReader = standbyStabilizationImageReader ?: return false
+        val activeReader = stabilizationImageReader
+        if (requireActiveReader && activeReader == null) return false
+        if (activeReader != null &&
+            (activeReader.width != targetReader.width || activeReader.height != targetReader.height)
+        ) {
+            return false
+        }
+        val requiredSize = state.videoCapabilities
+            .enhancedStabilizationInputSizesByResolution[state.videoConfig.resolution]
+            ?: return false
+        if (targetReader.width != requiredSize.width || targetReader.height != requiredSize.height) {
+            return false
+        }
+
+        val targetInfo = state.availableCameras.firstOrNull { candidate ->
+            runCatching { candidate.getOpenCameraId() == cameraOpenId }.getOrDefault(false)
+        } ?: return false
+        val timingCharacteristics = runCatching {
+            getCameraCharacteristicsCached(cameraOpenId)
+        }.getOrNull() ?: return false
+        val calibrationCameraId = targetInfo.outputPhysicalCameraId
+            ?.takeIf { it.isNotBlank() } ?: cameraOpenId
+        val calibrationCharacteristics = if (calibrationCameraId == cameraOpenId) {
+            timingCharacteristics
+        } else {
+            runCatching { getCameraCharacteristicsCached(calibrationCameraId) }.getOrNull()
+                ?: return false
+        }
+        if (!realtimeStabilizationCoordinator.isCameraSupported(
+                calibrationCharacteristics,
+                timingCharacteristics,
+            )
+        ) {
+            PLog.w(TAG, "EIS+ warm promotion skipped: target camera $calibrationCameraId is unsupported")
+            return false
+        }
+        return true
+    }
+
     private fun takeStandbyCamera(cameraOpenId: String): CameraDevice? {
         if (standbyCameraOpenId != cameraOpenId) return null
         val device = standbyCameraDevice ?: return null
+
+        val enhancedStabilizationHandoff =
+            _state.value.captureMode == CaptureMode.VIDEO && shouldUseVideoEnhancedStabilization()
+        if (enhancedStabilizationHandoff &&
+            !isStandbyEisInputReady(cameraOpenId, requireActiveReader = false)
+        ) {
+            PLog.w(TAG, "EIS+ prewarmed-camera promotion skipped: standby YUV/calibration is not ready")
+            closeStandbyCamera("EIS+ prewarmed camera has no matching stabilization input")
+            return null
+        }
 
         val recordingRelayMustBeReady =
             _state.value.captureMode == CaptureMode.VIDEO &&
@@ -10141,12 +10173,19 @@ class Camera2Controller(private val context: Context) {
         standbyImageReader?.setOnImageAvailableListener(null, null)
         try { standbyImageReader?.close() } catch (_: Exception) {}
         standbyImageReader = null
+        val targetStabilizationReader = standbyStabilizationImageReader
+        if (targetStabilizationReader != null) {
+            val outgoingStabilizationReader = stabilizationImageReader
+            stabilizationImageReader = targetStabilizationReader
+            standbyStabilizationImageReader = outgoingStabilizationReader
+        }
         standbyCameraDevice = null
         standbyCameraOpenId = null
         PLog.i(
             TAG,
             "Standby camera promoted from configured session: camera=${device.id}, " +
-                "captureFrames=$standbyFrameCount"
+                "captureFrames=$standbyFrameCount, " +
+                "eisYuv=${stabilizationImageReader?.let { "${it.width}x${it.height}" } ?: "off"}"
         )
         return device
     }
