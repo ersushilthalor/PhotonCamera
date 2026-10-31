@@ -115,6 +115,8 @@ class VideoRecorder(
     private var audioRecord: AudioRecord? = null
     private var inputSurface: Surface? = null
     private var renderer: RealtimeVideoRenderer? = null
+    private var dualCameraRelay: DualCameraRecordingRelay? = null
+    private var requestedInitialUltraWide = false
     private var requestedBitrateMbps: Int = 30
     private var requestedCodecMime: String = MediaFormat.MIMETYPE_VIDEO_AVC
     private var preferredEncoderCodecName: String? = null
@@ -185,9 +187,27 @@ class VideoRecorder(
         get() = isRecording
 
     val cameraInputSurface: Surface?
-        get() = renderer?.inputSurface.takeIf {
-            isRecording && !stopRequested
+        get() = cameraInputSurfaceForLens(isUltraWide = false)
+
+    fun cameraInputSurfaceForLens(isUltraWide: Boolean): Surface? {
+        if (!isRecording || stopRequested) return null
+        val relay = dualCameraRelay
+        if (relay?.isReady == true) {
+            return if (isUltraWide) relay.ultraWideInputSurface else relay.mainInputSurface
         }
+        return renderer?.inputSurface
+    }
+
+    fun setActiveCameraSource(isUltraWide: Boolean) {
+        dualCameraRelay?.setActiveSource(isUltraWide)
+    }
+
+    fun hasCameraSourceFrames(isUltraWide: Boolean): Boolean =
+        dualCameraRelay?.hasFrames(isUltraWide) == true
+
+    fun updateCameraRelayInputSize(isUltraWide: Boolean, width: Int, height: Int) {
+        dualCameraRelay?.updateBufferSize(isUltraWide, width, height)
+    }
 
     fun startRecording(
         size: Size,
@@ -198,6 +218,7 @@ class VideoRecorder(
         colorConfig: VideoEncoderColorRequest = VideoEncoderColorRequest(),
         cameraInputIsHlg10: Boolean = false,
         colorLayers: List<VideoColorEffectLayer> = emptyList(),
+        initialUltraWide: Boolean = false,
         cameraTimestampSource: Int = CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_UNKNOWN,
         sensorOrientationDegrees: Int = 0,
         orientationHintDegrees: Int = 0,
@@ -227,6 +248,7 @@ class VideoRecorder(
         requestedCodecMime = hlg10Encoder?.second ?: codecMime
         requestedColorConfig = colorConfig
         requestedCameraInputIsHlg10 = cameraInputIsHlg10
+        requestedInitialUltraWide = initialUltraWide
         if (hlg10Encoder != null) {
             PLog.i(
                 TAG,
@@ -335,10 +357,12 @@ class VideoRecorder(
         sensorOrientationDegrees: Int,
         frontFacing: Boolean,
         restartStabilization: Boolean,
+        ultraWide: Boolean = false,
     ) {
         if (!isRecording || stopRequested) return
 
         requestedFlipEncodedFrame = frontFacing
+        dualCameraRelay?.setActiveSource(ultraWide)
         val mirrorHorizontally = frontFacing && requestedOrientationHintDegrees % 180 == 0
         val mirrorVertically = frontFacing && requestedOrientationHintDegrees % 180 != 0
 
@@ -553,6 +577,24 @@ class VideoRecorder(
             encoderSurface = encoderSurface,
             onFrameAvailable = ::onRealtimeFrameAvailable,
         )
+        if (!requestedEnhancedStabilization && !requestedCameraInputIsHlg10) {
+            val downstream = realtimeRenderer.inputSurface
+            if (downstream != null) {
+                val relay = runCatching {
+                    DualCameraRecordingRelay(
+                        downstreamSurface = downstream,
+                        width = requestedCameraInputSize.width,
+                        height = requestedCameraInputSize.height,
+                        fps = requestedFps,
+                        initialUltraWide = requestedInitialUltraWide,
+                    )
+                }.onFailure {
+                    PLog.w(TAG, "Dual-camera recording relay unavailable; using the standard camera input", it)
+                }.getOrNull()
+                dualCameraRelay = relay?.takeIf { it.isReady }
+                if (relay != null && !relay.isReady) relay.release()
+            }
+        }
         PLog.d(
             TAG,
             "Realtime video renderer initialized: ${requestedSize.width}x${requestedSize.height} @ ${requestedFps}fps"
@@ -1555,6 +1597,11 @@ class VideoRecorder(
         audioRecordJob = null
 
         withContext(renderDispatcher) {
+            try {
+                dualCameraRelay?.release()
+            } catch (_: Exception) {
+            }
+            dualCameraRelay = null
             try {
                 renderer?.release()
             } catch (_: Exception) {
