@@ -9232,7 +9232,7 @@ class Camera2Controller(private val context: Context) {
                     size.width == requestedPreviewSize.width && size.height == requestedPreviewSize.height
                 }
             }
-            val standbyOutputSurfaces = buildList {
+            val standbyOutputSurfaces = buildList<Surface> {
                 standbyPreviewOutput?.let(::add)
                 recordingRelaySurface?.let(::add)
                 if (isEmpty()) add(reader.surface)
@@ -9359,12 +9359,28 @@ class Camera2Controller(private val context: Context) {
         val camera = standbyCameraDevice ?: return
         val targetSurface = videoRecorder.cameraInputSurfaceForLens(standbyIsUltraWide) ?: return
         val generation = standbyGeneration
+        val requestedPreviewSize = _state.value.currentPreviewSize
+        val standbyCharacteristics = runCatching {
+            getCameraCharacteristicsCached(camera.id)
+        }.getOrNull()
+        val standbyPreviewSizes = standbyCharacteristics
+            ?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            ?.getOutputSizes(SurfaceTexture::class.java).orEmpty()
+        val standbyPreviewOutput = standbyPreviewSurface?.takeIf { candidate ->
+            candidate.isValid && standbyPreviewSizes.any { size ->
+                size.width == requestedPreviewSize.width && size.height == requestedPreviewSize.height
+            }
+        }
+        val outputs = buildList<Surface> {
+            standbyPreviewOutput?.let(::add)
+            add(targetSurface)
+        }
         try {
             try { standbyCaptureSession?.stopRepeating() } catch (_: Exception) {}
             try { standbyCaptureSession?.close() } catch (_: Exception) {}
             standbyCaptureSession = null
             camera.createCaptureSession(
-                listOf(targetSurface),
+                outputs,
                 object : CameraCaptureSession.StateCallback() {
                     override fun onConfigured(session: CameraCaptureSession) {
                         if (generation != standbyGeneration || standbyCameraDevice !== camera) {
@@ -9373,7 +9389,7 @@ class Camera2Controller(private val context: Context) {
                         }
                         try {
                             val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
-                                addTarget(targetSurface)
+                                outputs.forEach(::addTarget)
                             }
                             standbyCaptureSession = session
                             session.setRepeatingRequest(request.build(), null, handler)
