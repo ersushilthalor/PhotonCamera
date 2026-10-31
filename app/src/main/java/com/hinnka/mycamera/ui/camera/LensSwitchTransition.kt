@@ -107,7 +107,10 @@ internal class LensSwitchTransitionState(
                     (viewModel.lensSwitchOverlapDurationSec.value * 30f).roundToInt().coerceIn(2, 30)
                 }
                 livePreview?.setLiveHandoffFrameCount(overlapDurationFrames)
-                val canStartLiveHandoff = overlapEnabled && isRearMainOrUltraWide &&
+                // Immediate stop taps are a source promotion, not an overlap animation.
+                // Keep them enabled even when the optional crossfade setting is disabled.
+                val canStartLiveHandoff = (overlapEnabled || isDirectImmediateLensTap) &&
+                    isRearMainOrUltraWide &&
                     livePreview?.canUseLiveLensHandoff == true
 
                 val previousTimestamp = before.previewFirstFrameTimestampNs
