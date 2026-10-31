@@ -3331,14 +3331,16 @@ class Camera2Controller(private val context: Context) {
                 override fun onClosed(camera: CameraDevice) {
                     if (cameraDevice === camera || cameraDeviceAwaitingClose === camera) {
                         handleCameraDeviceClosed(camera)
-                    } else {
-                        // The old active device is deliberately closed asynchronously when a
-                        // ready standby camera is promoted. Do not let its callback touch the
-                        // newly active device; retry warming the reverse lens after it releases.
-                        PLog.d(TAG, "Ignoring close callback from superseded camera: ${camera.id}")
+                    } else if (standbyCameraDevice === camera) {
+                        // The outgoing camera is retained as the reverse-switch standby after
+                        // promotion. If the HAL closes it under resource pressure, discard only
+                        // that standby bundle; never reset the newly active device lifecycle.
+                        closeStandbyCamera("outgoing standby device closed")
                         if (cameraDevice != null && cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN) {
                             startStandbyCameraIfPossible()
                         }
+                    } else {
+                        PLog.d(TAG, "Ignoring late close callback from superseded camera: ${camera.id}")
                     }
                 }
             }, cameraHandler)
@@ -9682,7 +9684,14 @@ class Camera2Controller(private val context: Context) {
                                             if (recordingRelaySurface != null) CameraDevice.TEMPLATE_RECORD
                                             else CameraDevice.TEMPLATE_PREVIEW
                                         ).apply {
-                                            standbyOutputSurfaces.forEach(::addTarget)
+                                            // Only preview/recording surfaces belong to the repeating request.
+                                            // The still ImageReader is configured in the session but is targeted
+                                            // only by an actual still-capture request after promotion.
+                                            standbyPreviewOutput?.let(::addTarget)
+                                            recordingRelaySurface?.let(::addTarget)
+                                            if (standbyPreviewOutput == null && recordingRelaySurface == null) {
+                                                addTarget(reader.surface)
+                                            }
 
                                             // Keep the warm standby stream at the same global 1x
                                             // field of view as the main camera. This makes main ->
@@ -9971,6 +9980,10 @@ class Camera2Controller(private val context: Context) {
         try { standbyCaptureSession?.stopRepeating() } catch (_: Exception) {}
         try { standbyCaptureSession?.close() } catch (_: Exception) {}
         standbyCaptureSession = null
+        standbyPreviewRequestBuilder = null
+        standbyCaptureImageReader?.setOnImageAvailableListener(null, null)
+        try { standbyCaptureImageReader?.close() } catch (_: Exception) {}
+        standbyCaptureImageReader = null
         standbyImageReader?.setOnImageAvailableListener(null, null)
         try { standbyImageReader?.close() } catch (_: Exception) {}
         standbyImageReader = null
