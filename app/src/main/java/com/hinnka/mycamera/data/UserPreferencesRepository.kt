@@ -256,6 +256,9 @@ data class UserPreferences(
     val videoTorchEnabled: Boolean = false,
     val videoLensLockEnabled: Boolean = false,
     val keepUltraWideReady: Boolean = true,
+    val autoSwitchToUltraWide: Boolean = false,
+    val lensSwitchOverlapAnimationEnabled: Boolean = true,
+    val lensSwitchOverlapDurationSec: Float = 0.3f,
     val videoWhiteBalanceLockEnabled: Boolean = false,
     val videoCodec: com.hinnka.mycamera.video.VideoCodec = com.hinnka.mycamera.video.VideoCodec.H264,
     val ultraHdrGainMapEnabled: Boolean = false,
@@ -543,6 +546,11 @@ class UserPreferencesRepository(private val context: Context) {
         private val VIDEO_TORCH_ENABLED = booleanPreferencesKey("video_torch_enabled")
         private val VIDEO_LENS_LOCK_ENABLED = booleanPreferencesKey("video_lens_lock_enabled")
         private val KEEP_ULTRA_WIDE_READY = booleanPreferencesKey("keep_ultra_wide_ready")
+        private val AUTO_SWITCH_TO_ULTRA_WIDE = booleanPreferencesKey("auto_switch_to_ultra_wide")
+        private val LENS_SWITCH_OVERLAP_ANIMATION_ENABLED =
+            booleanPreferencesKey("lens_switch_overlap_animation_enabled")
+        private val LENS_SWITCH_OVERLAP_DURATION_SEC =
+            floatPreferencesKey("lens_switch_overlap_duration_sec")
         private val VIDEO_WHITE_BALANCE_LOCK_ENABLED = booleanPreferencesKey("video_white_balance_lock_enabled")
         private val VIDEO_CODEC = stringPreferencesKey("video_codec")
         // Keep the persisted key for compatibility with existing installations.
@@ -913,6 +921,11 @@ class UserPreferencesRepository(private val context: Context) {
                 videoTorchEnabled = preferences[VIDEO_TORCH_ENABLED] ?: false,
                 videoLensLockEnabled = preferences[VIDEO_LENS_LOCK_ENABLED] ?: false,
                 keepUltraWideReady = preferences[KEEP_ULTRA_WIDE_READY] ?: true,
+                autoSwitchToUltraWide = preferences[AUTO_SWITCH_TO_ULTRA_WIDE] ?: false,
+                lensSwitchOverlapAnimationEnabled =
+                    preferences[LENS_SWITCH_OVERLAP_ANIMATION_ENABLED] ?: true,
+                lensSwitchOverlapDurationSec =
+                    (preferences[LENS_SWITCH_OVERLAP_DURATION_SEC] ?: 0.3f).coerceIn(0.1f, 1.0f),
                 videoWhiteBalanceLockEnabled = preferences[VIDEO_WHITE_BALANCE_LOCK_ENABLED] ?: false,
                 videoCodec = com.hinnka.mycamera.video.VideoCodec.valueOf(
                     preferences[VIDEO_CODEC] ?: com.hinnka.mycamera.video.VideoCodec.H264.name
@@ -2436,6 +2449,25 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun saveKeepUltraWideReady(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[KEEP_ULTRA_WIDE_READY] = enabled
+        }
+    }
+
+    suspend fun saveAutoSwitchToUltraWide(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[AUTO_SWITCH_TO_ULTRA_WIDE] = enabled
+        }
+    }
+
+    suspend fun saveLensSwitchOverlapAnimationEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[LENS_SWITCH_OVERLAP_ANIMATION_ENABLED] = enabled
+        }
+    }
+
+    suspend fun saveLensSwitchOverlapDurationSec(value: Float) {
+        context.dataStore.edit { preferences ->
+            preferences[LENS_SWITCH_OVERLAP_DURATION_SEC] = (value.coerceIn(0.1f, 1.0f) * 10f)
+                .toInt() / 10f
         }
     }
 
