@@ -115,6 +115,7 @@ private enum class CameraShootingMode {
 private const val InitialPreviewTransitionDelayMillis = 150L
 private const val PreviewTransitionRevealDurationMillis = 800
 private const val ZoomStopAnimationCompletionThreshold = 0.001f
+private const val MainUltraWideStopHoldDurationMillis = 200L
 private const val RawCaptureTapDebounceMillis = 1000L
 private const val DefaultShutterSpeedNs = 1_000_000_000f / 60f
 private const val DefaultIso = 100f
@@ -598,10 +599,46 @@ fun CameraScreen(
         cancelZoomStopAnimation()
         lensSwitchTransition.cancelPendingSwitch()
 
-        // Direct main/ultra-wide stop taps are a lens promotion, not a zoom animation on
-        // the outgoing camera. Request the target's native visible stop immediately; the live
-        // standby SurfaceTexture is already displaying the incoming camera while Camera2
-        // promotes its already-running session.
+        if (isUltraWideToMain) {
+            // First match the main camera's 1x field of view using a digital crop on the
+            // outgoing ultra-wide stream. Keep that framing stable for 200 ms, then promote
+            // the already-running main stream without reopening the recording pipeline.
+            val sourceCameraId = currentCamera.cameraId
+            zoomStopAnimationJob = scope.launch {
+                animateCurrentLensToZoomStopAndWait(
+                    targetZoom = targetStopZoom,
+                    durationMillis = resolveZoomStopAnimationDurationMillis(
+                        startingZoom,
+                        targetStopZoom,
+                    ),
+                )
+                delay(MainUltraWideStopHoldDurationMillis)
+
+                // A newer selection/camera change during the animation must not execute a
+                // stale handoff against a different active lens.
+                if (!isActive ||
+                    viewModel.state.value.currentCameraId != sourceCameraId ||
+                    viewModel.isVideoLensLocked()
+                ) {
+                    return@launch
+                }
+
+                zoomStopAnimationJob = null
+                lensSwitchTransition.switchLens(
+                    cameraId = targetCamera.cameraId,
+                    targetZoom = targetStopZoom,
+                    forceImmediateHandoff = true,
+                ) {
+                    viewModel.switchToLensAndSetZoomRatio(
+                        targetCamera.cameraId,
+                        targetStopZoom,
+                    )
+                }
+            }
+            return true
+        }
+
+        // Main -> ultra-wide still promotes the already-warm source directly.
         lensSwitchTransition.switchLens(
             cameraId = targetCamera.cameraId,
             targetZoom = targetStopZoom,
