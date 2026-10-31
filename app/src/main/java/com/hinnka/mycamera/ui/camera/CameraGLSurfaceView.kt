@@ -392,6 +392,48 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         }
     }
 
+    /**
+     * Wait for distinct sensor-timestamped frames to finish the complete preview render path.
+     * This prevents the outgoing lens frame from being removed after only the first incoming
+     * frame, which can still be a warm-up frame with unsettled exposure and focus.
+     */
+    suspend fun awaitPreviewFrames(minimumTimestampNs: Long, requiredFrameCount: Int) {
+        val targetCount = requiredFrameCount.coerceAtLeast(1)
+        var listener: ((Long) -> Unit)? = null
+        try {
+            suspendCancellableCoroutine<Unit> { continuation ->
+                var lastTimestampNs = minimumTimestampNs - 1L
+                var receivedFrames = 0
+                val callback: (Long) -> Unit = { timestamp ->
+                    if (timestamp >= minimumTimestampNs && timestamp > lastTimestampNs) {
+                        lastTimestampNs = timestamp
+                        receivedFrames += 1
+                        if (receivedFrames >= targetCount) {
+                            renderer.onPreviewFrameRendered = null
+                            post {
+                                if (continuation.isActive) continuation.resume(Unit)
+                            }
+                        }
+                    }
+                }
+                listener = callback
+                queueEvent {
+                    if (continuation.isActive) {
+                        renderer.onPreviewFrameRendered = callback
+                        requestRender()
+                    }
+                }
+            }
+        } finally {
+            val installedListener = listener
+            queueEvent {
+                if (renderer.onPreviewFrameRendered === installedListener) {
+                    renderer.onPreviewFrameRendered = null
+                }
+            }
+        }
+    }
+
     fun captureOriginalPreviewFrame(callback: (Bitmap?) -> Unit) {
         capturePreviewFrameInternal(
             maxLongEdge = null,
