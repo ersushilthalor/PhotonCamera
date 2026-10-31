@@ -2084,11 +2084,20 @@ class Camera2Controller(private val context: Context) {
 
     private fun promoteWarmStandbyCameraOnHandler(cameraId: String): Boolean {
         val currentState = _state.value
+        val recordingState = currentState.videoRecordingState
+        // During recording, only promote when both cameras are feeding the dedicated
+        // video relay. This keeps the encoder/muxer alive and avoids rebuilding a
+        // single-camera recording session mid-clip.
+        val canPromoteRecordingRelay =
+            currentState.captureMode == CaptureMode.VIDEO &&
+                recordingState.shouldAttachCameraInput() &&
+                videoRecorder.supportsDualCameraInput &&
+                !shouldUseVideoEnhancedStabilization()
         if (!keepUltraWideReadyEnabled ||
             cameraDeviceLifecycle != CameraDeviceLifecycle.OPEN ||
             !currentState.isPreviewActive ||
-            currentState.videoRecordingState.isRecording ||
-            currentState.videoRecordingState.isProcessing ||
+            (recordingState.isRecording && !canPromoteRecordingRelay) ||
+            recordingState.isProcessing ||
             currentState.isCapturing ||
             currentState.captureMode == CaptureMode.VIDEO && shouldUseVideoEnhancedStabilization()
         ) {
@@ -2207,6 +2216,15 @@ class Camera2Controller(private val context: Context) {
             )
         }
         refreshActiveFocusLimit()
+
+        if (canPromoteRecordingRelay) {
+            // The standby session is already writing to the matching relay input. Change
+            // only the relay's selected source; leave both Camera2 sessions and the encoder
+            // running continuously.
+            videoRecorder.setActiveCameraSource(
+                isUltraWide = targetInfo.lensType == LensType.BACK_ULTRA_WIDE
+            )
+        }
 
         // Both CameraCaptureSessions are already running their repeating requests.
         // Keep the original callbacks and outputs attached: standbyCaptureCallback forwards
