@@ -1425,7 +1425,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             3 -> {
                 if (primaryUpdated && currentFrameTimestampNs > liveHandoffLastPrimaryTimestampNs) {
                     liveHandoffLastPrimaryTimestampNs = currentFrameTimestampNs
-                    liveHandoffProgress = (liveHandoffProgress + 1).coerceAtMost(4)
+                    liveHandoffProgress = (liveHandoffProgress + 1).coerceAtMost(liveHandoffFrameCount)
                 }
                 if (liveHandoffProgress >= liveHandoffFrameCount) {
                     liveHandoffPhase = 0
@@ -1434,7 +1434,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                     useCurrentOesFrame()
                     return true
                 }
-                return drawLiveLensBlend(1f - liveHandoffProgress / 4f)
+                return drawLiveLensBlend(1f - liveHandoffProgress / liveHandoffFrameCount.toFloat())
             }
         }
         return false
