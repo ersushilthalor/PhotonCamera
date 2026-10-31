@@ -327,6 +327,15 @@ fun SettingsScreen(
     val focusPeakingEnabled by viewModel.focusPeakingEnabled.collectAsState(initial = true)
     val eyeFocusEnabled by viewModel.eyeFocusEnabled.collectAsState()
     val keepUltraWideReady by viewModel.keepUltraWideReady.collectAsState()
+    val autoSwitchToUltraWide by viewModel.autoSwitchToUltraWide.collectAsState()
+    val lensSwitchOverlapAnimationEnabled by viewModel.lensSwitchOverlapAnimationEnabled.collectAsState()
+    val lensSwitchOverlapDurationSec by viewModel.lensSwitchOverlapDurationSec.collectAsState()
+    var lensSwitchOverlapDurationUi by remember {
+        mutableFloatStateOf(lensSwitchOverlapDurationSec)
+    }
+    LaunchedEffect(lensSwitchOverlapDurationSec) {
+        lensSwitchOverlapDurationUi = lensSwitchOverlapDurationSec
+    }
     val showGrid = state.showGrid
     val shutterSoundEnabled by viewModel.shutterSoundEnabled.collectAsState(initial = true)
     val vibrationEnabled by viewModel.vibrationEnabled.collectAsState(initial = true)
@@ -1198,6 +1207,33 @@ fun SettingsScreen(
                             description = "Keep the supported alternate rear lens open in the background for faster switching.",
                             checked = keepUltraWideReady,
                             onCheckedChange = viewModel::setKeepUltraWideReady
+                        )
+
+                        SwitchSettingItem(
+                            title = "Frame-based lens handoff",
+                            description = "Blend between the live main and ultra-wide streams instead of switching through a frozen screenshot.",
+                            checked = lensSwitchOverlapAnimationEnabled,
+                            onCheckedChange = viewModel::setLensSwitchOverlapAnimationEnabled
+                        )
+
+                        SliderSettingItem(
+                            title = "Lens handoff duration",
+                            description = "Controls how long the live camera streams crossfade.",
+                            value = lensSwitchOverlapDurationUi,
+                            valueRange = 0.1f..1.0f,
+                            resetValue = 0.3f,
+                            onValueChange = { lensSwitchOverlapDurationUi = (it * 10f).roundToInt() / 10f },
+                            onValueChangeFinished = {
+                                viewModel.setLensSwitchOverlapDurationSec(lensSwitchOverlapDurationUi)
+                            },
+                            valueTextFormatter = { String.format(Locale.getDefault(), "%.1f s", it) }
+                        )
+
+                        SwitchSettingItem(
+                            title = "Auto switch to ultra-wide",
+                            description = "Switch to ultra-wide when close subjects repeatedly fail to focus on the main camera, then return when focus becomes reliable.",
+                            checked = autoSwitchToUltraWide,
+                            onCheckedChange = viewModel::setAutoSwitchToUltraWide
                         )
 
                         if (mainCameraIdOptions.size > 1) {
