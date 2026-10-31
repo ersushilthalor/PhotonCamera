@@ -315,6 +315,9 @@ class Camera2Controller(private val context: Context) {
     private var cachedCharacteristics: CameraCharacteristics? = null
     private var cachedCharacteristicsCameraId: String = ""
     private var activeOpenCameraId: String = ""
+    // CameraInfo.cameraId associated with the currently configured device/session.
+    // state.currentCameraId can move ahead while the old device is still being closed.
+    private var activeSessionCameraId: String = ""
     private var activeOutputPhysicalCameraId: String? = null
     private val failedPhysicalOutputProfiles = mutableSetOf<PhysicalOutputFailureKey>()
     private var cachedSensorOrientation: Int = 0
@@ -2159,6 +2162,7 @@ class Camera2Controller(private val context: Context) {
         cachedCharacteristics = null
         cachedCharacteristicsCameraId = ""
         activeOpenCameraId = ""
+        activeSessionCameraId = ""
         activeOutputPhysicalCameraId = null
         cachedSensorOrientation = 0
         cachedLensFacing = CameraCharacteristics.LENS_FACING_BACK
@@ -2606,6 +2610,7 @@ class Camera2Controller(private val context: Context) {
         }
 
         activeOpenCameraId = openCameraId
+        activeSessionCameraId = cameraId
         val requestedPhysicalCameraId = resolveRequestedPhysicalCameraId(_state.value, selectedCamera)
         var outputPhysicalCameraId = requestedPhysicalCameraId
         activeOutputPhysicalCameraId = outputPhysicalCameraId
@@ -6690,6 +6695,9 @@ class Camera2Controller(private val context: Context) {
     }
 
     private fun recreateSessionForPhysicalZoomIfNeeded(state: CameraState): Boolean {
+        // A lens switch updates state.currentCameraId before the old device is closed.
+        // Do not rebuild that old session for the new lens: openCameraNow() configures it.
+        if (state.currentCameraId != activeSessionCameraId) return false
         val desiredPhysicalCameraId = resolveOutputPhysicalCameraId(state)
         if (desiredPhysicalCameraId == activeOutputPhysicalCameraId) return false
         if (cameraDevice == null || previewSurface == null) return false
