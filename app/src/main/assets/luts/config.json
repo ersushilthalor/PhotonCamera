@@ -1,0 +1,125 @@
+{
+  "luts": [
+    {
+      "id": "none",
+      "path": "",
+      "name": {
+        "en": "Off",
+        "zh": "Off"
+      },
+      "isVip": false,
+      "isDefault": true,
+      "category": "Video"
+    },
+    {
+      "id": "oppo_brisa",
+      "path": "",
+      "name": {
+        "en": "Brisa",
+        "zh": "Brisa"
+      },
+      "isVip": false,
+      "category": "Video"
+    },
+    {
+      "id": "oppo_somber",
+      "path": "",
+      "name": {
+        "en": "Somber",
+        "zh": "Somber"
+      },
+      "isVip": false,
+      "category": "Video"
+    },
+    {
+      "id": "oppo_nettai",
+      "path": "",
+      "name": {
+        "en": "Nettai",
+        "zh": "Nettai"
+      },
+      "isVip": false,
+      "category": "Video"
+    },
+    {
+      "id": "oppo_romance",
+      "path": "",
+      "name": {
+        "en": "Romance",
+        "zh": "Romance"
+      },
+      "isVip": false,
+      "category": "Video"
+    },
+    {
+      "id": "oppo_romancesoft",
+      "path": "",
+      "name": {
+        "en": "RomanceSoft",
+        "zh": "RomanceSoft"
+      },
+      "isVip": false,
+      "category": "Video"
+    },
+    {
+      "id": "oppo_mono",
+      "path": "",
+      "name": {
+        "en": "Mono",
+        "zh": "Mono"
+      },
+      "isVip": false,
+      "category": "Video"
+    },
+    {
+      "id": "oppo_dusk",
+      "path": "",
+      "name": {
+        "en": "Dusk",
+        "zh": "Dusk"
+      },
+      "isVip": false,
+      "category": "Video"
+    },
+    {
+      "id": "oppo_synch",
+      "path": "",
+      "name": {
+        "en": "Synch",
+        "zh": "Synch"
+      },
+      "isVip": false,
+      "category": "Video"
+    },
+    {
+      "id": "oppo_teal",
+      "path": "",
+      "name": {
+        "en": "Teal",
+        "zh": "Teal"
+      },
+      "isVip": false,
+      "category": "Video"
+    },
+    {
+      "id": "oppo_cinema",
+      "path": "",
+      "name": {
+        "en": "Cinema",
+        "zh": "Cinema"
+      },
+      "isVip": false,
+      "category": "Video"
+    },
+    {
+      "id": "oppo_wedding",
+      "path": "",
+      "name": {
+        "en": "Wedding",
+        "zh": "Wedding"
+      },
+      "isVip": false,
+      "category": "Video"
+    }
+  ]
+}

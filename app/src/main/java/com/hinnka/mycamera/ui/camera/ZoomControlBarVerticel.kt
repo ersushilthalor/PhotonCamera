@@ -39,6 +39,7 @@ import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.CameraInfo
 import com.hinnka.mycamera.camera.LensType
 import com.hinnka.mycamera.viewmodel.CameraViewModel
+import com.hinnka.mycamera.video.CaptureMode
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.exp
@@ -82,6 +83,8 @@ fun ZoomControlBarVerticel(
     }
 
     val cameraState by viewModel.state.collectAsState()
+    val isLogVideo = cameraState.captureMode == CaptureMode.VIDEO &&
+        cameraState.videoConfig.logProfile.isEnabled
     val minZoom = remember(cameraState.availableCameras) {
         cameraState.availableCameras.filter { it.lensType != LensType.FRONT }.minOfOrNull { it.minZoom * it.displayIntrinsicZoomRatio } ?: 1f
     }
@@ -245,8 +248,8 @@ fun ZoomControlBarVerticel(
                     }
             ) {
                 Icon(
-                    imageVector = AppIcons.AutoAwesome,
-                    contentDescription = stringResource(R.string.filters_panel),
+                    imageVector = if (isLogVideo) AppIcons.Palette else AppIcons.AutoAwesome,
+                    contentDescription = stringResource(if (isLogVideo) R.string.filter else R.string.filters_panel),
                     modifier = Modifier.size(32.dp)
                         .background(Color.Black.copy(alpha = 0.3f), CircleShape)
                         .padding(8.dp),

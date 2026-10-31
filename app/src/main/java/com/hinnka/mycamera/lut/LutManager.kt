@@ -260,11 +260,12 @@ class LutManager(private val context: Context) {
         // 从文件加载
         return try {
             val lutConfig = if (lutInfo.isBuiltIn) {
-                if (lutInfo.fileName.isBlank()) {
-                    return null
+                if (lutInfo.id.startsWith(OppoLutPack.PREFIX)) {
+                    OppoLutPack.load(context, lutInfo.id)
+                } else {
+                    if (lutInfo.fileName.isBlank()) return null
+                    LutParser.parseFromAssets(context, lutInfo.fileName)
                 }
-                // 内置 LUT 从 assets 加载
-                LutParser.parseFromAssets(context, lutInfo.fileName)
             } else {
                 // 自定义 LUT 从文件系统加载
                 java.io.File(lutInfo.fileName).inputStream().use { inputStream ->
@@ -272,6 +273,7 @@ class LutManager(private val context: Context) {
                 }
             }
 
+            if (lutConfig == null) return null
             if (lutConfig.isValid()) {
                 // 添加到缓存
                 lutCache.put(id, lutConfig)

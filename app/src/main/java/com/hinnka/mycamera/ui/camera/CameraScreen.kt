@@ -281,9 +281,11 @@ fun CameraScreen(
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
     var zoomJoystickOpen by remember { mutableStateOf(false) }
     var showVideoResolutionPanel by remember { mutableStateOf(false) }
+    var showOppoLogLutWindow by remember { mutableStateOf(false) }
     var videoResolutionBackdrop by remember { mutableStateOf<Bitmap?>(null) }
     val resolutionPanelCaptureActive by rememberUpdatedState(
-        showVideoResolutionPanel && state.captureMode == CaptureMode.VIDEO
+        (showVideoResolutionPanel || showOppoLogLutWindow) &&
+            state.captureMode == CaptureMode.VIDEO
     )
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
     var zoomBarBounds by remember { mutableStateOf<Rect?>(null) }
@@ -367,13 +369,25 @@ fun CameraScreen(
     LaunchedEffect(state.captureMode) {
         if (state.captureMode != CaptureMode.VIDEO) {
             showVideoResolutionPanel = false
+            showOppoLogLutWindow = false
         }
+    }
+
+    LaunchedEffect(state.captureMode, state.videoConfig.logProfile) {
+        if (state.captureMode != CaptureMode.VIDEO || !state.videoConfig.logProfile.isEnabled) {
+            showOppoLogLutWindow = false
+        }
+    }
+    LaunchedEffect(showVideoResolutionPanel) {
+        if (showVideoResolutionPanel) showOppoLogLutWindow = false
     }
 
     // Sample the existing GL preview only while the resolution selector is visible.
     // The low-resolution frames are used only as the panel's frosted backdrop.
-    LaunchedEffect(showVideoResolutionPanel, state.captureMode, state.previewFirstFrameTimestampNs) {
-        if (!showVideoResolutionPanel || state.captureMode != CaptureMode.VIDEO) {
+    LaunchedEffect(showVideoResolutionPanel, showOppoLogLutWindow, state.captureMode, state.previewFirstFrameTimestampNs) {
+        if ((!showVideoResolutionPanel && !showOppoLogLutWindow) ||
+            state.captureMode != CaptureMode.VIDEO
+        ) {
             videoResolutionBackdrop?.recycleIfAlive()
             videoResolutionBackdrop = null
             return@LaunchedEffect
@@ -407,6 +421,7 @@ fun CameraScreen(
     LaunchedEffect(activePanel) {
         if (activePanel != ActivePanel.NONE) {
             showVideoResolutionPanel = false
+            showOppoLogLutWindow = false
         }
     }
 
@@ -1038,14 +1053,14 @@ fun CameraScreen(
                     onZoomStopClick = { animateZoomStopWithPreviewTransition(it) },
                     onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
                     onFilterClick = {
-                        // In Video + Log mode this button opens the live LUT picker.
-                        // With Log disabled, preserve the existing direct Edit behavior.
-                        val targetPanel = if (isVideoMode && state.videoConfig.logProfile.isEnabled) {
-                            ActivePanel.FILTERS
+                        if (isVideoMode && state.videoConfig.logProfile.isEnabled) {
+                            showVideoResolutionPanel = false
+                            activePanel = ActivePanel.NONE
+                            showOppoLogLutWindow = !showOppoLogLutWindow
                         } else {
-                            ActivePanel.EDIT
+                            showOppoLogLutWindow = false
+                            activePanel = if (activePanel == ActivePanel.EDIT) ActivePanel.NONE else ActivePanel.EDIT
                         }
-                        activePanel = if (activePanel == targetPanel) ActivePanel.NONE else targetPanel
                     },
                     onFilterButtonBoundsChanged = { bounds ->
                         filterButtonBounds = bounds
@@ -1588,14 +1603,14 @@ fun CameraScreen(
                             onZoomStopClick = { animateZoomStopWithPreviewTransition(it) },
                             onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
                             onFilterClick = {
-                                // Match the horizontal layout: Log video opens the live LUT picker;
-                                // Log Off continues to open the Edit panel directly.
-                                val targetPanel = if (isVideoMode && state.videoConfig.logProfile.isEnabled) {
-                                    ActivePanel.FILTERS
+                                if (isVideoMode && state.videoConfig.logProfile.isEnabled) {
+                                    showVideoResolutionPanel = false
+                                    activePanel = ActivePanel.NONE
+                                    showOppoLogLutWindow = !showOppoLogLutWindow
                                 } else {
-                                    ActivePanel.EDIT
+                                    showOppoLogLutWindow = false
+                                    activePanel = if (activePanel == ActivePanel.EDIT) ActivePanel.NONE else ActivePanel.EDIT
                                 }
-                                activePanel = if (activePanel == targetPanel) ActivePanel.NONE else targetPanel
                             },
                             onFilterButtonBoundsChanged = { bounds ->
                                 filterButtonBounds = bounds
@@ -1798,6 +1813,32 @@ fun CameraScreen(
                         .align(Alignment.TopCenter)
                         .statusBarsPadding()
                         .padding(top = 56.dp)
+                )
+
+                if (showOppoLogLutWindow) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable(
+                                interactionSource = remember {
+                                    androidx.compose.foundation.interaction.MutableInteractionSource()
+                                },
+                                indication = null
+                            ) { showOppoLogLutWindow = false }
+                    )
+                }
+                OppoLogLutFloatingWindow(
+                    isOpen = showOppoLogLutWindow,
+                    availableLuts = viewModel.selectableLutList.filter { it.id.startsWith("oppo_") },
+                    selectedLutId = currentLutId,
+                    intensity = effectiveRecipeParams.lutIntensity,
+                    backdrop = videoResolutionBackdrop,
+                    onLutSelected = viewModel::setLut,
+                    onIntensityChange = viewModel::updateLutIntensity,
+                    onDismissRequest = { showOppoLogLutWindow = false },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 148.dp)
                 )
             }
         }

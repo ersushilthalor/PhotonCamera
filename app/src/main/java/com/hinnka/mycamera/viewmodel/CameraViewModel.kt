@@ -43,6 +43,7 @@ import com.hinnka.mycamera.gallery.PhotoSavePath
 import com.hinnka.mycamera.lut.BaselineColorCorrectionTarget
 import com.hinnka.mycamera.lut.BakedLutExporter
 import com.hinnka.mycamera.lut.LutConfig
+import com.hinnka.mycamera.lut.OppoLutPack
 import com.hinnka.mycamera.lut.LutConverter
 import com.hinnka.mycamera.lut.LutInfo
 import com.hinnka.mycamera.lut.creator.LutGenerator
@@ -1451,7 +1452,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val profile = state.value.videoConfig.logProfile
             return if (state.value.captureMode == CaptureMode.VIDEO && profile.isEnabled) {
                 availableLutList.filter {
-                    it.id == "none" || profile.matchesLut(it.inputCurve, it.inputColorSpace)
+                    it.id == "none" || isOppoBundledLut(it.id) ||
+                        profile.matchesLut(it.inputCurve, it.inputColorSpace)
                 }
             } else availableLutList
         }
@@ -4098,7 +4100,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             userPreferencesRepository.saveVideoLogProfile(logProfile)
         }
-        validateAndCancelNonMatchingVideoLut(logProfile, currentLutConfig)
+        val selectedLutId = currentLutId.value
+        if (isOppoBundledLut(selectedLutId)) {
+            setLut(selectedLutId, persist = false)
+        } else {
+            validateAndCancelNonMatchingVideoLut(logProfile, currentLutConfig)
+        }
     }
 
     fun setVideoLogLutMode(mode: VideoLogLutMode) {
@@ -4111,8 +4118,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 验证并取消选择非匹配的视频 LUT
      * 如果当前处于视频模式且启用了 Log，若当前选中的 LUT 与 Log 格式不匹配，则取消该 LUT
      */
+    private fun isOppoBundledLut(id: String?): Boolean =
+        id?.startsWith(OppoLutPack.PREFIX) == true
+
     private fun validateAndCancelNonMatchingVideoLut(logProfile: VideoLogProfile, lutConfig: LutConfig?) {
-        if (logProfile != VideoLogProfile.OFF && lutConfig != null) {
+        if (logProfile != VideoLogProfile.OFF && lutConfig != null &&
+            !isOppoBundledLut(currentLutId.value)
+        ) {
             if (!logProfile.matchesLut(lutConfig.curve, lutConfig.colorSpace)) {
                 PLog.d(TAG, "Cancelling selected LUT [${lutConfig.title}] because it does not match video log profile [${logProfile.name}] colorSpace/curve")
                 setLut(null, persist = false)
@@ -4399,7 +4411,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun setLut(lutId: String?, persist: Boolean = true) {
         val normalizedLutId = lutId ?: "none"
         val profile = state.value.videoConfig.logProfile
-        if (state.value.captureMode == CaptureMode.VIDEO && profile.isEnabled && normalizedLutId != "none") {
+        if (state.value.captureMode == CaptureMode.VIDEO && profile.isEnabled &&
+            normalizedLutId != "none" && !isOppoBundledLut(normalizedLutId)
+        ) {
             val info = availableLutList.firstOrNull { it.id == normalizedLutId }
             if (info != null && !profile.matchesLut(info.inputCurve, info.inputColorSpace)) {
                 if (!persist) applyLut("none")
@@ -4494,7 +4508,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         lutLoadJob?.cancel()
         val profile = state.value.videoConfig.logProfile
         if (state.value.captureMode == CaptureMode.VIDEO && profile.isEnabled &&
-            !profile.matchesLut(currentLutConfig?.curve, currentLutConfig?.colorSpace)) {
+            !isOppoBundledLut(normalizedLutId) &&
+            !profile.matchesLut(currentLutConfig?.curve, currentLutConfig?.colorSpace)
+        ) {
             currentLutConfig = null
             cameraController.setLogLutActive(false)
         }
@@ -4511,16 +4527,29 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 cameraController.setLutEnabled(false)
             }
             lutLoadJob = viewModelScope.launch {
-                val loadedLut = withContext(Dispatchers.IO) {
+                val sourceLut = withContext(Dispatchers.IO) {
                     contentRepository.lutManager.loadLut(normalizedLutId)
                 }
                 if (lutLoadGeneration != loadGeneration || currentLutId.value != normalizedLutId) {
                     return@launch
                 }
+                val activeLogProfile = state.value.videoConfig.logProfile
+                val loadedLut = sourceLut?.let { lut ->
+                    if (state.value.captureMode == CaptureMode.VIDEO &&
+                        activeLogProfile.isEnabled && isOppoBundledLut(normalizedLutId)
+                    ) {
+                        lut.copy(
+                            curve = activeLogProfile.logCurve,
+                            colorSpace = activeLogProfile.colorSpace
+                        )
+                    } else lut
+                }
                 if (state.value.captureMode == CaptureMode.VIDEO) {
                     val logProfile = state.value.videoConfig.logProfile
                     if (logProfile != VideoLogProfile.OFF && loadedLut != null) {
-                        if (!logProfile.matchesLut(loadedLut.curve, loadedLut.colorSpace)) {
+                        if (!isOppoBundledLut(normalizedLutId) &&
+                            !logProfile.matchesLut(loadedLut.curve, loadedLut.colorSpace)
+                        ) {
                             PLog.d(TAG, "Deselecting newly selected LUT [${loadedLut.title}] because it does not match video log profile [${logProfile.name}] colorSpace/curve")
                             setLut(null, persist = false)
                             return@launch

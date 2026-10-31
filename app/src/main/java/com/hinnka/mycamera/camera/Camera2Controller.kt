@@ -7630,8 +7630,10 @@ class Camera2Controller(private val context: Context) {
         // The Selfie Mirror preference applies to still photos only.
         val shouldFlipEncodedFrame = isCurrentCameraFrontFacing()
         val logProfile = _state.value.videoConfig.logProfile
+        val isOppoBundledLut = creativeLutConfig?.title?.startsWith("oppo_") == true
         val monitorOnly = logProfile.isEnabled &&
-            _state.value.videoConfig.logLutMode == VideoLogLutMode.MONITOR_ONLY
+            _state.value.videoConfig.logLutMode == VideoLogLutMode.MONITOR_ONLY &&
+            !isOppoBundledLut
         val recordingLut = creativeLutConfig?.takeIf {
             !monitorOnly && logProfile.matchesLut(it.curve, it.colorSpace)
         }
