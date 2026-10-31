@@ -67,6 +67,7 @@ import com.hinnka.mycamera.MyCameraApplication
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.CameraState
+import com.hinnka.mycamera.camera.LensType
 import com.hinnka.mycamera.camera.FocusPointSource
 import com.hinnka.mycamera.camera.PhotoCaptureProgress
 import com.hinnka.mycamera.data.CaptureButtonStyle
@@ -512,6 +513,34 @@ fun CameraScreen(
         zoomStopAnimationJob = null
     }
 
+    suspend fun animateCurrentLensToZoomStopAndWait(
+        targetZoom: Float,
+        durationMillis: Int,
+    ) {
+        val startZoom = viewModel.zoomRatioByMain
+        if (abs(startZoom - targetZoom) <= ZoomStopAnimationCompletionThreshold) {
+            viewModel.setZoomRatio(targetZoom)
+            return
+        }
+        val progress = Animatable(0f)
+        progress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(
+                durationMillis = durationMillis,
+                easing = FastOutSlowInEasing
+            )
+        ) {
+            viewModel.setZoomRatio(
+                interpolateZoomRatio(
+                    startZoom = startZoom,
+                    targetZoom = targetZoom,
+                    progress = value
+                )
+            )
+        }
+        viewModel.setZoomRatio(targetZoom)
+    }
+
     fun animateCurrentLensToZoomStop(targetZoom: Float) {
         cancelZoomStopAnimation()
         val startZoom = viewModel.zoomRatioByMain
@@ -520,24 +549,107 @@ fun CameraScreen(
             return
         }
         zoomStopAnimationJob = scope.launch {
-            val progress = Animatable(0f)
-            progress.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(
-                    durationMillis = resolveZoomStopAnimationDurationMillis(startZoom, targetZoom),
-                    easing = FastOutSlowInEasing
+            animateCurrentLensToZoomStopAndWait(
+                targetZoom = targetZoom,
+                durationMillis = resolveZoomStopAnimationDurationMillis(startZoom, targetZoom),
+            )
+        }
+    }
+
+    /**
+     * Keep the main/ultra-wide handoff out of the zoom animation itself.
+     *
+     * Ultra-wide -> main: animate the active ultra-wide crop to the main 1x field of view,
+     * hold that exact framing, then promote the warm main stream.
+     * Main -> ultra-wide: promote the standby ultra-wide already cropped to the same 1x
+     * field of view, then animate that active lens out to its native wide stop.
+     */
+    fun runMainUltraWideStopTransition(targetCameraId: String): Boolean {
+        if (viewModel.isVideoLensLocked()) return false
+
+        val currentCamera = state.getCurrentCameraInfo() ?: return false
+        val targetCamera = state.availableCameras.firstOrNull {
+            it.cameraId == targetCameraId
+        } ?: return false
+        val currentLensType = currentCamera.lensType
+        val targetLensType = targetCamera.lensType
+        val currentStopZoom = currentCamera.displayIntrinsicZoomRatio
+            .takeIf { it > 0f }
+            ?: currentCamera.intrinsicZoomRatio.takeIf { it > 0f }
+            ?: 1f
+        val targetStopZoom = targetCamera.displayIntrinsicZoomRatio
+            .takeIf { it > 0f }
+            ?: targetCamera.intrinsicZoomRatio.takeIf { it > 0f }
+            ?: 1f
+        val startingZoom = viewModel.zoomRatioByMain
+
+        val isUltraWideToMain =
+            currentLensType == LensType.BACK_ULTRA_WIDE &&
+                targetLensType == LensType.BACK_MAIN
+        val isMainToUltraWide =
+            currentLensType == LensType.BACK_MAIN &&
+                targetLensType == LensType.BACK_ULTRA_WIDE
+        if (!isUltraWideToMain && !isMainToUltraWide) return false
+
+        // Stage only a tap from the physical lens's native stop; continuous zoom gestures
+        // keep their existing automatic lens-selection behavior.
+        if (abs(startingZoom - currentStopZoom) > 0.08f) return false
+
+        cancelZoomStopAnimation()
+        lensSwitchTransition.cancelPendingSwitch()
+
+        if (isUltraWideToMain) {
+            zoomStopAnimationJob = scope.launch {
+                animateCurrentLensToZoomStopAndWait(
+                    targetZoom = targetStopZoom,
+                    durationMillis = 300,
                 )
-            ) {
-                viewModel.setZoomRatio(
-                    interpolateZoomRatio(
-                        startZoom = startZoom,
-                        targetZoom = targetZoom,
-                        progress = value
+                delay(200L)
+
+                if (viewModel.state.value.currentCameraId != currentCamera.cameraId ||
+                    viewModel.isVideoLensLocked()
+                ) {
+                    return@launch
+                }
+
+                lensSwitchTransition.switchLens(
+                    cameraId = targetCamera.cameraId,
+                    targetZoom = targetStopZoom,
+                    forceImmediateHandoff = true,
+                ) {
+                    viewModel.switchToLensAndSetZoomRatio(
+                        targetCamera.cameraId,
+                        targetStopZoom,
                     )
+                }
+            }
+        } else {
+            // The incoming ultra-wide standby request is configured at this same global 1x
+            // crop. Promote it without a crossfade, then perform the visible 1x -> 0.5x zoom.
+            val matchingOneXZoom = 1f
+            lensSwitchTransition.switchLens(
+                cameraId = targetCamera.cameraId,
+                targetZoom = matchingOneXZoom,
+                forceImmediateHandoff = true,
+                onComplete = {
+                    if (viewModel.state.value.currentCameraId == targetCamera.cameraId) {
+                        zoomStopAnimationJob = scope.launch {
+                            animateCurrentLensToZoomStopAndWait(
+                                targetZoom = targetStopZoom,
+                                durationMillis = 300,
+                            )
+                            delay(200L)
+                        }
+                    }
+                },
+            ) {
+                viewModel.switchToLensAndSetZoomRatio(
+                    targetCamera.cameraId,
+                    matchingOneXZoom,
                 )
             }
-            viewModel.setZoomRatio(targetZoom)
         }
+        return true
     }
 
     fun runPreviewTransition(onSwitch: () -> Unit) {
@@ -561,6 +673,7 @@ fun CameraScreen(
         val targetZoom = targetCamera.displayIntrinsicZoomRatio.takeIf { it > 0f }
             ?: targetCamera.intrinsicZoomRatio.takeIf { it > 0f }
             ?: 1f
+        if (runMainUltraWideStopTransition(cameraId)) return
         if (viewModel.isVideoLensLocked()) {
             animateCurrentLensToZoomStop(targetZoom)
             return
@@ -613,6 +726,7 @@ fun CameraScreen(
             currentCameraId
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
+            if (runMainUltraWideStopTransition(camera.cameraId)) return
             lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
                 viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
             }
