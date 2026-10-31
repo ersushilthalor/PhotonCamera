@@ -1352,8 +1352,6 @@ fun CameraScreen(
                         )
                     }
 
-                    LensSwitchTransitionOverlay(lensSwitchTransition, Modifier.fillMaxSize())
-
                     val showLivePhotoIndicator =
                         state.captureMode == CaptureMode.PHOTO && useLivePhoto
                     val showVirtualApertureIndicator =
