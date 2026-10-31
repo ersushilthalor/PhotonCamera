@@ -9039,6 +9039,7 @@ class Camera2Controller(private val context: Context) {
             val keepVideoRecording = preserveVideoRecording && _state.value.videoRecordingState.isRecording
             if (keepVideoRecording) {
                 PLog.d(TAG, "Closing camera while keeping active video recording")
+                videoRecorder.beginCameraHandoff()
             }
             if (_state.value.videoRecordingState.isRecording && !keepVideoRecording) {
                 stopVideoRecording()
