@@ -2899,6 +2899,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             isInitialized.first { it }
             if (currentSurfaceTexture !== surfaceTexture) return@launch
             syncVendorCaptureSettingsToController()
+            cameraController.setStandbyPreviewSurface(glSurfaceView?.standbyCameraInputSurface)
             cameraController.openCamera(
                 surfaceTexture = surfaceTexture,
                 preserveVideoRecording = preserveVideoRecording,
@@ -2936,6 +2937,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraReopenJob?.cancel()
         cameraOpenInFlight = false
         currentSurfaceTexture = null
+        cameraController.setStandbyPreviewSurface(null)
         cameraController.closeCamera(expectedSurfaceTexture = surfaceTexture)
     }
 
