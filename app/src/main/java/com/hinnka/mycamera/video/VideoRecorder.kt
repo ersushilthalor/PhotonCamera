@@ -405,13 +405,14 @@ class VideoRecorder(
         // EIS+ consumes Camera2's timestamped YUV reader, not the renderer's OES input.
         // Keep the active stabilization session attached and only update its resume geometry.
         if (requestedEnhancedStabilization && currentCameraUsesEnhancedStabilization) {
-            runBlocking(renderDispatcher) {
+            // This only updates the dimensions used by a future pause/resume. Do not block the
+            // Camera2 handler or restart the live EIS session during the 0 ms lens handoff.
+            scope.launch(renderDispatcher) {
                 renderer?.updateStabilizationInputSize(size)
-                renderer?.updateStabilizationPresentationForCameraSwitch(sensorOrientationDegrees)
             }
             PLog.i(
                 TAG,
-                "EIS+ recording geometry refreshed without restarting its active session: " +
+                "EIS+ recording geometry queued without restarting its active session: " +
                     "${size.width}x${size.height}, sensorOrientation=$sensorOrientationDegrees",
             )
             return
