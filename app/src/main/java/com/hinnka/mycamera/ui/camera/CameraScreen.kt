@@ -280,6 +280,11 @@ fun CameraScreen(
     var cameraScreenBounds by remember { mutableStateOf<Rect?>(null) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
     var zoomJoystickOpen by remember { mutableStateOf(false) }
+    var showVideoResolutionPanel by remember { mutableStateOf(false) }
+    var videoResolutionBackdrop by remember { mutableStateOf<Bitmap?>(null) }
+    val resolutionPanelCaptureActive by rememberUpdatedState(
+        showVideoResolutionPanel && state.captureMode == CaptureMode.VIDEO
+    )
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
     var zoomBarBounds by remember { mutableStateOf<Rect?>(null) }
     var filterButtonBounds by remember { mutableStateOf<Rect?>(null) }
@@ -358,6 +363,52 @@ fun CameraScreen(
             }
         }
     )
+
+    LaunchedEffect(state.captureMode) {
+        if (state.captureMode != CaptureMode.VIDEO) {
+            showVideoResolutionPanel = false
+        }
+    }
+
+    // Sample the existing GL preview only while the resolution selector is visible.
+    // The low-resolution frames are used only as the panel's frosted backdrop.
+    LaunchedEffect(showVideoResolutionPanel, state.captureMode) {
+        if (!showVideoResolutionPanel || state.captureMode != CaptureMode.VIDEO) {
+            videoResolutionBackdrop?.recycleIfAlive()
+            videoResolutionBackdrop = null
+            return@LaunchedEffect
+        }
+
+        val preview = viewModel.glSurfaceView ?: return@LaunchedEffect
+        try {
+            while (isActive) {
+                preview.capturePreviewFrame(480) { frame ->
+                    if (resolutionPanelCaptureActive && !frame.isRecycled) {
+                        val previous = videoResolutionBackdrop
+                        videoResolutionBackdrop = frame
+                        if (previous != null && previous !== frame) {
+                            scope.launch {
+                                withFrameNanos { }
+                                previous.recycleIfAlive()
+                            }
+                        }
+                    } else {
+                        frame.recycleIfAlive()
+                    }
+                }
+                delay(220L)
+            }
+        } finally {
+            videoResolutionBackdrop?.recycleIfAlive()
+            videoResolutionBackdrop = null
+        }
+    }
+
+    LaunchedEffect(activePanel) {
+        if (activePanel != ActivePanel.NONE) {
+            showVideoResolutionPanel = false
+        }
+    }
 
     // 当打开滤镜面板时，生成预览图
     LaunchedEffect(activePanel) {
@@ -957,7 +1008,10 @@ fun CameraScreen(
                 onVideoTorchToggle = { viewModel.setVideoTorchEnabled(!state.videoConfig.torchEnabled) },
                 onVideoStabilizationModeChange = viewModel::setVideoStabilizationMode,
                 onVideoResolutionClick = {
-                    cycleVideoResolution(state)?.let(viewModel::setVideoResolution)
+                    if (state.videoConfig.aspectRatio != VideoAspectRatio.OPEN_GATE) {
+                        activePanel = ActivePanel.NONE
+                        showVideoResolutionPanel = !showVideoResolutionPanel
+                    }
                 },
                 onVideoFpsClick = {
                     cycleVideoFps(state)?.let(viewModel::setVideoFps)
@@ -1709,6 +1763,35 @@ fun CameraScreen(
                     controls(Modifier.fillMaxWidth())
                 }
             )
+
+            if (showVideoResolutionPanel && isVideoMode) {
+                Box(Modifier.fillMaxSize()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable(
+                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                showVideoResolutionPanel = false
+                            }
+                    )
+                    VideoResolutionFloatingPanel(
+                        isOpen = true,
+                        selectedResolution = state.videoConfig.resolution,
+                        selectedFps = state.videoConfig.fps,
+                        availableResolutions = state.videoCapabilities.availableResolutions,
+                        availableFps = state.videoCapabilities.availableFps,
+                        backdrop = videoResolutionBackdrop,
+                        onResolutionSelected = viewModel::setVideoResolution,
+                        onFpsSelected = viewModel::setVideoFps,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .statusBarsPadding()
+                            .padding(top = 56.dp)
+                    )
+                }
+            }
         }
         val panelDismissBounds = if (isXpan) {
             viewfinderAreaBounds ?: previewBounds
