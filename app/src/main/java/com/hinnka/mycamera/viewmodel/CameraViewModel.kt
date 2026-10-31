@@ -2909,6 +2909,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             isInitialized.first { it }
             if (currentSurfaceTexture !== surfaceTexture) return@launch
             syncVendorCaptureSettingsToController()
+            glSurfaceView?.setActiveCameraInputUsesStandby(false)
             cameraController.setStandbyPreviewSurface(glSurfaceView?.standbyCameraInputSurface)
             cameraController.openCamera(
                 surfaceTexture = surfaceTexture,
@@ -3782,15 +3783,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun switchToLens(cameraId: String) {
         if (isVideoLensLocked()) return
-        val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId }
+        val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId } ?: return
+        val targetZoom = targetCamera.defaultVisibleZoomRatio()
         syncVendorCaptureSettingsToController()
-        cameraController.switchToCameraId(cameraId)
-        targetCamera?.let { camera ->
-            setZoomRatioForCamera(camera.defaultVisibleZoomRatio(), camera.cameraId)
+        cameraController.tryPromoteWarmStandbyCamera(cameraId) { promoted, activeUsesStandbySurface ->
+            if (promoted) {
+                glSurfaceView?.setActiveCameraInputUsesStandby(activeUsesStandbySurface)
+                setZoomRatioForCamera(targetZoom, cameraId)
+            } else {
+                cameraController.switchToCameraId(cameraId)
+                setZoomRatioForCamera(targetZoom, cameraId)
+                reopenCamera(preserveVideoRecording = true)
+            }
         }
-        reopenCamera(
-            preserveVideoRecording = true
-        )
     }
 
     fun switchToLensAndSetZoomRatio(cameraId: String, ratio: Float) {
@@ -3799,11 +3804,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
         syncVendorCaptureSettingsToController()
-        cameraController.switchToCameraId(cameraId)
-        setZoomRatioForCamera(ratio, cameraId)
-        reopenCamera(
-            preserveVideoRecording = true
-        )
+        cameraController.tryPromoteWarmStandbyCamera(cameraId) { promoted, activeUsesStandbySurface ->
+            if (promoted) {
+                glSurfaceView?.setActiveCameraInputUsesStandby(activeUsesStandbySurface)
+                setZoomRatioForCamera(ratio, cameraId)
+            } else {
+                cameraController.switchToCameraId(cameraId)
+                setZoomRatioForCamera(ratio, cameraId)
+                reopenCamera(preserveVideoRecording = true)
+            }
+        }
     }
 
     /**
