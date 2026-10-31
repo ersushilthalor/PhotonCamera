@@ -51,13 +51,6 @@ fun CameraTopBar(
     onLivePhotoToggle: () -> Unit,
     videoConfig: VideoConfig,
     videoCapabilities: VideoCapabilities,
-    isProVideoMode: Boolean,
-    onProVideoModeToggle: () -> Unit,
-    isVideoLogWindowOpen: Boolean,
-    isVideoLutWindowOpen: Boolean,
-    currentVideoLutId: String,
-    onVideoLogWindowClick: () -> Unit,
-    onVideoLutWindowClick: () -> Unit,
     onVideoTorchToggle: () -> Unit,
     onVideoStabilizationModeChange: (VideoStabilizationMode) -> Unit,
     onVideoResolutionClick: () -> Unit,
@@ -73,13 +66,6 @@ fun CameraTopBar(
             recordingElapsedMs = recordingElapsedMs,
             videoConfig = videoConfig,
             videoCapabilities = videoCapabilities,
-            isProVideoMode = isProVideoMode,
-            onProVideoModeToggle = onProVideoModeToggle,
-            isVideoLogWindowOpen = isVideoLogWindowOpen,
-            isVideoLutWindowOpen = isVideoLutWindowOpen,
-            currentVideoLutId = currentVideoLutId,
-            onVideoLogWindowClick = onVideoLogWindowClick,
-            onVideoLutWindowClick = onVideoLutWindowClick,
             onVideoTorchToggle = onVideoTorchToggle,
             onVideoStabilizationModeChange = onVideoStabilizationModeChange,
             onVideoResolutionClick = onVideoResolutionClick,
@@ -182,13 +168,6 @@ private fun VideoTopBar(
     recordingElapsedMs: Long,
     videoConfig: VideoConfig,
     videoCapabilities: VideoCapabilities,
-    isProVideoMode: Boolean,
-    onProVideoModeToggle: () -> Unit,
-    isVideoLogWindowOpen: Boolean,
-    isVideoLutWindowOpen: Boolean,
-    currentVideoLutId: String,
-    onVideoLogWindowClick: () -> Unit,
-    onVideoLutWindowClick: () -> Unit,
     onVideoTorchToggle: () -> Unit,
     onVideoStabilizationModeChange: (VideoStabilizationMode) -> Unit,
     onVideoResolutionClick: () -> Unit,
@@ -229,27 +208,15 @@ private fun VideoTopBar(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    VideoModePill(
-                        label = stringResource(R.string.video_pro_mode),
-                        selected = isProVideoMode,
-                        onClick = onProVideoModeToggle
-                    )
-                    VideoModePill(
-                        label = stringResource(R.string.video_log),
-                        selected = isVideoLogWindowOpen || videoConfig.logProfile.isEnabled,
-                        onClick = onVideoLogWindowClick
-                    )
-                    VideoModePill(
-                        label = stringResource(R.string.video_pro_lut_button),
-                        selected = isVideoLutWindowOpen || currentVideoLutId != "none",
-                        onClick = onVideoLutWindowClick,
-                        icon = AppIcons.Palette
-                    )
-                    VideoModePill(
-                        label = "HDR",
-                        selected = videoHdrEnabled,
-                        onClick = onVideoHdrToggle
-                    )
+                    IconButton(onClick = onVideoHdrToggle) {
+                        Text(
+                            text = "HDR",
+                            color = Color.White.copy(alpha = if (videoHdrEnabled) 1f else 0.65f),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.autoRotate()
+                        )
+                    }
 
                     VideoActionIcon(
                         icon = if (videoConfig.torchEnabled) AppIcons.FlashlightOn else AppIcons.FlashlightOff,
@@ -304,59 +271,16 @@ private fun VideoTopBar(
                         }
                     }
 
-                    IconButton(
-                        onClick = onSettingsClick,
-                        modifier = Modifier.size(34.dp)
-                    ) {
+                    IconButton(onClick = onSettingsClick) {
                         Icon(
                             imageVector = Icons.Default.Settings,
                             contentDescription = stringResource(R.string.settings),
-                            modifier = Modifier.size(18.dp).autoRotate(),
+                            modifier = Modifier.size(20.dp).autoRotate(),
                             tint = Color.White
                         )
                     }
                 }
             }
-        }
-    }
-}
-
-
-@Composable
-private fun VideoModePill(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    icon: ImageVector? = null
-) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(9.dp),
-        color = if (selected) AccentColor.copy(alpha = 0.22f) else Color.Black.copy(alpha = 0.28f),
-        border = BorderStroke(1.dp, if (selected) AccentColor.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.12f)),
-        modifier = Modifier.height(30.dp)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(3.dp)
-        ) {
-            if (icon != null) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = if (selected) AccentColor else Color.White,
-                    modifier = Modifier.size(13.dp)
-                )
-            }
-            Text(
-                text = label,
-                color = if (selected) AccentColor else Color.White,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 0.3.sp,
-                maxLines = 1
-            )
         }
     }
 }
@@ -435,8 +359,7 @@ private fun VideoActionIcon(
 ) {
     IconButton(
         onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier.size(34.dp)
+        enabled = enabled
     ) {
         Icon(
             imageVector = icon,

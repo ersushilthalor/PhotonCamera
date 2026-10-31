@@ -84,7 +84,6 @@ import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VideoFpsPreset
 import com.hinnka.mycamera.video.VideoLogProfile
 import com.hinnka.mycamera.video.VideoResolutionPreset
-import com.hinnka.mycamera.video.VideoUiPreferences
 import com.hinnka.mycamera.video.VideoStabilizationMode
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
@@ -226,14 +225,6 @@ fun CameraScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var isProVideoMode by remember(context) {
-        mutableStateOf(VideoUiPreferences.isProVideoModeEnabled(context))
-    }
-    var isVideoLogWindowOpen by remember { mutableStateOf(false) }
-    var isVideoLutWindowOpen by remember { mutableStateOf(false) }
-    val videoFloatingWindowAppearance = remember(context) {
-        VideoUiPreferences.getFloatingWindowAppearance(context)
-    }
     val scope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
     val uiStyle by viewModel.uiStyle.collectAsState()
@@ -963,24 +954,6 @@ fun CameraScreen(
                 onLivePhotoToggle = { viewModel.setUseLivePhoto(!state.useLivePhoto) },
                 videoConfig = state.videoConfig,
                 videoCapabilities = state.videoCapabilities,
-                isProVideoMode = isProVideoMode,
-                onProVideoModeToggle = {
-                    isProVideoMode = !isProVideoMode
-                    VideoUiPreferences.setProVideoModeEnabled(context, isProVideoMode)
-                    isVideoLogWindowOpen = false
-                    isVideoLutWindowOpen = false
-                },
-                isVideoLogWindowOpen = isVideoLogWindowOpen,
-                isVideoLutWindowOpen = isVideoLutWindowOpen,
-                currentVideoLutId = currentLutId,
-                onVideoLogWindowClick = {
-                    isVideoLogWindowOpen = !isVideoLogWindowOpen
-                    if (isVideoLogWindowOpen) isVideoLutWindowOpen = false
-                },
-                onVideoLutWindowClick = {
-                    isVideoLutWindowOpen = !isVideoLutWindowOpen
-                    if (isVideoLutWindowOpen) isVideoLogWindowOpen = false
-                },
                 onVideoTorchToggle = { viewModel.setVideoTorchEnabled(!state.videoConfig.torchEnabled) },
                 onVideoStabilizationModeChange = viewModel::setVideoStabilizationMode,
                 onVideoResolutionClick = {
@@ -1709,49 +1682,6 @@ fun CameraScreen(
             }
 
             topBar()
-
-            if (isVideoMode && !state.videoRecordingState.isRecording &&
-                !state.videoRecordingState.isProcessing
-            ) {
-                if (isVideoLogWindowOpen) {
-                    VideoLogFloatingWindow(
-                        availableProfiles = state.videoCapabilities.availableLogProfiles,
-                        selectedProfile = state.videoConfig.logProfile,
-                        logLutMode = state.videoConfig.logLutMode,
-                        enabled = true,
-                        appearance = videoFloatingWindowAppearance,
-                        onSelectProfile = { profile ->
-                            viewModel.setVideoLogProfile(profile)
-                            isVideoLogWindowOpen = false
-                        },
-                        onLogLutModeSelected = viewModel::setVideoLogLutMode,
-                        onDismiss = { isVideoLogWindowOpen = false },
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .padding(top = topBarHeight + 7.dp)
-                    )
-                }
-                if (isVideoLutWindowOpen) {
-                    VideoLutFloatingWindow(
-                        availableLuts = viewModel.selectableLutList,
-                        selectedLutId = currentLutId,
-                        logProfile = state.videoConfig.logProfile,
-                        logLutMode = state.videoConfig.logLutMode,
-                        enabled = true,
-                        appearance = videoFloatingWindowAppearance,
-                        onSelectLut = { lutId -> viewModel.setLut(lutId) },
-                        onLogLutModeSelected = viewModel::setVideoLogLutMode,
-                        onManageLuts = {
-                            isVideoLutWindowOpen = false
-                            onFilterManagementClick(null)
-                        },
-                        onDismiss = { isVideoLutWindowOpen = false },
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .padding(top = topBarHeight + 7.dp)
-                    )
-                }
-            }
 
             CameraBottomControlsLayout(
                 viewfinderBottom = viewfinderTop + cardHeight,

@@ -1870,13 +1870,6 @@ fun SettingsScreen(
                             modifier = Modifier.padding(vertical = 8.dp)
                         )
 
-                        VideoFloatingWindowAppearanceSettings()
-
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-
                         DropdownSettingItem(
                             title = stringResource(
                                 R.string.settings_storage_path_title,
