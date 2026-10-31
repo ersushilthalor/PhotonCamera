@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * Coordinates lens handoff using the live secondary Camera2 stream.
@@ -69,7 +70,11 @@ internal class LensSwitchTransitionState(
                             targetLensType == LensType.BACK_ULTRA_WIDE) &&
                         currentLensType != targetLensType
                 livePreview = viewModel.glSurfaceView
-                val canStartLiveHandoff = isRearMainOrUltraWide &&
+                val overlapEnabled = viewModel.lensSwitchOverlapAnimationEnabled.value
+                val overlapDurationFrames =
+                    (viewModel.lensSwitchOverlapDurationSec.value * 30f).roundToInt().coerceIn(2, 30)
+                livePreview?.setLiveHandoffFrameCount(overlapDurationFrames)
+                val canStartLiveHandoff = overlapEnabled && isRearMainOrUltraWide &&
                     livePreview?.canUseLiveLensHandoff == true
 
                 val previousTimestamp = before.previewFirstFrameTimestampNs
