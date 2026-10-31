@@ -9306,6 +9306,66 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    private fun reconfigureStandbySessionForRecording() {
+        val handler = cameraHandler ?: return
+        if (Looper.myLooper() != handler.looper) {
+            handler.post { reconfigureStandbySessionForRecording() }
+            return
+        }
+        if (_state.value.captureMode != CaptureMode.VIDEO ||
+            !videoRecorder.isRecording() ||
+            !videoRecorder.supportsDualCameraInput ||
+            shouldUseVideoEnhancedStabilization()
+        ) return
+
+        val camera = standbyCameraDevice ?: return
+        val targetSurface = videoRecorder.cameraInputSurfaceForLens(standbyIsUltraWide) ?: return
+        val generation = standbyGeneration
+        try {
+            try { standbyCaptureSession?.stopRepeating() } catch (_: Exception) {}
+            try { standbyCaptureSession?.close() } catch (_: Exception) {}
+            standbyCaptureSession = null
+            camera.createCaptureSession(
+                listOf(targetSurface),
+                object : CameraCaptureSession.StateCallback() {
+                    override fun onConfigured(session: CameraCaptureSession) {
+                        if (generation != standbyGeneration || standbyCameraDevice !== camera) {
+                            session.close()
+                            return
+                        }
+                        try {
+                            val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
+                                addTarget(targetSurface)
+                            }
+                            standbyCaptureSession = session
+                            session.setRepeatingRequest(request.build(), null, handler)
+                            PLog.i(
+                                TAG,
+                                "Standby recording stream configured: camera=${camera.id}, " +
+                                    "ultraWide=$standbyIsUltraWide"
+                            )
+                        } catch (error: Exception) {
+                            PLog.w(TAG, "Standby recording request failed: ${error.message}")
+                            closeStandbyCamera("standby recording request failed")
+                        }
+                    }
+
+                    override fun onConfigureFailed(session: CameraCaptureSession) {
+                        PLog.w(TAG, "Standby recording session configuration failed: ${camera.id}")
+                        session.close()
+                        if (generation == standbyGeneration) {
+                            closeStandbyCamera("standby recording configure failed")
+                        }
+                    }
+                },
+                handler,
+            )
+        } catch (error: Exception) {
+            PLog.w(TAG, "Unable to reconfigure standby recording session: ${error.message}")
+            closeStandbyCamera("standby recording session exception")
+        }
+    }
+
     private fun takeStandbyCamera(cameraOpenId: String): CameraDevice? {
         if (standbyCameraOpenId != cameraOpenId) return null
         val device = standbyCameraDevice ?: return null
@@ -9337,6 +9397,11 @@ class Camera2Controller(private val context: Context) {
     }
 
     private fun closeStandbyCamera(reason: String) {
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { closeStandbyCamera(reason) }
+            return
+        }
         standbyGeneration++
         try { standbyCaptureSession?.stopRepeating() } catch (_: Exception) {}
         try { standbyCaptureSession?.close() } catch (_: Exception) {}
