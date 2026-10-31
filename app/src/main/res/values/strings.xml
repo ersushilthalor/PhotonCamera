@@ -1390,4 +1390,24 @@
     <!-- Video editor: independent color recovery with contrast preserved -->
     <string name="video_washed_out_recovery">Washed-Out Recovery</string>
     <string name="video_washed_out_recovery_description">Restore faded color in bright tones while preserving image luminance and the existing contrast setting.</string>
+
+    <string name="video_pro_mode">PRO</string>
+    <string name="video_log">LOG</string>
+    <string name="video_lut">LUT</string>
+    <string name="video_lut_off">Off</string>
+    <string name="video_floating_window_options">Floating window options</string>
+    <string name="video_floating_window_close">Close floating window</string>
+    <string name="video_floating_window_manage_luts">Manage LUTs</string>
+    <string name="video_log_lut_output">LUT output</string>
+    <string name="video_floating_window_appearance">Floating window appearance</string>
+    <string name="video_floating_window_appearance_description">Adjust the glass style, transparency, frosted blur and size used by the LOG and LUT floating controls.</string>
+    <string name="video_floating_window_glass_style">Glass style</string>
+    <string name="video_floating_window_style_liquid">Liquid</string>
+    <string name="video_floating_window_style_frosted">Frosted</string>
+    <string name="video_floating_window_style_transparent">Clear</string>
+    <string name="video_floating_window_style_solid">Solid</string>
+    <string name="video_floating_window_transparency">Transparency</string>
+    <string name="video_floating_window_blur">Blur strength</string>
+    <string name="video_floating_window_size">Window size</string>
+
 </resources>
