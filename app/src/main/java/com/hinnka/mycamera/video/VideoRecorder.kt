@@ -364,7 +364,7 @@ class VideoRecorder(
     fun onCameraSwitched(
         sensorOrientationDegrees: Int,
         frontFacing: Boolean,
-        restartStabilization: Boolean,
+        refreshStabilizationPresentation: Boolean,
         ultraWide: Boolean = false,
     ) {
         if (!isRecording || stopRequested) return
@@ -382,8 +382,8 @@ class VideoRecorder(
             // transform for the newly active lens. Do not restart or alter the recording pipeline.
             renderer?.updateMirrorTransform(mirrorHorizontally, mirrorVertically)
 
-            if (restartStabilization && !isPaused && requestedEnhancedStabilization) {
-                renderer?.restartStabilizationForCameraSwitch(sensorOrientationDegrees)
+            if (refreshStabilizationPresentation && !isPaused && requestedEnhancedStabilization) {
+                renderer?.updateStabilizationPresentationForCameraSwitch(sensorOrientationDegrees)
             }
         }
     }
@@ -397,18 +397,26 @@ class VideoRecorder(
         currentCameraUsesEnhancedStabilization: Boolean,
         sensorOrientationDegrees: Int = requestedSensorOrientationDegrees,
     ) {
-        // The renderer can start with EIS on the rear camera but fall back to its ordinary
-        // SurfaceTexture input on a switched front camera. Only keep the old buffer geometry
-        // when the current camera is still using the EIS input path; the recording-start flag
-        // alone must not block the front-camera input-size refresh.
-        if (
-            !isRecording ||
-            stopRequested ||
-            (requestedEnhancedStabilization && currentCameraUsesEnhancedStabilization)
-        ) return
+        if (!isRecording || stopRequested) return
         if (size.width <= 0 || size.height <= 0) return
         requestedCameraInputSize = size
         requestedSensorOrientationDegrees = sensorOrientationDegrees
+
+        // EIS+ consumes Camera2's timestamped YUV reader, not the renderer's OES input.
+        // Keep the active stabilization session attached and only update its resume geometry.
+        if (requestedEnhancedStabilization && currentCameraUsesEnhancedStabilization) {
+            runBlocking(renderDispatcher) {
+                renderer?.updateStabilizationInputSize(size)
+                renderer?.updateStabilizationPresentationForCameraSwitch(sensorOrientationDegrees)
+            }
+            PLog.i(
+                TAG,
+                "EIS+ recording geometry refreshed without restarting its active session: " +
+                    "${size.width}x${size.height}, sensorOrientation=$sensorOrientationDegrees",
+            )
+            return
+        }
+
         dualCameraRelay?.updateBufferSize(
             isUltraWide = requestedCurrentUltraWide,
             width = size.width,
