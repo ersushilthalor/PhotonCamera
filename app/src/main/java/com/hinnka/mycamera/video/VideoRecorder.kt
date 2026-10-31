@@ -358,8 +358,8 @@ class VideoRecorder(
 
     /**
      * EIS+ input is delivered through the timestamped YUV reader rather than cameraInputSurface.
-     * Explicitly restart its renderer session after Camera2 swaps physical lenses; no encoder
-     * SurfaceTexture callback is guaranteed to wake a stopped EIS session.
+     * Keep the existing renderer session attached across Camera2 lens switches; the coordinator
+     * reconfigures its native camera pipeline before the replacement lens starts streaming.
      */
     fun onCameraSwitched(
         sensorOrientationDegrees: Int,
