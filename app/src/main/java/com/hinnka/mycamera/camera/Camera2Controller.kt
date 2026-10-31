@@ -285,6 +285,7 @@ class Camera2Controller(private val context: Context) {
     @Volatile private var keepUltraWideReadyEnabled = true
     private var standbyCameraDevice: CameraDevice? = null
     private var standbyCaptureSession: CameraCaptureSession? = null
+    @Volatile private var standbyPreviewSurface: Surface? = null
     private var standbyImageReader: ImageReader? = null
     private var standbyCameraOpenId: String? = null
     private var standbyIsUltraWide = false
@@ -1989,6 +1990,19 @@ class Camera2Controller(private val context: Context) {
             )
             false
         }
+    }
+
+    fun setStandbyPreviewSurface(surface: Surface?) {
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { setStandbyPreviewSurface(surface) }
+            return
+        }
+        val normalized = surface?.takeIf { it.isValid }
+        if (standbyPreviewSurface === normalized) return
+        standbyPreviewSurface = normalized
+        if (standbyCameraDevice != null) closeStandbyCamera("standby preview surface changed")
+        if (normalized != null) startStandbyCameraIfPossible()
     }
 
     fun setKeepUltraWideReadyEnabled(enabled: Boolean) {
@@ -9212,7 +9226,17 @@ class Camera2Controller(private val context: Context) {
                     videoRecorder.cameraInputSurfaceForLens(targetIsUltraWide)
                 }
             } else null
-            val standbyOutputSurface = recordingRelaySurface ?: reader.surface
+            val requestedPreviewSize = _state.value.currentPreviewSize
+            val standbyPreviewOutput = standbyPreviewSurface?.takeIf { candidate ->
+                candidate.isValid && privateSizes.any { size ->
+                    size.width == requestedPreviewSize.width && size.height == requestedPreviewSize.height
+                }
+            }
+            val standbyOutputSurfaces = buildList {
+                standbyPreviewOutput?.let(::add)
+                recordingRelaySurface?.let(::add)
+                if (isEmpty()) add(reader.surface)
+            }
 
             cameraManager.openCamera(targetOpenId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
@@ -9225,7 +9249,7 @@ class Camera2Controller(private val context: Context) {
                     standbyCameraDevice = camera
                     try {
                         camera.createCaptureSession(
-                            listOf(standbyOutputSurface),
+                            standbyOutputSurfaces,
                             object : CameraCaptureSession.StateCallback() {
                                 override fun onConfigured(session: CameraCaptureSession) {
                                     if (generation != standbyGeneration || standbyCameraDevice !== camera) {
@@ -9237,14 +9261,28 @@ class Camera2Controller(private val context: Context) {
                                             if (recordingRelaySurface != null) CameraDevice.TEMPLATE_RECORD
                                             else CameraDevice.TEMPLATE_PREVIEW
                                         ).apply {
-                                            addTarget(standbyOutputSurface)
+                                            standbyOutputSurfaces.forEach(::addTarget)
                                         }
                                         standbyCaptureSession = session
-                                        session.setRepeatingRequest(request.build(), null, handler)
+                                        session.setRepeatingRequest(
+                                            request.build(),
+                                            object : CameraCaptureSession.CaptureCallback() {
+                                                override fun onCaptureCompleted(
+                                                    session: CameraCaptureSession,
+                                                    request: CaptureRequest,
+                                                    result: TotalCaptureResult,
+                                                ) {
+                                                    if (generation == standbyGeneration) standbyFrameCount += 1L
+                                                }
+                                            },
+                                            handler,
+                                        )
                                         PLog.i(
                                             TAG,
                                             "Standby lens ready: camera=$targetOpenId, " +
-                                                "output=${if (recordingRelaySurface != null) "dual-recording-relay" else "drained-yuv"}, " +
+                                                "output=${standbyOutputSurfaces.size} surface(s), " +
+                                                "livePreview=${standbyPreviewOutput != null}, " +
+                                                "recordingRelay=${recordingRelaySurface != null}, " +
                                                 "size=${if (recordingRelaySurface != null) relaySize else standbySize}"
                                         )
                                     } catch (error: Exception) {
