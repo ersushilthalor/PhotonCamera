@@ -8,7 +8,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 
@@ -60,10 +59,14 @@ internal class LensSwitchTransitionState(
                 val targetCamera = before.availableCameras.firstOrNull {
                     it.cameraId == request.cameraId
                 }
+                val currentLensType = currentCamera?.lensType
+                val targetLensType = targetCamera?.lensType
                 val isRearMainOrUltraWide =
-                    currentCamera?.lensType in setOf(LensType.BACK_MAIN, LensType.BACK_ULTRA_WIDE) &&
-                        targetCamera?.lensType in setOf(LensType.BACK_MAIN, LensType.BACK_ULTRA_WIDE) &&
-                        currentCamera?.lensType != targetCamera?.lensType
+                    (currentLensType == LensType.BACK_MAIN ||
+                        currentLensType == LensType.BACK_ULTRA_WIDE) &&
+                        (targetLensType == LensType.BACK_MAIN ||
+                            targetLensType == LensType.BACK_ULTRA_WIDE) &&
+                        currentLensType != targetLensType
                 livePreview = viewModel.glSurfaceView
                 val canStartLiveHandoff = isRearMainOrUltraWide &&
                     livePreview?.canUseLiveLensHandoff == true
