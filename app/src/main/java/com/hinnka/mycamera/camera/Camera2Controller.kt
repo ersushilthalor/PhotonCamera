@@ -2926,7 +2926,7 @@ class Camera2Controller(private val context: Context) {
                     videoRecorder.onCameraSwitched(
                         sensorOrientationDegrees = cachedSensorOrientation,
                         frontFacing = isCurrentCameraFrontFacing(),
-                        restartStabilization = stabilizationCameraChanged,
+                        refreshStabilizationPresentation = stabilizationCameraChanged,
                         ultraWide = _state.value.currentLensType == LensType.BACK_ULTRA_WIDE,
                     )
                 }
@@ -3035,13 +3035,22 @@ class Camera2Controller(private val context: Context) {
                     _state.value.videoRecordingState.isRecording
                 ) {
                     val switchedVideoState = _state.value
-                    val switchedInputSize =
-                        switchedVideoState.videoCapabilities.cameraInputSizesByResolution[
-                            switchedVideoState.videoConfig.resolution
-                        ] ?: resolvedVideoPreviewSize
+                    val switchedCameraUsesEis = shouldUseVideoEnhancedStabilization()
+                    val switchedInputSize = (
+                        if (switchedCameraUsesEis) {
+                            switchedVideoState.videoCapabilities
+                                .enhancedStabilizationInputSizesByResolution[
+                                    switchedVideoState.videoConfig.resolution
+                                ]
+                        } else {
+                            null
+                        }
+                    ) ?: switchedVideoState.videoCapabilities.cameraInputSizesByResolution[
+                        switchedVideoState.videoConfig.resolution
+                    ] ?: resolvedVideoPreviewSize
                     videoRecorder.updateCameraInputSize(
                         size = switchedInputSize,
-                        currentCameraUsesEnhancedStabilization = shouldUseVideoEnhancedStabilization(),
+                        currentCameraUsesEnhancedStabilization = switchedCameraUsesEis,
                         sensorOrientationDegrees = openCharacteristics.get(
                             CameraCharacteristics.SENSOR_ORIENTATION
                         ) ?: cachedSensorOrientation,

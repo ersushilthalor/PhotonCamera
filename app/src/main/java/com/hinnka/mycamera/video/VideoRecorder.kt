@@ -358,13 +358,13 @@ class VideoRecorder(
 
     /**
      * EIS+ input is delivered through the timestamped YUV reader rather than cameraInputSurface.
-     * Explicitly restart its renderer session after Camera2 swaps physical lenses; no encoder
-     * SurfaceTexture callback is guaranteed to wake a stopped EIS session.
+     * Keep the existing renderer session attached across Camera2 lens switches; the coordinator
+     * reconfigures its native camera pipeline before the replacement lens starts streaming.
      */
     fun onCameraSwitched(
         sensorOrientationDegrees: Int,
         frontFacing: Boolean,
-        restartStabilization: Boolean,
+        refreshStabilizationPresentation: Boolean,
         ultraWide: Boolean = false,
     ) {
         if (!isRecording || stopRequested) return
@@ -382,8 +382,8 @@ class VideoRecorder(
             // transform for the newly active lens. Do not restart or alter the recording pipeline.
             renderer?.updateMirrorTransform(mirrorHorizontally, mirrorVertically)
 
-            if (restartStabilization && !isPaused && requestedEnhancedStabilization) {
-                renderer?.restartStabilizationForCameraSwitch(sensorOrientationDegrees)
+            if (refreshStabilizationPresentation && !isPaused && requestedEnhancedStabilization) {
+                renderer?.updateStabilizationPresentationForCameraSwitch(sensorOrientationDegrees)
             }
         }
     }
@@ -397,18 +397,27 @@ class VideoRecorder(
         currentCameraUsesEnhancedStabilization: Boolean,
         sensorOrientationDegrees: Int = requestedSensorOrientationDegrees,
     ) {
-        // The renderer can start with EIS on the rear camera but fall back to its ordinary
-        // SurfaceTexture input on a switched front camera. Only keep the old buffer geometry
-        // when the current camera is still using the EIS input path; the recording-start flag
-        // alone must not block the front-camera input-size refresh.
-        if (
-            !isRecording ||
-            stopRequested ||
-            (requestedEnhancedStabilization && currentCameraUsesEnhancedStabilization)
-        ) return
+        if (!isRecording || stopRequested) return
         if (size.width <= 0 || size.height <= 0) return
         requestedCameraInputSize = size
         requestedSensorOrientationDegrees = sensorOrientationDegrees
+
+        // EIS+ consumes Camera2's timestamped YUV reader, not the renderer's OES input.
+        // Keep the active stabilization session attached and only update its resume geometry.
+        if (requestedEnhancedStabilization && currentCameraUsesEnhancedStabilization) {
+            // This only updates the dimensions used by a future pause/resume. Do not block the
+            // Camera2 handler or restart the live EIS session during the 0 ms lens handoff.
+            scope.launch(renderDispatcher) {
+                renderer?.updateStabilizationInputSize(size)
+            }
+            PLog.i(
+                TAG,
+                "EIS+ recording geometry queued without restarting its active session: " +
+                    "${size.width}x${size.height}, sensorOrientation=$sensorOrientationDegrees",
+            )
+            return
+        }
+
         dualCameraRelay?.updateBufferSize(
             isUltraWide = requestedCurrentUltraWide,
             width = size.width,

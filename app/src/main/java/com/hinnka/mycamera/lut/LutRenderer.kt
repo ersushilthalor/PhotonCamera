@@ -2763,11 +2763,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         stabilizationInputWidth = width
         stabilizationInputHeight = height
         updateMVPMatrix()
-        if (previewStabilizationUseCase != null) {
-            mgcEisHardwareBufferRenderer.release()
-            mgcEisYuvRenderer.release()
-            recreatePreviewStabilizationSession()
-        }
+        // Camera2's coordinator adapts the active native pipeline to the actual ImageReader
+        // dimensions. Update the session's resume dimensions without stopping/restarting it:
+        // this Compose update can arrive just after the new lens has already been promoted.
+        stabilizationSession?.updateInputSize(width, height)
     }
 
     fun setStabilizationCoordinator(coordinator: RealtimeStabilizationCoordinator?) {

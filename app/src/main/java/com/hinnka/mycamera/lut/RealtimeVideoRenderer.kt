@@ -1023,17 +1023,17 @@ class RealtimeVideoRenderer(
     }
 
     /**
-     * Camera2 closes and recreates its capture session during a physical lens switch. Restart the
-     * EIS session against the new calibration so returning to a supported lens cannot leave the
-     * encoder waiting forever on an inactive stabilization session.
+     * The coordinator has already switched calibration and reset the native camera pipeline
+     * before Camera2 opens the replacement lens. Refresh presentation orientation only; stopping
+     * and starting this Session here would briefly detach the last active EIS consumer and expose
+     * an unstabilized frame during the switch.
      */
     @Synchronized
-    fun restartStabilizationForCameraSwitch(sensorOrientationDegrees: Int) {
+    fun updateStabilizationPresentationForCameraSwitch(sensorOrientationDegrees: Int) {
         if (!initialized || !enhancedStabilizationEnabled) return
 
-        // A selected physical camera may expose a different cardinal sensor orientation.
-        // Reset only the presentation transform; keep the encoder and stabilization lifecycle
-        // intact so the existing no-freeze fix is not undone.
+        currentCameraSensorOrientationDegrees = sensorOrientationDegrees
+        cameraSensorOrientationFallbackApplied = false
         mgcEisPresentationTransform.reset()
         if (mgcEisPresentationTransform.captureFromSensorOrientation(sensorOrientationDegrees)) {
             cameraTransformAxesSwapped = null
@@ -1042,17 +1042,23 @@ class RealtimeVideoRenderer(
             PLog.w(TAG, "Cannot refresh EIS presentation orientation: $sensorOrientationDegrees")
         }
 
-        val session = stabilizationSession ?: return
-        session.stop()
-        stabilizationSessionStarted = false
-        stabilizationSessionStarted = session.start()
         PLog.i(
             TAG,
-            "MGC EIS recording session refreshed after camera switch: " +
+            "MGC EIS presentation refreshed after camera switch: " +
                 "sensorOrientation=$sensorOrientationDegrees, " +
-                "started=$stabilizationSessionStarted, " +
+                "sessionPreserved=${stabilizationSession?.isOperational == true}, " +
                 "cameraSupported=${stabilizationCoordinator?.isCurrentCameraSupported}",
         )
+    }
+
+    /** Update the dimensions used if an active EIS recording session is later resumed. */
+    @Synchronized
+    fun updateStabilizationInputSize(size: Size) {
+        if (size.width <= 0 || size.height <= 0) return
+        currentCameraInputSize = size
+        stabilizationSession?.updateInputSize(size.width, size.height)
+        cameraSurfaceTexture?.setDefaultBufferSize(size.width, size.height)
+        cameraTransformAxesSwapped = null
     }
 
     fun release() {
