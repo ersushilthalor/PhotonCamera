@@ -208,17 +208,7 @@ private fun VideoTopBar(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    if (videoConfig.logProfile.isEnabled) {
-                        IconButton(onClick = onVideoHdrToggle) {
-                            Text(
-                                text = "LUT",
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.autoRotate()
-                            )
-                        }
-                    } else {
+                    if (!videoConfig.logProfile.isEnabled) {
                         IconButton(onClick = onVideoHdrToggle) {
                             Text(
                                 text = "HDR",

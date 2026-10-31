@@ -280,13 +280,6 @@ fun CameraScreen(
     var cameraScreenBounds by remember { mutableStateOf<Rect?>(null) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
     var zoomJoystickOpen by remember { mutableStateOf(false) }
-    var showVideoResolutionPanel by remember { mutableStateOf(false) }
-    var showOppoLogLutWindow by remember { mutableStateOf(false) }
-    var videoResolutionBackdrop by remember { mutableStateOf<Bitmap?>(null) }
-    val resolutionPanelCaptureActive by rememberUpdatedState(
-        (showVideoResolutionPanel || showOppoLogLutWindow) &&
-            state.captureMode == CaptureMode.VIDEO
-    )
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
     var zoomBarBounds by remember { mutableStateOf<Rect?>(null) }
     var filterButtonBounds by remember { mutableStateOf<Rect?>(null) }
@@ -365,65 +358,6 @@ fun CameraScreen(
             }
         }
     )
-
-    LaunchedEffect(state.captureMode) {
-        if (state.captureMode != CaptureMode.VIDEO) {
-            showVideoResolutionPanel = false
-            showOppoLogLutWindow = false
-        }
-    }
-
-    LaunchedEffect(state.captureMode, state.videoConfig.logProfile) {
-        if (state.captureMode != CaptureMode.VIDEO || !state.videoConfig.logProfile.isEnabled) {
-            showOppoLogLutWindow = false
-        }
-    }
-    LaunchedEffect(showVideoResolutionPanel) {
-        if (showVideoResolutionPanel) showOppoLogLutWindow = false
-    }
-
-    // Sample the existing GL preview only while the resolution selector is visible.
-    // The low-resolution frames are used only as the panel's frosted backdrop.
-    LaunchedEffect(showVideoResolutionPanel, showOppoLogLutWindow, state.captureMode, state.previewFirstFrameTimestampNs) {
-        if ((!showVideoResolutionPanel && !showOppoLogLutWindow) ||
-            state.captureMode != CaptureMode.VIDEO
-        ) {
-            videoResolutionBackdrop?.recycleIfAlive()
-            videoResolutionBackdrop = null
-            return@LaunchedEffect
-        }
-
-        val preview = viewModel.glSurfaceView ?: return@LaunchedEffect
-        try {
-            while (isActive) {
-                preview.capturePreviewFrame(480) { frame ->
-                    if (resolutionPanelCaptureActive && !frame.isRecycled) {
-                        val previous = videoResolutionBackdrop
-                        videoResolutionBackdrop = frame
-                        if (previous != null && previous !== frame) {
-                            scope.launch {
-                                withFrameNanos { }
-                                previous.recycleIfAlive()
-                            }
-                        }
-                    } else {
-                        frame.recycleIfAlive()
-                    }
-                }
-                delay(220L)
-            }
-        } finally {
-            videoResolutionBackdrop?.recycleIfAlive()
-            videoResolutionBackdrop = null
-        }
-    }
-
-    LaunchedEffect(activePanel) {
-        if (activePanel != ActivePanel.NONE) {
-            showVideoResolutionPanel = false
-            showOppoLogLutWindow = false
-        }
-    }
 
     // 当打开滤镜面板时，生成预览图
     LaunchedEffect(activePanel) {
@@ -1024,8 +958,7 @@ fun CameraScreen(
                 onVideoStabilizationModeChange = viewModel::setVideoStabilizationMode,
                 onVideoResolutionClick = {
                     if (state.videoConfig.aspectRatio != VideoAspectRatio.OPEN_GATE) {
-                        activePanel = ActivePanel.NONE
-                        showVideoResolutionPanel = !showVideoResolutionPanel
+                        cycleVideoResolution(state)?.let(viewModel::setVideoResolution)
                     }
                 },
                 onVideoFpsClick = {
@@ -1033,13 +966,7 @@ fun CameraScreen(
                 },
                 videoHdrEnabled = videoHdrEnabled,
                 onVideoHdrToggle = {
-                    if (state.videoConfig.logProfile.isEnabled) {
-                        showVideoResolutionPanel = false
-                        activePanel = ActivePanel.NONE
-                        showOppoLogLutWindow = !showOppoLogLutWindow
-                    } else {
-                        viewModel.setVideoHdrEnabled(!videoHdrEnabled)
-                    }
+                    viewModel.setVideoHdrEnabled(!videoHdrEnabled)
                 },
                 onSettingsClick = {
                     activePanel = if (activePanel == ActivePanel.SETTINGS) ActivePanel.NONE else ActivePanel.SETTINGS
@@ -1061,20 +988,14 @@ fun CameraScreen(
                     onZoomStopClick = { animateZoomStopWithPreviewTransition(it) },
                     onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
                     onFilterClick = {
-                        if (isVideoMode && state.videoConfig.logProfile.isEnabled) {
-                            showVideoResolutionPanel = false
-                            activePanel = ActivePanel.NONE
-                            showOppoLogLutWindow = !showOppoLogLutWindow
-                        } else if (isVideoMode) {
-                            // Show LUT choices first; the selector's Edit action opens adjustments.
-                            showOppoLogLutWindow = false
+                        if (isVideoMode) {
+                            // Open the regular LUT selector; its Edit action opens adjustments.
                             activePanel = if (activePanel == ActivePanel.FILTERS) {
                                 ActivePanel.NONE
                             } else {
                                 ActivePanel.FILTERS
                             }
                         } else {
-                            showOppoLogLutWindow = false
                             activePanel = if (activePanel == ActivePanel.EDIT) ActivePanel.NONE else ActivePanel.EDIT
                         }
                     },
@@ -1619,20 +1540,14 @@ fun CameraScreen(
                             onZoomStopClick = { animateZoomStopWithPreviewTransition(it) },
                             onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
                             onFilterClick = {
-                                if (isVideoMode && state.videoConfig.logProfile.isEnabled) {
-                                    showVideoResolutionPanel = false
-                                    activePanel = ActivePanel.NONE
-                                    showOppoLogLutWindow = !showOppoLogLutWindow
-                                } else if (isVideoMode) {
-                                    // Show LUT choices first; the selector's Edit action opens adjustments.
-                                    showOppoLogLutWindow = false
+                                if (isVideoMode) {
+                                    // Open the regular LUT selector; its Edit action opens adjustments.
                                     activePanel = if (activePanel == ActivePanel.FILTERS) {
                                         ActivePanel.NONE
                                     } else {
                                         ActivePanel.FILTERS
                                     }
                                 } else {
-                                    showOppoLogLutWindow = false
                                     activePanel = if (activePanel == ActivePanel.EDIT) ActivePanel.NONE else ActivePanel.EDIT
                                 }
                             },
@@ -1803,68 +1718,6 @@ fun CameraScreen(
                 }
             )
 
-            if (isVideoMode) {
-                if (showVideoResolutionPanel) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clickable(
-                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                indication = null
-                            ) {
-                                showVideoResolutionPanel = false
-                            }
-                    )
-                }
-                VideoResolutionFloatingPanel(
-                    isOpen = showVideoResolutionPanel,
-                    selectedResolution = state.videoConfig.resolution,
-                    selectedFps = state.videoConfig.fps,
-                    availableResolutions = state.videoCapabilities.availableResolutions,
-                    availableFps = state.videoCapabilities.availableFps,
-                    backdrop = videoResolutionBackdrop,
-                    onResolutionSelected = { resolution ->
-                        if (resolution != state.videoConfig.resolution) {
-                            viewModel.setVideoResolution(resolution)
-                        }
-                    },
-                    onFpsSelected = { fps ->
-                        if (fps != state.videoConfig.fps) {
-                            viewModel.setVideoFps(fps)
-                        }
-                    },
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .statusBarsPadding()
-                        .padding(top = 88.dp)
-                )
-
-                if (showOppoLogLutWindow) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clickable(
-                                interactionSource = remember {
-                                    androidx.compose.foundation.interaction.MutableInteractionSource()
-                                },
-                                indication = null
-                            ) { showOppoLogLutWindow = false }
-                    )
-                }
-                OppoLogLutFloatingWindow(
-                    isOpen = showOppoLogLutWindow,
-                    availableLuts = viewModel.selectableLutList.filter { it.id.startsWith("oppo_") },
-                    selectedLutId = currentLutId,
-                    intensity = effectiveRecipeParams.lutIntensity,
-                    backdrop = videoResolutionBackdrop,
-                    onLutSelected = { lutId -> viewModel.setLut(lutId) },
-                    onIntensityChange = viewModel::updateLutIntensity,
-                    onDismissRequest = { showOppoLogLutWindow = false },
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 148.dp)
-                )
-            }
         }
         val panelDismissBounds = if (isXpan) {
             viewfinderAreaBounds ?: previewBounds
