@@ -51,6 +51,15 @@ private const val BlurSigma = 5f
 private const val BlurEnterDurationMillis = 80
 private const val BlurExitDurationMillis = 240
 
+private fun isHalfXZoom(zoom: Float): Boolean = kotlin.math.abs(zoom - 0.5f) < 0.025f
+
+private fun isTelephotoPresetZoom(zoom: Float): Boolean =
+    kotlin.math.abs(zoom - 2.0f) < 0.05f || kotlin.math.abs(zoom - 3.0f) < 0.05f
+
+private fun isFrameBasedHandoffEligible(fromZoom: Float, targetZoom: Float): Boolean =
+    (isHalfXZoom(fromZoom) && isTelephotoPresetZoom(targetZoom)) ||
+        (isTelephotoPresetZoom(fromZoom) && isHalfXZoom(targetZoom))
+
 /** Owns the frozen viewfinder independently of camera / SurfaceView recreation. */
 internal class LensSwitchTransitionState(
     private val scope: CoroutineScope,
@@ -139,13 +148,16 @@ internal class LensSwitchTransitionState(
                     // through two warm-up frames plus sixteen distinct incoming preview frames.
                     // A bounded timeout guarantees the UI cannot remain covered indefinitely
                     // on devices whose HAL delivers sparse or irregular timestamps.
-                    val handoffPreview = viewModel.glSurfaceView
-                    if (handoffPreview != null) {
-                        withTimeoutOrNull(900L) {
-                            handoffPreview.awaitPreviewFrames(
-                                minimumTimestampNs = readyState.previewFirstFrameTimestampNs!!,
-                                requiredFrameCount = 18,
-                            )
+                    val targetZoom = request?.targetZoom ?: viewModel.zoomRatioByMain
+                    if (isFrameBasedHandoffEligible(snapshotZoom, targetZoom)) {
+                        val handoffPreview = viewModel.glSurfaceView
+                        if (handoffPreview != null) {
+                            withTimeoutOrNull(900L) {
+                                handoffPreview.awaitPreviewFrames(
+                                    minimumTimestampNs = readyState.previewFirstFrameTimestampNs!!,
+                                    requiredFrameCount = 18,
+                                )
+                            }
                         }
                     }
                     animation.join()
