@@ -9145,6 +9145,7 @@ class Camera2Controller(private val context: Context) {
                 runCatching { candidate.getOpenCameraId() != activeOpenId }.getOrDefault(false)
         } ?: return
         val targetOpenId = runCatching { target.getOpenCameraId() }.getOrNull() ?: return
+        val targetIsUltraWide = target.lensType == LensType.BACK_ULTRA_WIDE
         if (standbyCameraOpenId == targetOpenId && standbyCameraDevice != null) return
 
         val concurrent = runCatching { cameraManager.concurrentCameraIds }.getOrDefault(emptySet())
@@ -9159,12 +9160,13 @@ class Camera2Controller(private val context: Context) {
         closeStandbyCamera("replacing standby target")
         val generation = ++standbyGeneration
         standbyCameraOpenId = targetOpenId
+        standbyIsUltraWide = targetIsUltraWide
         standbyFrameCount = 0L
         try {
             val characteristics = getCameraCharacteristicsCached(targetOpenId)
-            val outputSizes = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                ?.getOutputSizes(ImageFormat.YUV_420_888).orEmpty().toList()
-            val standbySize = outputSizes.minByOrNull { size ->
+            val streamMap = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            val yuvOutputSizes = streamMap?.getOutputSizes(ImageFormat.YUV_420_888).orEmpty().toList()
+            val standbySize = yuvOutputSizes.minByOrNull { size ->
                 abs(size.width - STANDBY_PREVIEW_WIDTH) + abs(size.height - STANDBY_PREVIEW_HEIGHT)
             } ?: Size(STANDBY_PREVIEW_WIDTH, STANDBY_PREVIEW_HEIGHT)
             val reader = ImageReader.newInstance(
@@ -9186,6 +9188,32 @@ class Camera2Controller(private val context: Context) {
                 }
             }, handler)
 
+            // During recording, stream the alternate lens directly into its dedicated OES relay
+            // input at the closest size this camera actually supports. Otherwise use a small
+            // drained YUV stream to warm the CameraDevice without a full-resolution preview.
+            val requestedRelaySize = videoRecorder.requestedRecordingCameraInputSize
+            val privateSizes = streamMap?.getOutputSizes(SurfaceTexture::class.java).orEmpty().toList()
+            val relaySize = privateSizes.minByOrNull { size ->
+                val requestedAspect = requestedRelaySize.width.toFloat() / requestedRelaySize.height.coerceAtLeast(1)
+                val actualAspect = size.width.toFloat() / size.height.coerceAtLeast(1)
+                val aspectPenalty = abs(requestedAspect - actualAspect) * 10_000f
+                val resolutionPenalty = abs(size.width - requestedRelaySize.width) +
+                    abs(size.height - requestedRelaySize.height)
+                aspectPenalty + resolutionPenalty
+            }
+            val recordingRelaySurface = if (
+                _state.value.captureMode == CaptureMode.VIDEO &&
+                videoRecorder.isRecording() &&
+                videoRecorder.supportsDualCameraInput &&
+                !shouldUseVideoEnhancedStabilization()
+            ) {
+                relaySize?.let {
+                    videoRecorder.updateCameraRelayInputSize(targetIsUltraWide, it.width, it.height)
+                    videoRecorder.cameraInputSurfaceForLens(targetIsUltraWide)
+                }
+            } else null
+            val standbyOutputSurface = recordingRelaySurface ?: reader.surface
+
             cameraManager.openCamera(targetOpenId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
                     if (generation != standbyGeneration || !keepUltraWideReadyEnabled ||
@@ -9197,7 +9225,7 @@ class Camera2Controller(private val context: Context) {
                     standbyCameraDevice = camera
                     try {
                         camera.createCaptureSession(
-                            listOf(reader.surface),
+                            listOf(standbyOutputSurface),
                             object : CameraCaptureSession.StateCallback() {
                                 override fun onConfigured(session: CameraCaptureSession) {
                                     if (generation != standbyGeneration || standbyCameraDevice !== camera) {
@@ -9205,12 +9233,20 @@ class Camera2Controller(private val context: Context) {
                                         return
                                     }
                                     try {
-                                        val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                                            addTarget(reader.surface)
+                                        val request = camera.createCaptureRequest(
+                                            if (recordingRelaySurface != null) CameraDevice.TEMPLATE_RECORD
+                                            else CameraDevice.TEMPLATE_PREVIEW
+                                        ).apply {
+                                            addTarget(standbyOutputSurface)
                                         }
                                         standbyCaptureSession = session
                                         session.setRepeatingRequest(request.build(), null, handler)
-                                        PLog.i(TAG, "Standby lens ready: camera=$targetOpenId, size=${standbySize.width}x${standbySize.height}")
+                                        PLog.i(
+                                            TAG,
+                                            "Standby lens ready: camera=$targetOpenId, " +
+                                                "output=${if (recordingRelaySurface != null) "dual-recording-relay" else "drained-yuv"}, " +
+                                                "size=${if (recordingRelaySurface != null) relaySize else standbySize}"
+                                        )
                                     } catch (error: Exception) {
                                         PLog.w(TAG, "Standby repeating request failed: ${error.message}")
                                         closeStandbyCamera("standby request failed")
@@ -9273,7 +9309,17 @@ class Camera2Controller(private val context: Context) {
     private fun takeStandbyCamera(cameraOpenId: String): CameraDevice? {
         if (standbyCameraOpenId != cameraOpenId) return null
         val device = standbyCameraDevice ?: return null
-        if (standbyCaptureSession == null || standbyFrameCount < 2L) {
+        val standbyStreamReady = if (
+            _state.value.captureMode == CaptureMode.VIDEO &&
+            videoRecorder.isRecording() &&
+            videoRecorder.supportsDualCameraInput &&
+            !shouldUseVideoEnhancedStabilization()
+        ) {
+            videoRecorder.hasCameraSourceFrames(standbyIsUltraWide)
+        } else {
+            standbyFrameCount >= 2L
+        }
+        if (standbyCaptureSession == null || !standbyStreamReady) {
             closeStandbyCamera("standby stream has not produced two frames")
             return null
         }
@@ -9301,6 +9347,7 @@ class Camera2Controller(private val context: Context) {
         val device = standbyCameraDevice
         standbyCameraDevice = null
         standbyCameraOpenId = null
+        standbyIsUltraWide = false
         try { device?.close() } catch (_: Exception) {}
         if (device != null) PLog.d(TAG, "Standby camera closed: ${device.id}, reason=$reason")
     }
