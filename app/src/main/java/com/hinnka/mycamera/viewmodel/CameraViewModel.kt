@@ -1886,6 +1886,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val videoLensLockEnabled: StateFlow<Boolean> = userPreferencesRepository.userPreferences
         .map { it.videoLensLockEnabled }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val keepUltraWideReady: StateFlow<Boolean> = userPreferencesRepository.userPreferences
+        .map { it.keepUltraWideReady }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val videoWhiteBalanceLockEnabled: StateFlow<Boolean> = userPreferencesRepository.userPreferences
         .map { it.videoWhiteBalanceLockEnabled }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
@@ -2904,12 +2907,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     suspend fun prepareCamera(): Boolean {
+        val startupPreferences = userPreferencesRepository.userPreferences.firstOrNull()
+        cameraController.setKeepUltraWideReadyEnabled(startupPreferences?.keepUltraWideReady ?: true)
         if (!cameraController.prepareCameras()) return false
         if (!hasAppliedDefaultFocalLength) {
-            val defaultFocalLength = userPreferencesRepository.userPreferences
-                .firstOrNull()
-                ?.defaultFocalLength
-                ?: 0f
+            val defaultFocalLength = startupPreferences?.defaultFocalLength ?: 0f
             if (defaultFocalLength != 0f) {
                 applyStartupDefaultFocalLength(defaultFocalLength)
             }
@@ -4159,6 +4161,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.setVideoLensLockEnabled(enabled)
         viewModelScope.launch {
             userPreferencesRepository.saveVideoLensLockEnabled(enabled)
+        }
+    }
+
+    fun setKeepUltraWideReady(enabled: Boolean) {
+        cameraController.setKeepUltraWideReadyEnabled(enabled)
+        viewModelScope.launch {
+            userPreferencesRepository.saveKeepUltraWideReady(enabled)
         }
     }
 
