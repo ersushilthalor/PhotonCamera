@@ -435,6 +435,10 @@ class VideoRecorder(
      */
     fun beginCameraHandoff() {
         if (!isRecording || stopRequested || isPaused) return
+        // The two-input EGL relay continuously supplies monotonic frames from whichever lens is
+        // selected. Running the legacy held-frame renderer at the same time would race the relay
+        // for the same downstream SurfaceTexture, so reserve the hold path for single-input mode.
+        if (dualCameraRelay?.isReady == true) return
         cameraHandoffActive = true
         cameraHandoffJob?.cancel()
         cameraHandoffJob = scope.launch(renderDispatcher) {
@@ -591,7 +595,11 @@ class VideoRecorder(
             encoderSurface = encoderSurface,
             onFrameAvailable = ::onRealtimeFrameAvailable,
         )
-        if (!requestedEnhancedStabilization && !requestedCameraInputIsHlg10) {
+        if (
+            !requestedEnhancedStabilization &&
+            !requestedCameraInputIsHlg10 &&
+            requestedColorConfig.logProfile != VideoLogProfile.HLG10
+        ) {
             val downstream = realtimeRenderer.inputSurface
             if (downstream != null) {
                 val relay = runCatching {
