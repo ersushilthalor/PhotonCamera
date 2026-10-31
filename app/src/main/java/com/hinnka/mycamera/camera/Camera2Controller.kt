@@ -265,6 +265,9 @@ class Camera2Controller(private val context: Context) {
     // ---------------------
 
     private var cameraDevice: CameraDevice? = null
+    // Tracks only a close that is allowed to advance the serialized open lifecycle.
+    // A superseded device closed during warm-standby promotion must not reset the new camera.
+    private var cameraDeviceAwaitingClose: CameraDevice? = null
     private var cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
     private var pendingCameraOpenRequest: CameraOpenRequest? = null
     @Volatile
@@ -2298,13 +2301,24 @@ class Camera2Controller(private val context: Context) {
         if (cameraDevice === camera) {
             cameraDevice = null
         }
+        cameraDeviceAwaitingClose = camera
         cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSING
         closeCameraDeviceSafely(camera, reason)
     }
 
     private fun handleCameraDeviceClosed(camera: CameraDevice) {
+        // Camera2 can deliver onClosed after a newer device has already been promoted.
+        // Only the current device or the specifically tracked serialized close may advance
+        // the global lifecycle; a late callback from a superseded device is harmless.
+        if (cameraDevice !== camera && cameraDeviceAwaitingClose !== camera) {
+            PLog.d(TAG, "Ignoring late close callback from superseded camera: ${camera.id}")
+            return
+        }
         if (cameraDevice === camera) {
             cameraDevice = null
+        }
+        if (cameraDeviceAwaitingClose === camera) {
+            cameraDeviceAwaitingClose = null
         }
         cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
         PLog.d(TAG, "Camera device closed: ${camera.id}")
@@ -3005,7 +3019,7 @@ class Camera2Controller(private val context: Context) {
                         cameraDeviceLifecycle != CameraDeviceLifecycle.OPENING
                     ) {
                         PLog.w(TAG, "Ignoring stale camera open callback: camera=${camera.id}")
-                        closeCameraDeviceAndAwait(camera, "stale camera open")
+                        closeCameraDeviceSafely(camera, "stale camera open")
                         return
                     }
                     PLog.d(TAG, "Camera opened: ${camera.id}")
@@ -3019,7 +3033,7 @@ class Camera2Controller(private val context: Context) {
 
                 override fun onDisconnected(camera: CameraDevice) {
                     if (openGeneration != cameraOpenGeneration) {
-                        closeCameraDeviceAndAwait(camera, "stale camera disconnect")
+                        closeCameraDeviceSafely(camera, "stale camera disconnect")
                         return
                     }
                     PLog.w(TAG, "Camera disconnected: ${camera.id} - 相机被其他应用或系统接管")
@@ -3038,7 +3052,7 @@ class Camera2Controller(private val context: Context) {
 
                 override fun onError(camera: CameraDevice, error: Int) {
                     if (openGeneration != cameraOpenGeneration) {
-                        closeCameraDeviceAndAwait(camera, "stale camera error")
+                        closeCameraDeviceSafely(camera, "stale camera error")
                         return
                     }
                     val errorMessage = when (error) {
@@ -3084,7 +3098,17 @@ class Camera2Controller(private val context: Context) {
                 }
 
                 override fun onClosed(camera: CameraDevice) {
-                    handleCameraDeviceClosed(camera)
+                    if (cameraDevice === camera || cameraDeviceAwaitingClose === camera) {
+                        handleCameraDeviceClosed(camera)
+                    } else {
+                        // The old active device is deliberately closed asynchronously when a
+                        // ready standby camera is promoted. Do not let its callback touch the
+                        // newly active device; retry warming the reverse lens after it releases.
+                        PLog.d(TAG, "Ignoring close callback from superseded camera: ${camera.id}")
+                        if (cameraDevice != null && cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN) {
+                            startStandbyCameraIfPossible()
+                        }
+                    }
                 }
             }, cameraHandler)
 
@@ -9226,6 +9250,12 @@ class Camera2Controller(private val context: Context) {
 
             clearCameraSessionState("closeCamera")
             val requestedOpenCameraId = _state.value.getCurrentCameraInfo()?.getOpenCameraId()
+            val canPromoteWarmStandbyImmediately =
+                !clearPendingOpen &&
+                    pendingCameraOpenRequest != null &&
+                    requestedOpenCameraId != null &&
+                    requestedOpenCameraId == standbyCameraOpenId &&
+                    isStandbyCameraReadyForPromotion(requestedOpenCameraId)
             if (clearPendingOpen || requestedOpenCameraId != standbyCameraOpenId) {
                 closeStandbyCamera(if (clearPendingOpen) "camera screen closed" else "different lens requested")
             }
@@ -9250,6 +9280,19 @@ class Camera2Controller(private val context: Context) {
             livePhotoRecorder.stopRecording()
 
             when {
+                deviceToClose != null && canPromoteWarmStandbyImmediately -> {
+                    // Both rear cameras are already running concurrently. Closing the old
+                    // device is asynchronous; waiting for its onClosed callback only delays
+                    // promotion of the already-configured standby device.
+                    PLog.i(
+                        TAG,
+                        "Promoting ready standby camera without waiting for old device close: " +
+                            "target=$requestedOpenCameraId, old=${deviceToClose.id}"
+                    )
+                    closeCameraDeviceSafely(deviceToClose, "warm standby lens promotion")
+                    cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
+                    openPendingCameraRequest()
+                }
                 deviceToClose != null -> {
                     closeCameraDeviceAndAwait(deviceToClose, "closeCamera")
                 }
@@ -9503,7 +9546,10 @@ class Camera2Controller(private val context: Context) {
                     val activeClosePending = cameraDevice == null &&
                         cameraDeviceLifecycle == CameraDeviceLifecycle.CLOSING &&
                         activeOpenCameraId == camera.id
-                    if (cameraDevice === camera || activeClosePending) {
+                    if (cameraDevice === camera ||
+                        cameraDeviceAwaitingClose === camera ||
+                        activeClosePending
+                    ) {
                         handleCameraDeviceClosed(camera)
                     } else if (standbyCameraDevice === camera) {
                         standbyCameraDevice = null
@@ -9590,6 +9636,22 @@ class Camera2Controller(private val context: Context) {
             PLog.w(TAG, "Unable to reconfigure standby recording session: ${error.message}")
             closeStandbyCamera("standby recording session exception")
         }
+    }
+
+    private fun isStandbyCameraReadyForPromotion(cameraOpenId: String): Boolean {
+        if (standbyCameraOpenId != cameraOpenId ||
+            standbyCameraDevice == null ||
+            standbyCaptureSession == null
+        ) {
+            return false
+        }
+        val recordingRelayMustBeReady =
+            _state.value.captureMode == CaptureMode.VIDEO &&
+                videoRecorder.isRecording() &&
+                videoRecorder.supportsDualCameraInput &&
+                !shouldUseVideoEnhancedStabilization()
+        return !recordingRelayMustBeReady ||
+            videoRecorder.hasCameraSourceFrames(standbyIsUltraWide)
     }
 
     private fun takeStandbyCamera(cameraOpenId: String): CameraDevice? {
