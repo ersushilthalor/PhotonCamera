@@ -2943,6 +2943,7 @@ class Camera2Controller(private val context: Context) {
                 cameraDevice = prewarmedDevice
                 cameraDeviceLifecycle = CameraDeviceLifecycle.OPEN
                 PLog.i(TAG, "Promoting prewarmed camera device: $openCameraId")
+                if (restartCameraForRawCaptureOutputMismatch("prewarmed camera promoted")) return
                 createPreviewSession(openGeneration = openGeneration)
                 return
             }
@@ -9233,7 +9234,10 @@ class Camera2Controller(private val context: Context) {
                 }
 
                 override fun onClosed(camera: CameraDevice) {
-                    if (cameraDevice === camera) {
+                    val activeClosePending = cameraDevice == null &&
+                        cameraDeviceLifecycle == CameraDeviceLifecycle.CLOSING &&
+                        activeOpenCameraId == camera.id
+                    if (cameraDevice === camera || activeClosePending) {
                         handleCameraDeviceClosed(camera)
                     } else if (standbyCameraDevice === camera) {
                         standbyCameraDevice = null
