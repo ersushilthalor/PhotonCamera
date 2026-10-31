@@ -55,6 +55,7 @@ internal class LensSwitchTransitionState(
                 }
 
                 val before = viewModel.state.value
+                val startingZoomByMain = viewModel.zoomRatioByMain
                 val currentCamera = before.getCurrentCameraInfo()
                 val targetCamera = before.availableCameras.firstOrNull {
                     it.cameraId == request.cameraId
@@ -110,7 +111,7 @@ internal class LensSwitchTransitionState(
                         // Match VCamera's 16-frame warm-up requirement on the direct 0.5x ↔
                         // 2x/3x handoff. Other lens transitions use the same live crossfade
                         // without imposing this additional delay.
-                        if (isFrameBasedHandoffEligible(viewModel.zoomRatioByMain, request.targetZoom)) {
+                        if (isFrameBasedHandoffEligible(startingZoomByMain, request.targetZoom)) {
                             withTimeoutOrNull(900L) {
                                 preview.awaitPreviewFrames(
                                     minimumTimestampNs = readyState.previewFirstFrameTimestampNs!!,
