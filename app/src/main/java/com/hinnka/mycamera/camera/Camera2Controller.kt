@@ -2024,10 +2024,13 @@ class Camera2Controller(private val context: Context) {
 
     fun setAutoSwitchToUltraWideEnabled(enabled: Boolean) {
         autoSwitchToUltraWideEnabled = enabled
-        if (!enabled) {
-            autoMacroActive = false
-            closeSubjectUnfocusedFrames = 0
-            subjectFarFrames = 0
+        val handler = cameraHandler ?: return
+        handler.post {
+            if (!enabled) {
+                autoMacroActive = false
+                closeSubjectUnfocusedFrames = 0
+                subjectFarFrames = 0
+            }
         }
     }
 
