@@ -241,7 +241,7 @@ private fun VideoTopBar(
                         onClick = onVideoLogWindowClick
                     )
                     VideoModePill(
-                        label = stringResource(R.string.video_lut),
+                        label = stringResource(R.string.video_pro_lut_button),
                         selected = isVideoLutWindowOpen || currentVideoLutId != "none",
                         onClick = onVideoLutWindowClick,
                         icon = Icons.Outlined.Palette

@@ -1393,7 +1393,7 @@
 
     <string name="video_pro_mode">PRO</string>
     <string name="video_log">LOG</string>
-    <string name="video_lut">LUT</string>
+    <string name="video_pro_lut_button">LUT</string>
     <string name="video_lut_off">Off</string>
     <string name="video_floating_window_options">Floating window options</string>
     <string name="video_floating_window_close">Close floating window</string>
