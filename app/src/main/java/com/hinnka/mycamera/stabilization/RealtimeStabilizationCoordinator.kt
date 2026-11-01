@@ -220,7 +220,6 @@ class RealtimeStabilizationCoordinator(context: Context) {
         // Wait through the seven-frame native lookahead plus a small margin for delayed HAL OIS samples.
         private const val HAL_OPTICAL_CORRECTION_PROBE_FRAME_COUNT =
             DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD + 3
-        private const val MIN_OPTICAL_CORRECTION_SAMPLES_PER_FRAME = 2
         // Reserve enough queued frames for the largest user-selectable lookahead,
         // plus the in-flight/current frame margin used by the feeder.
         private const val MAX_BUFFERED_STABILIZATION_IMAGES =
@@ -280,6 +279,8 @@ class RealtimeStabilizationCoordinator(context: Context) {
     private var nativeFrameAttemptCount = 0L
     private var captureResultCount = 0L
     private var consecutiveHalStabilizationConflictCount = 0
+    private var consecutiveMissingOpticalCorrectionFrames = 0
+    private var opticalTelemetryRuntimeUnavailable = false
     private var rawGyroCallbackCount = 0L
     private var opticalCorrectionSourceActive = false
     private var dynamicLensIntrinsicsSourceActive = false
@@ -287,15 +288,19 @@ class RealtimeStabilizationCoordinator(context: Context) {
     private var lastLoggedGateBoundaryCount = -1L
 
     var onEnhancedStabilizationUnavailable: (() -> Unit)? = null
+    var onOpticalStabilizationUnavailable: (() -> Unit)? = null
 
     val isGyroscopeAvailable: Boolean
         get() = gyroSensor != null
 
-    /** True when this camera can report at least one timestamped optical correction source. */
+    /** True when this camera can report timestamped optical correction data. */
     val supportsOpticalCorrectionTelemetry: Boolean
         get() = calibration?.let {
             it.supportsOisSamples || it.supportsLensIntrinsicsSamples
         } == true
+
+    val supportsLensIntrinsicsSamples: Boolean
+        get() = calibration?.supportsLensIntrinsicsSamples == true
 
     /** Legacy OIS shifts remain enabled as a fallback even on API-35 devices. */
     val shouldRequestOisSamples: Boolean
@@ -513,6 +518,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
         } else {
             emptyList()
         }
+        var notifyOpticalStabilizationUnavailable = false
         synchronized(lock) {
             captureResultCount += 1L
             val requestedVideoStabilization = request?.get(
@@ -610,6 +616,38 @@ class RealtimeStabilizationCoordinator(context: Context) {
             // A single accepted sample is useful: subsequent frames complete the time window
             // required by the native rolling-shutter row interpolator.
             val opticalCorrectionAccepted = acceptedOpticalCorrectionSamples > 0
+            val requestedOisActive =
+                requestedOpticalStabilization == CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
+            val actualOisActive = actualOpticalStabilization ==
+                CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON ||
+                (actualOpticalStabilization == null && requestedOisActive)
+            val telemetryAdvertised = currentCalibration.supportsOisSamples ||
+                currentCalibration.supportsLensIntrinsicsSamples
+            if (
+                activeSessionCount > 0 && telemetryAdvertised && actualOisActive &&
+                !opticalCorrectionAccepted
+            ) {
+                consecutiveMissingOpticalCorrectionFrames += 1
+            } else {
+                consecutiveMissingOpticalCorrectionFrames = 0
+            }
+            if (
+                !opticalTelemetryRuntimeUnavailable &&
+                consecutiveMissingOpticalCorrectionFrames >= HAL_OPTICAL_CORRECTION_PROBE_FRAME_COUNT
+            ) {
+                opticalTelemetryRuntimeUnavailable = true
+                // Do not keep feeding the native engine with a stale OIS pose. The controller
+                // will request OIS OFF while keeping gyro EIS+ active; if the HAL ignores OFF,
+                // the normal conflict guard will safely fall back.
+                opticalCorrectionSourceActive = false
+                lastOpticalCorrectionTimestampNs = 0L
+                notifyOpticalStabilizationUnavailable = true
+                PLog.w(
+                    TAG,
+                    "OIS is active but no usable timestamped optical samples arrived in " +
+                        "$consecutiveMissingOpticalCorrectionFrames capture results; requesting OIS OFF",
+                )
+            }
             if (activeSessionCount > 0 &&
                 (captureResultCount <= 3L || captureResultCount % 30L == 0L)
             ) {
@@ -657,6 +695,13 @@ class RealtimeStabilizationCoordinator(context: Context) {
             latestMetadataTimestampNs = maxOf(latestMetadataTimestampNs, timestampNs)
             trimOldest(frameMetadata, MAX_METADATA_COUNT)
             drainFramesLocked(lastFrameBoundaryNs)
+        }
+        if (notifyOpticalStabilizationUnavailable) {
+            try {
+                onOpticalStabilizationUnavailable?.invoke()
+            } catch (error: RuntimeException) {
+                PLog.w(TAG, "OIS disable callback failed: ${error.message}")
+            }
         }
     }
 
@@ -869,6 +914,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
         gyroFeedBoundaryNs = 0L
         lastProcessedGyroTimestampNs = 0L
         lastOpticalCorrectionTimestampNs = 0L
+        consecutiveMissingOpticalCorrectionFrames = 0
         lastLensIntrinsicsTimestampNs = 0L
         lastOisSampleTimestampNs = 0L
         latestMetadataTimestampNs = 0L
@@ -887,6 +933,8 @@ class RealtimeStabilizationCoordinator(context: Context) {
     }
 
     private fun resetFramePipelineForCameraSwitchLocked(currentCalibration: CameraCalibration?) {
+        opticalTelemetryRuntimeUnavailable = false
+        consecutiveMissingOpticalCorrectionFrames = 0
         val previousWidth = nativeFrameWidth
         val previousHeight = nativeFrameHeight
         val previousStrength = nativeStrength
@@ -969,11 +1017,12 @@ class RealtimeStabilizationCoordinator(context: Context) {
         }
         val videoConflict = actualVideoMode != null &&
             actualVideoMode != CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
-        val opticalTelemetryUnavailable = calibration?.let {
-            !it.supportsOisSamples && !it.supportsLensIntrinsicsSamples
-        } == true
+        val opticalTelemetryUnavailable = opticalTelemetryRuntimeUnavailable ||
+            calibration?.let {
+                !it.supportsOisSamples && !it.supportsLensIntrinsicsSamples
+            } == true
         val untrackedOpticalStabilization = actualOpticalMode ==
-            CaptureResult.LENS_OPTICAL_STABILIZATION_MODE_ON &&
+            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON &&
             opticalTelemetryUnavailable &&
             !opticalCorrectionAccepted
         // OIS and gyro EIS are compatible only when the optical movement can be timestamped

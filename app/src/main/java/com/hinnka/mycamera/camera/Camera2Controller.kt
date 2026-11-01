@@ -365,12 +365,17 @@ class Camera2Controller(private val context: Context) {
     private var previousVideoStabilizationMode = VideoStabilizationMode.OIS
     private val enhancedStabilizationUnavailableCameraIds =
         ConcurrentHashMap.newKeySet<String>()
+    private val enhancedOisUnavailableCameraIds =
+        ConcurrentHashMap.newKeySet<String>()
 
     init {
         realtimeStabilizationCoordinator.onEnhancedStabilizationUnavailable = {
             handleEnhancedStabilizationUnavailable(
                 reason = "Camera HAL stabilization conflicts with algorithmic stabilization"
             )
+        }
+        realtimeStabilizationCoordinator.onOpticalStabilizationUnavailable = {
+            handleOpticalStabilizationUnavailable()
         }
     }
 
@@ -3568,6 +3573,33 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    private fun handleOpticalStabilizationUnavailable() {
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { handleOpticalStabilizationUnavailable() }
+            return
+        }
+
+        val state = _state.value
+        if (state.captureMode != CaptureMode.VIDEO ||
+            state.videoConfig.stabilizationMode != VideoStabilizationMode.ENHANCED
+        ) {
+            return
+        }
+        val cameraId = currentStabilizationCameraId()
+        if (cameraId.isBlank() || !enhancedOisUnavailableCameraIds.add(cameraId)) return
+
+        PLog.w(
+            TAG,
+            "Disabling hardware OIS for EIS+ on camera=$cameraId because the HAL did not " +
+                "provide usable timestamped optical samples; gyro EIS+ remains enabled",
+        )
+        previewRequestBuilder?.apply {
+            applyBaseCameraSettings(this, isCapture = false)
+            updatePreview()
+        }
+    }
+
     private fun notifyEnhancedStabilizationUnavailable(
         fallback: EnhancedStabilizationFallback
     ) {
@@ -5288,13 +5320,14 @@ class Camera2Controller(private val context: Context) {
                     val oisModeAvailable = availableOpticalStabilizationModes.contains(
                         CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
                     )
-                    val canFuseOis = canFuseOpticalStabilization(
-                        oisModeAvailable = oisModeAvailable,
-                        supportsOisSamples = realtimeStabilizationCoordinator.shouldRequestOisSamples,
-                        supportsLensIntrinsicsSamples =
-                            realtimeStabilizationCoordinator.supportsOpticalCorrectionTelemetry &&
-                                !realtimeStabilizationCoordinator.shouldRequestOisSamples,
-                    )
+                    val cameraId = currentStabilizationCameraId()
+                    val canFuseOis = cameraId !in enhancedOisUnavailableCameraIds &&
+                        canFuseOpticalStabilization(
+                            oisModeAvailable = oisModeAvailable,
+                            supportsOisSamples = realtimeStabilizationCoordinator.shouldRequestOisSamples,
+                            supportsLensIntrinsicsSamples =
+                                realtimeStabilizationCoordinator.supportsLensIntrinsicsSamples,
+                        )
                     // Never turn on OIS without a timestamped optical correction source. If
                     // dynamic intrinsics are available, request legacy OIS samples too whenever
                     // supported; the native engine uses them only as a complete-window fallback.
