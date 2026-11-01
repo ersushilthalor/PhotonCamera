@@ -17,22 +17,15 @@ class RealtimeStabilizationMathTest {
     }
 
     @Test
-    fun stabilizationLookaheadAllowsZeroAndCapsAtTen() {
-        assertEquals(0, normalizeStabilizationLookahead(0))
-        assertEquals(0, normalizeStabilizationLookahead(-1))
-        assertEquals(10, normalizeStabilizationLookahead(10))
-        assertEquals(10, normalizeStabilizationLookahead(11))
-        assertEquals(7, normalizeStabilizationLookahead(DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD))
-    }
-
-    @Test
-    fun lookaheadZeroToTwoRemainsSelectedWithoutInternalFallback() {
-        assertEquals(0, normalizeStabilizationLookahead(0))
-        assertEquals(1, normalizeStabilizationLookahead(1))
-        assertEquals(2, normalizeStabilizationLookahead(2))
+    fun stabilizationLookaheadIsClampedToThreeThroughThirtyFrames() {
+        assertEquals(3, normalizeStabilizationLookahead(0))
+        assertEquals(3, normalizeStabilizationLookahead(2))
         assertEquals(3, normalizeStabilizationLookahead(3))
         assertEquals(10, normalizeStabilizationLookahead(10))
-        assertEquals(10, normalizeStabilizationLookahead(11))
+        assertEquals(30, normalizeStabilizationLookahead(30))
+        assertEquals(30, normalizeStabilizationLookahead(31))
+        assertEquals(30, normalizeStabilizationLookahead(Int.MAX_VALUE))
+        assertEquals(7, normalizeStabilizationLookahead(DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD))
     }
 
     @Test
