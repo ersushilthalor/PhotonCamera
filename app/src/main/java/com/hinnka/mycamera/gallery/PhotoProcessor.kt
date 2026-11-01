@@ -730,6 +730,12 @@ class PhotoProcessor(
 
         result ?: return@withContext null
 
+        // Apply the same Oppo photo pipeline to the rendered RAW/DNG bitmap as JPEG/YUV captures.
+        result = OppoPhotoPipelineEngine.process(
+            result,
+            metadata.customProperties[OppoPhotoPipelineEngine.METADATA_KEY],
+        )
+
         result = applyPostEditGeometry(result, metadata, "dng")
         result = applyFrame(result, metadata)
 
