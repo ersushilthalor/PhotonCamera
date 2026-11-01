@@ -195,9 +195,9 @@ private class BufferedStabilizationImage(
  * Source reconstruction of MGC's htd frame feeder around Photon's native EIS implementation.
  *
  * Camera metadata, calibrated gyro samples and optional OIS samples are held until they cross the
- * next timestamped image boundary. Reconstructed profile 7 then supplies a seven-frame
- * look-ahead. Preview and recording sessions share the feeder, source image and
- * result stream.
+ * next timestamped image boundary. The selected look-ahead window is forwarded unchanged to
+ * the native engine. Preview and recording sessions share the feeder, source image and result
+ * stream.
  */
 class RealtimeStabilizationCoordinator(context: Context) {
     companion object {
