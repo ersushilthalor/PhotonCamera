@@ -378,6 +378,9 @@ class Camera2Controller(private val context: Context) {
         realtimeStabilizationCoordinator.onOpticalStabilizationUnavailable = {
             handleOpticalStabilizationUnavailable()
         }
+        realtimeStabilizationCoordinator.onOpticalStabilizationTelemetryAvailable = {
+            handleOpticalStabilizationTelemetryAvailable()
+        }
     }
 
     @Volatile private var videoCameraHlg10InputActive: Boolean = false
@@ -2411,8 +2414,10 @@ class Camera2Controller(private val context: Context) {
             characteristics = resolvedCharacteristics,
             requestedConfig = requestedConfig,
             algorithmicStabilizationSupported =
-                realtimeStabilizationCoordinator.isCameraSupported(resolvedCharacteristics) &&
-                    !isEnhancedStabilizationUnavailableForCurrentCamera(),
+                realtimeStabilizationCoordinator.isCameraSupported(
+                    characteristics = resolvedCharacteristics,
+                    cameraId = currentStabilizationCameraId(),
+                ) && !isEnhancedStabilizationUnavailableForCurrentCamera(),
         )
         if (snapshot.config.logProfile != requestedConfig.logProfile) {
             PLog.w(
@@ -3574,6 +3579,32 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    private fun handleOpticalStabilizationTelemetryAvailable() {
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { handleOpticalStabilizationTelemetryAvailable() }
+            return
+        }
+        val state = _state.value
+        if (state.captureMode != CaptureMode.VIDEO ||
+            state.videoConfig.stabilizationMode != VideoStabilizationMode.ENHANCED
+        ) {
+            return
+        }
+        val cameraId = currentStabilizationCameraId()
+        if (cameraId.isBlank() || cameraId in enhancedOisUnavailableCameraIds) return
+
+        PLog.i(
+            TAG,
+            "Enabling hardware OIS for EIS+ on camera=$cameraId after timestamp-correlated " +
+                "optical telemetry was accepted",
+        )
+        previewRequestBuilder?.apply {
+            applyBaseCameraSettings(this, isCapture = false, currentState = state)
+            updatePreview()
+        }
+    }
+
     private fun handleOpticalStabilizationUnavailable() {
         val handler = cameraHandler
         if (handler != null && Looper.myLooper() != handler.looper) {
@@ -3581,15 +3612,15 @@ class Camera2Controller(private val context: Context) {
             return
         }
 
-        val cameraId = currentStabilizationCameraId()
-        if (cameraId.isBlank() || !enhancedOisUnavailableCameraIds.add(cameraId)) return
-
         val state = _state.value
         if (state.captureMode != CaptureMode.VIDEO ||
             state.videoConfig.stabilizationMode != VideoStabilizationMode.ENHANCED
         ) {
             return
         }
+
+        val cameraId = currentStabilizationCameraId()
+        if (cameraId.isBlank() || !enhancedOisUnavailableCameraIds.add(cameraId)) return
 
         PLog.w(
             TAG,
@@ -5324,6 +5355,7 @@ class Camera2Controller(private val context: Context) {
                     )
                     val cameraId = currentStabilizationCameraId()
                     val canFuseOis = cameraId !in enhancedOisUnavailableCameraIds &&
+                        realtimeStabilizationCoordinator.hasRuntimeOpticalCorrectionTelemetry &&
                         canFuseOpticalStabilization(
                             oisModeAvailable = oisModeAvailable,
                             supportsOisSamples = realtimeStabilizationCoordinator.shouldRequestOisSamples,
