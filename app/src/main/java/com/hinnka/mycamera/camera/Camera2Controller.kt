@@ -5355,16 +5355,17 @@ class Camera2Controller(private val context: Context) {
                     )
                     val cameraId = currentStabilizationCameraId()
                     val canFuseOis = cameraId !in enhancedOisUnavailableCameraIds &&
-                        realtimeStabilizationCoordinator.hasRuntimeOpticalCorrectionTelemetry &&
                         canFuseOpticalStabilization(
                             oisModeAvailable = oisModeAvailable,
                             supportsOisSamples = realtimeStabilizationCoordinator.shouldRequestOisSamples,
                             supportsLensIntrinsicsSamples =
                                 realtimeStabilizationCoordinator.supportsLensIntrinsicsSamples,
                         )
-                    // Never turn on OIS without a timestamped optical correction source. If
-                    // dynamic intrinsics are available, request legacy OIS samples too whenever
-                    // supported; the native engine uses them only as a complete-window fallback.
+                    // Legacy OIS samples are emitted only while hardware OIS is active, so a
+                    // runtime-sample gate here would deadlock OIS in the OFF state forever.
+                    // Start OIS when the HAL advertises a telemetry path; the coordinator
+                    // validates timestamp-correlated samples and disables OIS if the stream is blind.
+                    // Dynamic intrinsics remain primary; legacy shifts are the row-window fallback.
                     val opticalMode = when {
                         enhancedSelected && canFuseOis ->
                             CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
