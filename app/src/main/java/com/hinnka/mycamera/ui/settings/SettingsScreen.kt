@@ -1633,6 +1633,21 @@ fun SettingsScreen(
                             },
                         )
 
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                        SwitchSettingItem(
+                            title = stringResource(
+                                R.string.settings_force_ois_with_eis_plus
+                            ),
+                            description = stringResource(
+                                R.string.settings_force_ois_with_eis_plus_description
+                            ),
+                            checked = userPreferences.forceOisWithEisPlusEnabled,
+                            onCheckedChange = viewModel::setForceOisWithEisPlusEnabled,
+                        )
+
                         if (DeviceUtil.isOppo) {
                             HorizontalDivider(
                                 color = Color.White.copy(alpha = 0.1f),
