@@ -628,6 +628,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     init {
         viewModelScope.launch {
+            userPreferencesRepository.userPreferences.collect { preferences ->
+                cameraController.setForceOisWithEisPlusEnabled(
+                    preferences.forceOisWithEisPlusEnabled
+                )
+            }
+        }
+        viewModelScope.launch {
             oppoPhotoSettings.collect { settings ->
                 cameraController.setAutoHdrEnabled(settings.autoHdrEnabled)
                 cameraController.setFastShutterTargetFps(settings.fastShutterFps)
@@ -4110,6 +4117,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 resolution = resolvedConfig.resolution,
                 fps = resolvedConfig.fps,
             )
+        }
+    }
+
+    fun setForceOisWithEisPlusEnabled(enabled: Boolean) {
+        cameraController.setForceOisWithEisPlusEnabled(enabled)
+        viewModelScope.launch {
+            userPreferencesRepository.saveForceOisWithEisPlusEnabled(enabled)
         }
     }
 
