@@ -3226,7 +3226,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             customProperties = rawProcessingMetadataProperties(
                 userPrefs, cameraController.getCurrentSensorPhysicalAreaMm2(),
             ) + buildMap {
-                if (settings.oppoPhotoSettings.customPipelineEnabled && !settings.state.useRaw) {
+                if (settings.oppoPhotoSettings.customPipelineEnabled) {
                     put(
                         OppoPhotoPipelineEngine.METADATA_KEY,
                         settings.oppoPhotoSettings.toPipelineJson(),
@@ -6120,7 +6120,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     ),
                     captureExposureCompensationEv,
                 ) + buildMap {
-                    if (settings.oppoPhotoSettings.customPipelineEnabled && !settings.state.useRaw) {
+                    if (settings.oppoPhotoSettings.customPipelineEnabled) {
                         put(
                             OppoPhotoPipelineEngine.METADATA_KEY,
                             settings.oppoPhotoSettings.toPipelineJson(),
