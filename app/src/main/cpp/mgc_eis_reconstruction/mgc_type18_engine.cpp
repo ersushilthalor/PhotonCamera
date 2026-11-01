@@ -50,10 +50,9 @@ bool isPlausibleFramePeriod(std::int64_t period_ns) {
 
 type18::Parameters parametersFor(const EngineConfig &config) {
   type18::Parameters parameters;
-  // The motion-filtering factory selects this exact half-window from the MGC
-  // product profile.  V25's type-7 fallback has seven frames; type 18 has
-  // ten.  Keep it alongside the queue delay rather than letting either path
-  // retain a stale type-18 literal.
+  // The requested look-ahead is the shared half-window for pose sampling,
+  // motion filtering, delayed gyro integration and delayed frame output.
+  // Keep every stage driven by this one configured value.
   parameters.half_window_frames = config.lookahead_frames;
   // 0x22FD640 and 0x22FE244 pass params+416 to the rolling-shutter projection
   // builder. The ensuing conditional is the proprietary profile's calibrated
@@ -283,7 +282,8 @@ private:
            config_.active_array_width > 0 &&
            config_.active_array_height > 0 && config_.crop_width > 0 &&
            config_.crop_height > 0 && config_.num_strips == 12 &&
-           config_.lookahead_frames >= 0 && config_.lookahead_frames <= 10 &&
+           config_.lookahead_frames >= kMinimumSupportedLookaheadFrames &&
+           config_.lookahead_frames <= kMaximumSupportedLookaheadFrames &&
            config_.lookahead_frames == parameters_.half_window_frames &&
            config_.stabilization_strength >= 0.0 &&
            config_.stabilization_strength <= 1.0;
@@ -376,7 +376,7 @@ private:
     }
 
     // The first completed frame supplies an actual sensor period immediately,
-    // so startup never spends its seven-frame look-ahead on the 30 fps
+    // so startup never spends the configured look-ahead on the 30 fps
     // fallback. Later changes require three coherent results to reject a
     // one-frame HAL anomaly or a missing-result timestamp gap.
     if (!frame_period_initialized_) {
@@ -624,8 +624,8 @@ private:
     // 0x22D6944 increments the historical counter only after querying
     // center - 2*period, and continues while counter < params+272.  With
     // the profile-specific half-window this includes the corresponding extra deltas through
-    // center - 11*period, in addition to the initial center-to-previous
-    // delta assembled by 0x22D66A4..0x22D66DC.
+    // center - (lookahead + 1)*period, in addition to the initial
+    // center-to-previous delta assembled by 0x22D66A4..0x22D66DC.
     for (int distance = 2;
          distance <= parameters_.half_window_frames + 1; ++distance) {
       type18::PosePair older;
@@ -1058,8 +1058,8 @@ private:
       std::int64_t statistics_window_ns,
       std::int64_t sample_period_ns) const {
     // The recovered 30 fps profile expresses this endpoint in frame units.
-    // Use the observed sensor cadence so seven-frame look-ahead remains seven
-    // actual frames at 24/30/50/60 fps. 0x230F094 backs the endpoint toward
+    // Use the observed sensor cadence so the configured look-ahead remains
+    // the same number of actual frames at 24/30/50/60 fps. 0x230F094 backs the endpoint toward
     // the current frame until the primary pose ring covers it.
     std::int64_t end_timestamp_ns =
         first_row_timestamp_ns +
@@ -1216,8 +1216,8 @@ private:
     const double tight_candidate_blend = candidate_control.result;
     // 0x22FE420..0x22FE48C invokes the same primitive a second time with no
     // past statistics window. Its independent directional scalar is measured
-    // only across [frame_timestamp, frame_timestamp + 10 frames) and controls
-    // the 10-to-3 future-score horizon.
+    // only across the configured look-ahead interval and controls the
+    // configured-look-ahead-to-3 future-score horizon.
     const type18::GyroActivityMetrics future_activity = activityMetrics(
         queue, frame.frame_timestamp_ns, 0,
         frame_period_ns_);
