@@ -86,7 +86,6 @@ import com.hinnka.mycamera.ui.gallery.GalleryEditScreen
 import com.hinnka.mycamera.ui.settings.FilterManagementScreen
 import com.hinnka.mycamera.ui.settings.FrameEditorScreen
 import com.hinnka.mycamera.ui.settings.FrameManagementScreen
-import com.hinnka.mycamera.ui.settings.PhantomPipCropScreen
 import com.hinnka.mycamera.ui.settings.SettingsScreen
 import com.hinnka.mycamera.ui.settings.PresetEditorScreen
 import com.hinnka.mycamera.ui.settings.PresetManagementScreen
@@ -126,7 +125,6 @@ object Routes {
     fun presetEditor(presetId: String? = null): String {
         return if (presetId != null) "preset_editor?presetId=$presetId" else "preset_editor"
     }
-    const val PHANTOM_PIP_CROP = "phantom_pip_crop"
     const val COLOR_WALK = "color_walk"
     const val FILM_LIBRARY = "film_library"
     const val FILM_DETAIL = "film_detail/{filmId}"
@@ -883,9 +881,6 @@ fun NavigationHost(
                     onFrameManagementClick = {
                         navController.navigate(Routes.FRAME_MANAGEMENT)
                     },
-                    onPhantomPipCropClick = {
-                        navController.navigate(Routes.PHANTOM_PIP_CROP)
-                    },
                     onPresetManagementClick = {
                         navController.navigate(Routes.PRESET_MANAGEMENT)
                     }
@@ -920,18 +915,6 @@ fun NavigationHost(
                     },
                     onPresetEditClick = { id ->
                         navController.navigate(Routes.presetEditor(id))
-                    }
-                )
-            }
-
-            composable(Routes.PHANTOM_PIP_CROP) {
-                val crop by cameraViewModel.phantomPipCrop.collectAsState()
-                PhantomPipCropScreen(
-                    initialCrop = crop,
-                    onBack = { navController.popBackStack() },
-                    onSave = {
-                        cameraViewModel.setPhantomPipCrop(it)
-                        navController.popBackStack()
                     }
                 )
             }

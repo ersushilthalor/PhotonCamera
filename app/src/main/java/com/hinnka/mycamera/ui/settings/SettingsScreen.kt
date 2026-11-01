@@ -99,10 +99,7 @@ import com.hinnka.mycamera.ui.theme.PremiumAmber
 import com.hinnka.mycamera.ui.theme.PremiumGold
 import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.ui.theme.OnAccentColor
-import com.hinnka.mycamera.processor.DenoiseStrength
-import com.hinnka.mycamera.processor.MgcRawMaxMode
-import com.hinnka.mycamera.raw.RawOutputUpscaleMode
-import com.hinnka.mycamera.raw.RawSceneExposureMath
+
 import androidx.core.net.toUri
 import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.Lifecycle
@@ -143,11 +140,10 @@ import com.hinnka.mycamera.lut.creator.OpenAIApiClient
 import com.hinnka.mycamera.ml.DepthModelDownloadState
 import com.hinnka.mycamera.ml.DepthModelManager
 import com.hinnka.mycamera.raw.RawCfaCorrection
-import com.hinnka.mycamera.raw.RawSharpeningDefaults
-import com.hinnka.mycamera.raw.RawDenoiseDefaults
+
 import com.hinnka.mycamera.raw.RawNoiseProfileManager
 import com.hinnka.mycamera.raw.RawWhiteLevelCorrection
-import com.hinnka.mycamera.raw.SpectralFilmSelection
+
 import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD
 import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_STRENGTH
 import com.hinnka.mycamera.stabilization.ExternalLensStabilizationConfig
@@ -163,9 +159,7 @@ import com.hinnka.mycamera.ui.components.LogViewerDialog
 import com.hinnka.mycamera.ui.components.PaymentDialog
 import com.hinnka.mycamera.ui.components.DepthModelDownloadDialog
 import com.hinnka.mycamera.ui.components.SliderSettingItem
-import com.hinnka.mycamera.ui.components.RawEditPanel
-import com.hinnka.mycamera.ui.components.RawEditPanelContentMode
-import com.hinnka.mycamera.ui.components.RawNoiseProfileSelector
+
 import com.hinnka.mycamera.ui.components.RawDngMetadataCorrectionSettings
 import com.hinnka.mycamera.ui.components.rawDcpLensOptions
 import com.hinnka.mycamera.ui.components.rememberBackgroundPainter
@@ -175,7 +169,7 @@ import com.hinnka.mycamera.viewmodel.CameraViewModel
 import com.hinnka.mycamera.video.VideoRecordingPath
 import com.hinnka.mycamera.video.VideoStabilizationMode
 import java.io.File
-import java.util.Locale
+
 import java.util.UUID
 import kotlin.math.roundToInt
 import com.hinnka.mycamera.ui.icons.AppIcons
@@ -185,9 +179,6 @@ private enum class SettingsPage {
     FOCUS_LENS,
     CAPTURE_STORAGE,
     VIDEO,
-    PHOTO_MODE,
-    PROFESSIONAL_MODE,
-    PHANTOM,
     INTERFACE,
     CONTENT_MANAGEMENT,
     AI_SERVICE,
@@ -305,7 +296,6 @@ private fun AppLanguageSetting() {
     )
 }
 
-
 /**
  * 设置页面
  */
@@ -317,7 +307,6 @@ fun SettingsScreen(
     onFilterManagementClick: () -> Unit,
     onVideoFilterManagementClick: () -> Unit,
     onFrameManagementClick: () -> Unit,
-    onPhantomPipCropClick: () -> Unit,
     onPresetManagementClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -414,7 +403,6 @@ fun SettingsScreen(
     val rawWhiteLevelModes by viewModel.rawWhiteLevelModes.collectAsState()
     val rawCustomWhiteLevels by viewModel.rawCustomWhiteLevels.collectAsState()
     val rawCfaCorrectionModes by viewModel.rawCfaCorrectionModes.collectAsState()
-    val rawColorEngine by viewModel.rawRenderingEngine.collectAsState()
     val rawToneMappingParameters by viewModel.rawToneMappingParameters.collectAsState()
     val rawMaxSharpening by viewModel.rawMaxSharpening.collectAsState()
     val rawMaxQualityTuningEnabled by viewModel.rawMaxQualityTuningEnabled.collectAsState()
@@ -789,25 +777,18 @@ fun SettingsScreen(
     var downloadedUpdateApk by remember { mutableStateOf<File?>(null) }
     var showInstallUpdateDialog by remember { mutableStateOf(false) }
     var showRawBaselineRecipeEditor by remember { mutableStateOf(false) }
-    var jpgMultiFrameDenoiseCountSliderValue by remember(jpgMultiFrameDenoiseFrameCount) {
         mutableStateOf(jpgMultiFrameDenoiseFrameCount.toFloat())
     }
-    var jpgMultiFrameDenoiseOutputScaleUi by remember(jpgMultiFrameDenoiseOutputScale) {
         mutableStateOf(MultiFrameConfig.normalizeOutputScale(jpgMultiFrameDenoiseOutputScale))
     }
-    var hdrPlusFrameCountSliderValue by remember(hdrPlusFrameCount) {
         mutableStateOf(hdrPlusFrameCount.toFloat())
     }
-    var hdrPlusLongFrameExposureEvUi by remember(hdrPlusLongFrameExposureEv) {
         mutableStateOf(hdrPlusLongFrameExposureEv)
     }
-    var hdrPlusShortFrameExposureEvUi by remember(hdrPlusShortFrameExposureEv) {
         mutableStateOf(hdrPlusShortFrameExposureEv)
     }
-    var mlAeMaxHdrRatioUi by remember(mlAeMaxHdrRatio) {
         mutableStateOf(mlAeMaxHdrRatio)
     }
-    var rawMaxOutputScaleUi by remember(rawMaxOutputScale) {
         mutableStateOf(MultiFrameConfig.normalizeOutputScale(rawMaxOutputScale))
     }
 
@@ -1002,9 +983,6 @@ fun SettingsScreen(
         SettingsPage.FOCUS_LENS -> stringResource(R.string.settings_section_focus_lens)
         SettingsPage.CAPTURE_STORAGE -> stringResource(R.string.settings_section_capture_storage)
         SettingsPage.VIDEO -> stringResource(R.string.settings_section_video)
-        SettingsPage.PHOTO_MODE -> stringResource(R.string.settings_section_photo_mode)
-        SettingsPage.PROFESSIONAL_MODE -> stringResource(R.string.settings_section_professional_mode)
-        SettingsPage.PHANTOM -> stringResource(R.string.phantom)
         SettingsPage.INTERFACE -> stringResource(R.string.settings_section_interface)
         SettingsPage.CONTENT_MANAGEMENT -> stringResource(R.string.settings_section_management)
         SettingsPage.AI_SERVICE -> stringResource(R.string.ai_service)
@@ -1899,645 +1877,6 @@ fun SettingsScreen(
                     }
                 }
 
-                SettingsPage.PHOTO_MODE -> {
-                    // 照片模式设置
-                    SettingsSection(
-                        title = stringResource(R.string.settings_section_photo_mode),
-                        showTitle = false
-                    ) {
-                        SliderSettingItem(
-                            title = stringResource(R.string.settings_multi_frame_denoise_frame_count),
-                            description = stringResource(
-                                R.string.settings_multi_frame_denoise_frame_count_description
-                            ),
-                            value = jpgMultiFrameDenoiseCountSliderValue,
-                            valueRange = MultiFrameConfig.MIN_DENOISE_FRAME_COUNT.toFloat()..
-                                MultiFrameConfig.MAX_FRAME_COUNT.toFloat(),
-                            onValueChange = {
-                                jpgMultiFrameDenoiseCountSliderValue = it.roundToInt().toFloat()
-                            },
-                            resetValue = MultiFrameConfig.DEFAULT_DENOISE_FRAME_COUNT.toFloat(),
-                            onValueChangeFinished = {
-                                viewModel.setJpgMultiFrameDenoiseFrameCount(
-                                    jpgMultiFrameDenoiseCountSliderValue.roundToInt()
-                                )
-                            },
-                            valueTextFormatter = { it.roundToInt().toString() }
-                        )
-
-                        val jpgOutputScaleValueFormat = stringResource(R.string.settings_jpg_multi_frame_denoise_output_scale_value)
-                        SliderSettingItem(
-                            title = stringResource(R.string.settings_jpg_multi_frame_denoise_output_scale),
-                            description = stringResource(
-                                R.string.settings_jpg_multi_frame_denoise_output_scale_description
-                            ),
-                            value = jpgMultiFrameDenoiseOutputScaleUi,
-                            valueRange = MultiFrameConfig.MIN_OUTPUT_SCALE..MultiFrameConfig.MAX_OUTPUT_SCALE,
-                            resetValue = MultiFrameConfig.DEFAULT_SUPER_RESOLUTION_SCALE,
-                            onResetValue = { scale ->
-                                jpgMultiFrameDenoiseOutputScaleUi = scale
-                                viewModel.setJpgMultiFrameDenoiseOutputScale(scale)
-                            },
-                            onValueChange = {
-                                jpgMultiFrameDenoiseOutputScaleUi = MultiFrameConfig.normalizeOutputScale(it)
-                            },
-                            onValueChangeFinished = {
-                                viewModel.setJpgMultiFrameDenoiseOutputScale(jpgMultiFrameDenoiseOutputScaleUi)
-                            },
-                            valueTextFormatter = { scale -> String.format(jpgOutputScaleValueFormat, scale) }
-                        )
-
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
-
-                        QualityLevelSetting(
-                            title = stringResource(R.string.settings_nr_level),
-                            description = stringResource(R.string.settings_nr_level_description),
-                            levels = listOf(
-                                NoiseReductionLevel.OFF to stringResource(R.string.settings_nr_level_off),
-                                NoiseReductionLevel.FAST to stringResource(R.string.settings_nr_level_fast),
-                                NoiseReductionLevel.HIGH_QUALITY to stringResource(R.string.settings_nr_level_high_quality),
-                                NoiseReductionLevel.ZERO_SHUTTER_LAG to stringResource(R.string.settings_nr_level_zsl),
-                                NoiseReductionLevel.MINIMAL to stringResource(R.string.settings_nr_level_minimal)
-                            ),
-                            currentLevel = nrLevel,
-                            onLevelSelected = { viewModel.setNRLevel(it) }
-                        )
-
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
-
-                        QualityLevelSetting(
-                            title = stringResource(R.string.settings_edge_level),
-                            description = stringResource(R.string.settings_edge_level_description),
-                            levels = listOf(
-                                0 to stringResource(R.string.settings_nr_level_off),
-                                1 to stringResource(R.string.settings_nr_level_fast),
-                                2 to stringResource(R.string.settings_nr_level_high_quality),
-                                3 to stringResource(R.string.settings_nr_level_zsl)
-                            ),
-                            currentLevel = edgeLevel,
-                            onLevelSelected = { viewModel.setEdgeLevel(it) }
-                        )
-
-                        if (state.isP010Supported) {
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 12.dp)
-                            )
-
-                            SwitchSettingItem(
-                                title = stringResource(R.string.settings_use_p010),
-                                description = stringResource(R.string.settings_use_p010_description),
-                                checked = useP010,
-                                onCheckedChange = { viewModel.setUseP010(it) }
-                            )
-                        }
-
-                        if (state.isP3Supported) {
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 12.dp)
-                            )
-
-                            SwitchSettingItem(
-                                title = stringResource(R.string.settings_use_p3_color_space),
-                                description = stringResource(R.string.settings_use_p3_color_space_description),
-                                checked = useP3ColorSpace,
-                                onCheckedChange = { viewModel.setUseP3ColorSpace(it) }
-                            )
-                        }
-
-                    }
-                }
-
-                SettingsPage.PROFESSIONAL_MODE -> {
-                    // 专业模式使用 HDR+，融合模式决定是否支持包围曝光。
-                    SettingsSection(
-                        title = stringResource(R.string.settings_professional_group_max_hdr)
-                    ) {
-                        QualityLevelSetting(
-                            title = stringResource(R.string.settings_raw_max_spatial_mode),
-                            description = stringResource(R.string.settings_raw_max_spatial_mode_description),
-                            levels = listOf(
-                                MgcRawMaxMode.SPATIAL to stringResource(R.string.settings_raw_max_mode_spatial),
-                                MgcRawMaxMode.SABRE to stringResource(R.string.settings_raw_max_mode_sabre),
-                            ),
-                            currentLevel = hdrPlusMergeMode,
-                            onLevelSelected = viewModel::setHdrPlusMergeMode,
-                        )
-
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
-
-                        SliderSettingItem(
-                            title = stringResource(R.string.settings_hdr_plus_frame_count),
-                            description = stringResource(
-                                R.string.settings_hdr_plus_frame_count_description
-                            ),
-                            value = hdrPlusFrameCountSliderValue,
-                            valueRange = (if (effectiveHdrPlusBracketExposure) {
-                                MultiFrameConfig.MIN_HDR_PLUS_BRACKET_FRAME_COUNT
-                            } else {
-                                MultiFrameConfig.MIN_HDR_PLUS_FRAME_COUNT
-                            }).toFloat()..
-                                MultiFrameConfig.MAX_FRAME_COUNT.toFloat(),
-                            onValueChange = {
-                                hdrPlusFrameCountSliderValue = it.roundToInt().toFloat()
-                            },
-                            resetValue = MultiFrameConfig.DEFAULT_HDR_PLUS_FRAME_COUNT.toFloat(),
-                            onValueChangeFinished = {
-                                viewModel.setHdrPlusFrameCount(
-                                    hdrPlusFrameCountSliderValue.roundToInt()
-                                )
-                            },
-                            valueTextFormatter = { it.roundToInt().toString() }
-                        )
-
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
-
-                        SwitchSettingItem(
-                            title = stringResource(R.string.settings_hdr_plus_bracket_exposure),
-                            description = stringResource(
-                                if (hdrPlusMergeMode.supportsBracketExposure) {
-                                    R.string.settings_hdr_plus_bracket_exposure_description
-                                } else {
-                                    R.string.settings_hdr_plus_bracket_exposure_sabre_disabled
-                                }
-                            ),
-                            checked = effectiveHdrPlusBracketExposure,
-                            onCheckedChange = viewModel::setHdrPlusBracketExposureEnabled,
-                            enabled = hdrPlusMergeMode.supportsBracketExposure,
-                        )
-
-                        if (effectiveHdrPlusBracketExposure) {
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 12.dp)
-                            )
-                            SliderSettingItem(
-                                title = stringResource(R.string.settings_hdr_plus_long_frame_ev),
-                                description = stringResource(R.string.settings_hdr_plus_long_frame_ev_description),
-                                value = hdrPlusLongFrameExposureEvUi,
-                                valueRange = MultiFrameConfig.MIN_LONG_FRAME_EXPOSURE_EV..
-                                    MultiFrameConfig.MAX_LONG_FRAME_EXPOSURE_EV,
-                                onValueChange = { hdrPlusLongFrameExposureEvUi = (it * 10f).roundToInt() / 10f },
-                                onValueChangeFinished = {
-                                    viewModel.setHdrPlusLongFrameExposureEv(hdrPlusLongFrameExposureEvUi)
-                                },
-                                resetValue = MultiFrameConfig.LONG_FRAME_EXPOSURE_EV.toFloat(),
-                                valueTextFormatter = { String.format(Locale.getDefault(), "+%.1f EV", it) },
-                            )
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 12.dp)
-                            )
-                            SliderSettingItem(
-                                title = stringResource(R.string.settings_hdr_plus_short_frame_ev),
-                                description = stringResource(R.string.settings_hdr_plus_short_frame_ev_description),
-                                value = hdrPlusShortFrameExposureEvUi,
-                                valueRange = MultiFrameConfig.MIN_SHORT_FRAME_EXPOSURE_EV..
-                                    MultiFrameConfig.MAX_SHORT_FRAME_EXPOSURE_EV,
-                                onValueChange = { hdrPlusShortFrameExposureEvUi = (it * 10f).roundToInt() / 10f },
-                                onValueChangeFinished = {
-                                    viewModel.setHdrPlusShortFrameExposureEv(hdrPlusShortFrameExposureEvUi)
-                                },
-                                resetValue = MultiFrameConfig.DEFAULT_SHORT_FRAME_EXPOSURE_EV,
-                                valueTextFormatter = { String.format(Locale.getDefault(), "%.1f EV", it) },
-                            )
-                        }
-
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
-                        SliderSettingItem(
-                            title = stringResource(R.string.settings_ml_ae_max_hdr_ratio),
-                            description = stringResource(R.string.settings_ml_ae_max_hdr_ratio_description),
-                            value = mlAeMaxHdrRatioUi,
-                            valueRange = RawSceneExposureMath.MIN_CONFIGURED_MAX_HDR_RATIO..
-                                RawSceneExposureMath.MAX_CONFIGURED_MAX_HDR_RATIO,
-                            onValueChange = { mlAeMaxHdrRatioUi = (it * 10f).roundToInt() / 10f },
-                            onValueChangeFinished = { viewModel.setMlAeMaxHdrRatio(mlAeMaxHdrRatioUi) },
-                            resetValue = RawSceneExposureMath.FAST_MOMENTS_MAX_HDR_RATIO,
-                            valueTextFormatter = { String.format(Locale.getDefault(), "%.1f×", it) },
-                        )
-
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
-
-                        QualityLevelSetting(
-                            title = stringResource(R.string.settings_raw_min_shutter_speed),
-                            description = stringResource(
-                                R.string.settings_raw_min_shutter_speed_description
-                            ),
-                            levels = RAW_MIN_SHUTTER_SPEED_OPTIONS.map { value ->
-                                value to if (value == 0L) {
-                                    stringResource(R.string.video_option_off)
-                                } else {
-                                    "1/${(1_000_000_000L / value).toInt()}"
-                                }
-                            },
-                            currentLevel = rawMinShutterSpeedNs,
-                            onLevelSelected = viewModel::setRawMinShutterSpeedNs,
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    SettingsSection(
-                        title = stringResource(R.string.settings_professional_group_image_quality)
-                    ) {
-                        SwitchSettingItem(
-                            title = stringResource(R.string.settings_raw_max_quality_tuning),
-                            description = stringResource(R.string.settings_raw_max_quality_tuning_description),
-                            checked = rawMaxQualityTuningEnabled,
-                            onCheckedChange = viewModel::setRawMaxQualityTuningEnabled,
-                        )
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
-
-                        SwitchSettingItem(
-                            title = stringResource(R.string.settings_raw_digital_zoom_resampling),
-                            description = stringResource(R.string.settings_raw_digital_zoom_resampling_description),
-                            checked = rawDigitalZoomResamplingEnabled,
-                            onCheckedChange = viewModel::setRawDigitalZoomResamplingEnabled,
-                        )
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
-
-                        QualityLevelSetting(
-                            title = stringResource(R.string.settings_raw_output_upscale_mode),
-                            description = stringResource(
-                                R.string.settings_raw_output_upscale_mode_description
-                            ),
-                            levels = listOf(
-                                RawOutputUpscaleMode.LANCZOS3 to stringResource(
-                                    R.string.settings_raw_output_upscale_mode_lanczos
-                                ),
-                                RawOutputUpscaleMode.MGC_RAISR to stringResource(
-                                    R.string.settings_raw_output_upscale_mode_raisr
-                                ),
-                            ),
-                            currentLevel = rawOutputUpscaleMode,
-                            onLevelSelected = viewModel::setRawOutputUpscaleMode,
-                        )
-
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
-
-                        val valueFormat = stringResource(R.string.settings_raw_max_output_scale_value)
-                        val raisrUpscaleActive = rawOutputUpscaleMode.isMgcRaisr
-                        SliderSettingItem(
-                            title = stringResource(R.string.settings_raw_max_output_scale),
-                            description = stringResource(
-                                if (raisrUpscaleActive) {
-                                    R.string.settings_raw_max_output_scale_description_raisr
-                                } else {
-                                    R.string.settings_raw_max_output_scale_description
-                                }
-                            ),
-                            value = rawMaxOutputScaleUi,
-                            valueRange = MultiFrameConfig.MIN_OUTPUT_SCALE..MultiFrameConfig.MAX_OUTPUT_SCALE,
-                            resetValue = MultiFrameConfig.DEFAULT_SUPER_RESOLUTION_SCALE,
-                            onResetValue = { scale ->
-                                rawMaxOutputScaleUi = scale
-                                viewModel.setRawMaxOutputScale(scale)
-                            },
-                            onValueChange = {
-                                rawMaxOutputScaleUi = MultiFrameConfig.normalizeOutputScale(it)
-                            },
-                            onValueChangeFinished = {
-                                viewModel.setRawMaxOutputScale(rawMaxOutputScaleUi)
-                            },
-                            valueTextFormatter = { scale -> String.format(valueFormat, scale) },
-                            enabled = !raisrUpscaleActive,
-                        )
-
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
-
-                        SliderSettingItem(
-                            title = stringResource(R.string.settings_raw_max_default_sharpening),
-                            description = stringResource(
-                                R.string.settings_raw_max_default_sharpening_description
-                            ),
-                            value = rawMaxSharpeningUi,
-                            valueRange = 0f..1f,
-                            resetValue = RawSharpeningDefaults.DEFAULT_STRENGTH,
-                            onValueChange = {
-                                isRawSliderAdjusting = true
-                                rawMaxSharpeningUi = it
-                            },
-                            onValueChangeFinished = ::commitRawSliderValues,
-                        )
-
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
-
-                        if (availableRawNoiseProfiles.isNotEmpty()) {
-                            RawNoiseProfileSelector(
-                                lensOptions = rawDcpLensOptions(state.availableCameras),
-                                selectedProfileId = rawNoiseProfileId,
-                                profileIdsByLens = rawNoiseProfileIdsByLens,
-                                availableProfiles = availableRawNoiseProfiles,
-                                onSelectProfile = viewModel::setRawNoiseProfileId,
-                                onProfileIdsByLensChange = viewModel::setRawNoiseProfileIdsByLens,
-                                onImportProfile = {
-                                    importRawNoiseProfileLauncher.launch(arrayOf("*/*"))
-                                },
-                                onDeleteProfile = { profile ->
-                                    viewModel.deleteRawNoiseProfile(profile.id) { success ->
-                                        android.widget.Toast.makeText(
-                                            context,
-                                            if (success) {
-                                                R.string.raw_noise_profile_delete_success
-                                            } else {
-                                                R.string.raw_noise_profile_delete_failed
-                                            },
-                                            android.widget.Toast.LENGTH_SHORT,
-                                        ).show()
-                                    }
-                                },
-                            )
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 12.dp)
-                            )
-                        }
-
-                        SliderSettingItem(
-                            title = stringResource(R.string.settings_raw_max_default_luma_denoise),
-                            description = stringResource(
-                                R.string.settings_raw_max_default_luma_denoise_description
-                            ),
-                            value = rawMaxNoiseReductionUi,
-                            valueRange = DenoiseStrength.valueRange,
-                            resetValue = RawDenoiseDefaults.RAW_MAX_LUMA_STRENGTH,
-                            onValueChange = {
-                                isRawSliderAdjusting = true
-                                rawMaxNoiseReductionUi = it
-                            },
-                            onValueChangeFinished = ::commitRawSliderValues,
-                        )
-
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
-
-                        SliderSettingItem(
-                            title = stringResource(R.string.settings_raw_max_default_chroma_denoise),
-                            description = stringResource(
-                                R.string.settings_raw_max_default_chroma_denoise_description
-                            ),
-                            value = rawMaxChromaNoiseReductionUi,
-                            valueRange = DenoiseStrength.valueRange,
-                            resetValue = RawDenoiseDefaults.RAW_MAX_CHROMA_STRENGTH,
-                            onValueChange = {
-                                isRawSliderAdjusting = true
-                                rawMaxChromaNoiseReductionUi = it
-                            },
-                            onValueChangeFinished = ::commitRawSliderValues,
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    SettingsSection(
-                        title = stringResource(R.string.settings_raw_group_development)
-                    ) {
-                        RawEditPanel(
-                        selectedDcpId = rawDcpId,
-                        rawDcpIdsByLens = rawDcpIdsByLens,
-                        dcpLensOptions = rawDcpLensOptions(state.availableCameras),
-                        availableDcps = availableDcps,
-                        selectedBaselineLutId = rawBaselineLutId,
-                        onSelectBaselineLut = viewModel::setRawBaselineLutId,
-                        onEditBaselineRecipe = { showRawBaselineRecipeEditor = true },
-                        availableLuts = availableLuts,
-                        thumbnail = previewThumbnail,
-                        rawExposureCompensation = rawExposureCompensationUi,
-                        rawHighlightsAdjustment = rawHighlightsAdjustmentUi,
-                        rawShadowsAdjustment = rawShadowsAdjustmentUi,
-                        rawBlackPointCorrection = rawBlackPointCorrectionUi,
-                        rawWhitePointCorrection = rawWhitePointCorrectionUi,
-                        rawRenderingEngine = rawColorEngine,
-                        rawToneMappingParameters = rawToneMappingParametersUi,
-                        spectralFilmSelection = rawSpectralFilmSelection ?: SpectralFilmSelection(rawSpectralFilmStock ?: "kodak_portra_400"),
-                        spectralFilmPrint = rawSpectralFilmPrint ?: "kodak_portra_endura",
-                        onSelectDcp = { viewModel.setRawDcpId(it) },
-                        onRawDcpIdsByLensChange = { viewModel.setRawDcpIdsByLens(it) },
-                        onImportDcp = { importDcpLauncher.launch(arrayOf("*/*")) },
-                        onDeleteDcp = { dcp ->
-                            viewModel.deleteRawDcp(dcp.id) { success ->
-                                android.widget.Toast.makeText(
-                                    context,
-                                    if (success) R.string.raw_dcp_delete_success else R.string.raw_dcp_delete_failed,
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        },
-                        onRawExposureCompensationChange = {
-                            rawExposureCompensationUi = it
-                        },
-                        onRawHighlightsAdjustmentChange = {
-                            rawHighlightsAdjustmentUi = it
-                        },
-                        onRawShadowsAdjustmentChange = {
-                            rawShadowsAdjustmentUi = it
-                        },
-                        onRawBlackPointCorrectionChange = { rawBlackPointCorrectionUi = it },
-                        onRawWhitePointCorrectionChange = { rawWhitePointCorrectionUi = it },
-                        onRawColorEngineChange = { viewModel.setRawColorEngine(it) },
-                        onRawToneMappingParametersChange = { rawToneMappingParametersUi = it },
-                        onSpectralFilmSelectionChange = { viewModel.setRawSpectralFilmSelection(it) },
-                        onSpectralFilmPrintChange = { viewModel.setRawSpectralFilmPrint(it) },
-                        onAdjustmentStart = { isRawSliderAdjusting = true },
-                        onAdjustmentEnd = { commitRawSliderValues() },
-                        hncsFilmCurveMode = rawHncsFilmCurveMode,
-                        onHncsFilmCurveModeChange = viewModel::setRawHncsFilmCurveMode,
-                            contentMode = RawEditPanelContentMode.FULL
-                        )
-                    }
-
-                    SettingsSection(
-                        title = stringResource(R.string.settings_raw_group_capture_output)
-                    ) {
-                        if (isHdrSettingsSupported) {
-                            SwitchSettingItem(
-                                title = stringResource(R.string.settings_ultra_hdr_gain_map),
-                                description = stringResource(
-                                    R.string.settings_ultra_hdr_gain_map_description
-                                ),
-                                checked = ultraHdrGainMapEnabled,
-                                onCheckedChange = viewModel::setUltraHdrGainMapEnabled,
-                            )
-
-                            HorizontalDivider(
-                                modifier = Modifier.padding(vertical = 8.dp),
-                                color = Color.White.copy(alpha = 0.1f)
-                            )
-                        }
-
-                        QualityLevelSetting(
-                            title = stringResource(R.string.settings_export_dng_with_raw_export),
-                            description = stringResource(R.string.settings_export_dng_with_raw_export_description),
-                            levels = listOf(
-                                false to stringResource(R.string.settings_professional_export_jpg),
-                                true to stringResource(R.string.settings_professional_export_raw_jpg),
-                            ),
-                            currentLevel = exportDngWithRawExport,
-                            onLevelSelected = viewModel::setExportDngWithRawExport,
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    SettingsSection(
-                        title = stringResource(R.string.settings_raw_group_sensor_correction)
-                    ) {
-                        SwitchSettingItem(
-                            title = stringResource(R.string.settings_raw_lens_shading_correction),
-                            description = stringResource(R.string.settings_raw_lens_shading_correction_description),
-                            checked = rawLensShadingCorrectionEnabled,
-                            onCheckedChange = { viewModel.setRawLensShadingCorrectionEnabled(it) }
-                        )
-
-                        HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 8.dp),
-                            color = Color.White.copy(alpha = 0.1f)
-                        )
-
-                        RawDngMetadataCorrectionSetting(
-                            cameras = state.availableCameras,
-                            blackLevelModes = rawBlackLevelModes,
-                            customBlackLevels = rawCustomBlackLevels,
-                            whiteLevelModes = rawWhiteLevelModes,
-                            customWhiteLevels = rawCustomWhiteLevels,
-                            cfaCorrectionModes = rawCfaCorrectionModes,
-                            onCorrectionsChange = viewModel::setRawDngMetadataCorrections
-                        )
-                    }
-                }
-
-                SettingsPage.PHANTOM -> {
-                    if (DeviceUtil.canShowPhantom) {
-                        // 幻影模式设置
-                        SettingsSection(
-                            title = stringResource(R.string.ghost_mode),
-                            showTitle = false
-                        ) {
-                            SwitchSettingItem(
-                                title = stringResource(R.string.ghost_mode),
-                                description = stringResource(R.string.ghost_mode_dialog_description),
-                                checked = phantomMode,
-                                onCheckedChange = { enabled ->
-                                    if (enabled && (!Settings.canDrawOverlays(context) || !Environment.isExternalStorageManager())) {
-                                        showGhostPermissionDialog = true
-                                    } else if (enabled != phantomMode) {
-                                        viewModel.togglePhantomMode()
-                                    }
-                                }
-                            )
-
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
-
-                            SwitchSettingItem(
-                                title = stringResource(R.string.settings_phantom_button_hidden),
-                                description = stringResource(R.string.settings_phantom_button_hidden_description),
-                                checked = phantomButtonHidden,
-                                onCheckedChange = { viewModel.setPhantomButtonHidden(it) }
-                            )
-
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
-
-                            SwitchSettingItem(
-                                title = stringResource(R.string.settings_launch_camera_on_phantom_mode),
-                                description = stringResource(R.string.settings_launch_camera_on_phantom_mode_description),
-                                checked = launchCameraOnPhantomMode,
-                                onCheckedChange = { viewModel.setLaunchCameraOnPhantomMode(it) }
-                            )
-
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
-
-                            SwitchSettingItem(
-                                title = stringResource(R.string.settings_phantom_pip_preview),
-                                description = stringResource(R.string.settings_phantom_pip_preview_description),
-                                checked = phantomPipPreview,
-                                onCheckedChange = { viewModel.setPhantomPipPreview(it) }
-                            )
-
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
-
-                            NavigationSettingItem(
-                                title = stringResource(R.string.settings_phantom_pip_crop),
-                                description = stringResource(R.string.settings_phantom_pip_crop_description),
-                                onClick = onPhantomPipCropClick
-                            )
-
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
-
-                            SwitchSettingItem(
-                                title = stringResource(R.string.settings_phantom_save_as_new),
-                                description = stringResource(R.string.settings_phantom_save_as_new_description),
-                                checked = phantomSaveAsNew,
-                                onCheckedChange = { viewModel.setPhantomSaveAsNew(it) }
-                            )
-
-                            HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(vertical = 12.dp)
-                            )
-
-                            FrameWatermarkSetting(
-                                title = stringResource(R.string.settings_phantom_frame_title),
-                                description = stringResource(R.string.settings_phantom_frame_description),
-                                availableFrames = availableFrames,
-                                currentFrameId = phantomFrameId,
-                                onFrameSelected = viewModel::setPhantomFrame
-                            )
-
-                        }
-                    }
-                }
-
                 SettingsPage.INTERFACE -> {
                     // 界面样式
                     SettingsSection(
@@ -3237,86 +2576,7 @@ private fun SettingsCategoryOverview(
 
     Spacer(modifier = Modifier.height(24.dp))
 
-    SettingsSection(title = stringResource(R.string.imaging)) {
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_photo_mode),
-            description = listOf(
-                stringResource(R.string.settings_multi_frame_denoise_frame_count),
-                stringResource(R.string.settings_jpg_multi_frame_denoise_output_scale),
-                stringResource(R.string.settings_nr_level),
-                stringResource(R.string.settings_edge_level)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.PHOTO_MODE) }
-        )
-
-        SettingsCategoryDivider()
-
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_professional_mode),
-            description = listOf(
-                stringResource(R.string.settings_professional_group_max_hdr),
-                stringResource(R.string.settings_professional_group_image_quality),
-                stringResource(R.string.settings_raw_group_development),
-                stringResource(R.string.settings_raw_group_capture_output),
-                stringResource(R.string.settings_raw_group_sensor_correction),
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.PROFESSIONAL_MODE) }
-        )
-
-        if (DeviceUtil.canShowPhantom) {
-            SettingsCategoryDivider()
-
-            NavigationSettingItem(
-                title = stringResource(R.string.phantom),
-                description = listOf(
-                    stringResource(R.string.settings_phantom_pip_preview),
-                    stringResource(R.string.settings_phantom_save_as_new),
-                    stringResource(R.string.settings_phantom_frame_title)
-                ).joinToString(" · "),
-                onClick = { onPageSelected(SettingsPage.PHANTOM) }
-            )
-        }
-    }
-
-    Spacer(modifier = Modifier.height(24.dp))
-
-    SettingsSection(title = stringResource(R.string.settings_tab_system)) {
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_interface),
-            description = listOf(
-                stringResource(R.string.settings_background),
-                stringResource(R.string.settings_widget_theme),
-                stringResource(R.string.settings_develop_animation)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.INTERFACE) }
-        )
-
-        SettingsCategoryDivider()
-
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_management),
-            description = listOf(
-                stringResource(R.string.settings_filter_management),
-                stringResource(R.string.settings_frame_management),
-                stringResource(R.string.settings_preset_management)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.CONTENT_MANAGEMENT) }
-        )
-
-        SettingsCategoryDivider()
-
-        NavigationSettingItem(
-            title = stringResource(R.string.ai_service),
-            description = listOf(
-                stringResource(R.string.settings_openai_api_key),
-                stringResource(R.string.settings_openai_base_url),
-                stringResource(R.string.settings_ai_model)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.AI_SERVICE) }
-        )
-
-        SettingsCategoryDivider()
-
+SettingsSection(title = stringResource(R.string.settings_tab_system)) {
         NavigationSettingItem(
             title = stringResource(R.string.settings_section_system_control),
             description = listOf(
@@ -3326,28 +2586,6 @@ private fun SettingsCategoryOverview(
                 stringResource(R.string.settings_volume_key_action)
             ).joinToString(" · "),
             onClick = { onPageSelected(SettingsPage.SYSTEM_CONTROL) }
-        )
-
-        SettingsCategoryDivider()
-
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_data_maintenance),
-            description = listOf(
-                stringResource(R.string.settings_backup_settings),
-                stringResource(R.string.settings_restore_settings)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.DATA_MAINTENANCE) }
-        )
-
-        SettingsCategoryDivider()
-
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_help_about),
-            description = listOf(
-                stringResource(R.string.settings_log_viewer),
-                stringResource(R.string.settings_community_group)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.HELP_ABOUT) }
         )
     }
 }
@@ -4023,7 +3261,6 @@ fun DropdownSettingItem(
     }
 }
 
-
 /**
  * 导航设置项（点击后跳转到其他页面）
  */
@@ -4077,7 +3314,6 @@ fun NavigationSettingItem(
         }
     }
 }
-
 
 /**
  * 边框水印设置
@@ -4149,7 +3385,6 @@ fun FrameWatermarkSetting(
         )
     }
 }
-
 
 /**
  * 单个边框选项
@@ -4317,7 +3552,6 @@ private fun PremiumCard(
         }
     }
 }
-
 
 @Composable
 private fun CustomVendorKeysDialog(
