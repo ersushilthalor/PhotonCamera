@@ -135,8 +135,8 @@ struct FrameMetadata {
 };
 
 struct EngineConfig {
-  // MGC V25 profile 7 fixes the strip/look-ahead parameters below. The
-  // reconstruction also retains profile 18 only for differential research.
+  // The default configuration follows MGC V25 profile 7. The look-ahead
+  // remains caller-configurable within the supported 3-30 frame range.
   // Method 4 consumes strength in the packed lookahead frame state; its outer
   // full-grid feasibility correction is applied directly.
   int output_width = 1920;
