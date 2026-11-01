@@ -7,12 +7,13 @@ import java.io.File
 /**
  * Lifecycle wrapper around Photon’s source reconstruction of MGC’s sensor EIS path.
  *
- * MGC 9.6.080 resolves the installed `device_key=blueline` to product profile 7. The original
- * factory selects method 4, 12 strips and a seven-frame look-ahead for that profile. This class
- * owns the recovered gyro queues, motion filtering, look-ahead, crop constraints and rolling-
- * shutter projection as ordinary app source compiled into `libmy-native-lib.so`; it never loads
- * `libgcastartup.so`. Camera2 OIS shifts or API-35 dynamic intrinsics are interpolated on the same
- * rolling-shutter row timestamps and applied only to the real-camera projection.
+ * MGC 9.6.080 resolves the installed `device_key=blueline` to product profile 7. Its factory
+ * defaults to method 4, 12 strips and seven look-ahead frames; Photon passes the selected 3-30
+ * frame window through JNI to the native engine. This class owns the recovered gyro queues,
+ * motion filtering, crop constraints and rolling-shutter projection as ordinary app source
+ * compiled into `libmy-native-lib.so`; it never loads `libgcastartup.so`. Camera2 OIS shifts or
+ * API-35 dynamic intrinsics are interpolated on the same row timestamps and applied only to the
+ * real-camera projection.
  */
 internal class MgcEisNativeEngine(cacheDirectory: File) {
     companion object {
@@ -227,8 +228,8 @@ internal class MgcEisNativeEngine(cacheDirectory: File) {
 
         // htd's one-second dead-source escape can submit a startup backlog before the first
         // calibrated gyro event arrives. Those images do not have a reconstructable pose and
-        // must be reported as dropped instead of entering the seven-frame motion filter as a
-        // fabricated identity pose.
+        // must be reported as dropped instead of entering the configured look-ahead motion
+        // filter as a fabricated identity pose.
         if (firstGyroTimestampNs == 0L || firstGyroTimestampNs > firstRowCenterTimestampNs) {
             return FrameResult.Dropped(input.sensorTimestampNs)
         }
