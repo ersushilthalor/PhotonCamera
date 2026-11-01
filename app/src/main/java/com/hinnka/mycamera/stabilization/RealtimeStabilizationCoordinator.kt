@@ -27,8 +27,8 @@ const val STABILIZATION_LOOKAHEAD_FRAME_COUNT = MgcEisNativeEngine.LOOKAHEAD_FRA
 // method-4 look-ahead pose blend; the outer full-grid feasibility correction is independent.
 const val DEFAULT_VIDEO_STABILIZATION_STRENGTH = 1f
 const val DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD = 7
-const val MIN_VIDEO_STABILIZATION_LOOKAHEAD = 0
-const val MAX_VIDEO_STABILIZATION_LOOKAHEAD = 10
+const val MIN_VIDEO_STABILIZATION_LOOKAHEAD = 3
+const val MAX_VIDEO_STABILIZATION_LOOKAHEAD = 30
 
 fun normalizeStabilizationStrength(strength: Float): Float =
     if (strength.isFinite()) strength.coerceIn(0f, 1f) else DEFAULT_VIDEO_STABILIZATION_STRENGTH
