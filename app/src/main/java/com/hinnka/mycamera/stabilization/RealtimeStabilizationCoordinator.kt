@@ -340,6 +340,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
     private var opticalTelemetryRuntimeUnavailable = false
     private var runtimeOpticalCorrectionTelemetryAvailable = false
     private var oisBlindFrames = 0
+    private var oisBlindOnlyConflictDetected = false
     private val oisBlindCameras = HashSet<String>()
     private var rawGyroCallbackCount = 0L
     private var opticalCorrectionSourceActive = false
@@ -398,6 +399,10 @@ class RealtimeStabilizationCoordinator(context: Context) {
             if (enabled) {
                 oisBlindFrames = 0
                 calibration?.cameraId?.let(oisBlindCameras::remove)
+                if (oisBlindOnlyConflictDetected) {
+                    halStabilizationConflictDetected = false
+                }
+                oisBlindOnlyConflictDetected = false
             }
         }
         PLog.i(TAG, "MGC force OIS with EIS+ override: enabled=$enabled")
@@ -1161,6 +1166,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
             !forceOisWithEisPlusEnabled &&
             oisBlindFrames >= HAL_OPTICAL_CORRECTION_PROBE_FRAME_COUNT
         ) {
+            oisBlindOnlyConflictDetected = !videoConflict
             calibration?.cameraId
                 ?.takeIf { it.isNotBlank() }
                 ?.let(oisBlindCameras::add)
