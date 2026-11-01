@@ -364,6 +364,8 @@ class Camera2Controller(private val context: Context) {
     var onEnhancedStabilizationUnavailable: ((EnhancedStabilizationFallback) -> Unit)? = null
     var onVideoSaved: ((Uri?) -> Unit)? = null
     private var previousVideoStabilizationMode = VideoStabilizationMode.OIS
+    @Volatile
+    private var forceOisWithEisPlusEnabled = false
     private val enhancedStabilizationUnavailableCameraIds =
         ConcurrentHashMap.newKeySet<String>()
     private val enhancedOisUnavailableCameraIds =
@@ -3619,6 +3621,15 @@ class Camera2Controller(private val context: Context) {
             return
         }
 
+        if (forceOisWithEisPlusEnabled) {
+            PLog.w(
+                TAG,
+                "Keeping user-forced OIS active for EIS+ although timestamped optical telemetry " +
+                    "is unavailable; stabilization may be less accurate",
+            )
+            return
+        }
+
         val cameraId = currentStabilizationCameraId()
         if (cameraId.isBlank() || !enhancedOisUnavailableCameraIds.add(cameraId)) return
 
@@ -5317,8 +5328,9 @@ class Camera2Controller(private val context: Context) {
     /**
      * 应用防抖设置
      *
-     * EIS+ disables Camera2 electronic stabilization. Hardware OIS is enabled only when
-     * the HAL also exposes timestamped lens-intrinsics or OIS-offset telemetry that MGC can fuse.
+     * EIS+ disables Camera2 electronic stabilization. Hardware OIS is normally enabled only
+     * when MGC can fuse timestamped optical telemetry; the explicit force setting overrides
+     * that safety gate and keeps requesting OIS when the camera exposes the Camera2 OIS control.
      */
     private fun applyStabilizationSettings(
         builder: CaptureRequest.Builder,
@@ -5367,6 +5379,8 @@ class Camera2Controller(private val context: Context) {
                     // validates timestamp-correlated samples and disables OIS if the stream is blind.
                     // Dynamic intrinsics remain primary; legacy shifts are the row-window fallback.
                     val opticalMode = when {
+                        enhancedSelected && forceOisWithEisPlusEnabled && oisModeAvailable ->
+                            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
                         enhancedSelected && canFuseOis ->
                             CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
                         enhancedSelected ->
@@ -7590,6 +7604,17 @@ class Camera2Controller(private val context: Context) {
                 enhancedStabilizationLookahead = normalizeStabilizationLookahead(lookahead)
             )
         )
+    }
+
+    fun setForceOisWithEisPlusEnabled(enabled: Boolean) {
+        if (forceOisWithEisPlusEnabled == enabled) return
+        forceOisWithEisPlusEnabled = enabled
+        realtimeStabilizationCoordinator.setForceOisWithEisPlusEnabled(enabled)
+        previewRequestBuilder?.apply {
+            applyBaseCameraSettings(this, isCapture = false)
+            updatePreview()
+        }
+        PLog.i(TAG, "Force OIS with EIS+ setting changed: enabled=$enabled")
     }
 
     fun setExternalLensStabilizationConfig(config: ExternalLensStabilizationConfig) {
