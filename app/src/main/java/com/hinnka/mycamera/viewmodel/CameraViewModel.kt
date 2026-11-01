@@ -70,6 +70,9 @@ import com.hinnka.mycamera.processor.MgcRawMaxMode
 import com.hinnka.mycamera.processor.RawmaxExposurePlanner
 import com.hinnka.mycamera.processor.RawStackFrame
 import com.hinnka.mycamera.processor.OppoPhotoPipelineEngine
+import com.hinnka.mycamera.processor.OppoHdrFrameRole
+import com.hinnka.mycamera.processor.OppoHdrInputFrame
+import com.hinnka.mycamera.processor.OppoPhotoHdrEngine
 import com.hinnka.mycamera.processor.OppoRefocusDepthEngine
 import com.hinnka.mycamera.raw.ColorSpace
 import com.hinnka.mycamera.raw.DcpProfileParser
@@ -3658,14 +3661,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         } else if (photo.state.refocusCapturing) {
             processRefocusCapture(photo, settings)
         } else if (photo.state.hdrBracketCapturing) {
+            val baseFrame = photo.frames.firstOrNull {
+                (it.captureResult?.request?.tag as? Int) == 0
+            } ?: first
             processHdrBracket(
                 images = photo.frames.map { it.image },
                 captureResults = photo.frames.map { it.captureResult },
-                zeroEvFrameCount = photo.frames.size - 2,
                 expectedFrameCount = photo.frames.size,
-                captureInfo = captureInfo,
-                characteristics = characteristics,
-                captureResult = captureResult,
+                captureInfo = baseFrame.captureInfo,
+                characteristics = baseFrame.characteristics,
+                captureResult = baseFrame.captureResult,
                 settings = settings,
             )
         } else if (photo.state.isMultiFrameEnabled) {
@@ -6773,7 +6778,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun processHdrBracket(
         images: List<SafeImage>,
         captureResults: List<CaptureResult?>,
-        zeroEvFrameCount: Int,
         expectedFrameCount: Int,
         captureInfo: CaptureInfo,
         characteristics: CameraCharacteristics?,
@@ -6784,84 +6788,145 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val orderedImages = orderedFrames.images
         val orderedCaptureResults = orderedFrames.captureResults
         var imagesHandedToGallery = false
+        var fusedBitmap: Bitmap? = null
         try {
-            if (orderedImages.size != expectedFrameCount) return
+            if (orderedImages.size != expectedFrameCount || orderedImages.isEmpty()) return
+
             val context = getApplication<Application>()
             val shouldAutoSave = settings.preferences.autoSaveAfterCapture
             val sharpeningValue = 0f
             val noiseReductionValue = 0f
             val chromaNoiseReductionValue = 0f
             val photoQualityValue = settings.preferences.photoQuality
-            val baseImage = orderedImages[HDR_BRACKET_ZERO_INDEX]
-            val useSuperRes = false
-            val superResScale = 1.0f
-            val captureMode = "jpg_max"
-            val metadataCaptureInfo = captureInfo
+            val baseIndex = orderedCaptureResults.indexOfFirst {
+                (it?.request?.tag as? Int) == 0
+            }.takeIf { it >= 0 } ?: 0
+            val baseImage = orderedImages[baseIndex]
+            val baseCaptureResult = orderedCaptureResults.getOrNull(baseIndex) ?: captureResult
+            val aspectRatio = settings.state.aspectRatio
             val metadata = buildPhotoMetadata(
-                width = (baseImage.width.toFloat() * superResScale).roundToInt(),
-                height = (baseImage.height.toFloat() * superResScale).roundToInt(),
-                captureInfo = metadataCaptureInfo,
+                width = baseImage.width,
+                height = baseImage.height,
+                captureInfo = captureInfo,
                 sharpeningValue = sharpeningValue,
                 noiseReductionValue = noiseReductionValue,
                 chromaNoiseReductionValue = chromaNoiseReductionValue,
-                captureMode = captureMode,
+                captureMode = "jpg_max",
                 multipleExposureFrameCount = expectedFrameCount,
                 settings = settings,
             )
-
+            val outputIsLandscape = if (metadata.rotation == 90 || metadata.rotation == 270) {
+                baseImage.height >= baseImage.width
+            } else {
+                baseImage.width >= baseImage.height
+            }
+            val targetAspectRatio = (metadata.ratio ?: aspectRatio).getValue(outputIsLandscape)
             val photoId = GalleryManager.preparePhoto(
                 context,
                 metadata,
-                null,
+                baseCaptureResult,
                 settings.displayThumbnail,
                 false,
-                superResScale,
+                1.0f,
                 includeCropRegionInOutputSize = false,
                 photoId = settings.photoId,
             ) ?: return
 
-            val aspectRatio = metadata.ratio ?: settings.state.aspectRatio
-            val colorSpace = android.graphics.ColorSpace.get(metadataCaptureInfo.colorSpace)
-            imagesHandedToGallery = true
-            withContext(Dispatchers.IO) {
-                var fusedBitmap: Bitmap? = null
-                try {
-                    fusedBitmap = GalleryManager.composeHdrBracketPhoto(
-                        images = orderedImages,
-                        captureResults = orderedCaptureResults,
-                        zeroEvFrameCount = zeroEvFrameCount,
-                        rotation = metadata.rotation,
-                        aspectRatio = aspectRatio,
-                        shouldMirror = metadata.isMirrored,
-                        useSuperResolution = useSuperRes,
-                        colorSpace = colorSpace
-                    )
-                    val outputBitmap = fusedBitmap ?: return@withContext
+            val hdrFrames = orderedImages.mapIndexed { index, image ->
+                val result = orderedCaptureResults.getOrNull(index)
+                val requestIndex = (result?.request?.tag as? Int) ?: index
+                val role = when (requestIndex) {
+                    1 -> OppoHdrFrameRole.SHORT_HIGHLIGHT
+                    2 -> OppoHdrFrameRole.LONG_SHADOW
+                    else -> OppoHdrFrameRole.REFERENCE_BASE
+                }
+                val evOffset = when (requestIndex) {
+                    1 -> -1.7f
+                    2 -> 1.4f
+                    else -> 0f
+                }
+                OppoHdrInputFrame(
+                    image = image,
+                    captureResult = result,
+                    role = role,
+                    evOffset = evOffset,
+                )
+            }
 
-                    GalleryManager.saveBitmapPhoto(
-                        context,
-                        photoId,
-                        outputBitmap,
-                        shouldAutoSave,
-                        contentRepository.photoProcessor,
-                        sharpeningValue,
-                        noiseReductionValue,
-                        chromaNoiseReductionValue,
-                        photoQualityValue
-                    )
-                    PLog.d(TAG, "HDR bracket image saved: $photoId, characteristics=${characteristics != null}, result=${captureResult != null}")
-                } catch (e: Exception) {
-                    PLog.e(TAG, "Failed to process HDR bracket", e)
-                } finally {
-                    fusedBitmap?.takeIf { !it.isRecycled }?.recycle()
+            fusedBitmap = OppoPhotoHdrEngine.processHdrCapture(
+                frames = hdrFrames,
+                rotationDegrees = metadata.rotation,
+                targetAspectRatio = targetAspectRatio,
+                mirrorOutput = metadata.isMirrored,
+            )
+
+            // Keep a base-frame bitmap ready before handing YUV buffers to the legacy GLES
+            // fallback, because that compositor owns/closes the SafeImage instances.
+            if (fusedBitmap == null && orderedImages.size >= 3) {
+                val baseFallbackRaw = runCatching {
+                    YuvProcessor.processAndToBitmap(baseImage.image, aspectRatio, metadata.rotation)
+                }.getOrNull()
+                val baseFallback = baseFallbackRaw?.let {
+                    if (metadata.isMirrored) {
+                        BitmapUtils.flipHorizontal(it).also { mirrored -> it.recycle() }
+                    } else {
+                        it
+                    }
+                }
+                imagesHandedToGallery = true
+                val legacyResult = GalleryManager.composeHdrBracketPhoto(
+                    images = orderedImages,
+                    captureResults = orderedCaptureResults,
+                    zeroEvFrameCount = 1,
+                    rotation = metadata.rotation,
+                    aspectRatio = aspectRatio,
+                    shouldMirror = metadata.isMirrored,
+                    useSuperResolution = false,
+                    colorSpace = android.graphics.ColorSpace.get(captureInfo.colorSpace),
+                )
+                fusedBitmap = legacyResult ?: baseFallback
+                if (legacyResult != null) baseFallback?.recycle()
+            }
+
+            if (fusedBitmap == null && !imagesHandedToGallery) {
+                val fallback = YuvProcessor.processAndToBitmap(
+                    baseImage.image,
+                    aspectRatio,
+                    metadata.rotation,
+                )
+                fusedBitmap = if (metadata.isMirrored) {
+                    BitmapUtils.flipHorizontal(fallback).also { fallback.recycle() }
+                } else {
+                    fallback
                 }
             }
-            PLog.d(TAG, "Image saved: $photoId, HDR mode: $captureMode")
+            val outputBitmap = fusedBitmap
+                ?: throw IllegalStateException("Oppo HDR processing and safe base-frame fallback both failed")
+
+            withContext(Dispatchers.IO) {
+                GalleryManager.saveBitmapPhoto(
+                    context,
+                    photoId,
+                    outputBitmap,
+                    shouldAutoSave,
+                    contentRepository.photoProcessor,
+                    sharpeningValue,
+                    noiseReductionValue,
+                    chromaNoiseReductionValue,
+                    photoQualityValue,
+                )
+            }
+            PLog.i(
+                TAG,
+                "Oppo HDR saved: $photoId frames=${orderedImages.size} " +
+                    "roles=${hdrFrames.joinToString { it.role.name }}",
+            )
             markCapturedThumbnailSaved(settings, photoId)
             _imageSavedEvent.emit(photoId)
         } catch (e: Exception) {
-            PLog.e(TAG, "Failed to process HDR bracket", e)
+            PLog.e(TAG, "Failed to process Oppo HDR bracket", e)
         } finally {
+            fusedBitmap?.takeIf { !it.isRecycled }?.recycle()
             if (!imagesHandedToGallery) {
                 orderedImages.forEach { it.close() }
             }

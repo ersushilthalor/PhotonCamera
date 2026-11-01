@@ -1100,7 +1100,7 @@ class Camera2Controller(private val context: Context) {
             state.minimumFocusDistance > 0f &&
             !isRawCaptureReader(reader) -> state.refocusFrameCount.coerceIn(3, 8)
         shouldUseJpgMaxHdrCapture(state, isRawCaptureReader(reader)) && !shouldUseMultiFrameTorch(state) ->
-            buildHdrBracketEvOffsets(resolveHdrBracketZeroEvFrameCount(state)).size
+            buildHdrBracketEvOffsets(state).size
         state.requiresMultiFrameCaptureSequence -> state.activeMultiFrameCount
         else -> 1
     }
@@ -8263,16 +8263,11 @@ class Camera2Controller(private val context: Context) {
         device: CameraDevice,
         reader: ImageReader,
         session: CameraCaptureSession,
-        zeroEvFrameCount: Int,
         playShutterSound: Boolean,
-        baseExposureResult: CaptureResult?
+        baseExposureResult: CaptureResult?,
+        currentState: CameraState,
     ) {
-        val currentState = _state.value
-        val normalizedZeroEvFrameCount = zeroEvFrameCount.coerceIn(
-            0,
-            MultiFrameConfig.MAX_FRAME_COUNT
-        )
-        val evOffsets = buildHdrBracketEvOffsets(normalizedZeroEvFrameCount)
+        val evOffsets = buildHdrBracketEvOffsets(currentState)
         val hdrFrameCount = evOffsets.size
         _state.value = _state.value.copy(
             isCapturing = true,
@@ -8333,16 +8328,16 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
-    private fun buildHdrBracketEvOffsets(zeroEvFrameCount: Int): List<Float> {
-        val zeroCount = zeroEvFrameCount.coerceAtLeast(1)
-        return buildList {
-            add(0f)
-            add(HdrBracketConfig.YUV_LONG_EV)
-            add(HdrBracketConfig.YUV_SHORT_EV)
-            repeat((zeroCount - 1).coerceAtLeast(0)) {
-                add(0f)
-            }
+    /**
+     * OppoCam bracket order: reference, short highlight, optional long shadow.
+     * Auto HDR only brackets scenes whose live histogram shows actual highlight/shadow risk.
+     */
+    private fun buildHdrBracketEvOffsets(state: CameraState): List<Float> {
+        if (state.flashMode != 0) return listOf(0f)
+        if (!state.autoHdrEnabled || state.useJpgMaxHdrComposition) {
+            return listOf(0f, -1.7f, 1.4f)
         }
+        return resolveAutoHdrBracketEvOffsets(state)
     }
 
     /**
@@ -8761,14 +8756,12 @@ class Camera2Controller(private val context: Context) {
     }
 
     private fun shouldUseJpgMaxHdrCapture(state: CameraState, isRawCapture: Boolean): Boolean {
-        val sceneNeedsHdr = if (state.autoHdrEnabled) {
-            state.useJpgMaxHdrComposition || shouldUseAutoHdrForScene(state)
-        } else {
-            state.isJpgMaxHdrEnabled
-        }
+        val sceneNeedsHdr = state.useJpgMaxHdrComposition ||
+            (state.autoHdrEnabled && resolveAutoHdrBracketEvOffsets(state).size > 1)
         return state.captureMode == CaptureMode.PHOTO &&
                 state.isJpgMaxEnabled &&
                 sceneNeedsHdr &&
+                state.flashMode == 0 &&
                 !isMultiFrameTorchCaptureActive &&
                 !isRawCapture &&
                 !state.burstCapturing &&
@@ -8778,26 +8771,45 @@ class Camera2Controller(private val context: Context) {
                 !state.useLivePhoto
     }
 
-    private fun shouldUseAutoHdrForScene(state: CameraState): Boolean {
-        val histogram = state.histogram ?: return true
-        if (histogram.size < 256) return true
-        val total = histogram.sumOf { it.toLong() }
-        if (total <= 0L) return true
-        fun percentile(target: Double): Int {
-            val threshold = (total * target).toLong()
+    /**
+     * OppoCam-style histogram planner. Percentiles are normalized to [0, 1] rather than
+     * relying on a broad histogram-range threshold that brackets flat or ordinary scenes.
+     */
+    private fun resolveAutoHdrBracketEvOffsets(state: CameraState): List<Float> {
+        if (state.flashMode != 0) return emptyList()
+        val histogram = state.histogram ?: return emptyList()
+        if (histogram.size < 256) return emptyList()
+        val total = histogram.sumOf { it.coerceAtLeast(0).toLong() }
+        if (total <= 0L) return emptyList()
+
+        fun percentile(normalizedTarget: Double): Float {
+            val threshold = (total * normalizedTarget).toLong().coerceAtLeast(1L)
             var accumulated = 0L
             for (index in histogram.indices) {
-                accumulated += histogram[index].toLong()
-                if (accumulated >= threshold) return index
+                accumulated += histogram[index].coerceAtLeast(0).toLong()
+                if (accumulated >= threshold) {
+                    return index.toFloat() / histogram.lastIndex.coerceAtLeast(1)
+                }
             }
-            return histogram.lastIndex
+            return 1f
         }
-        val dynamicRange = percentile(0.95) - percentile(0.05)
-        val shadowPixels = histogram.take(38).sumOf { it.toLong() }
-        val highlightPixels = histogram.drop(224).sumOf { it.toLong() }
-        return dynamicRange >= 150 ||
-            (shadowPixels.toDouble() / total >= 0.16 &&
-                highlightPixels.toDouble() / total >= 0.035)
+
+        val p1 = percentile(0.01)
+        val p5 = percentile(0.05)
+        val p95 = percentile(0.95)
+        val p99 = percentile(0.99)
+        val dynamicRange = p99 - p1
+        val hasBlownHighlights = p99 >= 0.91f || (p95 >= 0.86f && p5 <= 0.22f)
+        val hasDeepShadows = p5 <= 0.09f && p95 >= 0.65f
+        if (!hasBlownHighlights) return emptyList()
+
+        val isVerySlowShutter = state.shutterSpeed > 66_666_666L
+        return if (hasDeepShadows && !isVerySlowShutter && dynamicRange >= 0.70f) {
+            listOf(0f, -1.7f, 1.4f)
+        } else {
+            // Highlight-only bracket avoids adding a blurred long exposure in low light.
+            listOf(0f, -1.7f)
+        }
     }
 
     private fun shouldUseMultiFrameTorch(state: CameraState): Boolean {
@@ -8861,9 +8873,9 @@ class Camera2Controller(private val context: Context) {
                     device = device,
                     reader = reader,
                     session = session,
-                    zeroEvFrameCount = resolveHdrBracketZeroEvFrameCount(currentState),
                     playShutterSound = false,
-                    baseExposureResult = baseExposureResult
+                    baseExposureResult = baseExposureResult,
+                    currentState = currentState,
                 )
                 return
             }
