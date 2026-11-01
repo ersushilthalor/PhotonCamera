@@ -61,6 +61,18 @@ class RealtimeStabilizationMathTest {
     }
 
     @Test
+    fun opticalShiftSanityLimitsRejectLargeAndNonFiniteOffsets() {
+        assertTrue(isPlausibleOisShift(40f, -40f, 1000, 1000))
+        assertFalse(isPlausibleOisShift(51f, 0f, 1000, 1000))
+        assertFalse(isPlausibleOisShift(Float.NaN, 0f, 1000, 1000))
+        assertFalse(isPlausibleOisShift(0f, 0f, 0, 1000))
+
+        assertTrue(isPlausibleOpticalCenterShift(40f, -40f, 40f, 1000, 1000))
+        assertFalse(isPlausibleOpticalCenterShift(0f, 51f, 0f, 1000, 1000))
+        assertFalse(isPlausibleOpticalCenterShift(0f, 0f, Float.POSITIVE_INFINITY, 1000, 1000))
+    }
+
+    @Test
     fun identityNativeMatricesReproduceMgcTwentySixVertexStrip() {
         val matrices = FloatArray(STABILIZATION_ROW_COUNT * 9)
         repeat(STABILIZATION_ROW_COUNT) { row ->
