@@ -3581,14 +3581,15 @@ class Camera2Controller(private val context: Context) {
             return
         }
 
+        val cameraId = currentStabilizationCameraId()
+        if (cameraId.isBlank() || !enhancedOisUnavailableCameraIds.add(cameraId)) return
+
         val state = _state.value
         if (state.captureMode != CaptureMode.VIDEO ||
             state.videoConfig.stabilizationMode != VideoStabilizationMode.ENHANCED
         ) {
             return
         }
-        val cameraId = currentStabilizationCameraId()
-        if (cameraId.isBlank() || !enhancedOisUnavailableCameraIds.add(cameraId)) return
 
         PLog.w(
             TAG,
