@@ -17,6 +17,7 @@ import com.hinnka.mycamera.model.ColorRecipeParams
 import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD
 import com.hinnka.mycamera.stabilization.RealtimeStabilizationCoordinator
 import com.hinnka.mycamera.stabilization.StabilizationUseCase
+import com.hinnka.mycamera.stabilization.resolveVideoStabilizationCropZoom
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.video.VideoEncoderColorConfig
 import com.hinnka.mycamera.video.VideoEncodedColorPipeline
@@ -85,8 +86,12 @@ class RealtimeVideoRenderer(
     private val colorProgramCache = PreviewColorProgramCache()
     private val basicToneTextures = BasicToneGlTextures()
     private val filmGrainGl = FilmGrainGl(TAG)
-    private val mgcEisHardwareBufferRenderer = MgcEisHardwareBufferRenderer(TAG)
-    private val mgcEisYuvRenderer = MgcEisYuvRenderer(TAG)
+    private val stabilizationOutputCropZoom =
+        resolveVideoStabilizationCropZoom(enhancedStabilizationStrength)
+    private val mgcEisHardwareBufferRenderer =
+        MgcEisHardwareBufferRenderer(TAG, stabilizationOutputCropZoom)
+    private val mgcEisYuvRenderer =
+        MgcEisYuvRenderer(TAG, stabilizationOutputCropZoom)
     private val filmGrainAmount: Float
         get() = layers.lastOrNull { it.params.filmGrain > 0.001f }?.params?.filmGrain ?: 0f
     private val finalFilmGrainEnabled: Boolean

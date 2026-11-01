@@ -19,19 +19,22 @@ import com.hinnka.mycamera.utils.PLog
  * Image and closes it after a successful draw; a null result leaves it available for the explicit
  * CPU YUV fallback on devices that cannot import the buffer into EGL.
  */
-internal class MgcEisHardwareBufferRenderer(private val tag: String) {
+internal class MgcEisHardwareBufferRenderer(
+    private val tag: String,
+    cropZoomFactor: Float,
+) {
+    init {
+        require(cropZoomFactor.isFinite() && cropZoomFactor >= 1f) {
+            "MGC EIS crop zoom must be finite and at least 1x"
+        }
+    }
     data class Frame(val timestampNs: Long, val textureId: Int, val width: Int, val height: Int)
 
     private val mesh = MgcEisMesh()
-    // Native output matrices pass through convertPixelHomographyToClip then
-    // applyCropZoomToClipHomography(kOutputCropZoom), where:
-    //   kLookaheadCropMargin = 0.05
-    //   kOutputCropZoom      = 1.0 / (1.0 - 2.0 * 0.05) ≈ 1.1111
-    // applyCropZoomToClipHomography divides the W row (h20, h21, h22) by zoom.
-    // A Dropped frame must use the same crop so that the viewport does not jump
-    // between 1.0x and 1.111x on every stabilization gap.
+    // Match the native strength-specific output crop on dropped frames too,
+    // so missing transforms do not jump back to the legacy 1.111x framing.
     private val droppedFrameHomographies = FloatArray(STABILIZATION_ROW_COUNT * 9).also { values ->
-        val h22 = 1.0f - 2.0f * 0.05f  // = 1.0f / kOutputCropZoom = 0.9f
+        val h22 = 1f / cropZoomFactor
         repeat(STABILIZATION_ROW_COUNT) { row ->
             val offset = row * 9
             values[offset] = 1f      // h00

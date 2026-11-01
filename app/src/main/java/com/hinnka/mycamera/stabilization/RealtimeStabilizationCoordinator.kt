@@ -27,6 +27,18 @@ const val STABILIZATION_LOOKAHEAD_FRAME_COUNT = MgcEisNativeEngine.LOOKAHEAD_FRA
 // method-4 look-ahead pose blend; the outer full-grid feasibility correction is independent.
 const val DEFAULT_VIDEO_STABILIZATION_STRENGTH = 1f
 const val MAX_VIDEO_STABILIZATION_STRENGTH = 2f
+internal const val BASE_VIDEO_STABILIZATION_CROP_MARGIN = 0.05f
+
+/**
+ * Output crop must match native geometry: 0-100% preserves legacy 1.111x;
+ * 200% uses a 10% safe inset (1.25x) for the stronger correction.
+ */
+internal fun resolveVideoStabilizationCropZoom(strength: Float): Float {
+    val cropGain = normalizeStabilizationStrength(strength).coerceAtLeast(1f)
+    val margin = BASE_VIDEO_STABILIZATION_CROP_MARGIN * cropGain
+    return 1f / (1f - 2f * margin)
+}
+
 const val DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD = 7
 const val MIN_VIDEO_STABILIZATION_LOOKAHEAD = 3
 const val MAX_VIDEO_STABILIZATION_LOOKAHEAD = 30

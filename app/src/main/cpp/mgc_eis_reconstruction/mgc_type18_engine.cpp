@@ -22,8 +22,6 @@ constexpr double kMaximumAllowedProtrusion = 0.0;
 // projection crop scale after construction.
 constexpr double kLookaheadCropMargin = 0.05;
 constexpr double kAllowedInnerMargin = 0.025;
-constexpr double kOutputCropZoom =
-    1.0 / (1.0 - 2.0 * kLookaheadCropMargin);
 constexpr double kProjectionDenominatorEpsilon = 0.000001;
 constexpr std::int64_t kMaximumLensSampleInterpolationGapNs = 25'000'000;
 constexpr double kMaximumOpticalCenterShiftRatio = 0.05;
@@ -737,9 +735,10 @@ private:
         row_timestamps_ns.push_back(timestamp_ns);
       }
     } else {
+      const double crop_margin = stabilizationCropMargin();
       const std::array<double, 2> source_rows{
-          kLookaheadCropMargin * static_cast<double>(config_.output_height),
-          (1.0 - kLookaheadCropMargin) *
+          crop_margin * static_cast<double>(config_.output_height),
+          (1.0 - crop_margin) *
               static_cast<double>(config_.output_height),
       };
       const auto offsets = type18::makeBoundingRowOffsets(
@@ -780,6 +779,21 @@ private:
     return type18::buildVirtualCameraProjectionRows(pose, {}, {intrinsics});
   }
 
+  // Strength above 100% needs additional crop headroom. Keep the original
+  // 5% / 1.111x framing at 0-100%, then increase the safe output inset linearly
+  // to 10% / 1.25x at 200%. The exact same margin is used by crop feasibility
+  // and the homography zoom, so the limiter and renderer share one geometry.
+  double stabilizationCropMargin() const {
+    const double crop_gain =
+        std::clamp(config_.stabilization_strength, 1.0, 2.0);
+    return kLookaheadCropMargin * crop_gain;
+  }
+
+  double stabilizationOutputCropZoom() const {
+    const double margin = stabilizationCropMargin();
+    return 1.0 / (1.0 - 2.0 * margin);
+  }
+
   double fullGridCorrection(const Quaternion &requested,
                             const Quaternion &fallback,
                             const FutureGeometry &geometry,
@@ -798,7 +812,7 @@ private:
     // geometry models.
     const type18::ProtrusionRect input{0.0, width, 0.0, height};
     const type18::ProtrusionRect output =
-        insetRect(width, height, kLookaheadCropMargin);
+        insetRect(width, height, stabilizationCropMargin());
     const type18::ProtrusionRect allowed{0.0, width, 0.0, height};
     return type18::computeFullGridCropCorrectionFraction(
         requested, fallback, geometry.inverse_real,
@@ -817,10 +831,11 @@ private:
     }
     const double width = static_cast<double>(config_.output_width);
     const double height = static_cast<double>(config_.output_height);
+    const double crop_margin = stabilizationCropMargin();
     const type18::ProtrusionRect input =
-        insetRect(width, height, kLookaheadCropMargin);
+        insetRect(width, height, crop_margin);
     const type18::ProtrusionRect output =
-        insetRect(width, height, kLookaheadCropMargin);
+        insetRect(width, height, crop_margin);
     const type18::ProtrusionRect allowed =
         insetRect(width, height, kAllowedInnerMargin);
     const std::vector<bool> mask(geometry.inverse_real.size() - 1, true);
@@ -1150,7 +1165,7 @@ private:
                 type18::convertPixelHomographyToClip(
                     pixel_warp, static_cast<double>(config_.output_width),
                     static_cast<double>(config_.output_height)),
-                kOutputCropZoom));
+                stabilizationOutputCropZoom()));
       }
       return output;
     }
@@ -1386,7 +1401,7 @@ private:
               type18::convertPixelHomographyToClip(
                   pixel_warp, static_cast<double>(config_.output_width),
                   static_cast<double>(config_.output_height)),
-              kOutputCropZoom));
+              stabilizationOutputCropZoom()));
     }
     return output;
   }

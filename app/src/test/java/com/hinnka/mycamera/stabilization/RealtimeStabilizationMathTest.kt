@@ -44,6 +44,14 @@ class RealtimeStabilizationMathTest {
     }
 
     @Test
+    fun stabilizationCropHeadroomScalesAboveOneHundredPercent() {
+        assertEquals(1f / 0.9f, resolveVideoStabilizationCropZoom(0f), 1.0e-5f)
+        assertEquals(1f / 0.9f, resolveVideoStabilizationCropZoom(1f), 1.0e-5f)
+        assertEquals(1f / 0.85f, resolveVideoStabilizationCropZoom(1.5f), 1.0e-5f)
+        assertEquals(1.25f, resolveVideoStabilizationCropZoom(2f), 1.0e-5f)
+    }
+
+    @Test
     fun hybridOisRequiresTimestampedOpticalTelemetry() {
         assertFalse(
             canFuseOpticalStabilization(
