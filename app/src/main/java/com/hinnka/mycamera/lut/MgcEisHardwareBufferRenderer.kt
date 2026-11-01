@@ -23,23 +23,30 @@ internal class MgcEisHardwareBufferRenderer(
     private val tag: String,
     cropZoomFactor: Float,
 ) {
-    init {
-        require(cropZoomFactor.isFinite() && cropZoomFactor >= 1f) {
-            "MGC EIS crop zoom must be finite and at least 1x"
-        }
-    }
     data class Frame(val timestampNs: Long, val textureId: Int, val width: Int, val height: Int)
 
     private val mesh = MgcEisMesh()
-    // Match the native strength-specific output crop on dropped frames too,
-    // so missing transforms do not jump back to the legacy 1.111x framing.
-    private val droppedFrameHomographies = FloatArray(STABILIZATION_ROW_COUNT * 9).also { values ->
+    // Match native crop on dropped frames. A volatile array reference lets strength updates
+    // replace the fallback transform atomically while the GL thread is rendering.
+    @Volatile
+    private var droppedFrameHomographies = createDroppedFrameHomographies(cropZoomFactor)
+
+    fun setCropZoomFactor(cropZoomFactor: Float) {
+        droppedFrameHomographies = createDroppedFrameHomographies(cropZoomFactor)
+    }
+
+    private fun createDroppedFrameHomographies(cropZoomFactor: Float): FloatArray {
+        require(cropZoomFactor.isFinite() && cropZoomFactor >= 1f) {
+            "MGC EIS crop zoom must be finite and at least 1x"
+        }
         val h22 = 1f / cropZoomFactor
-        repeat(STABILIZATION_ROW_COUNT) { row ->
-            val offset = row * 9
-            values[offset] = 1f      // h00
-            values[offset + 4] = 1f  // h11
-            values[offset + 8] = h22 // h22: W-row crop zoom
+        return FloatArray(STABILIZATION_ROW_COUNT * 9).also { values ->
+            repeat(STABILIZATION_ROW_COUNT) { row ->
+                val offset = row * 9
+                values[offset] = 1f      // h00
+                values[offset + 4] = 1f  // h11
+                values[offset + 8] = h22 // h22: W-row crop zoom
+            }
         }
     }
 
