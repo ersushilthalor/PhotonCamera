@@ -25,7 +25,8 @@ constexpr double kAllowedInnerMargin = 0.025;
 constexpr double kOutputCropZoom =
     1.0 / (1.0 - 2.0 * kLookaheadCropMargin);
 constexpr double kProjectionDenominatorEpsilon = 0.000001;
-constexpr std::int64_t kMaximumLensSampleInterpolationGapNs = 50'000'000;
+constexpr std::int64_t kMaximumLensSampleInterpolationGapNs = 25'000'000;
+constexpr double kMaximumOpticalCenterShiftRatio = 0.05;
 constexpr std::int64_t kMinimumSupportedFramePeriodNs = 1'000'000;
 constexpr std::int64_t kMaximumSupportedFramePeriodNs = 1'000'000'000;
 constexpr double kActiveCadenceTolerance = 0.08;
@@ -557,8 +558,8 @@ private:
           if (!std::isfinite(fx_ratio) || !std::isfinite(fy_ratio) ||
               fx_ratio < 0.5 || fx_ratio > 2.0 || fy_ratio < 0.5 ||
               fy_ratio > 2.0 ||
-              std::abs(cx_delta) > config_.output_width * 0.25 ||
-              std::abs(cy_delta) > config_.output_height * 0.25) {
+              std::abs(cx_delta) > config_.output_width * kMaximumOpticalCenterShiftRatio ||
+              std::abs(cy_delta) > config_.output_height * kMaximumOpticalCenterShiftRatio) {
             result.clear();
             break;
           }
@@ -592,8 +593,8 @@ private:
       const double cx_delta = offset.x * x_scale;
       const double cy_delta = offset.y * y_scale;
       if (!std::isfinite(cx_delta) || !std::isfinite(cy_delta) ||
-          std::abs(cx_delta) > config_.output_width * 0.25 ||
-          std::abs(cy_delta) > config_.output_height * 0.25) {
+          std::abs(cx_delta) > config_.output_width * kMaximumOpticalCenterShiftRatio ||
+          std::abs(cy_delta) > config_.output_height * kMaximumOpticalCenterShiftRatio) {
         return {nominal};
       }
       result.push_back(Mat3::cameraIntrinsics(
