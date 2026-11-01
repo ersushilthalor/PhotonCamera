@@ -44,6 +44,7 @@ import com.hinnka.mycamera.model.SafeImage
 import com.hinnka.mycamera.model.ColorRecipeParams
 import com.hinnka.mycamera.processor.MgcRawMaxMode
 import com.hinnka.mycamera.stabilization.ExternalLensStabilizationConfig
+import com.hinnka.mycamera.stabilization.canFuseOpticalStabilization
 import com.hinnka.mycamera.stabilization.RealtimeStabilizationCoordinator
 import com.hinnka.mycamera.stabilization.StabilizationImageReader
 import com.hinnka.mycamera.stabilization.normalizeStabilizationLookahead
