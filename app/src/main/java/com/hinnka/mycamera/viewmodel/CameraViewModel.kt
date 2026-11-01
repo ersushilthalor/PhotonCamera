@@ -32,6 +32,8 @@ import com.hinnka.mycamera.frame.FrameRenderer
 import com.hinnka.mycamera.data.PreferenceUpdateValue
 import com.hinnka.mycamera.data.PresetPackageManager
 import com.hinnka.mycamera.data.UserPreferences
+import com.hinnka.mycamera.data.OppoPhotoSettings
+import com.hinnka.mycamera.data.OppoPhotoSettingsRepository
 import com.hinnka.mycamera.data.VolumeKeyAction
 import com.hinnka.mycamera.frame.FrameEditorDraft
 import com.hinnka.mycamera.frame.FrameInfo
@@ -67,6 +69,8 @@ import com.hinnka.mycamera.processor.PhotonSensorSizeTuning
 import com.hinnka.mycamera.processor.MgcRawMaxMode
 import com.hinnka.mycamera.processor.RawmaxExposurePlanner
 import com.hinnka.mycamera.processor.RawStackFrame
+import com.hinnka.mycamera.processor.OppoPhotoPipelineEngine
+import com.hinnka.mycamera.processor.OppoRefocusDepthEngine
 import com.hinnka.mycamera.raw.ColorSpace
 import com.hinnka.mycamera.raw.DcpProfileParser
 import com.hinnka.mycamera.raw.DcpInfo
@@ -149,6 +153,7 @@ private data class CaptureSettingsSnapshot(
     val blackBorderCrop: RawBlackBorderCrop,
     val portraitMask: PortraitMaskSnapshot?,
     val multipleExposure: Boolean,
+    val oppoPhotoSettings: OppoPhotoSettings = OppoPhotoSettings(),
     val photoId: String = UUID.randomUUID().toString(),
     val galleryRegistration: CompletableDeferred<Unit> = CompletableDeferred(),
     // Exposure matching needs the unfiltered source; UI placeholders need the displayed look.
@@ -590,6 +595,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val presetPackageManager = PresetPackageManager(application, contentRepository)
 
     private val userPreferencesRepository = contentRepository.userPreferencesRepository
+    private val oppoPhotoSettingsRepository = OppoPhotoSettingsRepository(application)
+    val oppoPhotoSettings: StateFlow<OppoPhotoSettings> = oppoPhotoSettingsRepository.settings
     private val previewEyeFocusProcessor = PreviewEyeFocusProcessor(application)
 
     // 计费管理器
@@ -615,6 +622,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val realtimeStabilizationCoordinator get() = cameraController.realtimeStabilizationCoordinator
     val isAlgorithmicStabilizationSupported: Boolean
         get() = cameraController.realtimeStabilizationCoordinator.isGyroscopeAvailable
+
+    init {
+        viewModelScope.launch {
+            oppoPhotoSettings.collect { settings ->
+                cameraController.setAutoHdrEnabled(settings.autoHdrEnabled)
+                cameraController.setFastShutterTargetFps(settings.fastShutterFps)
+                cameraController.setRefocusCaptureSettings(
+                    enabled = settings.refocusEnabled,
+                    frameCount = settings.refocusFrameCount,
+                )
+            }
+        }
+    }
+
+    fun updateOppoPhotoSettings(settings: OppoPhotoSettings) {
+        oppoPhotoSettingsRepository.update { settings }
+    }
 
     // 照片保存完成事件
     private val _imageSavedEvent = MutableSharedFlow<String?>()
@@ -3187,7 +3211,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             rawAutoExposure = effectiveRawAutoExposure,
             customProperties = rawProcessingMetadataProperties(
                 userPrefs, cameraController.getCurrentSensorPhysicalAreaMm2(),
-            ),
+            ) + buildMap {
+                if (settings.oppoPhotoSettings.customPipelineEnabled && !settings.state.useRaw) {
+                    put(
+                        OppoPhotoPipelineEngine.METADATA_KEY,
+                        settings.oppoPhotoSettings.toPipelineJson(),
+                    )
+                }
+            },
             rawHighlightsAdjustment = userPrefs?.rawHighlightsAdjustment ?: 0f,
             rawShadowsAdjustment = userPrefs?.rawShadowsAdjustment ?: 0f,
             rawBlackPointCorrection = userPrefs?.rawBlackPointCorrection ?: 0f,
@@ -3549,6 +3580,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         blackBorderCrop = currentRawBlackBorderCrop(),
         portraitMask = capturePortraitMaskSnapshot(),
         multipleExposure = multipleExposureState.enabled,
+        oppoPhotoSettings = oppoPhotoSettings.value,
     )
 
     private fun submitPhotoCapture() {
@@ -3609,6 +3641,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val captureResult = first.captureResult
         if (settings.multipleExposure) {
             handleMultipleExposureFrameCaptured(first.image, captureInfo, settings)
+        } else if (photo.state.refocusCapturing) {
+            processRefocusCapture(photo, settings)
         } else if (photo.state.hdrBracketCapturing) {
             processHdrBracket(
                 images = photo.frames.map { it.image },
@@ -3729,6 +3763,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun startContinuousCapture() {
         if (state.value.useRaw && state.value.isRawSupported) return
+        val photoSettings = oppoPhotoSettings.value
+        if (!photoSettings.fastShutterEnabled) return
+        cameraController.setFastShutterTargetFps(photoSettings.fastShutterFps)
         val settings = snapshotCaptureSettings()
         cameraController.startBurstCapture {
             burstImageCount = 0
@@ -6068,7 +6105,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         userPrefs, cameraController.getCurrentSensorPhysicalAreaMm2(),
                     ),
                     captureExposureCompensationEv,
-                ),
+                ) + buildMap {
+                    if (settings.oppoPhotoSettings.customPipelineEnabled && !settings.state.useRaw) {
+                        put(
+                            OppoPhotoPipelineEngine.METADATA_KEY,
+                            settings.oppoPhotoSettings.toPipelineJson(),
+                        )
+                    }
+                },
                 rawHighlightsAdjustment = userPrefs?.rawHighlightsAdjustment ?: 0f,
                 rawShadowsAdjustment = userPrefs?.rawShadowsAdjustment ?: 0f,
                 rawBlackPointCorrection = userPrefs?.rawBlackPointCorrection ?: 0f,
@@ -6604,6 +6648,111 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             _imageSavedEvent.emit(photoId)
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to save image", e)
+        }
+    }
+
+    private suspend fun processRefocusCapture(
+        photo: CapturedPhoto,
+        settings: CaptureSettingsSnapshot,
+    ) {
+        val orderedFrames = photo.frames.sortedBy { frame ->
+            (frame.captureResult?.request?.tag as? Int) ?: Int.MAX_VALUE
+        }
+        val middleFrame = orderedFrames.getOrNull(orderedFrames.size / 2)
+        if (middleFrame == null || orderedFrames.size < 3) {
+            orderedFrames.forEach { it.image.close() }
+            PLog.e(TAG, "Refocus capture returned too few focus planes: ${orderedFrames.size}")
+            return
+        }
+
+        val context = getApplication<Application>()
+        val baseRotation = if (settings.lensFacing == CameraCharacteristics.LENS_FACING_FRONT) {
+            (settings.sensorOrientation - settings.deviceRotation + 360) % 360
+        } else {
+            (settings.sensorOrientation + settings.deviceRotation) % 360
+        }
+        val orientationOffset = settings.preferences.cameraOrientationOffsets[settings.cameraId] ?: 0
+        val rotation = (baseRotation + orientationOffset) % 360
+        val shouldMirror = settings.lensFacing == CameraCharacteristics.LENS_FACING_FRONT &&
+            settings.preferences.mirrorFrontCamera
+        val sessionId = "refocus_${settings.photoId}"
+        val frameFiles = mutableListOf<File>()
+
+        try {
+            orderedFrames.forEachIndexed { index, frame ->
+                val saved = GalleryManager.saveMultipleExposureFrame(
+                    context = context,
+                    sessionId = sessionId,
+                    frameIndex = index,
+                    image = frame.image,
+                    rotation = rotation,
+                    aspectRatio = settings.state.aspectRatio,
+                    shouldMirror = shouldMirror,
+                    photoQuality = settings.preferences.photoQuality,
+                )
+                if (saved == null) throw IllegalStateException("Failed to persist refocus plane $index")
+                frameFiles.add(saved)
+            }
+
+            val depthMapFile = GalleryManager.getMultipleExposureRefocusDepthMapFile(context, sessionId)
+            val depthMapReady = OppoRefocusDepthEngine.createDepthMap(frameFiles, depthMapFile)
+            if (!depthMapReady) {
+                PLog.w(TAG, "Refocus depth map could not be generated; plane selector remains available")
+            }
+
+            val middleFile = frameFiles[frameFiles.size / 2]
+            val bitmap = android.graphics.BitmapFactory.decodeFile(middleFile.absolutePath)
+                ?: throw IllegalStateException("Unable to decode the reference focus plane")
+            try {
+                val baseMetadata = buildPhotoMetadata(
+                    width = bitmap.width,
+                    height = bitmap.height,
+                    captureInfo = middleFrame.captureInfo,
+                    captureMode = "oppo_refocus",
+                    settings = settings,
+                )
+                val metadata = baseMetadata.copy(
+                    customProperties = baseMetadata.customProperties + mapOf(
+                        "oppo.refocusSessionId" to sessionId,
+                    ),
+                )
+                val photoId = GalleryManager.preparePhoto(
+                    context,
+                    metadata,
+                    middleFrame.captureResult,
+                    settings.displayThumbnail,
+                    false,
+                    1.0f,
+                    includeCropRegionInOutputSize = false,
+                    photoId = settings.photoId,
+                ) ?: throw IllegalStateException("Unable to register the refocus photo")
+
+                withContext(Dispatchers.IO) {
+                    GalleryManager.saveBitmapPhoto(
+                        context,
+                        photoId,
+                        bitmap,
+                        settings.preferences.autoSaveAfterCapture,
+                        contentRepository.photoProcessor,
+                        0f,
+                        0f,
+                        0f,
+                        settings.preferences.photoQuality,
+                    )
+                }
+                PLog.i(
+                    TAG,
+                    "Refocus photo saved: $photoId, planes=${frameFiles.size}, depthMap=$depthMapReady",
+                )
+                markCapturedThumbnailSaved(settings, photoId)
+                _imageSavedEvent.emit(photoId)
+            } finally {
+                if (!bitmap.isRecycled) bitmap.recycle()
+            }
+        } catch (e: Exception) {
+            PLog.e(TAG, "Failed to process refocus photo", e)
+            orderedFrames.forEach { it.image.close() }
+            GalleryManager.clearMultipleExposureSession(context, sessionId)
         }
     }
 

@@ -1390,4 +1390,36 @@
     <!-- Video editor: independent color recovery with contrast preserved -->
     <string name="video_washed_out_recovery">Washed-Out Recovery</string>
     <string name="video_washed_out_recovery_description">Restore faded color in bright tones while preserving image luminance and the existing contrast setting.</string>
+
+    <string name="oppo_auto_hdr">Auto HDR</string>
+    <string name="oppo_fast_shutter">Fast Shutter</string>
+    <string name="oppo_fast_shutter_fps">Burst target: %1$d FPS</string>
+    <string name="oppo_refocus">Refocus</string>
+    <string name="oppo_refocus_planes">Focus planes: %1$d</string>
+    <string name="oppo_custom_pipeline">Custom Pipeline</string>
+    <string name="oppo_enable_custom_pipeline">Enable custom photo processing</string>
+    <string name="oppo_color_profile">Color profile</string>
+    <string name="oppo_profile_natural">Natural</string>
+    <string name="oppo_profile_hasselblad">Hasselblad</string>
+    <string name="oppo_profile_samsung">Samsung</string>
+    <string name="oppo_profile_pixel">Pixel</string>
+    <string name="oppo_profile_iphone">iPhone</string>
+    <string name="oppo_profile_custom">Custom</string>
+    <string name="oppo_pipeline_exposure">Exposure</string>
+    <string name="oppo_pipeline_contrast">Contrast</string>
+    <string name="oppo_pipeline_highlights">Highlights</string>
+    <string name="oppo_pipeline_shadows">Shadows</string>
+    <string name="oppo_pipeline_saturation">Saturation</string>
+    <string name="oppo_pipeline_vibrance">Vibrance</string>
+    <string name="oppo_pipeline_temperature">Temperature</string>
+    <string name="oppo_pipeline_tint">Tint</string>
+    <string name="oppo_pipeline_sharpness">Sharpness</string>
+    <string name="oppo_pipeline_texture">Texture</string>
+    <string name="oppo_pipeline_noise_reduction">Noise reduction</string>
+    <string name="oppo_pipeline_detail_preservation">Detail preservation</string>
+    <string name="oppo_refocus_tap_subject">Tap the subject area to select the sharpest captured focus plane, or use the slider.</string>
+    <string name="oppo_refocus_preview">Refocus plane preview</string>
+    <string name="oppo_refocus_plane_count">Plane %1$d of %2$d</string>
+    <string name="oppo_refocus_near">Near</string>
+    <string name="oppo_refocus_far">Far</string>
 </resources>

@@ -245,6 +245,7 @@ fun CameraScreen(
     val currentBaselineRecipeParams by viewModel.currentBaselineRecipeParams.collectAsState()
     val categoryOrder by viewModel.categoryOrder.collectAsState(emptyList())
     val useRaw by viewModel.useRaw.collectAsState()
+    val oppoPhotoSettings by viewModel.oppoPhotoSettings.collectAsState()
     val useJpgMax by viewModel.useJpgMax.collectAsState()
     val useMultipleExposure by viewModel.useMultipleExposure.collectAsState()
     val useRawMax by viewModel.useRawMax.collectAsState()
@@ -1578,6 +1579,7 @@ fun CameraScreen(
                 latestPhoto = latestPhoto,
                 useMultipleExposure = useMultipleExposure,
                 multipleExposureState = multipleExposureState,
+                fastShutterEnabled = oppoPhotoSettings.fastShutterEnabled,
                 onGalleryThumbnailBoundsChanged = { bounds ->
                     galleryThumbnailBounds = bounds
                 },
@@ -1817,6 +1819,9 @@ fun CameraScreen(
             },
             useMultipleExposure = useMultipleExposure,
             onMultipleExposureToggle = { viewModel.setUseMultipleExposure(it) },
+            oppoPhotoSettings = oppoPhotoSettings,
+            onOppoPhotoSettingsChange = viewModel::updateOppoPhotoSettings,
+            refocusAvailable = state.minimumFocusDistance > 0f,
             contentTopPadding = CameraTopBarBaseTopPadding + topSafePadding
         )
 
@@ -2073,6 +2078,7 @@ private fun Controls(
     latestPhoto: com.hinnka.mycamera.gallery.MediaData?,
     useMultipleExposure: Boolean,
     multipleExposureState: com.hinnka.mycamera.viewmodel.MultipleExposureSessionState,
+    fastShutterEnabled: Boolean,
     onGalleryThumbnailBoundsChanged: (Rect) -> Unit,
     onCaptureButtonBoundsChanged: (Rect) -> Unit,
     onSwitchCameraClick: () -> Unit,
@@ -2144,7 +2150,7 @@ private fun Controls(
                     isVideoProcessing = state.videoRecordingState.isProcessing,
                     isPaused = state.videoRecordingState.isPaused,
                     allowLongPress = state.captureMode == CaptureMode.PHOTO &&
-                        !useMultipleExposure,
+                        !useMultipleExposure && fastShutterEnabled,
                     multipleExposureEnabled = useMultipleExposure && state.captureMode == CaptureMode.PHOTO,
                     multipleExposureProgress = multipleExposureState.capturedCount.toFloat() /
                             multipleExposureState.targetCount.coerceAtLeast(1).toFloat(),

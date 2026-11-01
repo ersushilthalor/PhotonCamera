@@ -382,6 +382,10 @@ data class CameraState(
     val hdrPlusBracketExposureEnabled: Boolean = MultiFrameConfig.DEFAULT_HDR_PLUS_BRACKET_EXPOSURE,
     val hdrPlusLongFrameExposureEv: Float = MultiFrameConfig.LONG_FRAME_EXPOSURE_EV.toFloat(),
     val hdrPlusShortFrameExposureEv: Float = MultiFrameConfig.DEFAULT_SHORT_FRAME_EXPOSURE_EV,
+    val autoHdrEnabled: Boolean = true,
+    val refocusCaptureEnabled: Boolean = false,
+    val refocusCapturing: Boolean = false,
+    val refocusFrameCount: Int = 5,
     val useRaw: Boolean = false,
     val useMultipleExposure: Boolean = false,
     val rawMinShutterSpeedNs: Long = 0L,
@@ -427,7 +431,8 @@ data class CameraState(
         get() = isIsoAuto && isShutterSpeedAuto
 
     val isMultiFrameEnabled: Boolean
-        get() = multiFrameOutputScale != null &&
+        get() = (multiFrameOutputScale != null ||
+            (autoHdrEnabled && captureMode == CaptureMode.PHOTO && !useRaw)) &&
             (!useRaw || (isRawSupported && isRawMultiFrameSupported && normalizedHdrPlusFrameCount > 1))
 
     // A single RAW frame uses the ordinary capture and development path.
@@ -453,7 +458,7 @@ data class CameraState(
         get() = isMultiFrameEnabled && !useRaw
 
     val isJpgMaxHdrEnabled: Boolean
-        get() = isJpgMaxEnabled && useJpgMaxHdrComposition
+        get() = isJpgMaxEnabled && (useJpgMaxHdrComposition || autoHdrEnabled)
 
     val isRawMaxEnabled: Boolean
         get() = isMultiFrameEnabled && useRaw
@@ -464,6 +469,7 @@ data class CameraState(
 
     val activeMultiFrameCount: Int
         get() = when {
+            autoHdrEnabled && captureMode == CaptureMode.PHOTO && !useRaw -> 1
             isJpgMaxEnabled -> MultiFrameConfig.normalizeDenoiseFrameCount(
                 jpgMultiFrameDenoiseFrameCount
             )

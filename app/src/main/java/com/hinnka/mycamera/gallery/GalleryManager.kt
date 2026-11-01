@@ -2852,6 +2852,10 @@ object GalleryManager {
         }
     }
 
+    fun getMultipleExposureRefocusDepthMapFile(context: Context, sessionId: String): File {
+        return File(getMultipleExposureSessionDir(context, sessionId, true), "refocus_depth.png")
+    }
+
     fun getMultipleExposureFrameFiles(context: Context, sessionId: String): List<File> {
         val dir = getMultipleExposureSessionDir(context, sessionId)
         return dir.listFiles { file ->

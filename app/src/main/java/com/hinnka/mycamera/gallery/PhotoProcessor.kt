@@ -26,6 +26,7 @@ import com.hinnka.mycamera.lut.LutManager
 import com.hinnka.mycamera.processor.PhotonSensorSizeTuning
 import com.hinnka.mycamera.processor.DepthBokehProcessor
 import com.hinnka.mycamera.processor.BokehStyle
+import com.hinnka.mycamera.processor.OppoPhotoPipelineEngine
 import com.hinnka.mycamera.raw.RawOutputScaling
 import com.hinnka.mycamera.raw.RawDigitalZoomResampling
 import com.hinnka.mycamera.raw.RawDemosaicProcessor
@@ -796,6 +797,10 @@ class PhotoProcessor(
             )
         }
 
+        result = OppoPhotoPipelineEngine.process(
+            result,
+            metadata.customProperties[OppoPhotoPipelineEngine.METADATA_KEY],
+        )
         result = applyPostEditGeometry(result, metadata, "bitmap")
         if (applyFrameWatermark) {
             result = applyFrame(result, metadata)

@@ -6,6 +6,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.ColorSpace
 import android.net.Uri
 import android.os.Build
@@ -20,6 +21,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
@@ -199,6 +201,7 @@ fun GalleryDetailScreen(
     var showAiScoreSheet by remember { mutableStateOf(false) }
     var showMoreSheet by remember { mutableStateOf(false) }
     var showHdrStrengthPanel by remember { mutableStateOf(false) }
+    var showRefocusViewer by remember { mutableStateOf(false) }
     val videoPreviewHandle = remember { VideoPreviewHandle() }
 
     val currentColorSpace = remember { mutableStateOf<ColorSpace?>(null) }
@@ -326,6 +329,23 @@ fun GalleryDetailScreen(
     }
 
     val currentPhoto = photos.getOrNull(pagerState.currentPage)
+    val refocusSessionId = currentPhoto?.metadata?.customProperties?.get("oppo.refocusSessionId")
+    var refocusPlaneFiles by remember(currentPhoto?.id) { mutableStateOf<List<File>>(emptyList()) }
+    var refocusDepthBitmap by remember(currentPhoto?.id) { mutableStateOf<Bitmap?>(null) }
+    var selectedRefocusPlane by remember(currentPhoto?.id) { mutableIntStateOf(0) }
+    LaunchedEffect(refocusSessionId) {
+        refocusPlaneFiles = emptyList()
+        refocusDepthBitmap?.recycle()
+        refocusDepthBitmap = null
+        if (!refocusSessionId.isNullOrBlank()) {
+            refocusPlaneFiles = GalleryManager.getMultipleExposureFrameFiles(context, refocusSessionId)
+            val depthFile = GalleryManager.getMultipleExposureRefocusDepthMapFile(context, refocusSessionId)
+            refocusDepthBitmap = withContext(Dispatchers.IO) {
+                BitmapFactory.decodeFile(depthFile.absolutePath)
+            }
+            selectedRefocusPlane = (refocusPlaneFiles.size / 2).coerceAtLeast(0)
+        }
+    }
     val isCurrentPhotoProcessing = currentPhoto?.id?.let(processingPhotos::containsKey) == true
 
     LaunchedEffect(currentPhoto?.id, isCurrentPhotoProcessing) {
@@ -510,6 +530,22 @@ fun GalleryDetailScreen(
                                 imageVector = AppIcons.BurstMode,
                                 contentDescription = "查看连拍照片", // 连拍照片
                                 tint = Color.White
+                            )
+                        }
+                    }
+                    if (
+                        !isCurrentPhotoProcessing &&
+                        !refocusSessionId.isNullOrBlank() &&
+                        refocusPlaneFiles.isNotEmpty()
+                    ) {
+                        IconButton(
+                            onClick = { showRefocusViewer = true },
+                            modifier = Modifier.autoRotate(),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = stringResource(R.string.oppo_refocus),
+                                tint = Color.White,
                             )
                         }
                     }
@@ -1090,6 +1126,88 @@ fun GalleryDetailScreen(
                 viewModel.showPaymentDialog = false
             }
         )
+    }
+
+    if (showRefocusViewer && currentPhoto != null && refocusPlaneFiles.isNotEmpty()) {
+        AppModalBottomSheet(
+            containerColor = GallerySheetSurface,
+            shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
+            scrimColor = Color.Black.copy(alpha = 0.64f),
+            onDismissRequest = { showRefocusViewer = false },
+            contentColor = GalleryToolbarContent,
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 18.dp)
+                    .padding(bottom = 24.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.oppo_refocus),
+                    color = GalleryToolbarContent,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = stringResource(R.string.oppo_refocus_tap_subject),
+                    color = GalleryToolbarContent.copy(alpha = 0.7f),
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
+                )
+                val planeIndex = selectedRefocusPlane.coerceIn(0, refocusPlaneFiles.lastIndex)
+                Box(
+                    modifier = Modifier.fillMaxWidth()
+                        .heightIn(min = 220.dp, max = 440.dp)
+                        .pointerInput(refocusDepthBitmap, refocusPlaneFiles) {
+                            detectTapGestures { offset ->
+                                val map = refocusDepthBitmap
+                                if (map != null && !map.isRecycled && map.width > 0 && map.height > 0) {
+                                    val x = (offset.x / size.width * map.width).toInt().coerceIn(0, map.width - 1)
+                                    val y = (offset.y / size.height * map.height).toInt().coerceIn(0, map.height - 1)
+                                    val depth = (map.getPixel(x, y) and 0xFF) / 255f
+                                    selectedRefocusPlane = (depth * refocusPlaneFiles.lastIndex).roundToInt()
+                                        .coerceIn(0, refocusPlaneFiles.lastIndex)
+                                }
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    AsyncImage(
+                        model = refocusPlaneFiles[planeIndex],
+                        contentDescription = stringResource(R.string.oppo_refocus_preview),
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp, max = 440.dp),
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = stringResource(R.string.oppo_refocus_near),
+                        color = GalleryToolbarContent.copy(alpha = 0.7f),
+                        fontSize = 11.sp,
+                    )
+                    Text(
+                        text = stringResource(R.string.oppo_refocus_plane_count, planeIndex + 1, refocusPlaneFiles.size),
+                        color = AccentColor,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = stringResource(R.string.oppo_refocus_far),
+                        color = GalleryToolbarContent.copy(alpha = 0.7f),
+                        fontSize = 11.sp,
+                    )
+                }
+                Slider(
+                    value = planeIndex.toFloat(),
+                    valueRange = 0f..refocusPlaneFiles.lastIndex.toFloat(),
+                    steps = (refocusPlaneFiles.size - 2).coerceAtLeast(0),
+                    onValueChange = { selectedRefocusPlane = it.roundToInt() },
+                )
+            }
+        }
     }
 
     // 更多 BottomSheet

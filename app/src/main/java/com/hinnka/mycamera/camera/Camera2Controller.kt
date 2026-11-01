@@ -8669,6 +8669,8 @@ class Camera2Controller(private val context: Context) {
 
     private fun shouldUseMultiFrameTorch(state: CameraState): Boolean {
         return state.requiresMultiFrameCaptureSequence &&
+                !(state.autoHdrEnabled && !state.useRaw) &&
+                !state.refocusCaptureEnabled &&
                 isFlashSupported &&
                 state.flashMode == CameraMetadata.FLASH_MODE_SINGLE
     }

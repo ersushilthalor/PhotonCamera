@@ -33,6 +33,7 @@ import com.hinnka.mycamera.ui.theme.OnAccentColor
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.MeteringMode
+import com.hinnka.mycamera.data.OppoPhotoSettings
 import com.hinnka.mycamera.raw.DcpInfo
 import com.hinnka.mycamera.raw.HncsFilmCurveMode
 import com.hinnka.mycamera.raw.RawRenderingEngine
@@ -111,11 +112,15 @@ fun CameraTopSheet(
     onJpgMaxToggle: (Boolean) -> Unit,
     useMultipleExposure: Boolean,
     onMultipleExposureToggle: (Boolean) -> Unit,
+    oppoPhotoSettings: OppoPhotoSettings,
+    onOppoPhotoSettingsChange: (OppoPhotoSettings) -> Unit,
+    refocusAvailable: Boolean,
     contentTopPadding: Dp = CameraTopSheetContentTopPadding,
     modifier: Modifier = Modifier
 ) {
     var expandedVideoPanel by rememberSaveable { mutableStateOf<VideoSettingPanel?>(null) }
     var showRenderingEngineSheet by rememberSaveable { mutableStateOf(false) }
+    var showOppoPipelineSheet by rememberSaveable { mutableStateOf(false) }
     var showContentManagementOptions by rememberSaveable { mutableStateOf(false) }
     fun handleContentManagementAction(action: () -> Unit) {
         showContentManagementOptions = false
@@ -200,47 +205,108 @@ fun CameraTopSheet(
                             )
                         } else {
                             QuickSettingToggle(
-                                title = stringResource(R.string.settings_use_jpg_max),
-                                checked = useJpgMax,
-                                onCheckedChange = onJpgMaxToggle,
+                                title = stringResource(R.string.oppo_auto_hdr),
+                                checked = oppoPhotoSettings.autoHdrEnabled,
+                                onCheckedChange = { enabled ->
+                                    onOppoPhotoSettingsChange(
+                                        oppoPhotoSettings.copy(
+                                            autoHdrEnabled = enabled,
+                                            refocusEnabled = if (enabled) false else oppoPhotoSettings.refocusEnabled,
+                                        )
+                                    )
+                                },
                                 modifier = itemModifier
                             )
                             QuickSettingToggle(
-                                title = stringResource(R.string.settings_use_multiple_exposure),
-                                checked = useMultipleExposure,
-                                onCheckedChange = onMultipleExposureToggle,
+                                title = stringResource(R.string.oppo_fast_shutter),
+                                checked = oppoPhotoSettings.fastShutterEnabled,
+                                onCheckedChange = {
+                                    onOppoPhotoSettingsChange(oppoPhotoSettings.copy(fastShutterEnabled = it))
+                                },
+                                modifier = itemModifier
+                            )
+                            QuickSettingToggle(
+                                title = stringResource(R.string.oppo_refocus),
+                                checked = oppoPhotoSettings.refocusEnabled,
+                                onCheckedChange = { enabled ->
+                                    onOppoPhotoSettingsChange(
+                                        oppoPhotoSettings.copy(
+                                            refocusEnabled = enabled,
+                                            autoHdrEnabled = if (enabled) false else oppoPhotoSettings.autoHdrEnabled,
+                                        )
+                                    )
+                                },
+                                enabled = refocusAvailable,
+                                modifier = itemModifier
+                            )
+                            QuickSettingButton2(
+                                title = stringResource(R.string.oppo_custom_pipeline),
+                                checked = oppoPhotoSettings.customPipelineEnabled,
+                                onClick = { showOppoPipelineSheet = true },
                                 modifier = itemModifier
                             )
                         }
-                        QuickSettingToggle(
-                            title = stringResource(R.string.settings_ultra_hdr_gain_map),
-                            checked = ultraHdrEnabled,
-                            onCheckedChange = onUltraHdrToggle,
-                            modifier = itemModifier
-                        )
-                        QuickSettingToggle(
-                            title = stringResource(R.string.camera_preview_stabilization),
-                            checked = photoPreviewStabilizationEnabled,
-                            onCheckedChange = onPhotoPreviewStabilizationChange,
-                            enabled = photoPreviewStabilizationAvailable,
-                            modifier = itemModifier
-                        )
                         MeteringModeQuickSetting(
                             meteringMode = meteringMode,
                             onMeteringModeChange = onMeteringModeChange,
                             modifier = itemModifier
                         )
-
                         ToolboxQuickSetting(
                             onToolboxClick = onToolboxClick,
                             modifier = itemModifier
                         )
-
                         ContentManagementQuickSetting(
                             onClick = { showContentManagementOptions = !showContentManagementOptions },
                             modifier = itemModifier
                         )
+                    }
 
+                    if (!isProfessionalMode && oppoPhotoSettings.fastShutterEnabled) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color.White.copy(alpha = 0.06f))
+                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.oppo_fast_shutter_fps, oppoPhotoSettings.fastShutterFps),
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Slider(
+                                value = oppoPhotoSettings.fastShutterFps.toFloat(),
+                                onValueChange = {
+                                    onOppoPhotoSettingsChange(oppoPhotoSettings.copy(fastShutterFps = it.toInt()))
+                                },
+                                valueRange = 5f..20f,
+                                steps = 14,
+                            )
+                        }
+                    }
+
+                    if (!isProfessionalMode && oppoPhotoSettings.refocusEnabled && refocusAvailable) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color.White.copy(alpha = 0.06f))
+                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.oppo_refocus_planes, oppoPhotoSettings.refocusFrameCount),
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Slider(
+                                value = oppoPhotoSettings.refocusFrameCount.toFloat(),
+                                onValueChange = {
+                                    onOppoPhotoSettingsChange(oppoPhotoSettings.copy(refocusFrameCount = it.toInt()))
+                                },
+                                valueRange = 3f..8f,
+                                steps = 4,
+                            )
+                        }
                     }
 
                     ContentManagementOptionsPanel(
@@ -495,6 +561,14 @@ fun CameraTopSheet(
         }
     }
 
+    if (showOppoPipelineSheet) {
+        OppoPhotoPipelineSheet(
+            settings = oppoPhotoSettings,
+            onSettingsChange = onOppoPhotoSettingsChange,
+            onDismiss = { showOppoPipelineSheet = false },
+        )
+    }
+
     if (showRenderingEngineSheet) {
         AppModalBottomSheet(
             onDismissRequest = { showRenderingEngineSheet = false },
@@ -540,6 +614,128 @@ fun CameraTopSheet(
                 )
             }
         }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun OppoPhotoPipelineSheet(
+    settings: OppoPhotoSettings,
+    onSettingsChange: (OppoPhotoSettings) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AppModalBottomSheet(
+        onDismissRequest = onDismiss,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.2f)) }
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 18.dp)
+                .padding(bottom = 24.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.oppo_custom_pipeline),
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 10.dp),
+            )
+            QuickSettingToggle(
+                title = stringResource(R.string.oppo_enable_custom_pipeline),
+                checked = settings.customPipelineEnabled,
+                onCheckedChange = { onSettingsChange(settings.copy(customPipelineEnabled = it)) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            SectionLabel(title = stringResource(R.string.oppo_color_profile))
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                listOf(
+                    "NATURAL" to R.string.oppo_profile_natural,
+                    "HASSELBLAD" to R.string.oppo_profile_hasselblad,
+                    "SAMSUNG" to R.string.oppo_profile_samsung,
+                    "PIXEL" to R.string.oppo_profile_pixel,
+                    "IPHONE" to R.string.oppo_profile_iphone,
+                    "CUSTOM" to R.string.oppo_profile_custom,
+                ).forEach { (profile, label) ->
+                    VideoOptionChip(
+                        title = stringResource(label),
+                        selected = settings.pipelineProfile == profile,
+                        onClick = {
+                            onSettingsChange(settings.copy(
+                                pipelineProfile = profile,
+                                customPipelineEnabled = true,
+                            ))
+                        },
+                    )
+                }
+            }
+            OppoPipelineSlider(R.string.oppo_pipeline_exposure, settings.exposure, -2f..2f) {
+                onSettingsChange(settings.copy(exposure = it, customPipelineEnabled = true, pipelineProfile = "CUSTOM"))
+            }
+            OppoPipelineSlider(R.string.oppo_pipeline_contrast, settings.contrast, 0.6f..1.4f) {
+                onSettingsChange(settings.copy(contrast = it, customPipelineEnabled = true, pipelineProfile = "CUSTOM"))
+            }
+            OppoPipelineSlider(R.string.oppo_pipeline_highlights, settings.highlights, -100f..100f) {
+                onSettingsChange(settings.copy(highlights = it, customPipelineEnabled = true, pipelineProfile = "CUSTOM"))
+            }
+            OppoPipelineSlider(R.string.oppo_pipeline_shadows, settings.shadows, -100f..100f) {
+                onSettingsChange(settings.copy(shadows = it, customPipelineEnabled = true, pipelineProfile = "CUSTOM"))
+            }
+            OppoPipelineSlider(R.string.oppo_pipeline_saturation, settings.saturation, -100f..100f) {
+                onSettingsChange(settings.copy(saturation = it, customPipelineEnabled = true, pipelineProfile = "CUSTOM"))
+            }
+            OppoPipelineSlider(R.string.oppo_pipeline_vibrance, settings.vibrance, -100f..100f) {
+                onSettingsChange(settings.copy(vibrance = it, customPipelineEnabled = true, pipelineProfile = "CUSTOM"))
+            }
+            OppoPipelineSlider(R.string.oppo_pipeline_temperature, settings.temperature, -100f..100f) {
+                onSettingsChange(settings.copy(temperature = it, customPipelineEnabled = true, pipelineProfile = "CUSTOM"))
+            }
+            OppoPipelineSlider(R.string.oppo_pipeline_tint, settings.tint, -100f..100f) {
+                onSettingsChange(settings.copy(tint = it, customPipelineEnabled = true, pipelineProfile = "CUSTOM"))
+            }
+            OppoPipelineSlider(R.string.oppo_pipeline_sharpness, settings.sharpness, 0f..100f) {
+                onSettingsChange(settings.copy(sharpness = it, customPipelineEnabled = true, pipelineProfile = "CUSTOM"))
+            }
+            OppoPipelineSlider(R.string.oppo_pipeline_texture, settings.texture, -100f..100f) {
+                onSettingsChange(settings.copy(texture = it, customPipelineEnabled = true, pipelineProfile = "CUSTOM"))
+            }
+            OppoPipelineSlider(R.string.oppo_pipeline_noise_reduction, settings.noiseReduction, 0f..100f) {
+                onSettingsChange(settings.copy(noiseReduction = it, customPipelineEnabled = true, pipelineProfile = "CUSTOM"))
+            }
+            OppoPipelineSlider(R.string.oppo_pipeline_detail_preservation, settings.detailPreservation, 0f..100f) {
+                onSettingsChange(settings.copy(detailPreservation = it, customPipelineEnabled = true, pipelineProfile = "CUSTOM"))
+            }
+        }
+    }
+}
+
+@Composable
+private fun OppoPipelineSlider(
+    titleRes: Int,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    onValueChange: (Float) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(titleRes),
+                color = Color.White.copy(alpha = 0.88f),
+                fontSize = 12.sp,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = String.format("%.2f", value),
+                color = AccentColor,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        Slider(value = value, onValueChange = onValueChange, valueRange = range)
     }
 }
 
