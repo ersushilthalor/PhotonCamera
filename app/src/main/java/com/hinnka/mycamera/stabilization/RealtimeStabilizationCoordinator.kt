@@ -306,6 +306,9 @@ class RealtimeStabilizationCoordinator(context: Context) {
     private var externalLensStabilizationConfig = ExternalLensStabilizationConfig.Disabled
 
     @Volatile
+    private var forceOisWithEisPlusEnabled = false
+
+    @Volatile
     private var gyroSourceReady = false
 
     @Volatile
@@ -388,12 +391,24 @@ class RealtimeStabilizationCoordinator(context: Context) {
         )
     }
 
+    fun setForceOisWithEisPlusEnabled(enabled: Boolean) {
+        synchronized(lock) {
+            if (forceOisWithEisPlusEnabled == enabled) return
+            forceOisWithEisPlusEnabled = enabled
+            if (enabled) {
+                oisBlindFrames = 0
+                calibration?.cameraId?.let(oisBlindCameras::remove)
+            }
+        }
+        PLog.i(TAG, "MGC force OIS with EIS+ override: enabled=$enabled")
+    }
+
     val isCurrentCameraSupported: Boolean
         get() = synchronized(lock) {
             val current = calibration
             !halStabilizationConflictDetected &&
                 isGyroscopeAvailable && current != null &&
-                current.cameraId !in oisBlindCameras &&
+                (forceOisWithEisPlusEnabled || current.cameraId !in oisBlindCameras) &&
                 isMgcStabilizationLensFacingSupported(current.lensFacing) &&
                 current.timestampSource ==
                 CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
@@ -412,7 +427,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
         val activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
         val physicalSize = characteristics.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
         val cameraNotBlind = cameraId?.let { id ->
-            synchronized(lock) { id !in oisBlindCameras }
+            synchronized(lock) { forceOisWithEisPlusEnabled || id !in oisBlindCameras }
         } ?: true
         return cameraNotBlind && isGyroscopeAvailable && activeArray != null && physicalSize != null &&
             isMgcStabilizationLensFacingSupported(lensFacing) &&
@@ -1135,12 +1150,17 @@ class RealtimeStabilizationCoordinator(context: Context) {
             actualVideoMode != CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
         val oisOn = actualOpticalMode != null &&
             actualOpticalMode != CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
-        oisBlindFrames = if (oisOn && !opticalCorrectionAccepted) {
+        oisBlindFrames = if (
+            !forceOisWithEisPlusEnabled && oisOn && !opticalCorrectionAccepted
+        ) {
             oisBlindFrames + 1
         } else {
             0
         }
-        if (oisBlindFrames >= HAL_OPTICAL_CORRECTION_PROBE_FRAME_COUNT) {
+        if (
+            !forceOisWithEisPlusEnabled &&
+            oisBlindFrames >= HAL_OPTICAL_CORRECTION_PROBE_FRAME_COUNT
+        ) {
             calibration?.cameraId
                 ?.takeIf { it.isNotBlank() }
                 ?.let(oisBlindCameras::add)
