@@ -14,6 +14,9 @@ namespace mgc_eis_reconstruction {
 // EisNative. It is intentionally not presented as Google's original source.
 
 constexpr double kNsToSeconds = 1.0e-9;
+constexpr int kMinimumSupportedLookaheadFrames = 3;
+constexpr int kMaximumSupportedLookaheadFrames = 30;
+constexpr int kDefaultLookaheadFrames = 7;
 
 struct Vec2 {
   double x = 0.0;
@@ -102,8 +105,8 @@ struct FrameMetadata {
   // Camera2 SENSOR_TIMESTAMP of the exact source buffer. This is distinct
   // from frame_timestamp_ns, which is the first-row centre timestamp consumed
   // by the EIS math. The delayed engine must return this ownership key with
-  // its output so a seven-frame look-ahead transform can never be applied to
-  // the current buffer.
+  // its output so a look-ahead transform can never be applied to the wrong
+  // source buffer.
   std::int64_t source_timestamp_ns = 0;
   std::int64_t frame_timestamp_ns = 0;
   std::int64_t exposure_time_ns = 0;
@@ -144,7 +147,7 @@ struct EngineConfig {
   int crop_height = 0;
 
   int num_strips = 12;
-  int lookahead_frames = 10;
+  int lookahead_frames = kDefaultLookaheadFrames;
   double stabilization_strength = 1.0;
 };
 
