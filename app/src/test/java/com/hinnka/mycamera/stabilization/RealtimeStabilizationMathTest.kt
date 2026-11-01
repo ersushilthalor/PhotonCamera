@@ -29,6 +29,38 @@ class RealtimeStabilizationMathTest {
     }
 
     @Test
+    fun hybridOisRequiresTimestampedOpticalTelemetry() {
+        assertFalse(
+            canFuseOpticalStabilization(
+                oisModeAvailable = true,
+                supportsOisSamples = false,
+                supportsLensIntrinsicsSamples = false,
+            ),
+        )
+        assertTrue(
+            canFuseOpticalStabilization(
+                oisModeAvailable = true,
+                supportsOisSamples = true,
+                supportsLensIntrinsicsSamples = false,
+            ),
+        )
+        assertTrue(
+            canFuseOpticalStabilization(
+                oisModeAvailable = true,
+                supportsOisSamples = false,
+                supportsLensIntrinsicsSamples = true,
+            ),
+        )
+        assertFalse(
+            canFuseOpticalStabilization(
+                oisModeAvailable = false,
+                supportsOisSamples = true,
+                supportsLensIntrinsicsSamples = true,
+            ),
+        )
+    }
+
+    @Test
     fun identityNativeMatricesReproduceMgcTwentySixVertexStrip() {
         val matrices = FloatArray(STABILIZATION_ROW_COUNT * 9)
         repeat(STABILIZATION_ROW_COUNT) { row ->

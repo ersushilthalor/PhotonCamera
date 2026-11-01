@@ -5252,8 +5252,8 @@ class Camera2Controller(private val context: Context) {
     /**
      * 应用防抖设置
      *
-     * 视频模式按用户选项启用 EIS/OIS。EIS+始终请求关闭 Camera2 EIS 和 HAL OIS；
-     * 仅当 HAL 忽略 OIS OFF 时，才用逐时刻镜头内参或 OIS 位移修正滚快门网格。
+     * EIS+ disables Camera2 electronic stabilization. Hardware OIS is enabled only when
+     * the HAL also exposes timestamped lens-intrinsics or OIS-offset telemetry that MGC can fuse.
      */
     private fun applyStabilizationSettings(
         builder: CaptureRequest.Builder,
@@ -5281,25 +5281,39 @@ class Camera2Controller(private val context: Context) {
                         videoStabilizationMode
                     )
                 }
-                if (availableOpticalStabilizationModes.contains(
-                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
-                    ) && isCaptureRequestKeyAvailable(
+                if (isCaptureRequestKeyAvailable(
                         CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE.name
                     )
                 ) {
-                    // EIS+ is gyro/rolling-shutter correction, not a replacement for lens OIS.
-                    // Keep hardware OIS enabled and feed its per-frame samples to the EIS+
-                    // projection so optical motion is not double-counted or silently lost.
-                    val opticalMode = if (
-                        enhancedSelected || mode == VideoStabilizationMode.OIS
-                    ) {
+                    val oisModeAvailable = availableOpticalStabilizationModes.contains(
                         CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
-                    } else {
-                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
+                    )
+                    val canFuseOis = canFuseOpticalStabilization(
+                        oisModeAvailable = oisModeAvailable,
+                        supportsOisSamples = realtimeStabilizationCoordinator.shouldRequestOisSamples,
+                        supportsLensIntrinsicsSamples =
+                            realtimeStabilizationCoordinator.supportsOpticalCorrectionTelemetry &&
+                                !realtimeStabilizationCoordinator.shouldRequestOisSamples,
+                    )
+                    // Never turn on OIS without a timestamped optical correction source. If
+                    // dynamic intrinsics are available, request legacy OIS samples too whenever
+                    // supported; the native engine uses them only as a complete-window fallback.
+                    val opticalMode = when {
+                        enhancedSelected && canFuseOis ->
+                            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
+                        enhancedSelected ->
+                            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
+                        mode == VideoStabilizationMode.OIS && oisModeAvailable ->
+                            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
+                        else ->
+                            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
                     }
                     builder.set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, opticalMode)
                 }
-                applyOisDataMode(builder, enhancedSelected)
+                applyOisDataMode(
+                    builder,
+                    enhancedSelected && realtimeStabilizationCoordinator.shouldRequestOisSamples,
+                )
                 return
             }
 
