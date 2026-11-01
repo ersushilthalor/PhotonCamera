@@ -29,7 +29,6 @@ constexpr jlong kPendingTimestamp = -1;
 // MGC build.  The factory fixes these values; keeping them here prevents a UI
 // or JNI caller from silently constructing an unrelated profile.
 constexpr int kMgcProfileStripCount = 12;
-constexpr int kMgcProfileLookaheadFrames = 7;
 
 struct Handle {
   Handle(EngineConfig config, bool front_camera_coordinate_mode)
@@ -75,11 +74,18 @@ Java_com_hinnka_mycamera_stabilization_MgcEisNativeBridge_create(
     config.crop_width = width;
     config.crop_height = height;
     config.num_strips = kMgcProfileStripCount;
-    config.lookahead_frames = std::clamp(static_cast<int>(lookahead_frames), 0, 10);
+    config.lookahead_frames = std::clamp(
+        static_cast<int>(lookahead_frames),
+        mgc_eis_reconstruction::kMinimumSupportedLookaheadFrames,
+        mgc_eis_reconstruction::kMaximumSupportedLookaheadFrames);
     config.stabilization_strength =
         std::clamp(static_cast<double>(strength), 0.0, 1.0);
-    return toJlong(
-        new Handle(std::move(config), front_facing == JNI_TRUE));
+    auto *state = new Handle(std::move(config), front_facing == JNI_TRUE);
+    __android_log_print(
+        ANDROID_LOG_INFO, kLogTag,
+        "MGC EIS lookahead requested=%d configured=%d",
+        static_cast<int>(lookahead_frames), state->engine.numFramesToLookAhead());
+    return toJlong(state);
   } catch (const std::exception &error) {
     logFailure("create", error);
     return 0;
@@ -219,7 +225,7 @@ Java_com_hinnka_mycamera_stabilization_MgcEisNativeBridge_processFrame(
           static_cast<long long>(current_frame_period_ns),
           1.0e9 / static_cast<double>(current_frame_period_ns),
           static_cast<double>(current_frame_period_ns) *
-              kMgcProfileLookaheadFrames / 1.0e6);
+              state->engine.numFramesToLookAhead() / 1.0e6);
     }
     if (!result) {
       return kPendingTimestamp;
