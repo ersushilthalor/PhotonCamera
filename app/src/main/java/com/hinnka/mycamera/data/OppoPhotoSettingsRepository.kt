@@ -11,7 +11,7 @@ data class OppoPhotoSettings(
     val fastShutterEnabled: Boolean = true,
     val fastShutterFps: Int = 20,
     val refocusEnabled: Boolean = false,
-    val refocusFrameCount: Int = 5,
+    val refocusFrameCount: Int = 3,
     val customPipelineEnabled: Boolean = false,
     val pipelineProfile: String = "NATURAL",
     val exposure: Float = 0f,
@@ -28,8 +28,9 @@ data class OppoPhotoSettings(
     val detailPreservation: Float = 88f,
 ) {
     fun normalized(): OppoPhotoSettings = copy(
-        fastShutterFps = fastShutterFps.coerceIn(5, 20),
-        refocusFrameCount = refocusFrameCount.coerceIn(3, 8),
+        // Fast Shutter always uses its maximum supported target; Refocus is fixed to 3 frames.
+        fastShutterFps = 20,
+        refocusFrameCount = 3,
         pipelineProfile = pipelineProfile.takeIf {
             it in setOf("NATURAL", "HASSELBLAD", "SAMSUNG", "PIXEL", "IPHONE", "CUSTOM")
         } ?: "NATURAL",
@@ -104,7 +105,7 @@ class OppoPhotoSettingsRepository(context: Context) {
         fastShutterEnabled = preferences.getBoolean("fast_shutter", true),
         fastShutterFps = preferences.getInt("fast_shutter_fps", 20),
         refocusEnabled = preferences.getBoolean("refocus", false),
-        refocusFrameCount = preferences.getInt("refocus_frame_count", 5),
+        refocusFrameCount = preferences.getInt("refocus_frame_count", 3),
         customPipelineEnabled = preferences.getBoolean("custom_pipeline", false),
         pipelineProfile = preferences.getString("pipeline_profile", "NATURAL") ?: "NATURAL",
         exposure = preferences.getFloat("pipeline_exposure", 0f),

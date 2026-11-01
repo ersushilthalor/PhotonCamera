@@ -261,54 +261,6 @@ fun CameraTopSheet(
                         )
                     }
 
-                    if (!isProfessionalMode && oppoPhotoSettings.fastShutterEnabled) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color.White.copy(alpha = 0.06f))
-                                .padding(horizontal = 14.dp, vertical = 10.dp)
-                        ) {
-                            Text(
-                                text = stringResource(R.string.oppo_fast_shutter_fps, oppoPhotoSettings.fastShutterFps),
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                            )
-                            Slider(
-                                value = oppoPhotoSettings.fastShutterFps.toFloat(),
-                                onValueChange = {
-                                    onOppoPhotoSettingsChange(oppoPhotoSettings.copy(fastShutterFps = it.toInt()))
-                                },
-                                valueRange = 5f..20f,
-                                steps = 14,
-                            )
-                        }
-                    }
-
-                    if (!isProfessionalMode && oppoPhotoSettings.refocusEnabled && refocusAvailable) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color.White.copy(alpha = 0.06f))
-                                .padding(horizontal = 14.dp, vertical = 10.dp)
-                        ) {
-                            Text(
-                                text = stringResource(R.string.oppo_refocus_planes, oppoPhotoSettings.refocusFrameCount),
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                            )
-                            Slider(
-                                value = oppoPhotoSettings.refocusFrameCount.toFloat(),
-                                onValueChange = {
-                                    onOppoPhotoSettingsChange(oppoPhotoSettings.copy(refocusFrameCount = it.toInt()))
-                                },
-                                valueRange = 3f..8f,
-                                steps = 4,
-                            )
-                        }
-                    }
-
                     ContentManagementOptionsPanel(
                         visible = showContentManagementOptions,
                         onFilterManageClick = {

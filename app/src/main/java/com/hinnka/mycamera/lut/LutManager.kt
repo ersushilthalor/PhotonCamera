@@ -44,6 +44,10 @@ class LutManager(private val context: Context) {
                 target?.let { "${it.name.lowercase()}_${lutId}_recipe" } ?: "${lutId}_recipe"
             )
 
+        // Video edits use their own key so they cannot mutate the Photo LUT recipe.
+        private fun videoRecipeKey(lutId: String) =
+            stringPreferencesKey("video_${lutId}_recipe")
+
         // 旧版逐字段 Key（仅用于迁移读取，新数据不再写入）
         private val legacyFieldNames = listOf(
             "exposure", "contrast", "saturation", "temperature", "tint", "fade", "color",
@@ -342,6 +346,30 @@ class LutManager(private val context: Context) {
     }
 
     // ========== 色彩配方持久化方法 ==========
+
+    /**
+     * 获取指定 LUT 的 Video-only 色彩配方。
+     * null 表示该 LUT 尚未单独编辑 Video 配方，应回退到普通 LUT 配方。
+     */
+    fun getVideoColorRecipeParams(lutId: String): Flow<ColorRecipeParams?> {
+        return context.colorRecipeDataStore.data.map { preferences ->
+            preferences[videoRecipeKey(lutId)]?.let { ColorRecipeParams.fromJson(it) }
+        }
+    }
+
+    suspend fun loadVideoColorRecipeParams(lutId: String): ColorRecipeParams? {
+        val preferences = context.colorRecipeDataStore.data.firstOrNull() ?: return null
+        return preferences[videoRecipeKey(lutId)]?.let { ColorRecipeParams.fromJson(it) }
+    }
+
+    /**
+     * 保存 Video-only 配方，不触碰 Photo LUT 配方，也不广播全局 LUT 更新。
+     */
+    suspend fun saveVideoColorRecipeParams(lutId: String, params: ColorRecipeParams) {
+        context.colorRecipeDataStore.edit { preferences ->
+            preferences[videoRecipeKey(lutId)] = params.toJson()
+        }
+    }
 
     /**
      * 保存指定 LUT 的色彩配方参数

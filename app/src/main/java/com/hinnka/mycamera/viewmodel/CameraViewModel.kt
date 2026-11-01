@@ -679,6 +679,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         initialValue = ColorRecipeParams.DEFAULT
     )
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val currentVideoRecipeParams: StateFlow<ColorRecipeParams?> = currentLutId.flatMapLatest { id ->
+        contentRepository.lutManager.getVideoColorRecipeParams(id)
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = null
+    )
+
     val currentEffectParams: StateFlow<EffectParams> = currentRecipeParams
         .map { it.toEffectParams() }
         .stateIn(viewModelScope, SharingStarted.Eagerly, EffectParams.DEFAULT)
@@ -881,15 +890,20 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun getMergedRecipeParams(
-        recipe: ColorRecipeParams = currentRecipeParams.value,
-        forVideo: Boolean = false,
+        recipe: ColorRecipeParams? = null,
+        forVideo: Boolean = state.value.captureMode == CaptureMode.VIDEO,
     ): ColorRecipeParams {
+        val baseRecipe = recipe ?: if (forVideo) {
+            currentVideoRecipeParams.value ?: currentRecipeParams.value
+        } else {
+            currentRecipeParams.value
+        }
         if (!forVideo || !_videoHdrEnabled.value) {
-            return recipe
+            return baseRecipe
         }
         // Match the existing Edit Control Panel display values: tonality +10, contrast -1,
         // exposure +0.3 EV, and shadows +10. Keep this as a render-time override only.
-        return recipe.copy(
+        return baseRecipe.copy(
             tonality = 1f,
             contrast = 0.95f,
             exposure = 0.3f,

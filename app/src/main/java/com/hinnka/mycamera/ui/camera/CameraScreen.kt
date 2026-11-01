@@ -237,6 +237,7 @@ fun CameraScreen(
     val currentLutId by viewModel.currentLutId.collectAsState()
     val lutNameOverlayState = rememberLutNameOverlayState()
     val currentRecipeParams by viewModel.currentRecipeParams.collectAsState()
+    val currentVideoRecipeParams by viewModel.currentVideoRecipeParams.collectAsState()
     val videoHdrEnabled by viewModel.videoHdrEnabled.collectAsState()
     val lutSelectorMode by viewModel.lutSelectorMode.collectAsState()
     val activePresetId by viewModel.activePresetId.collectAsState()
@@ -269,11 +270,16 @@ fun CameraScreen(
     val multipleExposureState = viewModel.multipleExposureState
     val canStartShutterAnimation by viewModel.canStartShutterAnimation.collectAsState()
     val currentCaptureModeForEffects by rememberUpdatedState(state.captureMode)
-    var previewRecipeParamsOverride by remember(currentLutId, activePresetId) {
+    val activeRecipeParams = if (state.captureMode == CaptureMode.VIDEO) {
+        currentVideoRecipeParams ?: currentRecipeParams
+    } else {
+        currentRecipeParams
+    }
+    var previewRecipeParamsOverride by remember(currentLutId, activePresetId, state.captureMode) {
         mutableStateOf<ColorRecipeParams?>(null)
     }
     val effectiveRecipeParams = viewModel.getMergedRecipeParams(
-        previewRecipeParamsOverride ?: currentRecipeParams,
+        previewRecipeParamsOverride ?: activeRecipeParams,
         forVideo = state.captureMode == CaptureMode.VIDEO
     )
     var pendingCaptureAnimationBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -309,8 +315,8 @@ fun CameraScreen(
         previewRecipeParamsOverride = null
     }
 
-    LaunchedEffect(currentRecipeParams) {
-        if (previewRecipeParamsOverride?.isSameAs(currentRecipeParams) == true) {
+    LaunchedEffect(activeRecipeParams) {
+        if (previewRecipeParamsOverride?.isSameAs(activeRecipeParams) == true) {
             previewRecipeParamsOverride = null
         }
     }
@@ -1955,8 +1961,12 @@ fun CameraScreen(
                 onParamsPreviewChange = { previewRecipeParamsOverride = it },
                 showEffects = true,
                 replaceVignetteWithWashedOutRecovery = state.captureMode == CaptureMode.VIDEO,
+                videoOnly = state.captureMode == CaptureMode.VIDEO,
                 onDismiss = {
-                    previewRecipeParamsOverride = null
+                    // Keep the Video preview override until the separate recipe reaches DataStore.
+                    if (state.captureMode != CaptureMode.VIDEO) {
+                        previewRecipeParamsOverride = null
+                    }
                     activePanel = ActivePanel.NONE
                 }
             )

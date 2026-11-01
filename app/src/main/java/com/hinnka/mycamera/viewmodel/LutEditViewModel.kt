@@ -29,4 +29,13 @@ class LutEditViewModel(application: Application) : AndroidViewModel(application)
             contentRepository.lutManager.saveColorRecipeParams(lutId, params, target)
         }
     }
+
+    suspend fun getVideoColorRecipe(lutId: String): ColorRecipeParams? =
+        contentRepository.lutManager.loadVideoColorRecipeParams(lutId)
+
+    fun saveVideoColorRecipe(lutId: String, params: ColorRecipeParams) {
+        viewModelScope.launch {
+            contentRepository.lutManager.saveVideoColorRecipeParams(lutId, params)
+        }
+    }
 }

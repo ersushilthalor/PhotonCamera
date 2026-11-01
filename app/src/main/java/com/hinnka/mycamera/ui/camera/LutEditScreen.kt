@@ -41,7 +41,8 @@ fun LutEditBottomSheet(
     editorTarget: LutEditorTarget = LutEditorTarget.CREATIVE_GLOBAL,
     containerColor: Color = Color.Transparent,
     modifier: Modifier = Modifier,
-    replaceVignetteWithWashedOutRecovery: Boolean = false
+    replaceVignetteWithWashedOutRecovery: Boolean = false,
+    videoOnly: Boolean = false
 ) {
     val lutEditViewModel: LutEditViewModel = viewModel()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -50,7 +51,7 @@ fun LutEditBottomSheet(
     var editingParams by remember { mutableStateOf(ColorRecipeParams.DEFAULT) }
     var saveJob by remember { mutableStateOf<Job?>(null) }
     var hasPendingLutSave by remember { mutableStateOf(false) }
-    val openingInitialParams = remember(lutId) { initialParams }
+    val openingInitialParams = remember(lutId, videoOnly, editorTarget) { initialParams }
 
     fun loadParams(params: ColorRecipeParams) {
         editingParams = params
@@ -61,7 +62,11 @@ fun LutEditBottomSheet(
         saveJob?.cancel()
         saveJob = coroutineScope.launch {
             delay(250)
-            lutEditViewModel.saveLutColorRecipe(lutId, params, editorTarget.baselineTarget)
+            if (videoOnly) {
+                lutEditViewModel.saveVideoColorRecipe(lutId, params)
+            } else {
+                lutEditViewModel.saveLutColorRecipe(lutId, params, editorTarget.baselineTarget)
+            }
             hasPendingLutSave = false
         }
     }
@@ -71,7 +76,11 @@ fun LutEditBottomSheet(
         saveJob?.cancel()
         saveJob = null
         hasPendingLutSave = false
-        lutEditViewModel.saveLutColorRecipe(lutId, editingParams, editorTarget.baselineTarget)
+        if (videoOnly) {
+            lutEditViewModel.saveVideoColorRecipe(lutId, editingParams)
+        } else {
+            lutEditViewModel.saveLutColorRecipe(lutId, editingParams, editorTarget.baselineTarget)
+        }
     }
 
     fun onParamsUpdated(newParams: ColorRecipeParams) {
@@ -81,12 +90,18 @@ fun LutEditBottomSheet(
     }
 
     // 初始加载
-    LaunchedEffect(lutId) {
-        val lutParams = openingInitialParams ?: lutEditViewModel.getColorRecipe(lutId, editorTarget.baselineTarget)
+    LaunchedEffect(lutId, videoOnly, editorTarget) {
+        val lutParams = if (videoOnly) {
+            lutEditViewModel.getVideoColorRecipe(lutId)
+                ?: openingInitialParams
+                ?: lutEditViewModel.getColorRecipe(lutId, editorTarget.baselineTarget)
+        } else {
+            openingInitialParams ?: lutEditViewModel.getColorRecipe(lutId, editorTarget.baselineTarget)
+        }
         loadParams(lutParams)
     }
 
-    DisposableEffect(lutId, editorTarget) {
+    DisposableEffect(lutId, editorTarget, videoOnly) {
         onDispose {
             flushLutSave()
         }
