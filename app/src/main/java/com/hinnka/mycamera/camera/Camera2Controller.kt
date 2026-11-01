@@ -264,19 +264,19 @@ class Camera2Controller(private val context: Context) {
     private var isCaptureFocusFrozen = false
     // ---------------------
 
-    private var cameraDevice: CameraDevice? = null
-    private var cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
+    @Volatile private var cameraDevice: CameraDevice? = null
+    @Volatile private var cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
     private var pendingCameraOpenRequest: CameraOpenRequest? = null
     @Volatile
     private var releaseCloseLatch: java.util.concurrent.CountDownLatch? = null
     private var captureSession: CameraCaptureSession? = null
-    private var previewRequestBuilder: CaptureRequest.Builder? = null
+    @Volatile private var previewRequestBuilder: CaptureRequest.Builder? = null
     private var previewSessionGeneration: Long = 0L
     private val previewUpdateScheduled = AtomicBoolean(false)
     private var pendingVendorSessionParameterRestart = false
     private var oppoSuperStabilizationEnabled = false
 
-    private var previewSurface: Surface? = null
+    @Volatile private var previewSurface: Surface? = null
     private var previewSurfaceTexture: SurfaceTexture? = null
     private var imageReader: ImageReader? = null
     private var stabilizationImageReader: StabilizationImageReader? = null
@@ -297,7 +297,8 @@ class Camera2Controller(private val context: Context) {
     private val cameraCharacteristicsCache = ConcurrentHashMap<String, CameraCharacteristics>()
     private var cachedCharacteristics: CameraCharacteristics? = null
     private var cachedCharacteristicsCameraId: String = ""
-    private var activeOpenCameraId: String = ""
+    @Volatile private var activeOpenCameraId: String = ""
+    @Volatile private var activeSelectedCameraId: String = ""
     private var activeOutputPhysicalCameraId: String? = null
     private val failedPhysicalOutputProfiles = mutableSetOf<PhysicalOutputFailureKey>()
     private var cachedSensorOrientation: Int = 0
@@ -2108,6 +2109,7 @@ class Camera2Controller(private val context: Context) {
         cachedCharacteristics = null
         cachedCharacteristicsCameraId = ""
         activeOpenCameraId = ""
+        activeSelectedCameraId = ""
         activeOutputPhysicalCameraId = null
         cachedSensorOrientation = 0
         cachedLensFacing = CameraCharacteristics.LENS_FACING_BACK
@@ -2555,6 +2557,7 @@ class Camera2Controller(private val context: Context) {
         }
 
         activeOpenCameraId = openCameraId
+        activeSelectedCameraId = cameraId
         val requestedPhysicalCameraId = resolveRequestedPhysicalCameraId(_state.value, selectedCamera)
         var outputPhysicalCameraId = requestedPhysicalCameraId
         activeOutputPhysicalCameraId = outputPhysicalCameraId
@@ -5795,6 +5798,34 @@ class Camera2Controller(private val context: Context) {
     }
 
     /**
+     * Returns true when the target lens is backed by the currently open CameraDevice.
+     * In that case a lens change can be completed by replacing the capture session,
+     * without closing and reopening the hardware device.
+     */
+    fun canReuseOpenCameraFor(cameraId: String): Boolean {
+        val targetCamera = _state.value.availableCameras.firstOrNull { it.cameraId == cameraId }
+            ?: return false
+        val targetOpenCameraId = try {
+            targetCamera.getOpenCameraId()
+        } catch (error: Exception) {
+            PLog.w(TAG, "Cannot resolve CameraDevice for lens $cameraId", error)
+            return false
+        }
+        val device = cameraDevice
+        val canReuse = cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN &&
+            device != null &&
+            device.id == targetOpenCameraId &&
+            activeOpenCameraId == targetOpenCameraId &&
+            previewSurface?.isValid == true
+        PLog.d(
+            TAG,
+            "Instant lens switch eligibility: selected=$cameraId, targetOpen=$targetOpenCameraId, " +
+                "activeOpen=$activeOpenCameraId, reuseDevice=$canReuse"
+        )
+        return canReuse
+    }
+
+    /**
      * 切换到指定的相机 ID
      */
     fun switchToCameraId(cameraId: String) {
@@ -6551,8 +6582,17 @@ class Camera2Controller(private val context: Context) {
             zoomPanY = if (requestedRatio <= 1.001f) 0f else _state.value.zoomPanY,
             zoomPanEnabled = requestedRatio > 1.001f && _state.value.zoomPanEnabled,
         )
-        val builder = previewRequestBuilder ?: return
         val openCameraId = activeOpenCameraId.takeIf { it.isNotEmpty() } ?: return
+        val selectedOpenCameraId = _state.value.getCurrentCameraInfo()?.let { camera ->
+            runCatching { camera.getOpenCameraId() }.getOrNull()
+        }
+        if (selectedOpenCameraId != null && selectedOpenCameraId != openCameraId) {
+            PLog.d(
+                TAG,
+                "Deferring zoom request for $selectedOpenCameraId until its CameraDevice is opened"
+            )
+            return
+        }
 
         try {
             val characteristics = resolveZoomRequestCharacteristics(openCameraId)
@@ -6571,10 +6611,11 @@ class Camera2Controller(private val context: Context) {
                 zoomPanEnabled = keepZoomPan,
             )
             if (recreateSessionForPhysicalZoomIfNeeded(_state.value)) {
-                PLog.d(TAG, "setZoomRatio: $ratio -> $clampedRatio (physical output session recreated)")
+                PLog.d(TAG, "setZoomRatio: $ratio -> $clampedRatio (lens/physical output session recreated)")
                 return
             }
 
+            val builder = previewRequestBuilder ?: return
             val activeRect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
             builder.apply {
                 applyZoomRequestSettings(
@@ -6666,18 +6707,30 @@ class Camera2Controller(private val context: Context) {
     }
 
     private fun recreateSessionForPhysicalZoomIfNeeded(state: CameraState): Boolean {
+        val selectedOpenCameraId = state.getCurrentCameraInfo()?.let { camera ->
+            runCatching { camera.getOpenCameraId() }.getOrNull()
+        }
+        if (selectedOpenCameraId != null && selectedOpenCameraId != activeOpenCameraId) {
+            return false
+        }
         val desiredPhysicalCameraId = resolveOutputPhysicalCameraId(state)
-        if (desiredPhysicalCameraId == activeOutputPhysicalCameraId) return false
-        if (cameraDevice == null || previewSurface == null) return false
+        val selectedCameraChanged = state.currentCameraId.isNotEmpty() &&
+            state.currentCameraId != activeSelectedCameraId
+        if (desiredPhysicalCameraId == activeOutputPhysicalCameraId && !selectedCameraChanged) {
+            return false
+        }
+        if (cameraDevice == null || previewSurface?.isValid != true) return false
 
         PLog.i(
             TAG,
-            "Recreating session for zoom physical output: " +
-                    "old=$activeOutputPhysicalCameraId, new=$desiredPhysicalCameraId, " +
+            "Recreating capture session without reopening CameraDevice: " +
+                    "selected=$activeSelectedCameraId -> ${state.currentCameraId}, " +
+                    "physicalOutput=$activeOutputPhysicalCameraId -> $desiredPhysicalCameraId, " +
                     "targetZoom=${getTargetZoomRatioByMain(state, state.getCurrentCameraInfo())}"
         )
 
         activeOutputPhysicalCameraId = desiredPhysicalCameraId
+        activeSelectedCameraId = state.currentCameraId
         refreshActiveFocusLimit()
         refreshHyperfocalFocusDistanceIfEnabled(updatePreview = false)
         safeCloseCaptureSession(captureSession, "physical zoom output changed")

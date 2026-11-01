@@ -3825,15 +3825,22 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun switchToLens(cameraId: String) {
         if (isVideoLensLocked()) return
-        val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId }
+        val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId } ?: return
         syncVendorCaptureSettingsToController()
+
+        // Lenses exposed by the same logical Camera2 device do not need a device restart.
+        // setZoomRatioForCamera() causes Camera2Controller to replace the capture session
+        // when the selected lens/physical output changes, keeping the device and preview
+        // surface alive throughout the handoff.
+        val reuseOpenDevice = cameraController.canReuseOpenCameraFor(cameraId)
         cameraController.switchToCameraId(cameraId)
-        targetCamera?.let { camera ->
-            setZoomRatioForCamera(camera.defaultVisibleZoomRatio(), camera.cameraId)
+        setZoomRatioForCamera(targetCamera.defaultVisibleZoomRatio(), targetCamera.cameraId)
+
+        if (reuseOpenDevice) {
+            PLog.i(TAG, "Instant lens switch: reused CameraDevice for ${targetCamera.cameraId}")
+        } else {
+            reopenCamera(preserveVideoRecording = true)
         }
-        reopenCamera(
-            preserveVideoRecording = true
-        )
     }
 
     fun switchToLensAndSetZoomRatio(cameraId: String, ratio: Float) {
@@ -3841,12 +3848,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             setZoomRatio(ratio)
             return
         }
+        val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId } ?: return
         syncVendorCaptureSettingsToController()
+
+        val reuseOpenDevice = cameraController.canReuseOpenCameraFor(cameraId)
         cameraController.switchToCameraId(cameraId)
-        setZoomRatioForCamera(ratio, cameraId)
-        reopenCamera(
-            preserveVideoRecording = true
-        )
+        setZoomRatioForCamera(ratio, targetCamera.cameraId)
+
+        if (reuseOpenDevice) {
+            PLog.i(TAG, "Instant zoom lens switch: reused CameraDevice for ${targetCamera.cameraId}")
+        } else {
+            reopenCamera(preserveVideoRecording = true)
+        }
     }
 
     /**
