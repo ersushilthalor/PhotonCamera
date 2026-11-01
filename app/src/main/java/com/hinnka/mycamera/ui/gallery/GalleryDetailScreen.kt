@@ -543,7 +543,7 @@ fun GalleryDetailScreen(
                             modifier = Modifier.autoRotate(),
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Tune,
+                                imageVector = AppIcons.Tune,
                                 contentDescription = stringResource(R.string.oppo_refocus),
                                 tint = Color.White,
                             )
@@ -1138,7 +1138,6 @@ fun GalleryDetailScreen(
         ) {
             Column(
                 modifier = Modifier.fillMaxWidth()
-                    .navigationBarsPadding()
                     .padding(horizontal = 18.dp)
                     .padding(bottom = 24.dp),
             ) {
