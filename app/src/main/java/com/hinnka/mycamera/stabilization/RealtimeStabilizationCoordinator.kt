@@ -676,7 +676,8 @@ class RealtimeStabilizationCoordinator(context: Context) {
             val acceptedOpticalCorrectionSamples =
                 acceptedLensIntrinsicsSamples + acceptedOisSamples
             // A real, timestamp-correlated sample proves that this camera's optical data path
-            // is alive. Only then may the controller request hardware OIS.
+            // is alive. For legacy OIS-only HALs, OIS must already be enabled to obtain this first
+            // sample; the controller starts a guarded probe from advertised capability metadata.
             if (acceptedOpticalCorrectionSamples > 0 &&
                 !runtimeOpticalCorrectionTelemetryAvailable
             ) {
