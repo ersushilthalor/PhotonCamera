@@ -78,8 +78,9 @@ Java_com_hinnka_mycamera_stabilization_MgcEisNativeBridge_create(
         static_cast<int>(lookahead_frames),
         mgc_eis_reconstruction::kMinimumSupportedLookaheadFrames,
         mgc_eis_reconstruction::kMaximumSupportedLookaheadFrames);
-    config.stabilization_strength =
-        std::clamp(static_cast<double>(strength), 0.0, 1.0);
+    config.stabilization_strength = std::clamp(
+        static_cast<double>(strength), 0.0,
+        mgc_eis_reconstruction::kMaximumStabilizationStrength);
     auto *state = new Handle(std::move(config), front_facing == JNI_TRUE);
     __android_log_print(
         ANDROID_LOG_INFO, kLogTag,

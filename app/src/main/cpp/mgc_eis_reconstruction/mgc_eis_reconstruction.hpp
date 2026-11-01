@@ -17,6 +17,7 @@ constexpr double kNsToSeconds = 1.0e-9;
 constexpr int kMinimumSupportedLookaheadFrames = 3;
 constexpr int kMaximumSupportedLookaheadFrames = 30;
 constexpr int kDefaultLookaheadFrames = 7;
+constexpr double kMaximumStabilizationStrength = 2.0;
 
 struct Vec2 {
   double x = 0.0;

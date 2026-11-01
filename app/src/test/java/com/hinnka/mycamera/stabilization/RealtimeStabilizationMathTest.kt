@@ -29,6 +29,21 @@ class RealtimeStabilizationMathTest {
     }
 
     @Test
+    fun stabilizationStrengthSupportsZeroThroughTwoHundredPercent() {
+        assertEquals(0f, normalizeStabilizationStrength(0f))
+        assertEquals(0.5f, normalizeStabilizationStrength(0.5f))
+        assertEquals(1f, normalizeStabilizationStrength(1f))
+        assertEquals(1.5f, normalizeStabilizationStrength(1.5f))
+        assertEquals(2f, normalizeStabilizationStrength(2f))
+        assertEquals(2f, normalizeStabilizationStrength(2.5f))
+        assertEquals(0f, normalizeStabilizationStrength(-0.5f))
+        assertEquals(
+            DEFAULT_VIDEO_STABILIZATION_STRENGTH,
+            normalizeStabilizationStrength(Float.NaN),
+        )
+    }
+
+    @Test
     fun hybridOisRequiresTimestampedOpticalTelemetry() {
         assertFalse(
             canFuseOpticalStabilization(

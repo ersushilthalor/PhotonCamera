@@ -26,6 +26,7 @@ const val STABILIZATION_LOOKAHEAD_FRAME_COUNT = MgcEisNativeEngine.LOOKAHEAD_FRA
 // MGC profile 7 passes 1.0 to setStabilizationStrength. The value is consumed by the packed
 // method-4 look-ahead pose blend; the outer full-grid feasibility correction is independent.
 const val DEFAULT_VIDEO_STABILIZATION_STRENGTH = 1f
+const val MAX_VIDEO_STABILIZATION_STRENGTH = 2f
 const val DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD = 7
 const val MIN_VIDEO_STABILIZATION_LOOKAHEAD = 3
 const val MAX_VIDEO_STABILIZATION_LOOKAHEAD = 30
@@ -33,7 +34,11 @@ internal const val MAX_OPTICAL_CENTER_SHIFT_RATIO = 0.05f
 private const val MAX_OPTICAL_GYRO_TIMESTAMP_DELTA_NS = 25_000_000L
 
 fun normalizeStabilizationStrength(strength: Float): Float =
-    if (strength.isFinite()) strength.coerceIn(0f, 1f) else DEFAULT_VIDEO_STABILIZATION_STRENGTH
+    if (strength.isFinite()) {
+        strength.coerceIn(0f, MAX_VIDEO_STABILIZATION_STRENGTH)
+    } else {
+        DEFAULT_VIDEO_STABILIZATION_STRENGTH
+    }
 
 fun normalizeStabilizationLookahead(lookahead: Int): Int =
     lookahead.coerceIn(MIN_VIDEO_STABILIZATION_LOOKAHEAD, MAX_VIDEO_STABILIZATION_LOOKAHEAD)

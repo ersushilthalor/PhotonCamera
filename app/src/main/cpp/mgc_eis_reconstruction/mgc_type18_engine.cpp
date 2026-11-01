@@ -118,9 +118,10 @@ public:
   }
 
   void setStrength(double strength) {
-    if (!(strength >= 0.0 && strength <= 1.0)) {
+    if (!(strength >= 0.0 &&
+          strength <= kMaximumStabilizationStrength)) {
       throw std::invalid_argument(
-          "Stabilization strength must be between zero and one");
+          "Stabilization strength must be between zero and two");
     }
     config_.stabilization_strength = strength;
   }
@@ -287,7 +288,7 @@ private:
            config_.lookahead_frames <= kMaximumSupportedLookaheadFrames &&
            config_.lookahead_frames == parameters_.half_window_frames &&
            config_.stabilization_strength >= 0.0 &&
-           config_.stabilization_strength <= 1.0;
+           config_.stabilization_strength <= kMaximumStabilizationStrength;
   }
 
   static StabilizedFrame dropped(std::int64_t timestamp_ns) {
@@ -1297,23 +1298,45 @@ private:
         filtered_motion_blend, current_full_grid_pressure,
         full_grid_future_pressure);
     const double temporal_pressure = pressure_filter_.update(spatial_pressure);
-    // pack_lookahead_frame_state writes min(filter+0x98c, filter+0x988) to
-    // frame-state +0x84. Both constructor fields start at 1.0, and valid
-    // strength is <= 1, so type-18 supplies the current strength here.
-    const double final_blend = type18::finalPoseBlend(
-        temporal_pressure, config_.stabilization_strength);
+    // The recovered type-18 packed frame state caps its native blend at 1.0.
+    // Preserve the original 0-100% mapping, then apply any 100-200% gain as a
+    // separate quaternion correction below; simply passing >1 here would be
+    // capped by the original min(filter+0x98c, strength) operation.
+    const double native_strength =
+        std::min(config_.stabilization_strength, 1.0);
+    const double final_blend =
+        type18::finalPoseBlend(temporal_pressure, native_strength);
     Quaternion output_pose = type18::interpolatePose(
         intermediate_pose, candidates.tight, final_blend,
         intermediate_pose);
 
-    // 0x22DB9F4 performs the method-4 outer full-grid feasibility pass and
-    // applies its returned correction directly. The strength-adjusted form at
-    // 0x22DDF44 belongs to the method-3/6 branch, not this path.
-    const double outer_correction = fullGridCorrection(
+    // First keep the normal 0-100% result crop-safe. This unboosted pose remains
+    // the algorithm's temporal reference so overdrive cannot feed back and
+    // compound from frame to frame.
+    double outer_correction = fullGridCorrection(
         output_pose, current.primary, dense_current, virtual_intrinsics);
     output_pose = type18::interpolatePose(
         output_pose, current.primary, outer_correction, output_pose);
-    previous_output_pose_ = output_pose;
+    const Quaternion base_output_pose = output_pose;
+    previous_output_pose_ = base_output_pose;
+
+    if (config_.stabilization_strength > 1.0) {
+      // Scale the actual gyro-derived virtual-pose delta in axis-angle space.
+      // 1.0 keeps the original result; 2.0 doubles its rotation correction.
+      // The second full-grid pass is mandatory: it limits the overdriven pose
+      // to the valid source crop instead of allowing black/undefined borders.
+      const Vec3 base_correction =
+          quaternionLog(base_output_pose * current.primary.inverse());
+      const Quaternion overdriven_pose =
+          (quaternionExp(base_correction * config_.stabilization_strength) *
+           current.primary)
+              .normalized();
+      outer_correction = fullGridCorrection(
+          overdriven_pose, current.primary, dense_current, virtual_intrinsics);
+      output_pose = type18::interpolatePose(
+          overdriven_pose, current.primary, outer_correction,
+          overdriven_pose);
+    }
 
     const std::vector<Mat3> virtual_rows =
         virtualProjection(output_pose, virtual_intrinsics);
