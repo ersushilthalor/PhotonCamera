@@ -6583,6 +6583,16 @@ class Camera2Controller(private val context: Context) {
             zoomPanEnabled = requestedRatio > 1.001f && _state.value.zoomPanEnabled,
         )
         val openCameraId = activeOpenCameraId.takeIf { it.isNotEmpty() } ?: return
+        val selectedOpenCameraId = _state.value.getCurrentCameraInfo()?.let { camera ->
+            runCatching { camera.getOpenCameraId() }.getOrNull()
+        }
+        if (selectedOpenCameraId != null && selectedOpenCameraId != openCameraId) {
+            PLog.d(
+                TAG,
+                "Deferring zoom request for $selectedOpenCameraId until its CameraDevice is opened"
+            )
+            return
+        }
 
         try {
             val characteristics = resolveZoomRequestCharacteristics(openCameraId)
@@ -6697,6 +6707,12 @@ class Camera2Controller(private val context: Context) {
     }
 
     private fun recreateSessionForPhysicalZoomIfNeeded(state: CameraState): Boolean {
+        val selectedOpenCameraId = state.getCurrentCameraInfo()?.let { camera ->
+            runCatching { camera.getOpenCameraId() }.getOrNull()
+        }
+        if (selectedOpenCameraId != null && selectedOpenCameraId != activeOpenCameraId) {
+            return false
+        }
         val desiredPhysicalCameraId = resolveOutputPhysicalCameraId(state)
         val selectedCameraChanged = state.currentCameraId.isNotEmpty() &&
             state.currentCameraId != activeSelectedCameraId
