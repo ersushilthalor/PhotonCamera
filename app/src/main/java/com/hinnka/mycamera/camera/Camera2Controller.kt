@@ -7609,7 +7609,15 @@ class Camera2Controller(private val context: Context) {
     fun setForceOisWithEisPlusEnabled(enabled: Boolean) {
         if (forceOisWithEisPlusEnabled == enabled) return
         forceOisWithEisPlusEnabled = enabled
+        if (enabled) {
+            val cameraId = currentStabilizationCameraId()
+            if (cameraId.isNotBlank()) {
+                enhancedStabilizationUnavailableCameraIds.remove(cameraId)
+                enhancedOisUnavailableCameraIds.remove(cameraId)
+            }
+        }
         realtimeStabilizationCoordinator.setForceOisWithEisPlusEnabled(enabled)
+        refreshVideoCapabilities()
         previewRequestBuilder?.apply {
             applyBaseCameraSettings(this, isCapture = false)
             updatePreview()
