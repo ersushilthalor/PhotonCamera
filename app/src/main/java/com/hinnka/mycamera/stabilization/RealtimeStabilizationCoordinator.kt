@@ -211,8 +211,10 @@ class RealtimeStabilizationCoordinator(context: Context) {
         private const val HAL_OPTICAL_CORRECTION_PROBE_FRAME_COUNT =
             DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD + 3
         private const val MIN_OPTICAL_CORRECTION_SAMPLES_PER_FRAME = 2
+        // Reserve enough queued frames for the largest user-selectable lookahead,
+        // plus the in-flight/current frame margin used by the feeder.
         private const val MAX_BUFFERED_STABILIZATION_IMAGES =
-            STABILIZATION_LOOKAHEAD_FRAME_COUNT + 8
+            MAX_VIDEO_STABILIZATION_LOOKAHEAD + 8
         const val STABILIZATION_IMAGE_READER_MAX_IMAGES =
             MAX_BUFFERED_STABILIZATION_IMAGES + 2
     }
