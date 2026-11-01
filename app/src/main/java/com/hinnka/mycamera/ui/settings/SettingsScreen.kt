@@ -777,21 +777,6 @@ fun SettingsScreen(
     var downloadedUpdateApk by remember { mutableStateOf<File?>(null) }
     var showInstallUpdateDialog by remember { mutableStateOf(false) }
     var showRawBaselineRecipeEditor by remember { mutableStateOf(false) }
-        mutableStateOf(jpgMultiFrameDenoiseFrameCount.toFloat())
-    }
-        mutableStateOf(MultiFrameConfig.normalizeOutputScale(jpgMultiFrameDenoiseOutputScale))
-    }
-        mutableStateOf(hdrPlusFrameCount.toFloat())
-    }
-        mutableStateOf(hdrPlusLongFrameExposureEv)
-    }
-        mutableStateOf(hdrPlusShortFrameExposureEv)
-    }
-        mutableStateOf(mlAeMaxHdrRatio)
-    }
-        mutableStateOf(MultiFrameConfig.normalizeOutputScale(rawMaxOutputScale))
-    }
-
     val ghostLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
         onResult = { _ ->
