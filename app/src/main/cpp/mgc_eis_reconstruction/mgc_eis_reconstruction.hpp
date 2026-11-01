@@ -14,10 +14,6 @@ namespace mgc_eis_reconstruction {
 // EisNative. It is intentionally not presented as Google's original source.
 
 constexpr double kNsToSeconds = 1.0e-9;
-constexpr int kMinimumSupportedLookaheadFrames = 3;
-constexpr int kMaximumSupportedLookaheadFrames = 30;
-constexpr int kDefaultLookaheadFrames = 7;
-constexpr double kMaximumStabilizationStrength = 2.0;
 
 struct Vec2 {
   double x = 0.0;
@@ -106,8 +102,8 @@ struct FrameMetadata {
   // Camera2 SENSOR_TIMESTAMP of the exact source buffer. This is distinct
   // from frame_timestamp_ns, which is the first-row centre timestamp consumed
   // by the EIS math. The delayed engine must return this ownership key with
-  // its output so a look-ahead transform can never be applied to the wrong
-  // source buffer.
+  // its output so a seven-frame look-ahead transform can never be applied to
+  // the current buffer.
   std::int64_t source_timestamp_ns = 0;
   std::int64_t frame_timestamp_ns = 0;
   std::int64_t exposure_time_ns = 0;
@@ -136,8 +132,8 @@ struct FrameMetadata {
 };
 
 struct EngineConfig {
-  // The default configuration follows MGC V25 profile 7. The look-ahead
-  // remains caller-configurable within the supported 3-30 frame range.
+  // MGC V25 profile 7 fixes the strip/look-ahead parameters below. The
+  // reconstruction also retains profile 18 only for differential research.
   // Method 4 consumes strength in the packed lookahead frame state; its outer
   // full-grid feasibility correction is applied directly.
   int output_width = 1920;
@@ -148,7 +144,7 @@ struct EngineConfig {
   int crop_height = 0;
 
   int num_strips = 12;
-  int lookahead_frames = kDefaultLookaheadFrames;
+  int lookahead_frames = 10;
   double stabilization_strength = 1.0;
 };
 

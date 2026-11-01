@@ -14,33 +14,24 @@ import java.nio.ByteBuffer
  * Center crop, orientation, mirroring and color effects remain in the normal preview or encoder
  * presentation pass.
  */
-internal class MgcEisYuvRenderer(
-    private val tag: String,
-    cropZoomFactor: Float,
-) {
+internal class MgcEisYuvRenderer(private val tag: String) {
     data class Frame(val timestampNs: Long, val textureId: Int, val width: Int, val height: Int)
 
     private val mesh = MgcEisMesh()
-    // Keep dropped-frame output crop synchronized with the active EIS+ strength.
-    @Volatile
-    private var droppedFrameHomographies = createDroppedFrameHomographies(cropZoomFactor)
-
-    fun setCropZoomFactor(cropZoomFactor: Float) {
-        droppedFrameHomographies = createDroppedFrameHomographies(cropZoomFactor)
-    }
-
-    private fun createDroppedFrameHomographies(cropZoomFactor: Float): FloatArray {
-        require(cropZoomFactor.isFinite() && cropZoomFactor >= 1f) {
-            "MGC EIS crop zoom must be finite and at least 1x"
-        }
-        val h22 = 1f / cropZoomFactor
-        return FloatArray(STABILIZATION_ROW_COUNT * 9).also { values ->
-            repeat(STABILIZATION_ROW_COUNT) { row ->
-                val offset = row * 9
-                values[offset] = 1f      // h00
-                values[offset + 4] = 1f  // h11
-                values[offset + 8] = h22 // h22: W-row crop zoom
-            }
+    // Native output matrices pass through convertPixelHomographyToClip then
+    // applyCropZoomToClipHomography(kOutputCropZoom), where:
+    //   kLookaheadCropMargin = 0.05
+    //   kOutputCropZoom      = 1.0 / (1.0 - 2.0 * 0.05) ≈ 1.1111
+    // applyCropZoomToClipHomography divides the W row (h20, h21, h22) by zoom.
+    // A Dropped frame must use the same crop so that the viewport does not jump
+    // between 1.0x and 1.111x on every stabilization gap.
+    private val droppedFrameHomographies = FloatArray(STABILIZATION_ROW_COUNT * 9).also { values ->
+        val h22 = 1.0f - 2.0f * 0.05f  // = 1.0f / kOutputCropZoom = 0.9f
+        repeat(STABILIZATION_ROW_COUNT) { row ->
+            val offset = row * 9
+            values[offset] = 1f      // h00
+            values[offset + 4] = 1f  // h11
+            values[offset + 8] = h22 // h22: W-row crop zoom
         }
     }
 

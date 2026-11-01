@@ -18,7 +18,6 @@ import com.hinnka.mycamera.stabilization.RealtimeStabilizationCoordinator
 import com.hinnka.mycamera.stabilization.StabilizationUseCase
 import com.hinnka.mycamera.stabilization.normalizeStabilizationLookahead
 import com.hinnka.mycamera.stabilization.normalizeStabilizationStrength
-import com.hinnka.mycamera.stabilization.resolveVideoStabilizationCropZoom
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.video.VideoLogProfile
 import java.nio.ByteBuffer
@@ -71,14 +70,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
 
     private val colorProgramCache = PreviewColorProgramCache()
     private val enginePreview = RawEnginePreviewGl()
-    private val mgcEisHardwareBufferRenderer = MgcEisHardwareBufferRenderer(
-        TAG,
-        resolveVideoStabilizationCropZoom(0f),
-    )
-    private val mgcEisYuvRenderer = MgcEisYuvRenderer(
-        TAG,
-        resolveVideoStabilizationCropZoom(0f),
-    )
+    private val mgcEisHardwareBufferRenderer = MgcEisHardwareBufferRenderer(TAG)
+    private val mgcEisYuvRenderer = MgcEisYuvRenderer(TAG)
 
     private data class PreviewCaptureRequest(
         val width: Int,
@@ -2426,9 +2419,6 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         previewStabilizationUseCase = useCase
         previewStabilizationStrength = normalizedStrength
         previewStabilizationLookahead = normalizedLookahead
-        val cropZoomFactor = resolveVideoStabilizationCropZoom(normalizedStrength)
-        mgcEisHardwareBufferRenderer.setCropZoomFactor(cropZoomFactor)
-        mgcEisYuvRenderer.setCropZoomFactor(cropZoomFactor)
         PLog.i(
             TAG,
             "Preview stabilization useCase=${useCase?.name ?: "OFF"}, " +

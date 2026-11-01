@@ -22,9 +22,10 @@ constexpr double kMaximumAllowedProtrusion = 0.0;
 // projection crop scale after construction.
 constexpr double kLookaheadCropMargin = 0.05;
 constexpr double kAllowedInnerMargin = 0.025;
+constexpr double kOutputCropZoom =
+    1.0 / (1.0 - 2.0 * kLookaheadCropMargin);
 constexpr double kProjectionDenominatorEpsilon = 0.000001;
-constexpr std::int64_t kMaximumLensSampleInterpolationGapNs = 25'000'000;
-constexpr double kMaximumOpticalCenterShiftRatio = 0.05;
+constexpr std::int64_t kMaximumLensSampleInterpolationGapNs = 50'000'000;
 constexpr std::int64_t kMinimumSupportedFramePeriodNs = 1'000'000;
 constexpr std::int64_t kMaximumSupportedFramePeriodNs = 1'000'000'000;
 constexpr double kActiveCadenceTolerance = 0.08;
@@ -49,9 +50,10 @@ bool isPlausibleFramePeriod(std::int64_t period_ns) {
 
 type18::Parameters parametersFor(const EngineConfig &config) {
   type18::Parameters parameters;
-  // The requested look-ahead is the shared half-window for pose sampling,
-  // motion filtering, delayed gyro integration and delayed frame output.
-  // Keep every stage driven by this one configured value.
+  // The motion-filtering factory selects this exact half-window from the MGC
+  // product profile.  V25's type-7 fallback has seven frames; type 18 has
+  // ten.  Keep it alongside the queue delay rather than letting either path
+  // retain a stale type-18 literal.
   parameters.half_window_frames = config.lookahead_frames;
   // 0x22FD640 and 0x22FE244 pass params+416 to the rolling-shutter projection
   // builder. The ensuing conditional is the proprietary profile's calibrated
@@ -116,10 +118,9 @@ public:
   }
 
   void setStrength(double strength) {
-    if (!(strength >= 0.0 &&
-          strength <= kMaximumStabilizationStrength)) {
+    if (!(strength >= 0.0 && strength <= 1.0)) {
       throw std::invalid_argument(
-          "Stabilization strength must be between zero and two");
+          "Stabilization strength must be between zero and one");
     }
     config_.stabilization_strength = strength;
   }
@@ -282,11 +283,10 @@ private:
            config_.active_array_width > 0 &&
            config_.active_array_height > 0 && config_.crop_width > 0 &&
            config_.crop_height > 0 && config_.num_strips == 12 &&
-           config_.lookahead_frames >= kMinimumSupportedLookaheadFrames &&
-           config_.lookahead_frames <= kMaximumSupportedLookaheadFrames &&
+           config_.lookahead_frames >= 0 && config_.lookahead_frames <= 10 &&
            config_.lookahead_frames == parameters_.half_window_frames &&
            config_.stabilization_strength >= 0.0 &&
-           config_.stabilization_strength <= kMaximumStabilizationStrength;
+           config_.stabilization_strength <= 1.0;
   }
 
   static StabilizedFrame dropped(std::int64_t timestamp_ns) {
@@ -376,7 +376,7 @@ private:
     }
 
     // The first completed frame supplies an actual sensor period immediately,
-    // so startup never spends the configured look-ahead on the 30 fps
+    // so startup never spends its seven-frame look-ahead on the 30 fps
     // fallback. Later changes require three coherent results to reject a
     // one-frame HAL anomaly or a missing-result timestamp gap.
     if (!frame_period_initialized_) {
@@ -557,8 +557,8 @@ private:
           if (!std::isfinite(fx_ratio) || !std::isfinite(fy_ratio) ||
               fx_ratio < 0.5 || fx_ratio > 2.0 || fy_ratio < 0.5 ||
               fy_ratio > 2.0 ||
-              std::abs(cx_delta) > config_.output_width * kMaximumOpticalCenterShiftRatio ||
-              std::abs(cy_delta) > config_.output_height * kMaximumOpticalCenterShiftRatio) {
+              std::abs(cx_delta) > config_.output_width * 0.25 ||
+              std::abs(cy_delta) > config_.output_height * 0.25) {
             result.clear();
             break;
           }
@@ -592,8 +592,8 @@ private:
       const double cx_delta = offset.x * x_scale;
       const double cy_delta = offset.y * y_scale;
       if (!std::isfinite(cx_delta) || !std::isfinite(cy_delta) ||
-          std::abs(cx_delta) > config_.output_width * kMaximumOpticalCenterShiftRatio ||
-          std::abs(cy_delta) > config_.output_height * kMaximumOpticalCenterShiftRatio) {
+          std::abs(cx_delta) > config_.output_width * 0.25 ||
+          std::abs(cy_delta) > config_.output_height * 0.25) {
         return {nominal};
       }
       result.push_back(Mat3::cameraIntrinsics(
@@ -624,8 +624,8 @@ private:
     // 0x22D6944 increments the historical counter only after querying
     // center - 2*period, and continues while counter < params+272.  With
     // the profile-specific half-window this includes the corresponding extra deltas through
-    // center - (lookahead + 1)*period, in addition to the initial
-    // center-to-previous delta assembled by 0x22D66A4..0x22D66DC.
+    // center - 11*period, in addition to the initial center-to-previous
+    // delta assembled by 0x22D66A4..0x22D66DC.
     for (int distance = 2;
          distance <= parameters_.half_window_frames + 1; ++distance) {
       type18::PosePair older;
@@ -735,10 +735,9 @@ private:
         row_timestamps_ns.push_back(timestamp_ns);
       }
     } else {
-      const double crop_margin = stabilizationCropMargin();
       const std::array<double, 2> source_rows{
-          crop_margin * static_cast<double>(config_.output_height),
-          (1.0 - crop_margin) *
+          kLookaheadCropMargin * static_cast<double>(config_.output_height),
+          (1.0 - kLookaheadCropMargin) *
               static_cast<double>(config_.output_height),
       };
       const auto offsets = type18::makeBoundingRowOffsets(
@@ -779,21 +778,6 @@ private:
     return type18::buildVirtualCameraProjectionRows(pose, {}, {intrinsics});
   }
 
-  // Strength above 100% needs additional crop headroom. Keep the original
-  // 5% / 1.111x framing at 0-100%, then increase the safe output inset linearly
-  // to 10% / 1.25x at 200%. The exact same margin is used by crop feasibility
-  // and the homography zoom, so the limiter and renderer share one geometry.
-  double stabilizationCropMargin() const {
-    const double crop_gain =
-        std::clamp(config_.stabilization_strength, 1.0, 2.0);
-    return kLookaheadCropMargin * crop_gain;
-  }
-
-  double stabilizationOutputCropZoom() const {
-    const double margin = stabilizationCropMargin();
-    return 1.0 / (1.0 - 2.0 * margin);
-  }
-
   double fullGridCorrection(const Quaternion &requested,
                             const Quaternion &fallback,
                             const FutureGeometry &geometry,
@@ -812,7 +796,7 @@ private:
     // geometry models.
     const type18::ProtrusionRect input{0.0, width, 0.0, height};
     const type18::ProtrusionRect output =
-        insetRect(width, height, stabilizationCropMargin());
+        insetRect(width, height, kLookaheadCropMargin);
     const type18::ProtrusionRect allowed{0.0, width, 0.0, height};
     return type18::computeFullGridCropCorrectionFraction(
         requested, fallback, geometry.inverse_real,
@@ -831,11 +815,10 @@ private:
     }
     const double width = static_cast<double>(config_.output_width);
     const double height = static_cast<double>(config_.output_height);
-    const double crop_margin = stabilizationCropMargin();
     const type18::ProtrusionRect input =
-        insetRect(width, height, crop_margin);
+        insetRect(width, height, kLookaheadCropMargin);
     const type18::ProtrusionRect output =
-        insetRect(width, height, crop_margin);
+        insetRect(width, height, kLookaheadCropMargin);
     const type18::ProtrusionRect allowed =
         insetRect(width, height, kAllowedInnerMargin);
     const std::vector<bool> mask(geometry.inverse_real.size() - 1, true);
@@ -1075,8 +1058,8 @@ private:
       std::int64_t statistics_window_ns,
       std::int64_t sample_period_ns) const {
     // The recovered 30 fps profile expresses this endpoint in frame units.
-    // Use the observed sensor cadence so the configured look-ahead remains
-    // the same number of actual frames at 24/30/50/60 fps. 0x230F094 backs the endpoint toward
+    // Use the observed sensor cadence so seven-frame look-ahead remains seven
+    // actual frames at 24/30/50/60 fps. 0x230F094 backs the endpoint toward
     // the current frame until the primary pose ring covers it.
     std::int64_t end_timestamp_ns =
         first_row_timestamp_ns +
@@ -1165,7 +1148,7 @@ private:
                 type18::convertPixelHomographyToClip(
                     pixel_warp, static_cast<double>(config_.output_width),
                     static_cast<double>(config_.output_height)),
-                stabilizationOutputCropZoom()));
+                kOutputCropZoom));
       }
       return output;
     }
@@ -1233,8 +1216,8 @@ private:
     const double tight_candidate_blend = candidate_control.result;
     // 0x22FE420..0x22FE48C invokes the same primitive a second time with no
     // past statistics window. Its independent directional scalar is measured
-    // only across the configured look-ahead interval and controls the
-    // configured-look-ahead-to-3 future-score horizon.
+    // only across [frame_timestamp, frame_timestamp + 10 frames) and controls
+    // the 10-to-3 future-score horizon.
     const type18::GyroActivityMetrics future_activity = activityMetrics(
         queue, frame.frame_timestamp_ns, 0,
         frame_period_ns_);
@@ -1313,45 +1296,23 @@ private:
         filtered_motion_blend, current_full_grid_pressure,
         full_grid_future_pressure);
     const double temporal_pressure = pressure_filter_.update(spatial_pressure);
-    // The recovered type-18 packed frame state caps its native blend at 1.0.
-    // Preserve the original 0-100% mapping, then apply any 100-200% gain as a
-    // separate quaternion correction below; simply passing >1 here would be
-    // capped by the original min(filter+0x98c, strength) operation.
-    const double native_strength =
-        std::min(config_.stabilization_strength, 1.0);
-    const double final_blend =
-        type18::finalPoseBlend(temporal_pressure, native_strength);
+    // pack_lookahead_frame_state writes min(filter+0x98c, filter+0x988) to
+    // frame-state +0x84. Both constructor fields start at 1.0, and valid
+    // strength is <= 1, so type-18 supplies the current strength here.
+    const double final_blend = type18::finalPoseBlend(
+        temporal_pressure, config_.stabilization_strength);
     Quaternion output_pose = type18::interpolatePose(
         intermediate_pose, candidates.tight, final_blend,
         intermediate_pose);
 
-    // First keep the normal 0-100% result crop-safe. This unboosted pose remains
-    // the algorithm's temporal reference so overdrive cannot feed back and
-    // compound from frame to frame.
-    double outer_correction = fullGridCorrection(
+    // 0x22DB9F4 performs the method-4 outer full-grid feasibility pass and
+    // applies its returned correction directly. The strength-adjusted form at
+    // 0x22DDF44 belongs to the method-3/6 branch, not this path.
+    const double outer_correction = fullGridCorrection(
         output_pose, current.primary, dense_current, virtual_intrinsics);
     output_pose = type18::interpolatePose(
         output_pose, current.primary, outer_correction, output_pose);
-    const Quaternion base_output_pose = output_pose;
-    previous_output_pose_ = base_output_pose;
-
-    if (config_.stabilization_strength > 1.0) {
-      // Scale the actual gyro-derived virtual-pose delta in axis-angle space.
-      // 1.0 keeps the original result; 2.0 doubles its rotation correction.
-      // The second full-grid pass is mandatory: it limits the overdriven pose
-      // to the valid source crop instead of allowing black/undefined borders.
-      const Vec3 base_correction =
-          quaternionLog(base_output_pose * current.primary.inverse());
-      const Quaternion overdriven_pose =
-          (quaternionExp(base_correction * config_.stabilization_strength) *
-           current.primary)
-              .normalized();
-      outer_correction = fullGridCorrection(
-          overdriven_pose, current.primary, dense_current, virtual_intrinsics);
-      output_pose = type18::interpolatePose(
-          overdriven_pose, current.primary, outer_correction,
-          overdriven_pose);
-    }
+    previous_output_pose_ = output_pose;
 
     const std::vector<Mat3> virtual_rows =
         virtualProjection(output_pose, virtual_intrinsics);
@@ -1401,7 +1362,7 @@ private:
               type18::convertPixelHomographyToClip(
                   pixel_warp, static_cast<double>(config_.output_width),
                   static_cast<double>(config_.output_height)),
-              stabilizationOutputCropZoom()));
+              kOutputCropZoom));
     }
     return output;
   }

@@ -149,7 +149,6 @@ import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_STRENGTH
 import com.hinnka.mycamera.stabilization.ExternalLensStabilizationConfig
 import com.hinnka.mycamera.stabilization.MIN_VIDEO_STABILIZATION_LOOKAHEAD
 import com.hinnka.mycamera.stabilization.MAX_VIDEO_STABILIZATION_LOOKAHEAD
-import com.hinnka.mycamera.stabilization.MAX_VIDEO_STABILIZATION_STRENGTH
 import com.hinnka.mycamera.stabilization.MIN_EXTERNAL_LENS_MAGNIFICATION
 import com.hinnka.mycamera.stabilization.normalizeStabilizationLookahead
 import com.hinnka.mycamera.stabilization.normalizeStabilizationStrength
@@ -1633,21 +1632,6 @@ fun SettingsScreen(
                             },
                         )
 
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-                        SwitchSettingItem(
-                            title = stringResource(
-                                R.string.settings_force_ois_with_eis_plus
-                            ),
-                            description = stringResource(
-                                R.string.settings_force_ois_with_eis_plus_description
-                            ),
-                            checked = userPreferences.forceOisWithEisPlusEnabled,
-                            onCheckedChange = viewModel::setForceOisWithEisPlusEnabled,
-                        )
-
                         if (DeviceUtil.isOppo) {
                             HorizontalDivider(
                                 color = Color.White.copy(alpha = 0.1f),
@@ -1683,7 +1667,7 @@ fun SettingsScreen(
                                 R.string.settings_video_stabilization_strength_description
                             ),
                             value = videoEnhancedStabilizationStrengthUi,
-                            valueRange = 0f..MAX_VIDEO_STABILIZATION_STRENGTH,
+                            valueRange = 0f..1f,
                             resetValue = DEFAULT_VIDEO_STABILIZATION_STRENGTH,
                             onResetValue = { strength ->
                                 videoEnhancedStabilizationStrengthUi = strength

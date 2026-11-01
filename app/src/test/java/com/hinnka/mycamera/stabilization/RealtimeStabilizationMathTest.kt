@@ -17,82 +17,22 @@ class RealtimeStabilizationMathTest {
     }
 
     @Test
-    fun stabilizationLookaheadIsClampedToThreeThroughThirtyFrames() {
-        assertEquals(3, normalizeStabilizationLookahead(0))
-        assertEquals(3, normalizeStabilizationLookahead(2))
-        assertEquals(3, normalizeStabilizationLookahead(3))
+    fun stabilizationLookaheadAllowsZeroAndCapsAtTen() {
+        assertEquals(0, normalizeStabilizationLookahead(0))
+        assertEquals(0, normalizeStabilizationLookahead(-1))
         assertEquals(10, normalizeStabilizationLookahead(10))
-        assertEquals(30, normalizeStabilizationLookahead(30))
-        assertEquals(30, normalizeStabilizationLookahead(31))
-        assertEquals(30, normalizeStabilizationLookahead(Int.MAX_VALUE))
+        assertEquals(10, normalizeStabilizationLookahead(11))
         assertEquals(7, normalizeStabilizationLookahead(DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD))
     }
 
     @Test
-    fun stabilizationStrengthSupportsZeroThroughTwoHundredPercent() {
-        assertEquals(0f, normalizeStabilizationStrength(0f))
-        assertEquals(0.5f, normalizeStabilizationStrength(0.5f))
-        assertEquals(1f, normalizeStabilizationStrength(1f))
-        assertEquals(1.5f, normalizeStabilizationStrength(1.5f))
-        assertEquals(2f, normalizeStabilizationStrength(2f))
-        assertEquals(2f, normalizeStabilizationStrength(2.5f))
-        assertEquals(0f, normalizeStabilizationStrength(-0.5f))
-        assertEquals(
-            DEFAULT_VIDEO_STABILIZATION_STRENGTH,
-            normalizeStabilizationStrength(Float.NaN),
-        )
-    }
-
-    @Test
-    fun stabilizationCropHeadroomScalesAboveOneHundredPercent() {
-        assertEquals(1f / 0.9f, resolveVideoStabilizationCropZoom(0f), 1.0e-5f)
-        assertEquals(1f / 0.9f, resolveVideoStabilizationCropZoom(1f), 1.0e-5f)
-        assertEquals(1f / 0.85f, resolveVideoStabilizationCropZoom(1.5f), 1.0e-5f)
-        assertEquals(1.25f, resolveVideoStabilizationCropZoom(2f), 1.0e-5f)
-    }
-
-    @Test
-    fun hybridOisRequiresTimestampedOpticalTelemetry() {
-        assertFalse(
-            canFuseOpticalStabilization(
-                oisModeAvailable = true,
-                supportsOisSamples = false,
-                supportsLensIntrinsicsSamples = false,
-            ),
-        )
-        assertTrue(
-            canFuseOpticalStabilization(
-                oisModeAvailable = true,
-                supportsOisSamples = true,
-                supportsLensIntrinsicsSamples = false,
-            ),
-        )
-        assertTrue(
-            canFuseOpticalStabilization(
-                oisModeAvailable = true,
-                supportsOisSamples = false,
-                supportsLensIntrinsicsSamples = true,
-            ),
-        )
-        assertFalse(
-            canFuseOpticalStabilization(
-                oisModeAvailable = false,
-                supportsOisSamples = true,
-                supportsLensIntrinsicsSamples = true,
-            ),
-        )
-    }
-
-    @Test
-    fun opticalShiftSanityLimitsRejectLargeAndNonFiniteOffsets() {
-        assertTrue(isPlausibleOisShift(40f, -40f, 1000, 1000))
-        assertFalse(isPlausibleOisShift(51f, 0f, 1000, 1000))
-        assertFalse(isPlausibleOisShift(Float.NaN, 0f, 1000, 1000))
-        assertFalse(isPlausibleOisShift(0f, 0f, 0, 1000))
-
-        assertTrue(isPlausibleOpticalCenterShift(40f, -40f, 40f, 1000, 1000))
-        assertFalse(isPlausibleOpticalCenterShift(0f, 51f, 0f, 1000, 1000))
-        assertFalse(isPlausibleOpticalCenterShift(0f, 0f, Float.POSITIVE_INFINITY, 1000, 1000))
+    fun lookaheadZeroToTwoRemainsSelectedWithoutInternalFallback() {
+        assertEquals(0, normalizeStabilizationLookahead(0))
+        assertEquals(1, normalizeStabilizationLookahead(1))
+        assertEquals(2, normalizeStabilizationLookahead(2))
+        assertEquals(3, normalizeStabilizationLookahead(3))
+        assertEquals(10, normalizeStabilizationLookahead(10))
+        assertEquals(10, normalizeStabilizationLookahead(11))
     }
 
     @Test
