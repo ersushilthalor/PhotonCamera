@@ -83,7 +83,7 @@ import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VideoFpsPreset
 import com.hinnka.mycamera.video.VideoLogProfile
-import com.hinnka.mycamera.video.VideoLookProfile
+import com.hinnka.mycamera.video.IphoneLookRecipe
 import com.hinnka.mycamera.video.VideoResolutionPreset
 import com.hinnka.mycamera.video.VideoStabilizationMode
 import kotlinx.coroutines.Job
@@ -1251,7 +1251,15 @@ fun CameraScreen(
                             currentLut = viewModel.currentLutConfig,
                             enginePreviewPlan = viewModel.currentEnginePreviewPlan,
                             baselineColorRecipeParams = currentBaselineRecipeParams,
-                            colorRecipeParams = effectiveRecipeParams,
+                            colorRecipeParams = if (
+                                state.captureMode == CaptureMode.VIDEO &&
+                                state.videoConfig.lookProfile.isEnabled &&
+                                state.videoConfig.logProfile == VideoLogProfile.OFF
+                            ) {
+                                IphoneLookRecipe.apply(effectiveRecipeParams)
+                            } else {
+                                effectiveRecipeParams
+                            },
                             focusPoint = state.focusPoint,
                             meteringPoint = state.meteringPoint,
                             canMoveMeteringPoint = state.supportsPointMetering &&
@@ -1308,11 +1316,6 @@ fun CameraScreen(
                             },
                             livePhotoRecorder = viewModel.livePhotoRecorder,
                             videoLogProfile = state.videoConfig.logProfile,
-                            videoLookProfile = if (state.captureMode == CaptureMode.VIDEO) {
-                                state.videoConfig.lookProfile
-                            } else {
-                                VideoLookProfile.OFF
-                            },
                             isEyeFocusBusy = viewModel.isEyeFocusBusy,
                             isAutoFocus = state.isAutoFocus,
                             focusPeakingEnabled = focusPeakingEnabled && !state.isHyperfocalFocusEnabled,

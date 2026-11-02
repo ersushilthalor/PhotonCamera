@@ -18,6 +18,7 @@ import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD
 import com.hinnka.mycamera.stabilization.RealtimeStabilizationCoordinator
 import com.hinnka.mycamera.stabilization.StabilizationUseCase
 import com.hinnka.mycamera.utils.PLog
+import com.hinnka.mycamera.video.IphoneLookRecipe
 import com.hinnka.mycamera.video.VideoEncoderColorConfig
 import com.hinnka.mycamera.video.VideoEncodedColorPipeline
 import com.hinnka.mycamera.video.VideoLogProfile
@@ -44,7 +45,6 @@ class RealtimeVideoRenderer(
     private val sensorOrientationDegrees: Int,
     colorLayers: List<VideoColorEffectLayer>,
     private val videoLogProfile: VideoLogProfile,
-    private val videoLookProfile: VideoLookProfile = VideoLookProfile.OFF,
     @Volatile private var mirrorHorizontally: Boolean,
     @Volatile private var mirrorVertically: Boolean,
     private val encoderColorConfig: VideoEncoderColorConfig,
@@ -53,6 +53,7 @@ class RealtimeVideoRenderer(
     private val enhancedStabilizationStrength: Float,
     private val enhancedStabilizationLookahead: Int = DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD,
     cameraInputIsHlg10: Boolean = false,
+    private val videoLookProfile: VideoLookProfile = VideoLookProfile.IPHONE_NATURAL,
 ) {
     companion object {
         private const val TAG = "RealtimeVideoRenderer"
@@ -70,14 +71,36 @@ class RealtimeVideoRenderer(
     private val appContext = context.applicationContext
     @Volatile private var cameraInputAlreadyHlg10 = cameraInputIsHlg10
     private val layers = colorLayers
-        .map { layer ->
+        .mapIndexed { index, layer ->
+            val baseParams = layer.recipeParams ?: ColorRecipeParams.DEFAULT
             LayerResources(
                 lutConfig = layer.lutConfig,
-                params = layer.recipeParams ?: ColorRecipeParams.DEFAULT,
+                // Apply the iPhone look once, on the final creative layer. This keeps
+                // baseline processing intact and avoids stacking the look twice.
+                params = if (
+                    videoLookProfile.isEnabled &&
+                    videoLogProfile == VideoLogProfile.OFF &&
+                    index == colorLayers.lastIndex
+                ) {
+                    IphoneLookRecipe.apply(baseParams)
+                } else {
+                    baseParams
+                },
             )
         }
         .ifEmpty {
-            listOf(LayerResources(lutConfig = null, params = ColorRecipeParams.DEFAULT))
+            listOf(
+                LayerResources(
+                    lutConfig = null,
+                    params = if (
+                        videoLookProfile.isEnabled && videoLogProfile == VideoLogProfile.OFF
+                    ) {
+                        IphoneLookRecipe.apply(ColorRecipeParams.DEFAULT)
+                    } else {
+                        ColorRecipeParams.DEFAULT
+                    },
+                )
+            )
         }
         .also { resolved ->
             require(resolved.size <= 2) {
@@ -333,7 +356,6 @@ class RealtimeVideoRenderer(
             cropRect = sourceCropRect,
             mvpMatrix = firstPassMvpMatrix,
             enableVideoLog = videoLogProfile.isEnabled && !cameraInputAlreadyHlg10,
-            videoLookEnabled = videoLookProfile.isEnabled && videoLogProfile == VideoLogProfile.OFF,
             presentationTimeNs = timestampNs,
         )
 
@@ -354,7 +376,6 @@ class RealtimeVideoRenderer(
                     cropRect = fullCropRect,
                     mvpMatrix = identityMatrix,
                     enableVideoLog = false,
-                    videoLookEnabled = false,
                     presentationTimeNs = timestampNs,
                 )
             }
@@ -506,7 +527,6 @@ class RealtimeVideoRenderer(
         cropRect: FloatArray,
         mvpMatrix: FloatArray,
         enableVideoLog: Boolean,
-        videoLookEnabled: Boolean,
         presentationTimeNs: Long,
     ) {
         val lutEnabled = layer.lutConfig != null && layer.lutTextureId != 0
@@ -576,7 +596,6 @@ class RealtimeVideoRenderer(
             locations.uVideoColorSpaceLocation,
             LutShaderMappings.colorSpaceId(videoLogProfile.colorSpace),
         )
-        bindVideoLookUniforms(locations, videoLookEnabled)
         bindRecipeUniforms(
             locations = locations,
             params = layer.params,
@@ -631,26 +650,6 @@ class RealtimeVideoRenderer(
         GLES30.glDisableVertexAttribArray(locations.aPositionLocation)
         GLES30.glDisableVertexAttribArray(locations.aTexCoordLocation)
         GlUtils.checkGlError("RealtimeVideoRenderer.drawLayer")
-    }
-
-    private fun bindVideoLookUniforms(
-        locations: ColorPassLocations,
-        enabled: Boolean,
-    ) {
-        val params = videoLookProfile.params
-        GLES30.glUniform1i(locations.uVideoLookEnabledLocation, if (enabled) 1 else 0)
-        GLES30.glUniform1f(locations.uVideoLookContrastLocation, params.contrast)
-        GLES30.glUniform1f(locations.uVideoLookSaturationLocation, params.saturation)
-        GLES30.glUniform1f(locations.uVideoLookShadowLiftLocation, params.shadowLift)
-        GLES30.glUniform1f(locations.uVideoLookHighlightKneeLocation, params.highlightKnee)
-        GLES30.glUniform1f(locations.uVideoLookHighlightShoulderLocation, params.highlightShoulder)
-        GLES30.glUniformMatrix3fv(
-            locations.uVideoLookColorMatrixLocation,
-            1,
-            false,
-            params.colorMatrix,
-            0,
-        )
     }
 
     private fun bindRecipeUniforms(

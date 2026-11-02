@@ -20,7 +20,6 @@ import com.hinnka.mycamera.stabilization.normalizeStabilizationLookahead
 import com.hinnka.mycamera.stabilization.normalizeStabilizationStrength
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.video.VideoLogProfile
-import com.hinnka.mycamera.video.VideoLookProfile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.ArrayDeque
@@ -503,8 +502,6 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     var livePhotoRecorder: LivePhotoRecorder? = null
     @Volatile
     var videoLogProfile: VideoLogProfile = VideoLogProfile.OFF
-    @Volatile
-    var videoLookProfile: VideoLookProfile = VideoLookProfile.OFF
 
     // 预览帧捕获请求仅在 GL 线程中写入和消费。
     private val pendingPreviewCaptureRequests = ArrayDeque<PreviewCaptureRequest>()
@@ -799,26 +796,6 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         return colorProgramCache.get(variant.copy(includeEnginePreview = includeEnginePreview))
     }
 
-    private fun bindVideoLookUniforms(
-        locations: ColorPassLocations,
-        enabled: Boolean,
-    ) {
-        val params = videoLookProfile.params
-        GLES30.glUniform1i(locations.uVideoLookEnabledLocation, if (enabled) 1 else 0)
-        GLES30.glUniform1f(locations.uVideoLookContrastLocation, params.contrast)
-        GLES30.glUniform1f(locations.uVideoLookSaturationLocation, params.saturation)
-        GLES30.glUniform1f(locations.uVideoLookShadowLiftLocation, params.shadowLift)
-        GLES30.glUniform1f(locations.uVideoLookHighlightKneeLocation, params.highlightKnee)
-        GLES30.glUniform1f(locations.uVideoLookHighlightShoulderLocation, params.highlightShoulder)
-        GLES30.glUniformMatrix3fv(
-            locations.uVideoLookColorMatrixLocation,
-            1,
-            false,
-            params.colorMatrix,
-            0,
-        )
-    }
-
     private fun drawColorPass(
         locations: ColorPassLocations,
         targetFboId: Int,
@@ -877,12 +854,6 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         GLES30.glUniform1i(locations.uVideoLogEnabledLocation, if (enableVideoLog && videoLogProfile.isEnabled) 1 else 0)
         GLES30.glUniform1i(locations.uVideoLogCurveLocation, LutShaderMappings.transferCurveId(videoLogProfile.logCurve))
         GLES30.glUniform1i(locations.uVideoColorSpaceLocation, LutShaderMappings.colorSpaceId(videoLogProfile.colorSpace))
-        bindVideoLookUniforms(
-            locations = locations,
-            enabled = enableVideoLog &&
-                videoLookProfile.isEnabled &&
-                videoLogProfile == VideoLogProfile.OFF,
-        )
 
         // Washed-out recovery is a standalone chroma pass; it must not depend on
         // enabling the other recipe controls (especially contrast/exposure).
