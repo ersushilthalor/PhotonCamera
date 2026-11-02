@@ -213,6 +213,23 @@ class LensSwitchController(
             instantSwitch = false
         }
         pruneRigs()
+
+        // The standby Surface can become available after the active stream is already
+        // running. Re-evaluate the pair at that point instead of leaving the rig stuck
+        // permanently in COLD mode from the first surface callback.
+        val standby = standbyWanted
+        if (mode == Mode.COLD && standby != null && standby != want &&
+            surfaces[standby.key]?.isValid == true
+        ) {
+            when (decideMode(want, standby)) {
+                Mode.LOGICAL -> {
+                    coldOpen(want) // Recreate this one logical session with both physical outputs.
+                    return
+                }
+                Mode.CONCURRENT -> mode = Mode.CONCURRENT
+                Mode.COLD -> Unit
+            }
+        }
         warmStandby()
     }
 
