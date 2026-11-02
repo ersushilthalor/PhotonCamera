@@ -75,6 +75,7 @@ fun CameraTopSheet(
     videoBitrate: VideoBitratePreset,
     onVideoBitrateChange: (VideoBitratePreset) -> Unit,
     videoCodec: VideoCodec,
+    availableVideoCodecs: List<VideoCodec>,
     onVideoCodecChange: (VideoCodec) -> Unit,
     videoAudioInputId: String,
     videoAudioInputOptions: List<VideoAudioInputOption>,
@@ -434,7 +435,7 @@ fun CameraTopSheet(
                                             verticalArrangement = Arrangement.spacedBy(8.dp),
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            VideoCodec.entries.forEach { codec ->
+                                            availableVideoCodecs.forEach { codec ->
                                                 VideoOptionChip(
                                                     title = codec.displayName,
                                                     selected = videoCodec == codec,
