@@ -1760,6 +1760,8 @@ fun CameraScreen(
             videoLogProfile = state.videoConfig.logProfile,
             availableVideoLogProfiles = state.videoCapabilities.availableLogProfiles,
             onVideoLogProfileChange = { viewModel.setVideoLogProfile(it) },
+            videoLookProfile = state.videoConfig.lookProfile,
+            onVideoLookProfileChange = { viewModel.setVideoLookProfile(it) },
             videoBitrate = state.videoConfig.bitrate,
             onVideoBitrateChange = { viewModel.setVideoBitrate(it) },
             videoCodec = videoCodec,

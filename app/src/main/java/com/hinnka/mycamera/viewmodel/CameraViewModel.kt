@@ -2631,6 +2631,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 glSurfaceView?.let { view ->
                     view.setVideoLogProfile(currentState.videoConfig.logProfile)
+                    view.setVideoLookProfile(
+                        if (currentState.captureMode == CaptureMode.VIDEO) currentState.videoConfig.lookProfile
+                        else VideoLookProfile.OFF
+                    )
                     view.setMeteringPoint(currentState.meteringReferencePoint?.let { point ->
                         android.graphics.PointF(point.first, point.second)
                     })
@@ -3159,6 +3163,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 view.setParams(currentRecipeParams.value)
                 view.setColorRecipeEnabled(!currentRecipeParams.value.isDefault())
                 view.setVideoLogProfile(currentState.videoConfig.logProfile)
+                view.setVideoLookProfile(
+                    if (currentState.captureMode == CaptureMode.VIDEO) currentState.videoConfig.lookProfile
+                    else VideoLookProfile.OFF
+                )
                 view.restoreRenderStateAfterResume()
             }
         }
