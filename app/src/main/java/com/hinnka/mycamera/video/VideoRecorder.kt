@@ -123,6 +123,7 @@ class VideoRecorder(
     private var requestedRecordingTreeUri: String? = null
     private var preferredAudioInputId: String = VIDEO_AUDIO_INPUT_AUTO
     private var requestedColorConfig: VideoEncoderColorRequest = VideoEncoderColorRequest()
+    private var requestedVideoLookProfile: VideoLookProfile = VideoLookProfile.IPHONE_NATURAL
     @Volatile private var requestedCameraInputIsHlg10: Boolean = false
     private var preparedEncoderColorConfig: VideoEncoderColorConfig? = null
     private var requestedOutputSize = Size(1080, 1920)
@@ -193,6 +194,7 @@ class VideoRecorder(
         codecMime: String,
         colorConfig: VideoEncoderColorRequest = VideoEncoderColorRequest(),
         cameraInputIsHlg10: Boolean = false,
+        videoLookProfile: VideoLookProfile = VideoLookProfile.IPHONE_NATURAL,
         colorLayers: List<VideoColorEffectLayer> = emptyList(),
         cameraTimestampSource: Int = CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_UNKNOWN,
         sensorOrientationDegrees: Int = 0,
@@ -223,6 +225,7 @@ class VideoRecorder(
         requestedCodecMime = hlg10Encoder?.second ?: codecMime
         requestedColorConfig = colorConfig
         requestedCameraInputIsHlg10 = cameraInputIsHlg10
+        requestedVideoLookProfile = videoLookProfile
         if (hlg10Encoder != null) {
             PLog.i(
                 TAG,
@@ -481,6 +484,7 @@ class VideoRecorder(
             sensorOrientationDegrees = requestedSensorOrientationDegrees,
             colorLayers = requestedColorLayers,
             videoLogProfile = requestedColorConfig.logProfile,
+            videoLookProfile = requestedVideoLookProfile,
             cameraInputIsHlg10 = requestedCameraInputIsHlg10,
             mirrorHorizontally =
                 requestedFlipEncodedFrame && requestedOrientationHintDegrees % 180 == 0,

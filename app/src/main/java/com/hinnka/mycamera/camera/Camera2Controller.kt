@@ -58,6 +58,7 @@ import com.hinnka.mycamera.video.VideoCapabilitiesResolver
 import com.hinnka.mycamera.video.VideoFpsPreset
 import com.hinnka.mycamera.video.VideoEncoderColorRequest
 import com.hinnka.mycamera.video.VideoLogProfile
+import com.hinnka.mycamera.video.VideoLookProfile
 import com.hinnka.mycamera.video.OppoNaturalVideoEngine
 import com.hinnka.mycamera.video.OppoHlg10AutoExposureEngine
 import com.hinnka.mycamera.video.VideoLogLutMode
@@ -7386,6 +7387,13 @@ class Camera2Controller(private val context: Context) {
         _state.value = _state.value.copy(videoConfig = _state.value.videoConfig.copy(logLutMode = mode))
     }
 
+    fun setVideoLookProfile(profile: VideoLookProfile) {
+        if (_state.value.videoRecordingState.isRecording || _state.value.videoRecordingState.isProcessing) return
+        _state.value = _state.value.copy(
+            videoConfig = _state.value.videoConfig.copy(lookProfile = profile)
+        )
+    }
+
     fun setVideoLogProfile(logProfile: VideoLogProfile) {
         val previousProfile = _state.value.videoConfig.logProfile
         if (previousProfile != logProfile) {
@@ -7670,6 +7678,7 @@ class Camera2Controller(private val context: Context) {
                 hasActiveLut = recordingLut != null && (recordingRecipe?.lutIntensity ?: 1f) > 0f
             ),
             cameraInputIsHlg10 = cameraInputIsHlg10,
+            videoLookProfile = _state.value.videoConfig.lookProfile,
             colorLayers = colorLayers,
             cameraTimestampSource = getActiveOpenCameraCharacteristics()
                 ?.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE)

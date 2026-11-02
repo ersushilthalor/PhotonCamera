@@ -4,6 +4,7 @@ import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
+import android.media.ImageReader
 import android.media.MediaRecorder
 import android.os.Build
 import android.util.Range
@@ -59,8 +60,35 @@ object VideoCapabilitiesResolver {
         val openGateAspect = resolveOpenGatePortraitAspectRatio(activeArray, sensorOrientation)
 
         val availableResolutions = VideoResolutionPreset.entries.filter { preset ->
-            findBestOutputSize(recordingOutputSizes, preset, requestedConfig.aspectRatio, openGateAspect) != null &&
-                findBestOutputSize(previewOutputSizes, preset, requestedConfig.aspectRatio, openGateAspect) != null
+            val recordingSource = findBestOutputSize(
+                recordingOutputSizes,
+                preset,
+                requestedConfig.aspectRatio,
+                openGateAspect,
+            )
+            val previewSource = findBestOutputSize(
+                previewOutputSizes,
+                preset,
+                requestedConfig.aspectRatio,
+                openGateAspect,
+            )
+            val encodedSize = if (requestedConfig.aspectRatio == VideoAspectRatio.OPEN_GATE) {
+                previewSource
+            } else {
+                preset.resolveOutputSize(
+                    requestedConfig.aspectRatio.getPortraitAspectRatio(openGateAspect),
+                )
+            }
+            recordingSource != null && previewSource != null && encodedSize != null &&
+                VideoCodec.entries.any { codec ->
+                    VideoFpsPreset.entries.any { fps ->
+                        VideoEncoderCapabilityResolver.supportsSizeAndRate(
+                            codecMime = codec.mimeType,
+                            size = encodedSize,
+                            fps = fps.fps,
+                        )
+                    }
+                }
         }
 
         val recordingSizesByResolution = availableResolutions.mapNotNull { preset ->
@@ -93,20 +121,44 @@ object VideoCapabilitiesResolver {
             requestedConfig.aspectRatio.getPortraitAspectRatio(openGateAspect)
         )
         val cameraInputSize = cameraInputSizesByResolution[resolvedResolution] ?: previewSize
-
-        val availableFps = resolveAvailableFps(
-            characteristics = characteristics,
-            cameraInputSize = cameraInputSize,
-            previewSize = previewSize
-        )
-        val resolvedFps = requestedConfig.fps.takeIf { availableFps.contains(it) }
-            ?: availableFps.firstOrNull()
-            ?: VideoFpsPreset.FPS_30
+        val outputSize = requestedConfig.resolveOutputSize(openGateAspect, cameraInputSize)
+        val availableCodecs = VideoCodec.entries.filter { codec ->
+            VideoFpsPreset.entries.any { fps ->
+                VideoEncoderCapabilityResolver.supportsSizeAndRate(
+                    codecMime = codec.mimeType,
+                    size = outputSize,
+                    fps = fps.fps,
+                )
+            }
+        }
+        val resolvedCodec = requestedConfig.codec.takeIf { it in availableCodecs }
+            ?: availableCodecs.firstOrNull()
+            ?: requestedConfig.codec
 
         val enhancedCameraInputSize =
             enhancedStabilizationInputSizesByResolution[resolvedResolution]
         val enhancedStabilizationAvailable = algorithmicStabilizationSupported &&
             enhancedCameraInputSize != null
+        val useEnhancedStabilizationInput =
+            requestedConfig.stabilizationMode == VideoStabilizationMode.ENHANCED &&
+                enhancedStabilizationAvailable
+        val selectedCameraInputSize = if (useEnhancedStabilizationInput) {
+            enhancedCameraInputSize ?: cameraInputSize
+        } else {
+            cameraInputSize
+        }
+
+        val availableFps = resolveAvailableFps(
+            characteristics = characteristics,
+            cameraInputSize = selectedCameraInputSize,
+            previewSize = previewSize,
+            outputSize = outputSize,
+            encoderCodecMime = resolvedCodec.mimeType,
+            cameraInputIsYuv = useEnhancedStabilizationInput,
+        )
+        val resolvedFps = requestedConfig.fps.takeIf { availableFps.contains(it) }
+            ?: availableFps.firstOrNull()
+            ?: VideoFpsPreset.FPS_30
 
         /*PLog.d(
             TAG,
@@ -150,6 +202,7 @@ object VideoCapabilitiesResolver {
             config = requestedConfig.copy(
                 resolution = resolvedResolution,
                 fps = resolvedFps,
+                codec = resolvedCodec,
                 logProfile = resolvedLogProfile,
                 bitrate = requestedConfig.bitrate,
                 stabilizationMode = resolvedStabilizationMode,
@@ -165,6 +218,7 @@ object VideoCapabilitiesResolver {
                 availableAspectRatios = VideoAspectRatio.entries.toList(),
                 availableLogProfiles = availableLogProfiles,
                 availableBitrates = VideoBitratePreset.entries.toList(),
+                availableCodecs = availableCodecs,
                 cameraInputSizesByResolution = cameraInputSizesByResolution,
                 enhancedStabilizationInputSizesByResolution =
                     enhancedStabilizationInputSizesByResolution,
@@ -283,43 +337,36 @@ object VideoCapabilitiesResolver {
     private fun resolveAvailableFps(
         characteristics: CameraCharacteristics,
         cameraInputSize: Size,
-        previewSize: Size
+        previewSize: Size,
+        outputSize: Size,
+        encoderCodecMime: String,
+        cameraInputIsYuv: Boolean,
     ): List<VideoFpsPreset> {
-        val outputRanges = characteristics.readMetadataOrNull(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
-            ?: return emptyList()
+        val outputRanges = characteristics.readMetadataOrNull(
+            CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES
+        ) ?: return emptyList()
         if (outputRanges.isEmpty()) return emptyList()
-        val minFrameDurationNs = resolveMinFrameDurationNs(characteristics, cameraInputSize, previewSize)
-        val maxFpsByDuration = if (minFrameDurationNs > 0) {
+
+        val minFrameDurationNs = resolveMinFrameDurationNs(
+            characteristics = characteristics,
+            cameraInputSize = cameraInputSize,
+            previewSize = previewSize,
+            cameraInputIsYuv = cameraInputIsYuv,
+        )
+        val maxFpsByDuration = if (minFrameDurationNs > 0L) {
             (1_000_000_000.0 / minFrameDurationNs.toDouble()).toInt()
         } else {
             Int.MAX_VALUE
         }
 
-        val strictAvailableFps = VideoFpsPreset.entries.filter { preset ->
-            preset.fps <= maxFpsByDuration && outputRanges.any { range ->
-                supportsFps(range, preset.fps)
-            }
-        }
-
-        if (strictAvailableFps.isNotEmpty()) {
-            val advertisedMaxFps = strictAvailableFps.maxOf { it.fps }
-            if (advertisedMaxFps >= 50) {
-                return strictAvailableFps
-            }
-
-            val optimisticFps = VideoFpsPreset.entries.filter { it.fps > advertisedMaxFps }
-            if (optimisticFps.isNotEmpty()) {
-                /*PLog.w(
-                    TAG,
-                    "Camera reports max $advertisedMaxFps fps only, keeping optimistic presets=${optimisticFps.map { it.fps }} " +
-                        "for cameraInput=${cameraInputSize.width}x${cameraInputSize.height}"
-                )*/
-                return (strictAvailableFps + optimisticFps).distinctBy { it.fps }
-            }
-        }
-
-        return strictAvailableFps.ifEmpty {
-            listOf(VideoFpsPreset.FPS_30)
+        return VideoFpsPreset.entries.filter { preset ->
+            preset.fps <= maxFpsByDuration &&
+                outputRanges.any { range -> supportsFps(range, preset.fps) } &&
+                VideoEncoderCapabilityResolver.supportsSizeAndRate(
+                    codecMime = encoderCodecMime,
+                    size = outputSize,
+                    fps = preset.fps,
+                )
         }
     }
 
@@ -342,17 +389,27 @@ object VideoCapabilitiesResolver {
     private fun resolveMinFrameDurationNs(
         characteristics: CameraCharacteristics,
         cameraInputSize: Size,
-        previewSize: Size
+        previewSize: Size,
+        cameraInputIsYuv: Boolean,
     ): Long {
         val streamConfigMap = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         if (streamConfigMap == null) return 0L
 
-        val cameraInputDurationNs = queryMinFrameDurationNs(
-            streamConfigMap = streamConfigMap,
-            outputClass = SurfaceTexture::class.java,
-            outputSize = cameraInputSize,
-            label = "recording SurfaceTexture"
-        )
+        val cameraInputDurationNs = if (cameraInputIsYuv) {
+            queryMinFrameDurationNs(
+                streamConfigMap = streamConfigMap,
+                outputClass = ImageReader::class.java,
+                outputSize = cameraInputSize,
+                label = "EIS+ YUV ImageReader",
+            )
+        } else {
+            queryMinFrameDurationNs(
+                streamConfigMap = streamConfigMap,
+                outputClass = SurfaceTexture::class.java,
+                outputSize = cameraInputSize,
+                label = "recording SurfaceTexture",
+            )
+        }
         val previewDurationNs = queryMinFrameDurationNs(
             streamConfigMap = streamConfigMap,
             outputClass = SurfaceTexture::class.java,

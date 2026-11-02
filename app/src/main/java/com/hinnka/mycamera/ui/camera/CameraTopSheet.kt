@@ -49,6 +49,7 @@ import com.hinnka.mycamera.ui.icons.AppIcons
 private enum class VideoSettingPanel {
     ASPECT_RATIO,
     LOG_PROFILE,
+    LOOK_PROFILE,
     BITRATE,
     CODEC,
     MICROPHONE
@@ -69,9 +70,12 @@ fun CameraTopSheet(
     videoLogProfile: VideoLogProfile,
     availableVideoLogProfiles: List<VideoLogProfile>,
     onVideoLogProfileChange: (VideoLogProfile) -> Unit,
+    videoLookProfile: VideoLookProfile,
+    onVideoLookProfileChange: (VideoLookProfile) -> Unit,
     videoBitrate: VideoBitratePreset,
     onVideoBitrateChange: (VideoBitratePreset) -> Unit,
     videoCodec: VideoCodec,
+    availableVideoCodecs: List<VideoCodec>,
     onVideoCodecChange: (VideoCodec) -> Unit,
     videoAudioInputId: String,
     videoAudioInputOptions: List<VideoAudioInputOption>,
@@ -327,6 +331,15 @@ fun CameraTopSheet(
                             modifier = itemModifier
                         )
                         VideoSettingTile(
+                            title = "Video look",
+                            summary = videoLookProfileLabel(videoLookProfile),
+                            expanded = expandedVideoPanel == VideoSettingPanel.LOOK_PROFILE,
+                            onClick = {
+                                expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.LOOK_PROFILE) null else VideoSettingPanel.LOOK_PROFILE
+                            },
+                            modifier = itemModifier
+                        )
+                        VideoSettingTile(
                             title = stringResource(R.string.video_bitrate_chip),
                             summary = "${videoBitrate.bitrateMbps}M",
                             expanded = expandedVideoPanel == VideoSettingPanel.BITRATE,
@@ -384,6 +397,22 @@ fun CameraTopSheet(
                                         }
                                     }
 
+                                    VideoSettingPanel.LOOK_PROFILE -> {
+                                        FlowRow(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            VideoLookProfile.entries.forEach { profile ->
+                                                VideoOptionChip(
+                                                    title = videoLookProfileLabel(profile),
+                                                    selected = videoLookProfile == profile,
+                                                    onClick = { onVideoLookProfileChange(profile) }
+                                                )
+                                            }
+                                        }
+                                    }
+
                                     VideoSettingPanel.BITRATE -> {
                                         FlowRow(
                                             modifier = Modifier.fillMaxWidth(),
@@ -406,7 +435,7 @@ fun CameraTopSheet(
                                             verticalArrangement = Arrangement.spacedBy(8.dp),
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            VideoCodec.entries.forEach { codec ->
+                                            availableVideoCodecs.forEach { codec ->
                                                 VideoOptionChip(
                                                     title = codec.displayName,
                                                     selected = videoCodec == codec,
@@ -823,6 +852,14 @@ private fun videoAspectRatioLabel(aspectRatio: VideoAspectRatio): String {
         VideoAspectRatio.RATIO_16_9 -> stringResource(R.string.video_aspect_16_9)
         VideoAspectRatio.RATIO_21_9 -> stringResource(R.string.video_aspect_21_9)
         VideoAspectRatio.OPEN_GATE -> stringResource(R.string.video_aspect_open_gate)
+    }
+}
+
+@Composable
+private fun videoLookProfileLabel(profile: VideoLookProfile): String {
+    return when (profile) {
+        VideoLookProfile.OFF -> stringResource(R.string.video_log_off)
+        VideoLookProfile.IPHONE_NATURAL -> profile.displayName
     }
 }
 

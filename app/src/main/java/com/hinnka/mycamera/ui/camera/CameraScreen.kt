@@ -83,6 +83,7 @@ import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VideoFpsPreset
 import com.hinnka.mycamera.video.VideoLogProfile
+import com.hinnka.mycamera.video.IphoneLookRecipe
 import com.hinnka.mycamera.video.VideoResolutionPreset
 import com.hinnka.mycamera.video.VideoStabilizationMode
 import kotlinx.coroutines.Job
@@ -1250,7 +1251,15 @@ fun CameraScreen(
                             currentLut = viewModel.currentLutConfig,
                             enginePreviewPlan = viewModel.currentEnginePreviewPlan,
                             baselineColorRecipeParams = currentBaselineRecipeParams,
-                            colorRecipeParams = effectiveRecipeParams,
+                            colorRecipeParams = if (
+                                state.captureMode == CaptureMode.VIDEO &&
+                                state.videoConfig.lookProfile.isEnabled &&
+                                state.videoConfig.logProfile == VideoLogProfile.OFF
+                            ) {
+                                IphoneLookRecipe.apply(effectiveRecipeParams)
+                            } else {
+                                effectiveRecipeParams
+                            },
                             focusPoint = state.focusPoint,
                             meteringPoint = state.meteringPoint,
                             canMoveMeteringPoint = state.supportsPointMetering &&
@@ -1754,9 +1763,12 @@ fun CameraScreen(
             videoLogProfile = state.videoConfig.logProfile,
             availableVideoLogProfiles = state.videoCapabilities.availableLogProfiles,
             onVideoLogProfileChange = { viewModel.setVideoLogProfile(it) },
+            videoLookProfile = state.videoConfig.lookProfile,
+            onVideoLookProfileChange = { viewModel.setVideoLookProfile(it) },
             videoBitrate = state.videoConfig.bitrate,
             onVideoBitrateChange = { viewModel.setVideoBitrate(it) },
-            videoCodec = videoCodec,
+            videoCodec = state.videoConfig.codec,
+            availableVideoCodecs = state.videoCapabilities.availableCodecs,
             onVideoCodecChange = { viewModel.setVideoCodec(it) },
             videoAudioInputId = state.videoConfig.audioInputId,
             videoAudioInputOptions = videoAudioInputOptions,
