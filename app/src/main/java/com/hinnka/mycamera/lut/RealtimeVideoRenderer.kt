@@ -18,6 +18,7 @@ import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD
 import com.hinnka.mycamera.stabilization.RealtimeStabilizationCoordinator
 import com.hinnka.mycamera.stabilization.StabilizationUseCase
 import com.hinnka.mycamera.utils.PLog
+import com.hinnka.mycamera.video.IphoneLookRecipe
 import com.hinnka.mycamera.video.VideoEncoderColorConfig
 import com.hinnka.mycamera.video.VideoEncodedColorPipeline
 import com.hinnka.mycamera.video.VideoLogProfile
@@ -68,14 +69,26 @@ class RealtimeVideoRenderer(
     private val appContext = context.applicationContext
     @Volatile private var cameraInputAlreadyHlg10 = cameraInputIsHlg10
     private val layers = colorLayers
-        .map { layer ->
+        .mapIndexed { index, layer ->
+            val baseParams = layer.recipeParams ?: ColorRecipeParams.DEFAULT
             LayerResources(
                 lutConfig = layer.lutConfig,
-                params = layer.recipeParams ?: ColorRecipeParams.DEFAULT,
+                // Apply the iPhone look once, on the final creative layer. This keeps
+                // baseline processing intact and avoids stacking the look twice.
+                params = if (index == colorLayers.lastIndex) {
+                    IphoneLookRecipe.apply(baseParams)
+                } else {
+                    baseParams
+                },
             )
         }
         .ifEmpty {
-            listOf(LayerResources(lutConfig = null, params = ColorRecipeParams.DEFAULT))
+            listOf(
+                LayerResources(
+                    lutConfig = null,
+                    params = IphoneLookRecipe.apply(ColorRecipeParams.DEFAULT),
+                )
+            )
         }
         .also { resolved ->
             require(resolved.size <= 2) {
