@@ -5,9 +5,10 @@ import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.roundToInt
 
-private const val MinZoomStopAnimationDurationMillis = 220
-private const val MaxZoomStopAnimationDurationMillis = 420
-private const val ZoomStopAnimationMillisPerOctave = 80f
+// Keep snapshot motion responsive without imposing a 220 ms minimum wait.
+private const val MinZoomStopAnimationDurationMillis = 0
+private const val MaxZoomStopAnimationDurationMillis = 180
+private const val ZoomStopAnimationMillisPerOctave = 40f
 
 internal fun interpolateZoomRatio(
     startZoom: Float,
