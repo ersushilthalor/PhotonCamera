@@ -2494,6 +2494,11 @@ class Camera2Controller(private val context: Context) {
             }
             return
         }
+        // Reuse the active CameraDevice when a lens button only changes the
+        // logical-camera crop/zoom and keeps the same physical output stream.
+        // Do not tear down the session, SurfaceTexture, ImageReader or in-flight captures.
+        if (tryReuseOpenCameraForLensSwitch(surfaceTexture)) return
+
         pendingCameraOpenRequest = CameraOpenRequest(surfaceTexture, preserveVideoRecording)
         when (cameraDeviceLifecycle) {
             CameraDeviceLifecycle.CLOSED -> openPendingCameraRequest()
@@ -2506,6 +2511,47 @@ class Camera2Controller(private val context: Context) {
                 PLog.d(TAG, "Camera open queued while previous device is closing")
             }
         }
+    }
+
+    /**
+     * Fast path for lens selections backed by the already-open logical camera.
+     *
+     * Reuse is deliberately conservative: the SurfaceTexture, logical CameraDevice
+     * and physical output stream must all remain unchanged. A physical-output or
+     * stream-format change falls back to the normal reopen path.
+     */
+    private fun tryReuseOpenCameraForLensSwitch(surfaceTexture: SurfaceTexture): Boolean {
+        if (cameraDeviceLifecycle != CameraDeviceLifecycle.OPEN ||
+            cameraDevice == null ||
+            captureSession == null ||
+            previewRequestBuilder == null ||
+            previewSurfaceTexture !== surfaceTexture ||
+            _state.value.captureMode != CaptureMode.PHOTO
+        ) return false
+
+        val selectedCamera = _state.value.getCurrentCameraInfo() ?: return false
+        val targetOpenCameraId = selectedCamera.getOpenCameraId()
+        if (targetOpenCameraId != activeOpenCameraId) return false
+
+        val targetPhysicalCameraId = resolveOutputPhysicalCameraId(_state.value, selectedCamera)
+        if (targetPhysicalCameraId != activeOutputPhysicalCameraId) return false
+
+        pendingCameraOpenRequest = null
+        clearPointFocusState()
+        refreshActiveFocusLimit()
+        refreshHyperfocalFocusDistanceIfEnabled(updatePreview = false)
+        _state.update { it.copy(previewFirstFrameTimestampNs = null) }
+        previewRequestBuilder?.let { builder ->
+            applyBaseCameraSettings(builder, isCapture = false, currentState = _state.value)
+            updatePreview()
+        }
+        PLog.i(
+            TAG,
+            "LensSwitchTrace same-device fast path: open=" + activeOpenCameraId +
+                ", physical=" + activeOutputPhysicalCameraId +
+                ", zoom=" + _state.value.zoomRatio
+        )
+        return true
     }
 
     private fun openPendingCameraRequest() {

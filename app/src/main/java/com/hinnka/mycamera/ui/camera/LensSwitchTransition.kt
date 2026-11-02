@@ -100,6 +100,7 @@ internal class LensSwitchTransitionState(
                 val request = pendingRequest
                 pendingRequest = null
                 switchPending = false
+                PLog.d("LensSwitchTrace", "switch request ready")
                 if (request != null) {
                     previousTimestamp = viewModel.state.value.previewFirstFrameTimestampNs
                     awaitedCameraId = request.cameraId
@@ -119,6 +120,7 @@ internal class LensSwitchTransitionState(
                             it.previewFirstFrameTimestampNs != null &&
                             it.previewFirstFrameTimestampNs != previousTimestamp
                     }
+                    PLog.d("LensSwitchTrace", "new preview result received")
                     // Follow the current SurfaceView if preview dimensions change.
                     val rendered = CompletableDeferred<Unit>()
                     val waiter = launch {
@@ -131,6 +133,7 @@ internal class LensSwitchTransitionState(
                     }
                     try {
                         rendered.await()
+                        PLog.d("LensSwitchTrace", "first preview frame rendered")
                     } finally {
                         waiter.cancel()
                     }
@@ -139,7 +142,7 @@ internal class LensSwitchTransitionState(
                 // Renderer callbacks run before GLSurfaceView swaps buffers.
                 withFrameNanos { }
                 withFrameNanos { }
-                opacity.animateTo(0f, tween(160))
+                opacity.animateTo(0f, tween(100))
                 clearSnapshot()
                 isActive = false
                 awaitedCameraId = null
