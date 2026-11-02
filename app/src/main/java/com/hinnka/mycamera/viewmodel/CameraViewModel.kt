@@ -118,6 +118,7 @@ import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VideoBitratePreset
 import com.hinnka.mycamera.video.VideoFpsPreset
 import com.hinnka.mycamera.video.VideoLogProfile
+import com.hinnka.mycamera.video.VideoLookProfile
 import com.hinnka.mycamera.video.VideoLogLutMode
 import com.hinnka.mycamera.video.VideoRecordingPath
 import com.hinnka.mycamera.video.VideoResolutionPreset
@@ -2361,6 +2362,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 cameraController.setVideoFps(it.videoFps)
                 cameraController.setVideoAspectRatio(it.videoAspectRatio)
                 cameraController.setVideoLogProfile(it.videoLogProfile)
+                cameraController.setVideoLookProfile(it.videoLookProfile)
                 cameraController.setVideoLogLutMode(it.videoLogLutMode)
                 cameraController.setVideoBitrate(it.videoBitrate)
                 cameraController.setVideoAudioInputId(it.videoAudioInputId)
@@ -2548,6 +2550,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 cameraController.setVideoFps(prefs.videoFps)
                 cameraController.setVideoAspectRatio(prefs.videoAspectRatio)
                 cameraController.setVideoLogProfile(prefs.videoLogProfile)
+                cameraController.setVideoLookProfile(prefs.videoLookProfile)
                 cameraController.setVideoLogLutMode(prefs.videoLogLutMode)
                 cameraController.setVideoBitrate(prefs.videoBitrate)
                 cameraController.setVideoAudioInputId(prefs.videoAudioInputId)
@@ -4161,6 +4164,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             setLut(selectedLutId, persist = false)
         } else {
             validateAndCancelNonMatchingVideoLut(logProfile, currentLutConfig)
+        }
+    }
+
+    fun setVideoLookProfile(profile: VideoLookProfile) {
+        if (state.value.videoRecordingState.isRecording || state.value.videoRecordingState.isProcessing) return
+        cameraController.setVideoLookProfile(profile)
+        viewModelScope.launch {
+            userPreferencesRepository.saveVideoLookProfile(profile)
         }
     }
 

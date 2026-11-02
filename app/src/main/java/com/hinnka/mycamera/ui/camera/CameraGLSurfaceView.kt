@@ -24,6 +24,7 @@ import com.hinnka.mycamera.stabilization.normalizeStabilizationLookahead
 import com.hinnka.mycamera.stabilization.normalizeStabilizationStrength
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.video.VideoLogProfile
+import com.hinnka.mycamera.video.VideoLookProfile
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
@@ -451,6 +452,11 @@ class CameraGLSurfaceView @JvmOverloads constructor(
 
     fun setVideoLogProfile(profile: VideoLogProfile) {
         renderer.videoLogProfile = profile
+        requestRender()
+    }
+
+    fun setVideoLookProfile(profile: VideoLookProfile) {
+        renderer.videoLookProfile = profile
         requestRender()
     }
 

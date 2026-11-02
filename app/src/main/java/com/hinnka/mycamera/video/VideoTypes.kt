@@ -139,6 +139,7 @@ data class VideoConfig(
     val fps: VideoFpsPreset = VideoFpsPreset.FPS_30,
     val aspectRatio: VideoAspectRatio = VideoAspectRatio.RATIO_16_9,
     val logProfile: VideoLogProfile = VideoLogProfile.OFF,
+    val lookProfile: VideoLookProfile = VideoLookProfile.IPHONE_NATURAL,
     val logLutMode: VideoLogLutMode = VideoLogLutMode.MONITOR_ONLY,
     val bitrate: VideoBitratePreset = VideoBitratePreset.P5,
     val codec: VideoCodec = VideoCodec.H264,

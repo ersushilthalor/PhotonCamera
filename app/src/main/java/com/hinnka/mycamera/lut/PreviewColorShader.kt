@@ -41,6 +41,13 @@ internal object PreviewColorShader {
             uniform bool uVideoLogEnabled;
             uniform int uVideoLogCurve;
             uniform int uVideoColorSpace;
+            uniform bool uVideoLookEnabled;
+            uniform float uVideoLookContrast;
+            uniform float uVideoLookSaturation;
+            uniform float uVideoLookShadowLift;
+            uniform float uVideoLookHighlightKnee;
+            uniform float uVideoLookHighlightShoulder;
+            uniform mat3 uVideoLookColorMatrix;
 
             uniform bool uColorRecipeEnabled;
             uniform mat4 uSTMatrix;
@@ -90,6 +97,32 @@ internal object PreviewColorShader {
             const float PI = 3.14159265359;
 
             ${PreviewColorShaderModules.COLOR_TRANSFER_CORE}
+            vec3 applyVideoNaturalLook(vec3 encodedColor) {
+                vec3 linearColor = srgbToLinear(max(encodedColor, vec3(0.0)));
+                linearColor = max(uVideoLookColorMatrix * linearColor, vec3(0.0));
+                float luma = dot(linearColor, W);
+                linearColor = mix(vec3(luma), linearColor, uVideoLookSaturation);
+                linearColor = max(
+                    (linearColor - vec3(0.18)) * uVideoLookContrast + vec3(0.18),
+                    vec3(0.0)
+                );
+                linearColor += uVideoLookShadowLift * linearColor *
+                    pow(max(vec3(1.0) - linearColor, vec3(0.0)), vec3(2.0));
+                float knee = clamp(uVideoLookHighlightKnee, 0.50, 0.95);
+                vec3 kneeCoordinate = clamp(
+                    (linearColor - vec3(knee)) / max(1.0 - knee, 0.001),
+                    0.0,
+                    1.0
+                );
+                vec3 rolledHighlights = vec3(knee) + (1.0 - knee) *
+                    pow(kneeCoordinate, vec3(1.0 + max(uVideoLookHighlightShoulder, 0.0)));
+                linearColor = mix(
+                    linearColor,
+                    rolledHighlights,
+                    step(vec3(knee), linearColor)
+                );
+                return linearToSrgb(clamp(linearColor, 0.0, 1.0));
+            }
             ${if (needsLogInput) LogInputGl.GLSL else ""}
             ${PreviewColorShaderModules.EXPOSURE}
             ${ContrastShader.GLSL}
@@ -298,6 +331,9 @@ internal object PreviewColorShader {
                     color.rgb = sanitizeColor(vec3(r, g, b));
                 }
 
+                if (uVideoLookEnabled) {
+                    color.rgb = sanitizeColor(applyVideoNaturalLook(color.rgb));
+                }
 
                 ${if (variant.includePreLogFilmGrain) """
                 if (uFilmGrain > 0.001) {

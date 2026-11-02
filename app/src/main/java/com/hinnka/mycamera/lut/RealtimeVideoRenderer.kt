@@ -21,6 +21,7 @@ import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.video.VideoEncoderColorConfig
 import com.hinnka.mycamera.video.VideoEncodedColorPipeline
 import com.hinnka.mycamera.video.VideoLogProfile
+import com.hinnka.mycamera.video.VideoLookProfile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -43,6 +44,7 @@ class RealtimeVideoRenderer(
     private val sensorOrientationDegrees: Int,
     colorLayers: List<VideoColorEffectLayer>,
     private val videoLogProfile: VideoLogProfile,
+    private val videoLookProfile: VideoLookProfile = VideoLookProfile.OFF,
     @Volatile private var mirrorHorizontally: Boolean,
     @Volatile private var mirrorVertically: Boolean,
     private val encoderColorConfig: VideoEncoderColorConfig,
@@ -331,6 +333,7 @@ class RealtimeVideoRenderer(
             cropRect = sourceCropRect,
             mvpMatrix = firstPassMvpMatrix,
             enableVideoLog = videoLogProfile.isEnabled && !cameraInputAlreadyHlg10,
+            videoLookEnabled = videoLookProfile.isEnabled && videoLogProfile == VideoLogProfile.OFF,
             presentationTimeNs = timestampNs,
         )
 
@@ -351,6 +354,7 @@ class RealtimeVideoRenderer(
                     cropRect = fullCropRect,
                     mvpMatrix = identityMatrix,
                     enableVideoLog = false,
+                    videoLookEnabled = false,
                     presentationTimeNs = timestampNs,
                 )
             }
@@ -502,6 +506,7 @@ class RealtimeVideoRenderer(
         cropRect: FloatArray,
         mvpMatrix: FloatArray,
         enableVideoLog: Boolean,
+        videoLookEnabled: Boolean,
         presentationTimeNs: Long,
     ) {
         val lutEnabled = layer.lutConfig != null && layer.lutTextureId != 0
@@ -571,6 +576,7 @@ class RealtimeVideoRenderer(
             locations.uVideoColorSpaceLocation,
             LutShaderMappings.colorSpaceId(videoLogProfile.colorSpace),
         )
+        bindVideoLookUniforms(locations, videoLookEnabled)
         bindRecipeUniforms(
             locations = locations,
             params = layer.params,
@@ -625,6 +631,26 @@ class RealtimeVideoRenderer(
         GLES30.glDisableVertexAttribArray(locations.aPositionLocation)
         GLES30.glDisableVertexAttribArray(locations.aTexCoordLocation)
         GlUtils.checkGlError("RealtimeVideoRenderer.drawLayer")
+    }
+
+    private fun bindVideoLookUniforms(
+        locations: ColorPassLocations,
+        enabled: Boolean,
+    ) {
+        val params = videoLookProfile.params
+        GLES30.glUniform1i(locations.uVideoLookEnabledLocation, if (enabled) 1 else 0)
+        GLES30.glUniform1f(locations.uVideoLookContrastLocation, params.contrast)
+        GLES30.glUniform1f(locations.uVideoLookSaturationLocation, params.saturation)
+        GLES30.glUniform1f(locations.uVideoLookShadowLiftLocation, params.shadowLift)
+        GLES30.glUniform1f(locations.uVideoLookHighlightKneeLocation, params.highlightKnee)
+        GLES30.glUniform1f(locations.uVideoLookHighlightShoulderLocation, params.highlightShoulder)
+        GLES30.glUniformMatrix3fv(
+            locations.uVideoLookColorMatrixLocation,
+            1,
+            false,
+            params.colorMatrix,
+            0,
+        )
     }
 
     private fun bindRecipeUniforms(

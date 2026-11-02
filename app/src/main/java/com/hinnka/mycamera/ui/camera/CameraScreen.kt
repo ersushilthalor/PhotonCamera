@@ -83,6 +83,7 @@ import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VideoFpsPreset
 import com.hinnka.mycamera.video.VideoLogProfile
+import com.hinnka.mycamera.video.VideoLookProfile
 import com.hinnka.mycamera.video.VideoResolutionPreset
 import com.hinnka.mycamera.video.VideoStabilizationMode
 import kotlinx.coroutines.Job
@@ -1307,6 +1308,11 @@ fun CameraScreen(
                             },
                             livePhotoRecorder = viewModel.livePhotoRecorder,
                             videoLogProfile = state.videoConfig.logProfile,
+                            videoLookProfile = if (state.captureMode == CaptureMode.VIDEO) {
+                                state.videoConfig.lookProfile
+                            } else {
+                                VideoLookProfile.OFF
+                            },
                             isEyeFocusBusy = viewModel.isEyeFocusBusy,
                             isAutoFocus = state.isAutoFocus,
                             focusPeakingEnabled = focusPeakingEnabled && !state.isHyperfocalFocusEnabled,

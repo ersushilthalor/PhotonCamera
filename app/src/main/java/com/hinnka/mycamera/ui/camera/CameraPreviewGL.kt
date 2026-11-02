@@ -33,6 +33,7 @@ import com.hinnka.mycamera.ui.components.FocusIndicator
 import com.hinnka.mycamera.utils.OrientationObserver
 import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.video.VideoLogProfile
+import com.hinnka.mycamera.video.VideoLookProfile
 
 /**
  * 相机预览组件 - OpenGL ES 版本（Camera2 适配）
@@ -75,6 +76,7 @@ fun CameraPreviewGL(
     onFirstPreviewFrame: (() -> Unit)? = null,
     livePhotoRecorder: LivePhotoRecorder? = null,
     videoLogProfile: VideoLogProfile = VideoLogProfile.OFF,
+    videoLookProfile: VideoLookProfile = VideoLookProfile.OFF,
     isEyeFocusBusy: Boolean = false,
     onGLSurfaceViewReady: ((CameraGLSurfaceView) -> Unit)? = null,
     isAutoFocus: Boolean = true,
@@ -328,6 +330,9 @@ fun CameraPreviewGL(
                         glSurfaceView.setMeteringMode(meteringMode)
                         glSurfaceView.setLivePhotoRecorder(livePhotoRecorder)
                         glSurfaceView.setVideoLogProfile(videoLogProfile)
+                        glSurfaceView.setVideoLookProfile(
+                            if (captureMode == CaptureMode.VIDEO) videoLookProfile else VideoLookProfile.OFF
+                        )
                         glSurfaceView.setAutoFocus(isAutoFocus)
                         glSurfaceView.setFocusPeakingEnabled(focusPeakingEnabled)
                         glSurfaceView.setEyeFocusBusy(isEyeFocusBusy)
