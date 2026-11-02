@@ -282,6 +282,17 @@ class RealtimeStabilizationCoordinator(context: Context) {
     val shouldRequestOisSamples: Boolean
         get() = calibration?.supportsLensIntrinsicsSamples != true
 
+    /**
+     * True only when the current camera can really deliver per-frame optical-correction data
+     * (legacy OIS shifts or API-35 lens intrinsics). Hardware OIS may be left ON together with
+     * EIS+ only in that case. Without the data the native engine falls back to a fixed lens
+     * model, so EIS+ would re-correct shake that OIS already removed (double correction).
+     */
+    val canFuseOpticalCorrection: Boolean
+        get() = calibration?.let {
+            it.supportsOisSamples || it.supportsLensIntrinsicsSamples
+        } == true
+
     /** True after this acquisition has received its first monotonic calibrated gyro sample. */
     val isPoseSourceReady: Boolean
         get() = gyroSourceReady

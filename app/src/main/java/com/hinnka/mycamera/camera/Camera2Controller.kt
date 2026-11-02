@@ -5252,8 +5252,9 @@ class Camera2Controller(private val context: Context) {
     /**
      * 应用防抖设置
      *
-     * 视频模式按用户选项启用 EIS/OIS。EIS+始终请求关闭 Camera2 EIS 和 HAL OIS；
-     * 仅当 HAL 忽略 OIS OFF 时，才用逐时刻镜头内参或 OIS 位移修正滚快门网格。
+     * 视频模式按用户选项启用 EIS/OIS。EIS+始终请求关闭 Camera2 EIS；
+     * HAL OIS 仅在 EIS+ 能拿到逐帧 OIS 位移或镜头内参（可融合）时保持开启，
+     * 否则请求关闭，避免 OIS 与 EIS+ 对同一抖动重复校正。
      */
     private fun applyStabilizationSettings(
         builder: CaptureRequest.Builder,
@@ -5287,11 +5288,15 @@ class Camera2Controller(private val context: Context) {
                         CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE.name
                     )
                 ) {
-                    // EIS+ is gyro/rolling-shutter correction, not a replacement for lens OIS.
-                    // Keep hardware OIS enabled and feed its per-frame samples to the EIS+
-                    // projection so optical motion is not double-counted or silently lost.
+                    // Keep hardware OIS enabled ONLY if its per-frame samples (or API-35 lens
+                    // intrinsics) can be fed to the EIS+ projection. If they cannot, OIS moves
+                    // the image while EIS+ assumes a fixed lens, so the same shake gets corrected
+                    // twice and the result is less stable than either one alone. In that case
+                    // run EIS+ on its own (OIS OFF).
+                    val canFuseOis = realtimeStabilizationCoordinator.canFuseOpticalCorrection
                     val opticalMode = if (
-                        enhancedSelected || mode == VideoStabilizationMode.OIS
+                        mode == VideoStabilizationMode.OIS ||
+                        (enhancedSelected && canFuseOis)
                     ) {
                         CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
                     } else {
@@ -5321,7 +5326,9 @@ class Camera2Controller(private val context: Context) {
             if (availableOpticalStabilizationModes.contains(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)) {
                 builder.set(
                     CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
-                    if (enhancedPhotoPreview) {
+                    if (enhancedPhotoPreview &&
+                        !realtimeStabilizationCoordinator.canFuseOpticalCorrection
+                    ) {
                         CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
                     } else {
                         CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
