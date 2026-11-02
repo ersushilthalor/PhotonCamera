@@ -419,6 +419,15 @@ set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O3 -ffast-math")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O3 -ffast-math")
 set(REQUIRE_SIMD ON CACHE BOOL "Require SIMD" FORCE)
 set(WITH_SIMD ON CACHE BOOL "Enable SIMD" FORCE)
+
+# This Android app ships only arm64-v8a (see app/build.gradle.kts).
+# Keep the TurboJPEG library required by PhotonCamera, but omit unrelated
+# upstream developer tools, regression tests, Java wrappers, and fuzz targets.
+set(WITH_TOOLS OFF CACHE BOOL "Disable upstream command-line tools" FORCE)
+set(WITH_TESTS OFF CACHE BOOL "Disable upstream regression tests" FORCE)
+set(WITH_JAVA OFF CACHE BOOL "Disable the Java wrapper" FORCE)
+set(WITH_FUZZ OFF CACHE BOOL "Disable fuzz targets" FORCE)
+
 add_subdirectory(libjpeg-turbo)
 add_library(
     ultrahdr-static
