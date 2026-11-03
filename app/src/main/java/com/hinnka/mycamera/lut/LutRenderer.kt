@@ -69,6 +69,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     }
 
     private val colorProgramCache = PreviewColorProgramCache()
+    @Volatile private var beautyRenderController: BeautyRenderController? = null
     private val enginePreview = RawEnginePreviewGl()
     private val mgcEisHardwareBufferRenderer = MgcEisHardwareBufferRenderer(TAG)
     private val mgcEisYuvRenderer = MgcEisYuvRenderer(TAG)
@@ -819,6 +820,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         GLES30.glViewport(0, 0, width, height)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
         GLES30.glUseProgram(locations.programId)
+        locations.bindBeauty(beautyRenderController?.snapshot() ?: BeautyRenderState())
         colorProgramCache.bindLogInput(locations)
         enginePreview.bind(locations.uEnginePreviewLutLocation)
 
@@ -2364,6 +2366,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     /**
      * 设置预览尺寸
      */
+    fun setBeautyController(controller: BeautyRenderController?) {
+        beautyRenderController = controller
+    }
+
     fun setPreviewSize(width: Int, height: Int) {
         val sizeChanged = previewWidth != width || previewHeight != height
         previewWidth = width
