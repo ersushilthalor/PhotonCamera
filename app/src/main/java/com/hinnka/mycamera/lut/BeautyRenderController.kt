@@ -1,5 +1,6 @@
 package com.hinnka.mycamera.lut
 
+import android.opengl.GLES30
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -95,4 +96,25 @@ class BeautyRenderController {
     fun clear() {
         state.set(BeautyRenderState())
     }
+}
+
+
+internal fun ColorPassLocations.bindBeauty(state: BeautyRenderState) {
+    val region = state.faceRegion
+    val strength = if (state.active) state.smoothing.coerceIn(0f, 1f) else 0f
+    GLES30.glUniform1f(uBeautyStrengthLocation, strength)
+    if (region == null || strength <= 0f) {
+        GLES30.glUniform4f(uBeautyFaceRectLocation, 0f, 0f, 0f, 0f)
+        GLES30.glUniform2f(uBeautyLeftEyeLocation, -1f, -1f)
+        GLES30.glUniform2f(uBeautyRightEyeLocation, -1f, -1f)
+        GLES30.glUniform2f(uBeautyMouthLocation, -1f, -1f)
+        return
+    }
+    GLES30.glUniform4f(
+        uBeautyFaceRectLocation,
+        region.left, region.top, region.right, region.bottom,
+    )
+    GLES30.glUniform2f(uBeautyLeftEyeLocation, region.leftEyeX, region.leftEyeY)
+    GLES30.glUniform2f(uBeautyRightEyeLocation, region.rightEyeX, region.rightEyeY)
+    GLES30.glUniform2f(uBeautyMouthLocation, region.mouthX, region.mouthY)
 }
