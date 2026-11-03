@@ -2205,6 +2205,30 @@ fun SettingsScreen(
                         title = stringResource(R.string.settings_section_help_about),
                         showTitle = false
                     ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Image(
+                                painter = painterResource(R.drawable.photon_camera_logo),
+                                contentDescription = stringResource(R.string.app_name),
+                                modifier = Modifier.size(88.dp),
+                                contentScale = ContentScale.Fit
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = stringResource(R.string.app_name),
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
