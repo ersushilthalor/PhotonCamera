@@ -1,5 +1,6 @@
 import java.util.Properties
-import java.net.URL
+import java.io.File
+import java.net.URI
 
 plugins {
     alias(libs.plugins.android.application)
@@ -15,15 +16,15 @@ val downloadFaceLandmarkerModel by tasks.registering {
         val modelFile = faceLandmarkerModelFile.asFile
         if (!modelFile.isFile || modelFile.length() < 1_000_000L) {
             modelFile.parentFile.mkdirs()
-            val temporaryFile = java.io.File(modelFile.absolutePath + ".download")
+            val temporaryFile = File(modelFile.absolutePath + ".download")
             temporaryFile.delete()
-            URL(
+            URI(
                 "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
-            ).openConnection().apply {
+            ).toURL().openConnection().apply {
                 connectTimeout = 30_000
                 readTimeout = 120_000
             }.getInputStream().use { input ->
-                temporaryFile.outputStream().buffered().use { output -> input.copyTo(output) }
+                temporaryFile.outputStream().buffered().use { output: java.io.BufferedOutputStream -> input.copyTo(output) }
             }
             check(temporaryFile.length() >= 1_000_000L) {
                 "Downloaded Face Landmarker model is incomplete"
