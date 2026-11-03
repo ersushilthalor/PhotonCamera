@@ -1,10 +1,48 @@
 import java.util.Properties
+import java.net.URL
 
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+}
+
+val faceLandmarkerModelFile = layout.projectDirectory.file("src/main/assets/face_landmarker.task")
+val downloadFaceLandmarkerModel by tasks.registering {
+    outputs.file(faceLandmarkerModelFile)
+    doLast {
+        val modelFile = faceLandmarkerModelFile.asFile
+        if (!modelFile.isFile || modelFile.length() < 1_000_000L) {
+            modelFile.parentFile.mkdirs()
+            val temporaryFile = java.io.File(modelFile.absolutePath + ".download")
+            temporaryFile.delete()
+            URL(
+                "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+            ).openConnection().apply {
+                connectTimeout = 30_000
+                readTimeout = 120_000
+            }.getInputStream().use { input ->
+                temporaryFile.outputStream().buffered().use { output -> input.copyTo(output) }
+            }
+            check(temporaryFile.length() >= 1_000_000L) {
+                "Downloaded Face Landmarker model is incomplete"
+            }
+            check(temporaryFile.renameTo(modelFile) || temporaryFile.copyTo(modelFile, overwrite = true).exists()) {
+                "Unable to install Face Landmarker model asset"
+            }
+            temporaryFile.delete()
+        }
+    }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(downloadFaceLandmarkerModel)
+}
+tasks.configureEach {
+    if (name.startsWith("merge") && name.endsWith("Assets")) {
+        dependsOn(downloadFaceLandmarkerModel)
+    }
 }
 
 val localProperties = Properties().apply {
@@ -128,7 +166,7 @@ android {
     }
 
     androidResources {
-        noCompress += "tflite"
+        noCompress += listOf("tflite", "task")
     }
 
     sourceSets {
