@@ -43,6 +43,11 @@ internal object PreviewColorShader {
             uniform int uVideoColorSpace;
 
             uniform bool uColorRecipeEnabled;
+            uniform float uBeautyStrength;
+            uniform vec4 uBeautyFaceRect;
+            uniform vec2 uBeautyLeftEye;
+            uniform vec2 uBeautyRightEye;
+            uniform vec2 uBeautyMouth;
             uniform mat4 uSTMatrix;
             uniform float uExposure;
             uniform float uContrast;
@@ -182,6 +187,43 @@ internal object PreviewColorShader {
                     color = vec4(r, g, b, a);
                 }
                 """ else "vec4 color = samplePreviewSource(uvCoord);"}
+
+                // Face-aware skin smoothing. Face coordinates are supplied by MediaPipe
+                // Face Landmarker; eyes and mouth are protected to retain facial detail.
+                if (uBeautyStrength > 0.001 && uBeautyFaceRect.z > uBeautyFaceRect.x) {
+                    vec2 beautyCoord = vec2(vOutputCoord.x, 1.0 - vOutputCoord.y);
+                    vec2 faceSize = max(uBeautyFaceRect.zw - uBeautyFaceRect.xy, vec2(0.001));
+                    vec2 faceCenter = (uBeautyFaceRect.xy + uBeautyFaceRect.zw) * 0.5;
+                    vec2 faceLocal = (beautyCoord - faceCenter) / (faceSize * 0.5);
+                    float faceMask = 1.0 - smoothstep(0.78, 1.03, length(faceLocal));
+
+                    vec2 eyeRadius = vec2(faceSize.x * 0.105, faceSize.y * 0.085);
+                    float leftEyeKeep = 1.0 - smoothstep(
+                        0.85, 1.65,
+                        length((beautyCoord - uBeautyLeftEye) / max(eyeRadius, vec2(0.001)))
+                    );
+                    float rightEyeKeep = 1.0 - smoothstep(
+                        0.85, 1.65,
+                        length((beautyCoord - uBeautyRightEye) / max(eyeRadius, vec2(0.001)))
+                    );
+                    vec2 mouthRadius = vec2(faceSize.x * 0.19, faceSize.y * 0.095);
+                    float mouthKeep = 1.0 - smoothstep(
+                        0.80, 1.70,
+                        length((beautyCoord - uBeautyMouth) / max(mouthRadius, vec2(0.001)))
+                    );
+                    float detailProtection = max(max(leftEyeKeep, rightEyeKeep), mouthKeep);
+                    float beautyMask = faceMask * (1.0 - detailProtection);
+
+                    vec2 blurStep = uTexelSize * (1.0 + uBeautyStrength * 3.0);
+                    vec3 softened = color.rgb * 0.36;
+                    softened += samplePreviewSource(uvCoord + vec2( blurStep.x, 0.0)).rgb * 0.12;
+                    softened += samplePreviewSource(uvCoord + vec2(-blurStep.x, 0.0)).rgb * 0.12;
+                    softened += samplePreviewSource(uvCoord + vec2(0.0,  blurStep.y)).rgb * 0.12;
+                    softened += samplePreviewSource(uvCoord + vec2(0.0, -blurStep.y)).rgb * 0.12;
+                    softened += samplePreviewSource(uvCoord + blurStep * 0.7071).rgb * 0.08;
+                    softened += samplePreviewSource(uvCoord - blurStep * 0.7071).rgb * 0.08;
+                    color.rgb = mix(color.rgb, softened, beautyMask * uBeautyStrength * 0.62);
+                }
 
                 ${if (variant.includeJpegInputToneCurve) """
                 color.rgb = applyJpegInputToneCurve(color.rgb);
