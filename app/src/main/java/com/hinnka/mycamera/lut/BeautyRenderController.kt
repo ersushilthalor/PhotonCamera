@@ -44,8 +44,9 @@ data class BeautyFaceRegion(
             fun center(indices: IntArray): Pair<Float, Float> {
                 val selected = indices.mapNotNull(points::getOrNull)
                 if (selected.isEmpty()) return 0.5f to 0.5f
-                return selected.sumOf { it.first.toDouble() }.toFloat() / selected.size to
-                    selected.sumOf { it.second.toDouble() }.toFloat() / selected.size
+                val x = selected.sumOf { it.first.toDouble() }.toFloat() / selected.size
+                val y = selected.sumOf { it.second.toDouble() }.toFloat() / selected.size
+                return x to y
             }
 
             val leftEye = center(intArrayOf(33, 133, 159, 145, 160, 144))
