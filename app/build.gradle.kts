@@ -1,5 +1,6 @@
 import java.util.Properties
 import java.io.File
+import java.io.BufferedOutputStream
 import java.net.URI
 
 plugins {
@@ -24,7 +25,7 @@ val downloadFaceLandmarkerModel by tasks.registering {
                 connectTimeout = 30_000
                 readTimeout = 120_000
             }.getInputStream().use { input ->
-                temporaryFile.outputStream().buffered().use { output: java.io.BufferedOutputStream -> input.copyTo(output) }
+                temporaryFile.outputStream().buffered().use { output: BufferedOutputStream -> input.copyTo(output) }
             }
             check(temporaryFile.length() >= 1_000_000L) {
                 "Downloaded Face Landmarker model is incomplete"
