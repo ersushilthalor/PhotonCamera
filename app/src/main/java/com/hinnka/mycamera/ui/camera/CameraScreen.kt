@@ -1713,7 +1713,10 @@ fun CameraScreen(
                     .padding(top = topBarHeight + 10.dp, end = 14.dp)
                     .clip(RoundedCornerShape(18.dp))
                     .background(Color.Black.copy(alpha = 0.72f))
-                    .clickable { beautyPanelOpen = !beautyPanelOpen }
+                    .clickable(
+                        enabled = !state.videoRecordingState.isRecording &&
+                            !state.videoRecordingState.isProcessing,
+                    ) { beautyPanelOpen = !beautyPanelOpen }
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 Text(
@@ -1750,6 +1753,8 @@ fun CameraScreen(
                             Switch(
                                 checked = beautyEnabled,
                                 onCheckedChange = { beautyEnabled = it },
+                                enabled = !state.videoRecordingState.isRecording &&
+                                    !state.videoRecordingState.isProcessing,
                             )
                         }
                         Text("Skin smoothing", color = Color.White.copy(alpha = 0.82f), fontSize = 12.sp)
@@ -1757,7 +1762,8 @@ fun CameraScreen(
                             value = beautySmoothing,
                             onValueChange = { beautySmoothing = it },
                             valueRange = 0f..1f,
-                            enabled = beautyEnabled,
+                            enabled = beautyEnabled && !state.videoRecordingState.isRecording &&
+                                !state.videoRecordingState.isProcessing,
                         )
                         Text(
                             "${(beautySmoothing * 100f).roundToInt()}%",
