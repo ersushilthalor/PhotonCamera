@@ -171,6 +171,7 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+    implementation("io.github.kyant0:backdrop:2.0.0")
     implementation(libs.androidx.fragment.ktx)
     implementation(libs.androidx.recyclerview)
     

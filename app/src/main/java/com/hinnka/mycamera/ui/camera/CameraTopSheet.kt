@@ -45,6 +45,8 @@ import com.hinnka.mycamera.ui.components.RawRenderingEngineSettingsPanel
 import com.hinnka.mycamera.video.*
 import com.hinnka.mycamera.video.VideoCodec
 import com.hinnka.mycamera.ui.icons.AppIcons
+import com.hinnka.mycamera.ui.components.GlassTopPanel
+import com.hinnka.mycamera.ui.components.glassTile
 
 private enum class VideoSettingPanel {
     ASPECT_RATIO,
@@ -143,18 +145,21 @@ fun CameraTopSheet(
         exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
         modifier = modifier
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
-                .background(Color.Black.copy(alpha = 0.8f))
-                // Keep the screen's top inset fixed, but measure content and side padding
-                // in the rotated viewport so landscape controls stay inside the sheet.
-                .padding(top = contentTopPadding)
-                .autoRotate(matchParentSize = true)
-                .padding(horizontal = 24.dp)
+        GlassTopPanel(
+            modifier = Modifier.fillMaxWidth(),
+            cornerRadius = 24.dp,
+            blurRadius = 18.dp,
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    // Keep the screen's top inset fixed, but measure content and side padding
+                    // in the rotated viewport so landscape controls stay inside the sheet.
+                    .padding(top = contentTopPadding)
+                    .autoRotate(matchParentSize = true)
+                    .padding(horizontal = 24.dp)
+            ) {
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -173,11 +178,10 @@ fun CameraTopSheet(
                                 modifier = Modifier
                                     .weight(1f)
                                     .heightIn(min = 40.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(
-                                        if (isSelected) AccentColor else Color.White.copy(
-                                            alpha = 0.12f
-                                        )
+                                    .glassTile(
+                                        shape = RoundedCornerShape(8.dp),
+                                        selected = isSelected,
+                                        selectedColor = AccentColor,
                                     )
                                     .clickable { onAspectRatioChange(ratio) }
                                     .padding(vertical = 8.dp),
@@ -285,11 +289,10 @@ fun CameraTopSheet(
                                 modifier = Modifier
                                     .weight(1f)
                                     .heightIn(min = 40.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(
-                                        if (isSelected) AccentColor else Color.White.copy(
-                                            alpha = 0.12f
-                                        )
+                                    .glassTile(
+                                        shape = RoundedCornerShape(8.dp),
+                                        selected = isSelected,
+                                        selectedColor = AccentColor,
                                     )
                                     .clickable { onVideoAspectRatioChange(ratio) }
                                     .padding(vertical = 8.dp),
@@ -473,9 +476,8 @@ fun CameraTopSheet(
                 ) {
                     Row(
                         modifier = Modifier
+                            .glassTile(shape = RoundedCornerShape(8.dp))
                             .clickable(onClick = onMoreSettingsClick)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(color = Color.White.copy(alpha = 0.15f))
                             .padding(16.dp, 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -509,6 +511,7 @@ fun CameraTopSheet(
                         )
                     }
                 }
+            }
             }
         }
     }
@@ -702,10 +705,7 @@ private fun VideoSettingTile(
     Column(
         modifier = modifier
             .height(40.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (expanded) AccentColor else Color.White.copy(alpha = 0.14f)
-            )
+            .glassTile(shape = RoundedCornerShape(8.dp), selected = expanded, selectedColor = AccentColor)
             .clickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically)
@@ -762,10 +762,7 @@ private fun VideoOptionChip(
     Box(
         modifier = Modifier
             .heightIn(min = 36.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (selected) AccentColor else Color.White.copy(alpha = 0.12f)
-            )
+            .glassTile(shape = RoundedCornerShape(8.dp), selected = selected, selectedColor = AccentColor)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
@@ -989,8 +986,7 @@ fun QuickSettingValue(
     Box(
         modifier = modifier
             .height(48.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = 0.15f))
+            .glassTile(shape = RoundedCornerShape(8.dp), selected = false, selectedColor = AccentColor)
             .clickable { onClick() }
             .padding(horizontal = 8.dp, vertical = 6.dp),
         contentAlignment = Alignment.CenterStart
@@ -1023,8 +1019,7 @@ fun QuickSettingButton(
     Box(
         modifier = modifier
             .height(48.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = 0.15f))
+            .glassTile(shape = RoundedCornerShape(8.dp), selected = false, selectedColor = AccentColor)
             .clickable { onClick() }
             .padding(horizontal = 8.dp, vertical = 6.dp),
         contentAlignment = Alignment.CenterStart
@@ -1062,12 +1057,7 @@ fun QuickSettingButton2(
     Box(
         modifier = modifier
             .height(48.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (checked) AccentColor else Color.White.copy(
-                    alpha = 0.15f
-                )
-            )
+            .glassTile(shape = RoundedCornerShape(8.dp), selected = checked, selectedColor = AccentColor)
             .clickable { onClick() }
             .padding(horizontal = 8.dp, vertical = 6.dp),
         contentAlignment = Alignment.CenterStart
@@ -1105,12 +1095,7 @@ fun QuickSettingToggle(
     Box(
         modifier = modifier
             .height(48.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (checked) AccentColor.copy(alpha = contentAlpha) else Color.White.copy(
-                    alpha = 0.15f
-                )
-            )
+            .glassTile(shape = RoundedCornerShape(8.dp), selected = checked, selectedColor = AccentColor)
             .clickable(enabled = enabled) { onCheckedChange(!checked) }
             .padding(horizontal = 8.dp, vertical = 6.dp),
         contentAlignment = Alignment.CenterStart
