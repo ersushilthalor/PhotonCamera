@@ -40,6 +40,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import com.hinnka.mycamera.livephoto.LivePhotoRecorder
 import com.hinnka.mycamera.lut.LutConfig
 import com.hinnka.mycamera.lut.VideoColorEffectLayer
+import com.hinnka.mycamera.lut.BeautyRenderController
 import com.hinnka.mycamera.model.SafeImage
 import com.hinnka.mycamera.model.ColorRecipeParams
 import com.hinnka.mycamera.processor.MgcRawMaxMode
@@ -92,7 +93,10 @@ sealed interface EnhancedStabilizationFallback {
  * - 手动曝光控制（ISO、快门速度）
  * - 变焦控制
  */
-class Camera2Controller(private val context: Context) {
+class Camera2Controller(
+    private val context: Context,
+    private val beautyRenderController: BeautyRenderController? = null,
+) {
 
     companion object {
         private const val TAG = "Camera2Controller"
@@ -7643,9 +7647,17 @@ class Camera2Controller(private val context: Context) {
             !monitorOnly && logProfile.matchesLut(it.curve, it.colorSpace)
         }
         val recordingRecipe = creativeRecipeParams.takeUnless { monitorOnly }
+        val beautySnapshot = beautyRenderController?.snapshot()
+        val beautyEnabled = beautySnapshot?.enabled == true && beautySnapshot.smoothing > 0.001f
         val colorLayers = buildList {
-            if (recordingLut != null || recordingRecipe?.isDefault() == false) {
-                add(VideoColorEffectLayer(recordingLut, recordingRecipe))
+            if (recordingLut != null || recordingRecipe?.isDefault() == false || beautyEnabled) {
+                add(
+                    VideoColorEffectLayer(
+                        lutConfig = recordingLut,
+                        recipeParams = recordingRecipe,
+                        beautyController = beautyRenderController?.takeIf { beautyEnabled },
+                    )
+                )
             }
         }
         val cameraInputIsHlg10 = logProfile == VideoLogProfile.HLG10 &&
