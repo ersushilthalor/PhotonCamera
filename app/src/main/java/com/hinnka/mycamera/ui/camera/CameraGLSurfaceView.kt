@@ -10,6 +10,7 @@ import android.view.Surface
 import com.hinnka.mycamera.livephoto.LivePhotoRecorder
 import com.hinnka.mycamera.camera.MeteringMode
 import com.hinnka.mycamera.lut.LutConfig
+import com.hinnka.mycamera.lut.BeautyRenderController
 import com.hinnka.mycamera.lut.LutRenderer
 import com.hinnka.mycamera.raw.RawEnginePreviewPlan
 import com.hinnka.mycamera.preview.EyeFocusPreviewFrame
@@ -447,6 +448,13 @@ class CameraGLSurfaceView @JvmOverloads constructor(
      */
     fun setLivePhotoRecorder(recorder: LivePhotoRecorder?) {
         renderer.livePhotoRecorder = recorder
+    }
+
+    fun setBeautyController(controller: BeautyRenderController?) {
+        queueEvent {
+            renderer.setBeautyController(controller)
+            requestRender()
+        }
     }
 
     fun setVideoLogProfile(profile: VideoLogProfile) {
