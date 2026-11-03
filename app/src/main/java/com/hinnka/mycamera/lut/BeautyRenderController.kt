@@ -33,7 +33,7 @@ data class BeautyFaceRegion(
                 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136,
                 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109
             )
-            val oval = ovalIndices.mapNotNull(points::getOrNull)
+            val oval = ovalIndices.asIterable().mapNotNull { index -> points.getOrNull(index) }
             if (oval.size != ovalIndices.size) return null
             val left = oval.minOf { it.first }.coerceIn(0f, 1f)
             val top = oval.minOf { it.second }.coerceIn(0f, 1f)
@@ -42,7 +42,7 @@ data class BeautyFaceRegion(
             if (right - left < 0.04f || bottom - top < 0.04f) return null
 
             fun center(indices: IntArray): Pair<Float, Float> {
-                val selected = indices.mapNotNull(points::getOrNull)
+                val selected = indices.asIterable().mapNotNull { index -> points.getOrNull(index) }
                 if (selected.isEmpty()) return 0.5f to 0.5f
                 val x = selected.sumOf { it.first.toDouble() }.toFloat() / selected.size
                 val y = selected.sumOf { it.second.toDouble() }.toFloat() / selected.size
