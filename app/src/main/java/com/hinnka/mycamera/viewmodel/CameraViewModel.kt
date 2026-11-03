@@ -48,6 +48,7 @@ import com.hinnka.mycamera.lut.LutConfig
 import com.hinnka.mycamera.lut.OppoLutPack
 import com.hinnka.mycamera.lut.LutConverter
 import com.hinnka.mycamera.lut.LutInfo
+import com.hinnka.mycamera.lut.BeautyRenderController
 import com.hinnka.mycamera.lut.creator.LutGenerator
 import com.hinnka.mycamera.lut.creator.OpenAIApiClient
 import com.hinnka.mycamera.model.CameraPreset
@@ -59,6 +60,7 @@ import com.hinnka.mycamera.model.toEffectParams
 import com.hinnka.mycamera.ml.DepthModelManager
 import com.hinnka.mycamera.phantom.PhantomWidgetProvider
 import com.hinnka.mycamera.preview.EyeFocusPreviewFrame
+import com.hinnka.mycamera.preview.BeautyFaceLandmarker
 import com.hinnka.mycamera.preview.PortraitMaskSnapshot
 import com.hinnka.mycamera.preview.PreviewEyeFocusProcessor
 import com.hinnka.mycamera.processor.CaptureProcessingQueue
@@ -590,7 +592,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val captureResults: List<CaptureResult?>
     )
 
-    private val cameraController = Camera2Controller(application)
+    val beautyRenderController = BeautyRenderController()
+    private val cameraController = Camera2Controller(application, beautyRenderController)
 
 
     // 内容仓库（单例，与 GalleryViewModel 共享）
@@ -601,6 +604,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val oppoPhotoSettingsRepository = OppoPhotoSettingsRepository(application)
     val oppoPhotoSettings: StateFlow<OppoPhotoSettings> = oppoPhotoSettingsRepository.settings
     private val previewEyeFocusProcessor = PreviewEyeFocusProcessor(application)
+    private val beautyFaceLandmarker = BeautyFaceLandmarker(application) { region ->
+        beautyRenderController.setFaceRegion(region)
+    }
 
     // 计费管理器
     private val billingManager = com.hinnka.mycamera.billing.BillingManagerImpl(application)
@@ -4893,7 +4899,20 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.updateHighlightPoint(x, y)
     }
 
+    fun setBeautyEnabled(enabled: Boolean) {
+        beautyRenderController.setEnabled(enabled)
+        if (!enabled) beautyRenderController.setFaceRegion(null)
+    }
+
+    fun setBeautySmoothing(value: Float) {
+        beautyRenderController.setSmoothing(value)
+    }
+
     fun handleEyeFocusInputUpdate(frame: EyeFocusPreviewFrame) {
+        if (beautyRenderController.snapshot().enabled) {
+            val beautyInput = frame.bitmap.copy(Bitmap.Config.ARGB_8888, false)
+            if (beautyInput != null) beautyFaceLandmarker.submit(beautyInput)
+        }
         val cameraState = state.value
         val acceptsPortraitMask = cameraState.captureMode == CaptureMode.PHOTO &&
             cameraState.useRaw &&
@@ -7249,6 +7268,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraReopenJob?.cancel()
         cameraErrorRecoveryJob?.cancel()
         previewEyeFocusProcessor.close()
+        beautyFaceLandmarker.close()
         cameraController.release()
         contentRepository.lutManager.clearCache()
         contentRepository.frameManager.clearCache()
