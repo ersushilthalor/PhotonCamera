@@ -1095,7 +1095,7 @@ fun QuickSettingToggle(
     Box(
         modifier = modifier
             .height(48.dp)
-            .glassTile(shape = RoundedCornerShape(8.dp), selected = checked, selectedColor = AccentColor)
+            .glassTile(shape = RoundedCornerShape(8.dp), selected = checked, selectedColor = AccentColor.copy(alpha = contentAlpha))
             .clickable(enabled = enabled) { onCheckedChange(!checked) }
             .padding(horizontal = 8.dp, vertical = 6.dp),
         contentAlignment = Alignment.CenterStart
