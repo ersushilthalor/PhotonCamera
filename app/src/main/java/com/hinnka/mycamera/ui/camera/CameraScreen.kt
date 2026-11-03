@@ -342,6 +342,9 @@ fun CameraScreen(
 
     // UI State
     var activePanel by remember { mutableStateOf(ActivePanel.NONE) }
+    var beautyPanelOpen by remember { mutableStateOf(false) }
+    var beautyEnabled by remember { mutableStateOf(false) }
+    var beautySmoothing by remember { mutableFloatStateOf(0.38f) }
     var selectedParameter by remember { mutableStateOf(CameraParameter.EXPOSURE_COMPENSATION) }
     var showParameterRuler by remember(state.captureMode, state.useRaw) { mutableStateOf(false) }
     val isXpan = state.aspectRatio == AspectRatio.XPAN
@@ -377,6 +380,11 @@ fun CameraScreen(
         if (!state.useRaw || state.captureMode != CaptureMode.PHOTO) {
             rawCaptureTapLocked = false
         }
+    }
+
+    LaunchedEffect(beautyEnabled, beautySmoothing) {
+        viewModel.setBeautyEnabled(beautyEnabled)
+        viewModel.setBeautySmoothing(beautySmoothing)
     }
 
     // 从后台返回时检查并恢复相机，刷新最新照片
@@ -1296,7 +1304,7 @@ fun CameraScreen(
                                     hy
                                 )
                             },
-                            onEyeFocusInputAvailable = if (eyeFocusActive || portraitMaskActive) {
+                            onEyeFocusInputAvailable = if (eyeFocusActive || portraitMaskActive || beautyEnabled) {
                                 viewModel::handleEyeFocusInputUpdate
                             } else {
                                 null
@@ -1307,6 +1315,7 @@ fun CameraScreen(
                             },
                             livePhotoRecorder = viewModel.livePhotoRecorder,
                             videoLogProfile = state.videoConfig.logProfile,
+                            beautyController = viewModel.beautyRenderController,
                             isEyeFocusBusy = viewModel.isEyeFocusBusy,
                             isAutoFocus = state.isAutoFocus,
                             focusPeakingEnabled = focusPeakingEnabled && !state.isHyperfocalFocusEnabled,
@@ -1693,6 +1702,74 @@ fun CameraScreen(
                                 onPanBy = viewModel::panZoomBy,
                             )
                         }
+                    }
+                }
+            }
+
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = topBarHeight + 10.dp, end = 14.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Color.Black.copy(alpha = 0.72f))
+                    .clickable(
+                        enabled = !state.videoRecordingState.isRecording &&
+                            !state.videoRecordingState.isProcessing,
+                    ) { beautyPanelOpen = !beautyPanelOpen }
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    text = if (beautyEnabled) "✨ Beauty ON" else "✨ Beauty",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+
+            if (beautyPanelOpen) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = topBarHeight + 52.dp, end = 12.dp)
+                        .widthIn(max = 260.dp),
+                    color = Color.Black.copy(alpha = 0.88f),
+                    shape = RoundedCornerShape(18.dp),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Text(
+                                "Beauty",
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Switch(
+                                checked = beautyEnabled,
+                                onCheckedChange = { beautyEnabled = it },
+                                enabled = !state.videoRecordingState.isRecording &&
+                                    !state.videoRecordingState.isProcessing,
+                            )
+                        }
+                        Text("Skin smoothing", color = Color.White.copy(alpha = 0.82f), fontSize = 12.sp)
+                        Slider(
+                            value = beautySmoothing,
+                            onValueChange = { beautySmoothing = it },
+                            valueRange = 0f..1f,
+                            enabled = beautyEnabled && !state.videoRecordingState.isRecording &&
+                                !state.videoRecordingState.isProcessing,
+                        )
+                        Text(
+                            "${(beautySmoothing * 100f).roundToInt()}%",
+                            color = Color.White.copy(alpha = 0.72f),
+                            fontSize = 11.sp,
+                        )
                     }
                 }
             }

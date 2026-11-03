@@ -61,6 +61,7 @@ class RealtimeVideoRenderer(
     private data class LayerResources(
         val lutConfig: LutConfig?,
         val params: ColorRecipeParams,
+        val beautyController: BeautyRenderController? = null,
         var lutTextureId: Int = 0,
         var curveTextureId: Int = 0,
     )
@@ -72,6 +73,7 @@ class RealtimeVideoRenderer(
             LayerResources(
                 lutConfig = layer.lutConfig,
                 params = layer.recipeParams ?: ColorRecipeParams.DEFAULT,
+                beautyController = layer.beautyController,
             )
         }
         .ifEmpty {
@@ -520,6 +522,7 @@ class RealtimeVideoRenderer(
         GLES30.glClearColor(0f, 0f, 0f, 1f)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
         GLES30.glUseProgram(locations.programId)
+        locations.bindBeauty(layer.beautyController?.snapshot() ?: BeautyRenderState())
         colorProgramCache.bindLogInput(locations)
 
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)

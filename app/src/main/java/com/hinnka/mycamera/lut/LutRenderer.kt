@@ -69,6 +69,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     }
 
     private val colorProgramCache = PreviewColorProgramCache()
+    @Volatile private var beautyRenderController: BeautyRenderController? = null
     private val enginePreview = RawEnginePreviewGl()
     private val mgcEisHardwareBufferRenderer = MgcEisHardwareBufferRenderer(TAG)
     private val mgcEisYuvRenderer = MgcEisYuvRenderer(TAG)
@@ -814,11 +815,16 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         curveTextureId: Int,
         curveEnabled: Boolean,
         enableVideoLog: Boolean,
+        applyBeauty: Boolean = true,
     ) {
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, targetFboId)
         GLES30.glViewport(0, 0, width, height)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
         GLES30.glUseProgram(locations.programId)
+        locations.bindBeauty(
+            if (applyBeauty) beautyRenderController?.snapshot() ?: BeautyRenderState()
+            else BeautyRenderState()
+        )
         colorProgramCache.bindLogInput(locations)
         enginePreview.bind(locations.uEnginePreviewLutLocation)
 
@@ -1137,6 +1143,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                     curveTextureId = curveTextureId,
                     curveEnabled = curveEnabled && curveTextureId != 0,
                     enableVideoLog = false,
+                    applyBeauty = false,
                 )
                 currentTexId = stackTextureId
             }
@@ -2364,6 +2371,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     /**
      * 设置预览尺寸
      */
+    fun setBeautyController(controller: BeautyRenderController?) {
+        beautyRenderController = controller
+    }
+
     fun setPreviewSize(width: Int, height: Int) {
         val sizeChanged = previewWidth != width || previewHeight != height
         previewWidth = width

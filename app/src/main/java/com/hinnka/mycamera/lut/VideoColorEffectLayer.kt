@@ -6,4 +6,5 @@ import com.hinnka.mycamera.model.ColorRecipeParams
 data class VideoColorEffectLayer(
     val lutConfig: LutConfig?,
     val recipeParams: ColorRecipeParams?,
+    val beautyController: BeautyRenderController? = null,
 )

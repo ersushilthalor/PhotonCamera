@@ -22,6 +22,7 @@ import com.hinnka.mycamera.livephoto.LivePhotoRecorder
 import com.hinnka.mycamera.camera.FocusPointSource
 import com.hinnka.mycamera.camera.MeteringMode
 import com.hinnka.mycamera.lut.LutConfig
+import com.hinnka.mycamera.lut.BeautyRenderController
 import com.hinnka.mycamera.raw.RawEnginePreviewPlan
 import kotlinx.coroutines.flow.StateFlow
 import com.hinnka.mycamera.model.ColorRecipeParams
@@ -75,6 +76,7 @@ fun CameraPreviewGL(
     onFirstPreviewFrame: (() -> Unit)? = null,
     livePhotoRecorder: LivePhotoRecorder? = null,
     videoLogProfile: VideoLogProfile = VideoLogProfile.OFF,
+    beautyController: BeautyRenderController? = null,
     isEyeFocusBusy: Boolean = false,
     onGLSurfaceViewReady: ((CameraGLSurfaceView) -> Unit)? = null,
     isAutoFocus: Boolean = true,
@@ -98,6 +100,10 @@ fun CameraPreviewGL(
     LaunchedEffect(glSurfaceViewRef, enginePreviewPlan, resumeGeneration) {
         val view = glSurfaceViewRef ?: return@LaunchedEffect
         enginePreviewPlan.collect { view.setEnginePreview(it) }
+    }
+
+    LaunchedEffect(glSurfaceViewRef, beautyController, resumeGeneration) {
+        glSurfaceViewRef?.setBeautyController(beautyController)
     }
 
     DisposableEffect(lifecycleOwner) {
