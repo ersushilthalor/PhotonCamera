@@ -815,12 +815,16 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         curveTextureId: Int,
         curveEnabled: Boolean,
         enableVideoLog: Boolean,
+        applyBeauty: Boolean = true,
     ) {
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, targetFboId)
         GLES30.glViewport(0, 0, width, height)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
         GLES30.glUseProgram(locations.programId)
-        locations.bindBeauty(beautyRenderController?.snapshot() ?: BeautyRenderState())
+        locations.bindBeauty(
+            if (applyBeauty) beautyRenderController?.snapshot() ?: BeautyRenderState()
+            else BeautyRenderState()
+        )
         colorProgramCache.bindLogInput(locations)
         enginePreview.bind(locations.uEnginePreviewLutLocation)
 
@@ -1139,6 +1143,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                     curveTextureId = curveTextureId,
                     curveEnabled = curveEnabled && curveTextureId != 0,
                     enableVideoLog = false,
+                    applyBeauty = false,
                 )
                 currentTexId = stackTextureId
             }
