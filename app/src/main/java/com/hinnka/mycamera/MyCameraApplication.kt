@@ -32,12 +32,24 @@ class MyCameraApplication : Application() {
         applicationScope.launch(Dispatchers.Default) {
             RawSceneExposureEstimator.warmUp(this@MyCameraApplication)
         }
-        StartupTrace.measure("BuglyHelper.init") {
-            BuglyHelper.init(this)
+        applicationScope.launch(Dispatchers.IO) {
+            runCatching {
+                StartupTrace.measure("BuglyHelper.init") {
+                    BuglyHelper.init(this@MyCameraApplication)
+                }
+            }.onFailure { error ->
+                PLog.e(TAG, "Bugly initialization failed", error)
+            }
         }
         val contentRepository = ContentRepository.getInstance(this)
-        StartupTrace.measure("ContentRepository.initialize") {
-            contentRepository.initialize()
+        applicationScope.launch(Dispatchers.IO) {
+            runCatching {
+                StartupTrace.measure("ContentRepository.initialize") {
+                    contentRepository.initialize()
+                }
+            }.onFailure { error ->
+                PLog.e(TAG, "Content repository initialization failed", error)
+            }
         }
         phantomService = StartupTrace.measure("PhantomService()") {
             PhantomService(this)
@@ -69,7 +81,7 @@ class MyCameraApplication : Application() {
     }
 
     private fun recoverPrivateGalleryIndex() {
-        applicationScope.launch {
+        applicationScope.launch(Dispatchers.IO) {
             try {
                 val result = GalleryManager.recoverPrivatePhotoDirectoryToDatabase(this@MyCameraApplication)
                 PLog.d(

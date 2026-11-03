@@ -228,7 +228,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        val splashScreen = installSplashScreen()
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         StartupTrace.mark("MainActivity.onCreate start")
 
@@ -282,12 +282,6 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             FilmData.init(this@MainActivity)
-        }
-
-        splashScreen.setKeepOnScreenCondition {
-            val cameraInitialized = cameraViewModel.isInitialized.value
-            val galleryInitialized = galleryViewModel.isInitialized.value
-            !(cameraInitialized && galleryInitialized)
         }
 
 

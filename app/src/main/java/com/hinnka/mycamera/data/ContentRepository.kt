@@ -15,6 +15,7 @@ import com.hinnka.mycamera.raw.DcpManager
 import com.hinnka.mycamera.raw.RawNoiseProfileInfo
 import com.hinnka.mycamera.raw.RawNoiseProfileManager
 import com.hinnka.mycamera.utils.StartupTrace
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,6 +28,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * 使用 StateFlow 实现响应式更新
  */
 class ContentRepository private constructor(context: Context) {
+    private val initializationComplete = CompletableDeferred<Unit>()
 
     companion object {
         @Volatile
@@ -96,30 +98,38 @@ class ContentRepository private constructor(context: Context) {
      * 初始化内容
      */
     fun initialize() {
-        StartupTrace.measure("ContentRepository.lutManager.initialize") {
-            lutManager.initialize()
+        try {
+            StartupTrace.measure("ContentRepository.lutManager.initialize") {
+                lutManager.initialize()
+            }
+            StartupTrace.measure("ContentRepository.frameManager.initialize") {
+                frameManager.initialize()
+            }
+            _availableLuts.value = StartupTrace.measure("ContentRepository.getAvailableLuts") {
+                lutManager.getAvailableLuts()
+            }
+            _availableFrames.value = StartupTrace.measure("ContentRepository.getAvailableFrames") {
+                frameManager.getAvailableFrames()
+            }
+            _availableDcps.value = StartupTrace.measure("ContentRepository.getAvailableDcps") {
+                dcpManager.getAvailableDcps()
+            }
+            _availableRawNoiseProfiles.value = StartupTrace.measure(
+                "ContentRepository.getAvailableRawNoiseProfiles",
+            ) {
+                rawNoiseProfileManager.getAvailableProfiles()
+            }
+            StartupTrace.mark(
+                "ContentRepository.initialize populated",
+                "luts=${_availableLuts.value.size}, frames=${_availableFrames.value.size}, dcps=${_availableDcps.value.size}"
+            )
+        } finally {
+            initializationComplete.complete(Unit)
         }
-        StartupTrace.measure("ContentRepository.frameManager.initialize") {
-            frameManager.initialize()
-        }
-        _availableLuts.value = StartupTrace.measure("ContentRepository.getAvailableLuts") {
-            lutManager.getAvailableLuts()
-        }
-        _availableFrames.value = StartupTrace.measure("ContentRepository.getAvailableFrames") {
-            frameManager.getAvailableFrames()
-        }
-        _availableDcps.value = StartupTrace.measure("ContentRepository.getAvailableDcps") {
-            dcpManager.getAvailableDcps()
-        }
-        _availableRawNoiseProfiles.value = StartupTrace.measure(
-            "ContentRepository.getAvailableRawNoiseProfiles",
-        ) {
-            rawNoiseProfileManager.getAvailableProfiles()
-        }
-        StartupTrace.mark(
-            "ContentRepository.initialize populated",
-            "luts=${_availableLuts.value.size}, frames=${_availableFrames.value.size}, dcps=${_availableDcps.value.size}"
-        )
+    }
+
+    suspend fun awaitInitialized() {
+        initializationComplete.await()
     }
 
     /**

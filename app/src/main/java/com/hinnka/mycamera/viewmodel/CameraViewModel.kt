@@ -2568,11 +2568,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 cameraController.setVideoCodec(prefs.videoCodec)
                 cameraController.setMeteringMode(prefs.meteringMode)
 
-                // 根据启动时的拍摄模式应用照片 LUT 或独立的视频 LUT。
-                resolveLutIdForMode(prefs, prefs.captureMode)?.let {
-                    setLut(it, persist = false)
-                }
-
                 // 应用保存的边框配置
                 if (prefs.frameId != null) {
                     currentFrameId = prefs.frameId
@@ -2610,14 +2605,20 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 cameraController.setUseLivePhoto(shouldEnableLivePhoto(prefs))
                 // 应用保存的虚拟光圈
                 applyDefaultVirtualAperture(prefs.defaultVirtualAperture)
-            } else {
-                // 如果没有任何偏好设置，使用配置文件中的默认 LUT（第一个）
-                val defaultLut = availableLutList.firstOrNull { it.isDefault }
-                defaultLut?.let { setLut(it.id, persist = false) }
             }
 
             _isInitialized.value = true
             StartupTrace.mark("CameraViewModel.isInitialized set to true")
+
+            // Keep camera startup independent of the disk scan; apply the saved/default LUT afterward.
+            viewModelScope.launch {
+                contentRepository.awaitInitialized()
+                availableLutList = contentRepository.availableLuts.first()
+                val startupLutId = prefs?.let { resolveLutIdForMode(it, it.captureMode) }
+                    ?: availableLutList.firstOrNull { it.isDefault }?.id
+                startupLutId?.let { setLut(it, persist = false) }
+                StartupTrace.mark("CameraViewModel.startup LUT applied", "lutId=$startupLutId")
+            }
         }
 
         // 监听相机状态，用于同步预览渲染参数
