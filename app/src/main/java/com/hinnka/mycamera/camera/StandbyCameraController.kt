@@ -380,12 +380,16 @@ class StandbyCameraController(context: Context) {
             return null
         }
 
-        val concurrentPairSupported = try {
-            cameraManager.concurrentCameraIds.any { ids ->
-                ids.contains(activeOpenCameraId) && ids.contains(standbyOpenCameraId)
+        val concurrentPairSupported = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                cameraManager.concurrentCameraIds.any { ids ->
+                    ids.contains(activeOpenCameraId) && ids.contains(standbyOpenCameraId)
+                }
+            } catch (error: Exception) {
+                PLog.w(TAG, "Unable to read concurrent camera combinations", error)
+                false
             }
-        } catch (error: Exception) {
-            PLog.w(TAG, "Unable to read concurrent camera combinations", error)
+        } else {
             false
         }
 
@@ -679,10 +683,14 @@ class StandbyCameraController(context: Context) {
 
             val outputConfigurations = buildList {
                 add(OutputConfiguration(checkNotNull(standbyPreviewSurface)).apply {
-                    plan.standbyPhysicalCameraId?.let(::setPhysicalCameraId)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        plan.standbyPhysicalCameraId?.let { setPhysicalCameraId(it) }
+                    }
                 })
                 add(OutputConfiguration(reader.surface).apply {
-                    plan.standbyPhysicalCameraId?.let(::setPhysicalCameraId)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        plan.standbyPhysicalCameraId?.let { setPhysicalCameraId(it) }
+                    }
                 })
             }
             val sessionConfiguration = SessionConfiguration(
