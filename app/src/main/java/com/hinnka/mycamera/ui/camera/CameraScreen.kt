@@ -1000,15 +1000,13 @@ fun CameraScreen(
                     onZoomStopClick = { animateZoomStopWithPreviewTransition(it) },
                     onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
                     onFilterClick = {
-                        if (isVideoMode) {
-                            // Open the regular LUT selector; its Edit action opens adjustments.
-                            activePanel = if (activePanel == ActivePanel.FILTERS) {
-                                ActivePanel.NONE
-                            } else {
-                                ActivePanel.FILTERS
-                            }
+                        // Open the horizontal LUT strip in both Photo and Video.
+                        // The selector's Edit action opens the color-adjustment sheet.
+                        if (activePanel == ActivePanel.FILTERS) {
+                            activePanel = ActivePanel.NONE
                         } else {
-                            activePanel = if (activePanel == ActivePanel.EDIT) ActivePanel.NONE else ActivePanel.EDIT
+                            viewModel.setLutSelectorMode(LutSelectorMode.Style)
+                            activePanel = ActivePanel.FILTERS
                         }
                     },
                     onFilterButtonBoundsChanged = { bounds ->
@@ -1554,15 +1552,13 @@ fun CameraScreen(
                             onZoomStopClick = { animateZoomStopWithPreviewTransition(it) },
                             onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
                             onFilterClick = {
-                                if (isVideoMode) {
-                                    // Open the regular LUT selector; its Edit action opens adjustments.
-                                    activePanel = if (activePanel == ActivePanel.FILTERS) {
-                                        ActivePanel.NONE
-                                    } else {
-                                        ActivePanel.FILTERS
-                                    }
+                                // Open the horizontal LUT strip in both Photo and Video.
+                                // The selector's Edit action opens the color-adjustment sheet.
+                                if (activePanel == ActivePanel.FILTERS) {
+                                    activePanel = ActivePanel.NONE
                                 } else {
-                                    activePanel = if (activePanel == ActivePanel.EDIT) ActivePanel.NONE else ActivePanel.EDIT
+                                    viewModel.setLutSelectorMode(LutSelectorMode.Style)
+                                    activePanel = ActivePanel.FILTERS
                                 }
                             },
                             onFilterButtonBoundsChanged = { bounds ->
@@ -1846,6 +1842,9 @@ fun CameraScreen(
                         activePanel = ActivePanel.NONE
                         onFilterManagementClick(lutId)
                     },
+                    // Keep per-LUT long-press management, but remove the header shortcut.
+                    // Quick LUT access lives on the right side of the zoom bar.
+                    showManagementButton = false,
                     categoryOrder = categoryOrder,
                     headerContent = if (isVideoLog) {
                         {

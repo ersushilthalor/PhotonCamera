@@ -199,6 +199,7 @@ fun LutSelector(
     onEditClick: (() -> Unit)? = null,
     showEditButtonWhenNoLut: Boolean = false,
     onManageClick: ((String) -> Unit)? = null,
+    showManagementButton: Boolean = true,
     categoryOrder: List<String> = emptyList(),
     headerContent: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -338,7 +339,7 @@ fun LutSelector(
                                 LutEditButton(onClick = onEditClick)
                             }
 
-                            if (onManageClick != null) {
+                            if (onManageClick != null && showManagementButton) {
                                 var lastClickTime by remember { mutableLongStateOf(0L) }
                                 LutPanelIconButton(
                                     imageVector = Icons.Default.Settings,
