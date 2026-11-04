@@ -648,16 +648,32 @@ fun NavigationHost(
             navController = navController,
             startDestination = Routes.CAMERA,
             enterTransition = {
-                slideInHorizontally(initialOffsetX = { it }) + fadeIn()
+                if (targetState.destination.route == Routes.SETTINGS) {
+                    androidx.compose.animation.EnterTransition.None
+                } else {
+                    slideInHorizontally(initialOffsetX = { it }) + fadeIn()
+                }
             },
             exitTransition = {
-                slideOutHorizontally(targetOffsetX = { -it }) + fadeOut()
+                if (targetState.destination.route == Routes.SETTINGS) {
+                    androidx.compose.animation.ExitTransition.None
+                } else {
+                    slideOutHorizontally(targetOffsetX = { -it }) + fadeOut()
+                }
             },
             popEnterTransition = {
-                slideInHorizontally(initialOffsetX = { -it }) + fadeIn()
+                if (initialState.destination.route == Routes.SETTINGS) {
+                    androidx.compose.animation.EnterTransition.None
+                } else {
+                    slideInHorizontally(initialOffsetX = { -it }) + fadeIn()
+                }
             },
             popExitTransition = {
-                slideOutHorizontally(targetOffsetX = { it }) + fadeOut()
+                if (initialState.destination.route == Routes.SETTINGS) {
+                    androidx.compose.animation.ExitTransition.None
+                } else {
+                    slideOutHorizontally(targetOffsetX = { it }) + fadeOut()
+                }
             }
         ) {
             composable(Routes.CAMERA) {
