@@ -318,6 +318,7 @@ fun FocoCameraIntegrationScreen(
                 if (lock) viewModel.lockFocusOnPoint(point.x, point.y, viewWidth, viewHeight)
                 else viewModel.focusOnPoint(point.x, point.y, viewWidth, viewHeight)
             }
+            override fun unlockFocus() = viewModel.unlockFocus()
             override fun setPro(pro: ProState) {
                 viewModel.setExposureCompensation(pro.evIndex)
                 if (pro.iso == null) viewModel.setIsoAuto(true) else viewModel.setIso(pro.iso)
