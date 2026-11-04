@@ -3853,10 +3853,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         targetCamera?.let { camera ->
             setZoomRatioForCamera(camera.defaultVisibleZoomRatio(), camera.cameraId)
         }
-        // Physical lenses exposed by one logical Camera2 device can be switched by
-        // rebuilding only its capture session. Closing the CameraDevice here adds an
-        // avoidable black-frame/cold-open gap and defeats seamless physical handoff.
-        if (!sharesOpenCameraDevice) {
+        val logicalDualPreviewSwitched = sharesOpenCameraDevice &&
+            cameraController.selectLogicalDualPreview(cameraId)
+        // A same-logical-device switch is instant only when both physical outputs are
+        // already part of the configured session. Otherwise keep the supported rebuild path.
+        if (!sharesOpenCameraDevice || !logicalDualPreviewSwitched) {
             reopenCamera(preserveVideoRecording = true)
         }
     }
@@ -3874,7 +3875,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         syncVendorCaptureSettingsToController()
         cameraController.switchToCameraId(cameraId)
         setZoomRatioForCamera(ratio, cameraId)
-        if (!sharesOpenCameraDevice) {
+        val logicalDualPreviewSwitched = sharesOpenCameraDevice &&
+            cameraController.selectLogicalDualPreview(cameraId)
+        if (!sharesOpenCameraDevice || !logicalDualPreviewSwitched) {
             reopenCamera(preserveVideoRecording = true)
         }
     }
