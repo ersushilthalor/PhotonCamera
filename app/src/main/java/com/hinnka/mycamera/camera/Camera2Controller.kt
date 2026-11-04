@@ -4085,18 +4085,19 @@ class Camera2Controller(private val context: Context) {
 
     private fun createOutputConfiguration(
         surface: Surface,
-        useHlg10: Boolean = false
+        useHlg10: Boolean = false,
+        physicalCameraId: String? = activeOutputPhysicalCameraId,
     ): OutputConfiguration {
         return OutputConfiguration(surface).apply {
             if (useHlg10) {
                 check(Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
                 setDynamicRangeProfile(DynamicRangeProfiles.HLG10)
             }
-            activeOutputPhysicalCameraId?.let { physicalCameraId ->
-                setPhysicalCameraId(physicalCameraId)
+            physicalCameraId?.let { outputPhysicalCameraId ->
+                setPhysicalCameraId(outputPhysicalCameraId)
                 PLog.i(
                     TAG,
-                    "OutputConfiguration bound to physicalCameraId=$physicalCameraId " +
+                    "OutputConfiguration bound to physicalCameraId=$outputPhysicalCameraId " +
                             "(openCameraId=$activeOpenCameraId)"
                 )
             }
