@@ -3521,6 +3521,10 @@ class Camera2Controller(private val context: Context) {
         }
         val device = cameraDevice ?: return
         val surface = previewSurface ?: return
+        val logicalSurface = logicalDualPreviewSurface?.takeIf {
+            logicalDualPreviewEnabled && it.isValid
+        }
+        logicalDualPreviewReady = false
         // createCaptureSession closes the previous session before onConfigured runs.
         // Stop exposing it while the replacement is being configured.
         invalidateCaptureSession(captureSession, "preview session replacement")
@@ -3558,6 +3562,7 @@ class Camera2Controller(private val context: Context) {
         try {
             previewRequestBuilder = device.createCaptureRequest(templateType).apply {
                 addTarget(surface)
+                logicalSurface?.let(::addTarget)
                 stabilizationReader?.surface?.let(::addTarget)
                 videoSurface?.let(::addTarget)
 
@@ -3566,6 +3571,7 @@ class Camera2Controller(private val context: Context) {
             }
 
             val surfaces = mutableListOf(surface)
+            logicalSurface?.let(surfaces::add)
             stabilizationReader?.surface?.let(surfaces::add)
             videoSurface?.let(surfaces::add)
             if (captureMode == CaptureMode.PHOTO) {
@@ -3653,11 +3659,28 @@ class Camera2Controller(private val context: Context) {
             )
             val outputConfigs = buildList {
                 add(createOutputConfiguration(surface))
+                logicalSurface?.let { dualSurface ->
+                    val physicalId = logicalDualPreviewSurfaceTexture
+                        ?.takeIf { it === standbyPreviewSurfaceTexture }
+                        ?.let { logicalSecondaryPhysicalCameraId }
+                        ?: logicalSecondaryPhysicalCameraId
+                    if (!physicalId.isNullOrBlank()) {
+                        add(OutputConfiguration(dualSurface).apply {
+                            setPhysicalCameraId(physicalId)
+                        })
+                    }
+                }
                 stabilizationReader?.surface?.let { eisSurface ->
                     add(createOutputConfiguration(eisSurface))
                 }
                 reader?.surface?.let { captureSurface ->
-                    add(createOutputConfiguration(captureSurface))
+                    if (logicalSurface != null) {
+                        // Keep the still reader logical so the selected physical lens is
+                        // resolved by the current zoom/camera controls at capture time.
+                        add(OutputConfiguration(captureSurface))
+                    } else {
+                        add(createOutputConfiguration(captureSurface))
+                    }
                 }
             }
             val sessionConfig = SessionConfiguration(
@@ -3690,6 +3713,7 @@ class Camera2Controller(private val context: Context) {
                                     "sessionColorSpace=${if (shouldUseP3ColorSpace()) "DISPLAY_P3" else "DEFAULT"}"
                         )
                         safeCloseCaptureSession(session, "photo configure failure")
+                        if (retryPreviewSessionWithoutLogicalDualPreview("photo configure failed", openGeneration)) return
                         if (vendorSessionParametersApplied &&
                             retryPreviewSessionWithoutVendorSessionParameters(
                                 reason = "photo configure failed",
@@ -3719,6 +3743,7 @@ class Camera2Controller(private val context: Context) {
             device.createCaptureSession(sessionConfig)
         } catch (e: IllegalStateException) {
             PLog.w(TAG, "Failed to create preview session", e)
+            if (retryPreviewSessionWithoutLogicalDualPreview("create session illegal state: ${e.message}", openGeneration)) return
             if (retryVideoSessionWithoutCameraHlg(openGeneration)) return
             if (vendorSessionParametersApplied &&
                 retryPreviewSessionWithoutVendorSessionParameters(
@@ -3738,6 +3763,7 @@ class Camera2Controller(private val context: Context) {
             handlePreviewSessionFailure("create session illegal state", openGeneration, e)
         } catch (e: Exception) {
             PLog.w(TAG, "Failed to create preview session", e)
+            if (retryPreviewSessionWithoutLogicalDualPreview("create session exception: ${e.message}", openGeneration)) return
             if (retryVideoSessionWithoutCameraHlg(openGeneration)) return
             if (vendorSessionParametersApplied &&
                 retryPreviewSessionWithoutVendorSessionParameters(
