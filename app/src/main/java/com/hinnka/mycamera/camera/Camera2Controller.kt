@@ -293,6 +293,7 @@ class Camera2Controller(private val context: Context) {
             !current.videoRecordingState.isProcessing
         if (!eligible || handler == null || primaryTexture == null || secondaryTexture == null) {
             standbyCameraController.release("active configuration is not eligible for persistent handoff")
+            releaseLogicalDualPreviewSurface("active configuration is not eligible")
             return
         }
         val standbyTexture = when (activeTexture) {
@@ -450,18 +451,32 @@ class Camera2Controller(private val context: Context) {
 
     fun selectLogicalDualPreview(cameraId: String): Boolean {
         if (!logicalDualPreviewEnabled || !logicalDualPreviewReady) return false
-        return when (cameraId) {
-            logicalPrimaryLensCameraId -> {
-                activeOutputPhysicalCameraId = logicalPrimaryPhysicalCameraId
-                publishPreviewSource(logicalDualPreviewSurfaceTexture === standbyPreviewSurfaceTexture)
-                true
-            }
-            logicalSecondaryLensCameraId -> {
-                activeOutputPhysicalCameraId = logicalSecondaryPhysicalCameraId
-                publishPreviewSource(logicalDualPreviewSurfaceTexture === standbyPreviewSurfaceTexture)
-                true
-            }
-            else -> false
+        val selectedPhysicalId = when (cameraId) {
+            logicalPrimaryLensCameraId -> logicalPrimaryPhysicalCameraId
+            logicalSecondaryLensCameraId -> logicalSecondaryPhysicalCameraId
+            else -> return false
+        }
+        if (selectedPhysicalId.isNullOrBlank()) return false
+        activeOutputPhysicalCameraId = selectedPhysicalId
+        val selectedTexture = if (cameraId == logicalPrimaryLensCameraId) {
+            previewSurfaceTexture
+        } else {
+            logicalDualPreviewSurfaceTexture
+        }
+        publishPreviewSource(selectedTexture === standbyPreviewSurfaceTexture)
+
+        // Keep both outputs configured and only replace the repeating request controls.
+        val session = captureSession ?: return false
+        val builder = previewRequestBuilder ?: return false
+        return try {
+            applyBaseCameraSettings(builder, isCapture = false)
+            session.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
+            PLog.i(TAG, "Selected logical physical lens: cameraId=" + cameraId +
+                ", physicalId=" + selectedPhysicalId)
+            true
+        } catch (error: Exception) {
+            PLog.w(TAG, "Could not update logical dual-preview request", error)
+            false
         }
     }
 
@@ -2428,6 +2443,7 @@ class Camera2Controller(private val context: Context) {
         clearCaptureFocusState("session cleared: $reason")
         safeCloseCaptureSession(captureSession, reason)
         captureSession = null
+        releaseLogicalDualPreviewSurface("camera session cleared: " + reason)
         _enginePreviewSource.value = null
         previewRequestBuilder = null
         safeReleasePreviewSurface(reason)
@@ -3521,16 +3537,24 @@ class Camera2Controller(private val context: Context) {
         }
         val device = cameraDevice ?: return
         val surface = previewSurface ?: return
-        val logicalSurface = logicalDualPreviewSurface?.takeIf {
-            logicalDualPreviewEnabled && it.isValid
-        }
         logicalDualPreviewReady = false
         // createCaptureSession closes the previous session before onConfigured runs.
         // Stop exposing it while the replacement is being configured.
         invalidateCaptureSession(captureSession, "preview session replacement")
         val captureMode = _state.value.captureMode
+        val sessionState = _state.value
         val reader = imageReader
         val stabilizationReader = ensureStabilizationImageReader()
+        val logicalSurface = logicalDualPreviewSurface?.takeIf {
+            captureMode == CaptureMode.PHOTO &&
+                sessionState.getCurrentCameraInfo()?.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+                !requestedRawCaptureEnabled &&
+                !sessionState.useRaw &&
+                !sessionState.useLivePhoto &&
+                reader?.imageFormat == ImageFormat.YUV_420_888 &&
+                stabilizationReader == null &&
+                logicalDualPreviewEnabled && it.isValid
+        }
         val useEnhancedStabilization = shouldUseVideoEnhancedStabilization()
         val videoSurface = if (
             captureMode == CaptureMode.VIDEO &&
@@ -3658,13 +3682,15 @@ class Camera2Controller(private val context: Context) {
                         "isP010Supported=$isP010Supported"
             )
             val outputConfigs = buildList {
-                add(createOutputConfiguration(surface))
+                add(OutputConfiguration(surface).apply {
+                    if (logicalSurface != null) {
+                        logicalPrimaryPhysicalCameraId?.let { setPhysicalCameraId(it) }
+                    } else {
+                        activeOutputPhysicalCameraId?.let { setPhysicalCameraId(it) }
+                    }
+                })
                 logicalSurface?.let { dualSurface ->
-                    val physicalId = logicalDualPreviewSurfaceTexture
-                        ?.takeIf { it === standbyPreviewSurfaceTexture }
-                        ?.let { logicalSecondaryPhysicalCameraId }
-                        ?: logicalSecondaryPhysicalCameraId
-                    if (!physicalId.isNullOrBlank()) {
+                    logicalSecondaryPhysicalCameraId?.let { physicalId ->
                         add(OutputConfiguration(dualSurface).apply {
                             setPhysicalCameraId(physicalId)
                         })
@@ -3675,8 +3701,8 @@ class Camera2Controller(private val context: Context) {
                 }
                 reader?.surface?.let { captureSurface ->
                     if (logicalSurface != null) {
-                        // Keep the still reader logical so the selected physical lens is
-                        // resolved by the current zoom/camera controls at capture time.
+                        // Keep the still reader logical; current lens selection and zoom
+                        // decide which physical sensor supplies the capture.
                         add(OutputConfiguration(captureSurface))
                     } else {
                         add(createOutputConfiguration(captureSurface))
@@ -4257,6 +4283,9 @@ class Camera2Controller(private val context: Context) {
             return
         }
         captureSession = session
+        logicalDualPreviewReady = logicalDualPreviewEnabled &&
+            logicalDualPreviewSurface?.isValid == true &&
+            _state.value.captureMode == CaptureMode.PHOTO
         _state.update { it.copy(previewFirstFrameTimestampNs = null) }
 
         try {
