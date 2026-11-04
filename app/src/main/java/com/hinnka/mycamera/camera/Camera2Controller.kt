@@ -304,8 +304,31 @@ class Camera2Controller(private val context: Context) {
             standbyCameraController.release("standby SurfaceTexture was released")
             return
         }
+
+        val activeCamera = current.getCurrentCameraInfo() ?: return
+        val alternateCamera = findAlternateRearLens(activeCamera, current.availableCameras)
+        val activeOpenId = runCatching { activeCamera.getOpenCameraId() }.getOrNull()
+        val alternateOpenId = alternateCamera?.let {
+            runCatching { it.getOpenCameraId() }.getOrNull()
+        }
+
+        // One logical CameraDevice can stream both physical lens outputs into the two GL inputs.
+        if (logicalDualPreviewEnabled &&
+            (activeCamera.cameraId == logicalPrimaryLensCameraId ||
+                activeCamera.cameraId == logicalSecondaryLensCameraId)
+        ) {
+            return
+        }
+        if (!alternateOpenId.isNullOrBlank() && activeOpenId == alternateOpenId &&
+            configureLogicalDualPreview(activeCamera, alternateCamera!!, standbyTexture, current)
+        ) {
+            standbyCameraController.release("same logical camera uses two physical preview outputs")
+            return
+        }
+
+        releaseLogicalDualPreviewSurface("logical physical pair no longer selected")
         standbyCameraController.prepare(
-            activeCamera = current.getCurrentCameraInfo(),
+            activeCamera = activeCamera,
             availableCameras = current.availableCameras,
             activeOpenCameraId = getActiveOpenCameraId(),
             previewSize = current.currentPreviewSize,
@@ -315,6 +338,131 @@ class Camera2Controller(private val context: Context) {
             standbyPreviewSurfaceTexture = standbyTexture,
             callbackHandler = handler,
         )
+    }
+
+    private fun findAlternateRearLens(active: CameraInfo, cameras: List<CameraInfo>): CameraInfo? {
+        val rear = cameras.filter { it.lensFacing == CameraCharacteristics.LENS_FACING_BACK }
+        return if (active.lensType == LensType.BACK_ULTRA_WIDE) {
+            rear.firstOrNull { it.lensType == LensType.BACK_MAIN && it.cameraId != active.cameraId }
+        } else {
+            rear.firstOrNull { it.lensType == LensType.BACK_ULTRA_WIDE && it.cameraId != active.cameraId }
+        }
+    }
+
+    private fun configureLogicalDualPreview(
+        activeCamera: CameraInfo,
+        alternateCamera: CameraInfo,
+        alternateTexture: SurfaceTexture,
+        state: CameraState,
+    ): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P ||
+            logicalDualPreviewFailedOpenGeneration == cameraOpenGeneration
+        ) {
+            return false
+        }
+        val openId = runCatching { activeCamera.getOpenCameraId() }.getOrNull() ?: return false
+        if (runCatching { alternateCamera.getOpenCameraId() }.getOrNull() != openId) return false
+        val logicalCharacteristics = getCameraCharacteristicsOrNull(openId, "logical dual preview") ?: return false
+        val physicalIds = logicalCharacteristics.physicalCameraIds
+        val primaryPhysicalId = activeCamera.getBoundPhysicalCameraId(
+            getTargetZoomRatioByMain(state, activeCamera)
+        ) ?: activeCamera.outputPhysicalCameraId
+            ?: activeCamera.cameraId.takeIf { physicalIds.contains(it) }
+        val secondaryPhysicalId = alternateCamera.getBoundPhysicalCameraId(1f)
+            ?: alternateCamera.outputPhysicalCameraId
+            ?: alternateCamera.cameraId.takeIf { physicalIds.contains(it) }
+        if (primaryPhysicalId.isNullOrBlank() || secondaryPhysicalId.isNullOrBlank() ||
+            primaryPhysicalId == secondaryPhysicalId ||
+            !physicalIds.contains(primaryPhysicalId) ||
+            !physicalIds.contains(secondaryPhysicalId)
+        ) {
+            return false
+        }
+
+        val existingSurface = logicalDualPreviewSurface
+        if (logicalDualPreviewEnabled &&
+            logicalDualPreviewSurfaceTexture === alternateTexture &&
+            existingSurface?.isValid == true &&
+            logicalPrimaryLensCameraId == activeCamera.cameraId &&
+            logicalSecondaryLensCameraId == alternateCamera.cameraId
+        ) {
+            return true
+        }
+
+        releaseLogicalDualPreviewSurface("replacing logical dual output")
+        val surface = try {
+            alternateTexture.setDefaultBufferSize(
+                state.currentPreviewSize.width,
+                state.currentPreviewSize.height,
+            )
+            Surface(alternateTexture)
+        } catch (error: Exception) {
+            PLog.w(TAG, "Unable to create logical secondary preview surface", error)
+            return false
+        }
+
+        logicalDualPreviewSurface = surface
+        logicalDualPreviewSurfaceTexture = alternateTexture
+        logicalPrimaryLensCameraId = activeCamera.cameraId
+        logicalSecondaryLensCameraId = alternateCamera.cameraId
+        logicalPrimaryPhysicalCameraId = primaryPhysicalId
+        logicalSecondaryPhysicalCameraId = secondaryPhysicalId
+        logicalDualPreviewEnabled = true
+        logicalDualPreviewReady = false
+        activeOutputPhysicalCameraId = primaryPhysicalId
+        PLog.i(
+            TAG,
+            "Configuring logical dual preview: open=" + openId +
+                ", primary=" + activeCamera.cameraId + ":" + primaryPhysicalId +
+                ", secondary=" + alternateCamera.cameraId + ":" + secondaryPhysicalId,
+        )
+        createPreviewSession(openGeneration = cameraOpenGeneration)
+        return true
+    }
+
+    private fun releaseLogicalDualPreviewSurface(reason: String) {
+        val surface = logicalDualPreviewSurface
+        logicalDualPreviewSurface = null
+        logicalDualPreviewSurfaceTexture = null
+        logicalDualPreviewEnabled = false
+        logicalDualPreviewReady = false
+        logicalPrimaryLensCameraId = null
+        logicalSecondaryLensCameraId = null
+        logicalPrimaryPhysicalCameraId = null
+        logicalSecondaryPhysicalCameraId = null
+        if (surface != null) {
+            PLog.d(TAG, "Releasing logical secondary preview surface: " + reason)
+            runCatching { surface.release() }
+        }
+    }
+
+    private fun retryPreviewSessionWithoutLogicalDualPreview(
+        reason: String,
+        openGeneration: Long,
+    ): Boolean {
+        if (!logicalDualPreviewEnabled || openGeneration != cameraOpenGeneration) return false
+        PLog.w(TAG, "Logical dual-physical preview rejected; retrying single-output session: " + reason)
+        logicalDualPreviewFailedOpenGeneration = openGeneration
+        releaseLogicalDualPreviewSurface("HAL rejected logical dual preview")
+        createPreviewSession(openGeneration = openGeneration)
+        return true
+    }
+
+    fun selectLogicalDualPreview(cameraId: String): Boolean {
+        if (!logicalDualPreviewEnabled || !logicalDualPreviewReady) return false
+        return when (cameraId) {
+            logicalPrimaryLensCameraId -> {
+                activeOutputPhysicalCameraId = logicalPrimaryPhysicalCameraId
+                publishPreviewSource(logicalDualPreviewSurfaceTexture === standbyPreviewSurfaceTexture)
+                true
+            }
+            logicalSecondaryLensCameraId -> {
+                activeOutputPhysicalCameraId = logicalSecondaryPhysicalCameraId
+                publishPreviewSource(logicalDualPreviewSurfaceTexture === standbyPreviewSurfaceTexture)
+                true
+            }
+            else -> false
+        }
     }
 
     /** The renderer changes only its OES input; Camera2 sessions are not rebuilt. */
