@@ -475,10 +475,18 @@ class StandbyCameraController(context: Context) {
             return
         }
 
-        if (activePlan?.key == plan.key &&
-            standbyCameraDevice != null &&
-            standbyCaptureSession != null
-        ) {
+        val reusableActivePlan = activePlan?.let { existing ->
+            existing.standbyCameraId == plan.standbyCameraId &&
+                existing.standbyOpenCameraId == plan.standbyOpenCameraId &&
+                existing.previewSize == plan.previewSize &&
+                standbyCameraDevice != null &&
+                standbyCaptureSession != null &&
+                standbyPreviewSurface?.isValid == true
+        } == true
+        if (reusableActivePlan) {
+            // The retained session owns a valid still reader at the old lens's
+            // supported size. Do not close/reopen it merely because a fresh
+            // size-selection pass would choose a different still-resolution.
             return
         }
         if (pendingPlan?.key == plan.key) return
