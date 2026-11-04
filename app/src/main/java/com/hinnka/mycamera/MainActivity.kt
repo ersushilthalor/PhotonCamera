@@ -91,6 +91,7 @@ import com.hinnka.mycamera.ui.settings.SettingsScreen
 import com.hinnka.mycamera.ui.settings.PresetEditorScreen
 import com.hinnka.mycamera.ui.settings.PresetManagementScreen
 import com.hinnka.mycamera.ui.theme.PhotonCameraTheme
+import com.hinnka.mycamera.ui.theme.AppUiScale
 import com.hinnka.mycamera.update.AppUpdateManager
 import com.hinnka.mycamera.utils.BuglyHelper
 import com.hinnka.mycamera.utils.DeviceUtil
@@ -298,6 +299,7 @@ class MainActivity : AppCompatActivity() {
             )
 
             PhotonCameraTheme {
+                AppUiScale {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = Color.Black
@@ -336,6 +338,7 @@ class MainActivity : AppCompatActivity() {
 
                         AppUpdateInstallPrompt()
                     }
+                }
                 }
             }
         }
