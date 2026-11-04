@@ -6674,6 +6674,19 @@ class Camera2Controller(private val context: Context) {
         )
         val builder = previewRequestBuilder ?: return
         val openCameraId = activeOpenCameraId.takeIf { it.isNotEmpty() } ?: return
+        val selectedOpenCameraId = _state.value.getCurrentCameraInfo()?.let {
+            runCatching { it.getOpenCameraId() }.getOrNull()
+        }
+        if (selectedOpenCameraId != null && selectedOpenCameraId != openCameraId) {
+            // The selected lens belongs to another CameraDevice. Keep the requested zoom
+            // in CameraState, but never submit it to the old device while its close/handoff
+            // is pending. The replacement session applies this value during configuration.
+            PLog.d(
+                TAG,
+                "Deferring zoom request until camera handoff: selected=$selectedOpenCameraId active=$openCameraId"
+            )
+            return
+        }
 
         try {
             val characteristics = resolveZoomRequestCharacteristics(openCameraId)
@@ -6819,6 +6832,12 @@ class Camera2Controller(private val context: Context) {
         if (!current.zoomPanEnabled && current.zoomPanX == 0f && current.zoomPanY == 0f) return
         val next = current.copy(zoomPanX = 0f, zoomPanY = 0f, zoomPanEnabled = false)
         _state.value = next
+        val selectedOpenCameraId = current.getCurrentCameraInfo()?.let {
+            runCatching { it.getOpenCameraId() }.getOrNull()
+        }
+        if (selectedOpenCameraId != null && selectedOpenCameraId != activeOpenCameraId) {
+            return
+        }
         previewRequestBuilder?.apply {
             applyBaseCameraSettings(this, isCapture = false, currentState = next)
             updatePreview()
