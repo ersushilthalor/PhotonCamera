@@ -150,6 +150,12 @@ class Camera2Controller(private val context: Context) {
         val preserveVideoRecording: Boolean,
     )
 
+    private data class PendingStandbyRewarm(
+        val closingDevice: CameraDevice,
+        val previewTexture: SurfaceTexture,
+        val previewSource: PreviewStreamSource,
+    )
+
     private enum class CameraDeviceLifecycle {
         CLOSED,
         OPENING,
@@ -281,7 +287,11 @@ class Camera2Controller(private val context: Context) {
 
     private var previewSurface: Surface? = null
     private var previewSurfaceTexture: SurfaceTexture? = null
+    private var rootPreviewSurfaceTexture: SurfaceTexture? = null
     private var standbyPreviewSurfaceTexture: SurfaceTexture? = null
+    private var standbyPreviewStreamSource: PreviewStreamSource = PreviewStreamSource.STANDBY
+    private var pendingStandbyRewarm: PendingStandbyRewarm? = null
+    private var activeClosingCameraDevice: CameraDevice? = null
     private var imageReader: ImageReader? = null
     private var stabilizationImageReader: StabilizationImageReader? = null
 
@@ -353,6 +363,8 @@ class Camera2Controller(private val context: Context) {
 
     private val _state = MutableStateFlow(CameraState())
     val state: StateFlow<CameraState> = _state.asStateFlow()
+    private val _displayedPreviewSource = MutableStateFlow(PreviewStreamSource.MAIN)
+    val displayedPreviewSource: StateFlow<PreviewStreamSource> = _displayedPreviewSource.asStateFlow()
 
     @Volatile
     var retainCaptureSettingsEnabled: Boolean = false
@@ -371,6 +383,17 @@ class Camera2Controller(private val context: Context) {
         ConcurrentHashMap.newKeySet<String>()
 
     init {
+        standbyCameraController.onPromotedCameraClosed = { camera ->
+            handleCameraDeviceClosed(camera)
+        }
+        standbyCameraController.onPromotedCameraUnavailable = { camera, reason ->
+            val handler = cameraHandler
+            if (handler != null && Looper.myLooper() != handler.looper) {
+                handler.post { handleCameraDeviceUnavailable(camera, reason) }
+            } else {
+                handleCameraDeviceUnavailable(camera, reason)
+            }
+        }
         realtimeStabilizationCoordinator.onEnhancedStabilizationUnavailable = {
             handleEnhancedStabilizationUnavailable(
                 reason = "Camera HAL stabilization conflicts with algorithmic stabilization"
@@ -2245,19 +2268,32 @@ class Camera2Controller(private val context: Context) {
         if (cameraDevice === camera) {
             cameraDevice = null
         }
+        activeClosingCameraDevice = camera
         cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSING
         closeCameraDeviceSafely(camera, reason)
     }
 
     private fun handleCameraDeviceClosed(camera: CameraDevice) {
+        val wasActiveClose = cameraDevice === camera || activeClosingCameraDevice === camera
         if (cameraDevice === camera) {
             cameraDevice = null
         }
-        cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
-        PLog.d(TAG, "Camera device closed: ${camera.id}")
-        openPendingCameraRequest()
-        if (cameraDeviceLifecycle == CameraDeviceLifecycle.CLOSED) {
+        if (activeClosingCameraDevice === camera) {
+            activeClosingCameraDevice = null
+        }
+        if (wasActiveClose) {
+            cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
+            PLog.d(TAG, "Active camera device closed: ${camera.id}")
+            openPendingCameraRequest()
             releaseCloseLatch?.countDown()
+        } else {
+            PLog.d(TAG, "Detached camera device closed: ${camera.id}")
+        }
+
+        val rewarm = pendingStandbyRewarm
+        if (rewarm?.closingDevice === camera) {
+            pendingStandbyRewarm = null
+            prepareStandbyForActiveCamera(rewarm.previewTexture, rewarm.previewSource)
         }
     }
 
@@ -2492,25 +2528,11 @@ class Camera2Controller(private val context: Context) {
         val action = {
             if (standbyPreviewSurfaceTexture !== surfaceTexture) {
                 standbyPreviewSurfaceTexture = surfaceTexture
+                standbyPreviewStreamSource = PreviewStreamSource.STANDBY
                 if (surfaceTexture == null) {
                     standbyCameraController.release("standby preview SurfaceTexture detached")
                 } else {
-                    val device = cameraDevice
-                    val activeState = _state.value
-                    val handler = cameraHandler
-                    if (device != null && captureSession != null && handler != null &&
-                        !activeState.videoRecordingState.isRecording &&
-                        !activeState.videoRecordingState.isProcessing
-                    ) {
-                        standbyCameraController.prepare(
-                            activeCamera = activeState.getCurrentCameraInfo(),
-                            availableCameras = activeState.availableCameras,
-                            activeOpenCameraId = device.id,
-                            previewSize = activeState.currentPreviewSize,
-                            callbackHandler = handler,
-                            previewSurfaceTexture = surfaceTexture,
-                        )
-                    }
+                    prepareStandbyForActiveCamera(surfaceTexture, PreviewStreamSource.STANDBY)
                 }
             }
         }
@@ -2523,7 +2545,11 @@ class Camera2Controller(private val context: Context) {
     }
 
     fun onStandbyPreviewFrameAvailable(timestampNs: Long) {
-        standbyCameraController.onPreviewFrameAvailable(timestampNs)
+        standbyCameraController.onPreviewFrameAvailable(timestampNs, PreviewStreamSource.STANDBY)
+    }
+
+    fun onMainPreviewFrameAvailable(timestampNs: Long) {
+        standbyCameraController.onPreviewFrameAvailable(timestampNs, PreviewStreamSource.MAIN)
     }
 
     fun openCamera(surfaceTexture: SurfaceTexture, preserveVideoRecording: Boolean = false) {
@@ -2534,6 +2560,7 @@ class Camera2Controller(private val context: Context) {
             }
             return
         }
+        if (rootPreviewSurfaceTexture == null) rootPreviewSurfaceTexture = surfaceTexture
         pendingCameraOpenRequest = CameraOpenRequest(surfaceTexture, preserveVideoRecording)
         when (cameraDeviceLifecycle) {
             CameraDeviceLifecycle.CLOSED -> openPendingCameraRequest()
@@ -2571,6 +2598,7 @@ class Camera2Controller(private val context: Context) {
     private fun openCameraNow(request: CameraOpenRequest) {
         val surfaceTexture = request.surfaceTexture
         val preserveVideoRecording = request.preserveVideoRecording
+        _displayedPreviewSource.value = PreviewStreamSource.MAIN
         clearPointFocusState()
         val openGeneration = ++cameraOpenGeneration
 
