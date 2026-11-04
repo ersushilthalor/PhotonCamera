@@ -2590,6 +2590,170 @@ class Camera2Controller(private val context: Context) {
      * @param surfaceTexture SurfaceTexture 用于预览
      */
     @SuppressLint("MissingPermission")
+    private fun prepareLogicalMultiCameraStandby(
+        activeCamera: CameraInfo,
+        availableCameras: List<CameraInfo>,
+        activeOpenId: String,
+        standbyTexture: SurfaceTexture,
+        handler: Handler,
+    ): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return false
+        val activeState = _state.value
+        if (activeState.captureMode != CaptureMode.PHOTO ||
+            activeState.useRaw ||
+            activeState.useP010 ||
+            activeState.photoPreviewStabilizationEnabled ||
+            imageReader?.imageFormat != ImageFormat.YUV_420_888
+        ) return false
+
+        val backCameras = availableCameras.filter {
+            it.lensFacing == CameraCharacteristics.LENS_FACING_BACK
+        }
+        val mainCamera = backCameras.firstOrNull { it.lensType == LensType.BACK_MAIN }
+            ?: backCameras.firstOrNull { it.lensType != LensType.BACK_ULTRA_WIDE }
+            ?: return false
+        val ultraWideCamera = backCameras.firstOrNull { it.lensType == LensType.BACK_ULTRA_WIDE }
+            ?: return false
+        if (mainCamera.getOpenCameraId() != activeOpenId ||
+            ultraWideCamera.getOpenCameraId() != activeOpenId
+        ) return false
+
+        val activeIsUltraWide = activeCamera.cameraId == ultraWideCamera.cameraId
+        val standbyCamera = if (activeIsUltraWide) mainCamera else ultraWideCamera
+        val logicalCharacteristics = runCatching {
+            cameraManager.getCameraCharacteristics(activeOpenId)
+        }.getOrNull() ?: return false
+        val physicalIds = logicalCharacteristics.physicalCameraIds
+        fun physicalId(info: CameraInfo): String? {
+            return info.outputPhysicalCameraId
+                ?: info.getBoundPhysicalCameraId(1f)
+                ?: info.cameraId.takeIf { it != activeOpenId && physicalIds.contains(it) }
+        }
+
+        val mainPhysicalId = physicalId(mainCamera)
+        val ultraWidePhysicalId = physicalId(ultraWideCamera) ?: return false
+        if (!physicalIds.contains(ultraWidePhysicalId) ||
+            (mainPhysicalId != null && !physicalIds.contains(mainPhysicalId)) ||
+            mainPhysicalId == ultraWidePhysicalId
+        ) return false
+
+        if (logicalDualStreamConfigured &&
+            logicalStandbyCameraInfo?.cameraId == standbyCamera.cameraId &&
+            logicalStandbyPreviewSurface != null &&
+            logicalStandbyCaptureImageReader != null &&
+            standbyPreviewSurfaceTexture === standbyTexture
+        ) {
+            return true
+        }
+
+        // A logical session has fixed sensor-to-texture routing: MAIN is always the
+        // primary camera texture and STANDBY is always the ultra-wide texture.
+        val mainCharacteristics = runCatching {
+            cameraManager.getCameraCharacteristics(mainPhysicalId ?: activeOpenId)
+        }.getOrNull() ?: return false
+        val ultraWideCharacteristics = runCatching {
+            cameraManager.getCameraCharacteristics(ultraWidePhysicalId)
+        }.getOrNull() ?: return false
+
+        fun closestSize(characteristics: CameraCharacteristics, format: Int, preferred: Size): Size? {
+            val sizes = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                ?.getOutputSizes(format)
+                ?.toList()
+                .orEmpty()
+            if (sizes.isEmpty()) return null
+            val aspect = preferred.width.toFloat() / preferred.height.toFloat()
+            val area = preferred.width.toLong() * preferred.height.toLong()
+            return sizes.minWithOrNull(
+                compareBy<Size>(
+                    { abs(it.width.toFloat() / it.height.toFloat() - aspect) },
+                    { abs(it.width.toLong() * it.height.toLong() - area) },
+                    { abs(it.width - preferred.width) + abs(it.height - preferred.height) },
+                ),
+            )
+        }
+
+        val mainPreviewSize = closestSize(
+            mainCharacteristics,
+            ImageFormat.PRIVATE,
+            activeState.currentPreviewSize,
+        ) ?: return false
+        val ultraWidePreviewSize = closestSize(
+            ultraWideCharacteristics,
+            ImageFormat.PRIVATE,
+            activeState.currentPreviewSize,
+        ) ?: return false
+        val currentCaptureSize = activeState.currentCaptureSize
+        val targetCaptureSize = closestSize(
+            ultraWideCharacteristics,
+            ImageFormat.YUV_420_888,
+            currentCaptureSize,
+        ) ?: return false
+
+        val mainTexture = previewSurfaceTexture ?: rootPreviewSurfaceTexture ?: return false
+        val mainSurface = previewSurface ?: return false
+        val secondarySurface = try {
+            standbyTexture.setDefaultBufferSize(ultraWidePreviewSize.width, ultraWidePreviewSize.height)
+            Surface(standbyTexture)
+        } catch (error: Exception) {
+            PLog.w(TAG, "Could not create logical multi-camera standby Surface", error)
+            return false
+        }
+        val secondaryReader = try {
+            ImageReader.newInstance(
+                targetCaptureSize.width,
+                targetCaptureSize.height,
+                ImageFormat.YUV_420_888,
+                imageReaderMaxImages.coerceAtLeast(4),
+            ).also(::configureDiscardImageReaderListener)
+        } catch (error: Exception) {
+            runCatching { secondarySurface.release() }
+            PLog.w(TAG, "Could not create logical multi-camera capture reader", error)
+            return false
+        }
+
+        try {
+            mainTexture.setDefaultBufferSize(mainPreviewSize.width, mainPreviewSize.height)
+            clearLogicalStandbyOutputs("replace logical physical outputs")
+            logicalStandbyPreviewSurface = secondarySurface
+            logicalStandbyCaptureImageReader = secondaryReader
+            logicalStandbyCameraInfo = standbyCamera
+            logicalStandbyPhysicalCameraId = if (activeIsUltraWide) mainPhysicalId else ultraWidePhysicalId
+            logicalStandbyPreviewOutputSize = if (activeIsUltraWide) mainPreviewSize else ultraWidePreviewSize
+            logicalStandbyCaptureOutputSize = if (activeIsUltraWide) currentCaptureSize else targetCaptureSize
+            logicalStandbyPreviewSource = if (activeIsUltraWide) {
+                PreviewStreamSource.MAIN
+            } else {
+                PreviewStreamSource.STANDBY
+            }
+            logicalMainPreviewPhysicalCameraId = mainPhysicalId
+            logicalSecondaryPreviewPhysicalCameraId = ultraWidePhysicalId
+            standbyPreviewSurfaceTexture = standbyTexture
+            standbyPreviewStreamSource = PreviewStreamSource.STANDBY
+            logicalDualStreamConfigured = false
+            logicalDualSessionGeneration++
+            _displayedPreviewSource.value = if (activeIsUltraWide) {
+                PreviewStreamSource.STANDBY
+            } else {
+                PreviewStreamSource.MAIN
+            }
+            standbyCameraController.release("logical multi-camera physical session is used instead")
+            PLog.i(
+                TAG,
+                "Preparing logical dual-physical preview: main=$mainPhysicalId, ultraWide=$ultraWidePhysicalId, " +
+                    "active=${activeCamera.cameraId}, mainSize=$mainPreviewSize, ultraWideSize=$ultraWidePreviewSize"
+            )
+            createPreviewSession(openGeneration = cameraOpenGeneration)
+            return true
+        } catch (error: Exception) {
+            runCatching { secondarySurface.release() }
+            safeCloseImageReader(secondaryReader)
+            clearLogicalStandbyOutputs("logical physical setup failed")
+            PLog.w(TAG, "Logical multi-camera standby setup failed", error)
+            return false
+        }
+    }
+
+    @SuppressLint("MissingPermission")
     private fun prepareStandbyForActiveCamera(
         previewTexture: SurfaceTexture?,
         previewSource: PreviewStreamSource,
