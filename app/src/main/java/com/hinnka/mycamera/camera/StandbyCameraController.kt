@@ -406,14 +406,37 @@ class StandbyCameraController(context: Context) {
             return null
         }
         val streamMap = targetCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-        val previewSupported = streamMap?.getOutputSizes(SurfaceTexture::class.java)
-            ?.any { it.width == previewSize.width && it.height == previewSize.height } == true
-        val captureSupported = streamMap?.getOutputSizes(captureFormat)
-            ?.any { it.width == captureSize.width && it.height == captureSize.height } == true
-        if (!previewSupported || !captureSupported) {
+        val supportedPreviewSizes = streamMap?.getOutputSizes(SurfaceTexture::class.java).orEmpty()
+        val previewSupported = supportedPreviewSizes.any {
+            it.width == previewSize.width && it.height == previewSize.height
+        }
+        if (!previewSupported) {
             publishUnavailable(
                 phase = StandbyCameraPhase.CONCURRENT_COMBINATION_UNSUPPORTED,
-                message = "Target lens does not support the active preview/capture output sizes",
+                message = "Target lens does not support the active preview buffer size",
+                activeCameraId = activeOpenCameraId, standbyCameraId = targetCamera.cameraId,
+                lensType = targetCamera.lensType,
+            )
+            return null
+        }
+        // Main and Ultra-Wide sensors rarely expose identical still-output sizes.
+        // Pick the target lens's best YUV output for the same aspect ratio and pass
+        // that exact ImageReader through the handoff instead of forcing Main's size.
+        val desiredCaptureAspect = maxOf(captureSize.width, captureSize.height).toFloat() /
+            minOf(captureSize.width, captureSize.height).coerceAtLeast(1)
+        val targetCaptureSize = streamMap?.getOutputSizes(captureFormat)
+            ?.filter { it.width > 0 && it.height > 0 }
+            ?.minWithOrNull(
+                compareBy<Size>(
+                    { abs(maxOf(it.width, it.height).toFloat() /
+                        minOf(it.width, it.height).coerceAtLeast(1) - desiredCaptureAspect) },
+                    { -(it.width.toLong() * it.height.toLong()) },
+                ),
+            )
+        if (targetCaptureSize == null) {
+            publishUnavailable(
+                phase = StandbyCameraPhase.CONCURRENT_COMBINATION_UNSUPPORTED,
+                message = "Target lens has no still output for the active YUV capture format",
                 activeCameraId = activeOpenCameraId, standbyCameraId = targetCamera.cameraId,
                 lensType = targetCamera.lensType,
             )
@@ -427,7 +450,7 @@ class StandbyCameraController(context: Context) {
             activeOpenCameraId = activeOpenCameraId, standbyOpenCameraId = standbyOpenCameraId,
             standbyPhysicalCameraId = standbyPhysicalId, standbyCameraId = targetCamera.cameraId,
             lensType = targetCamera.lensType, aspectRatio = ratio,
-            previewSize = previewSize, captureSize = captureSize, captureFormat = captureFormat,
+            previewSize = previewSize, captureSize = targetCaptureSize, captureFormat = captureFormat,
             maxImages = maxImages.coerceAtLeast(2), previewSurfaceTexture = standbyPreviewSurfaceTexture,
         )
     }
