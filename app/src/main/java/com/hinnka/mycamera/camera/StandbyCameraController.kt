@@ -9,6 +9,7 @@ import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
+import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.media.ImageReader
@@ -385,6 +386,7 @@ class StandbyCameraController(context: Context) {
                             openRequestGeneration = null
                         }
                         if (openGeneration == generation) {
+                            standbyCameraDevice = camera
                             failCurrentPlan("Standby camera disconnected", null)
                         } else {
                             closeOpenedCamera(camera)
@@ -396,6 +398,7 @@ class StandbyCameraController(context: Context) {
                             openRequestGeneration = null
                         }
                         if (openGeneration == generation) {
+                            standbyCameraDevice = camera
                             failCurrentPlan("Standby camera open error: " + error, null)
                         } else {
                             closeOpenedCamera(camera)
@@ -498,7 +501,9 @@ class StandbyCameraController(context: Context) {
             }
 
             val outputConfiguration = OutputConfiguration(reader.surface).apply {
-                plan.standbyPhysicalCameraId?.let(::setPhysicalCameraId)
+                plan.standbyPhysicalCameraId?.let { physicalId ->
+                    setPhysicalCameraId(physicalId)
+                }
             }
             val sessionConfiguration = SessionConfiguration(
                 SessionConfiguration.SESSION_REGULAR,

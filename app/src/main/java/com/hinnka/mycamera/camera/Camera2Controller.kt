@@ -235,9 +235,6 @@ class Camera2Controller(private val context: Context) {
     }
 
     private val cameraDiscovery = CameraDiscovery(context)
-    private val standbyCameraController = StandbyCameraController(context)
-    val standbyCameraStatus: StateFlow<StandbyCameraStatus> = standbyCameraController.status
-    private var waitingForStandbyRelease = false
 
     // --- 拍照状态机相关 ---
 
@@ -2147,7 +2144,6 @@ class Camera2Controller(private val context: Context) {
     }
 
     private fun clearCameraSessionState(reason: String, closeImageReader: Boolean = true) {
-        standbyCameraController.release("main camera session cleared: " + reason)
         burstCapturing = false
         _state.update { it.copy(burstCapturing = false) }
         photoCaptures.values.toList().forEach {
@@ -2511,17 +2507,6 @@ class Camera2Controller(private val context: Context) {
 
     private fun openPendingCameraRequest() {
         if (cameraDeviceLifecycle != CameraDeviceLifecycle.CLOSED) return
-        if (standbyCameraController.isDeviceTransitioning) {
-            if (!waitingForStandbyRelease) {
-                waitingForStandbyRelease = true
-                standbyCameraController.whenDeviceIdle {
-                    waitingForStandbyRelease = false
-                    openPendingCameraRequest()
-                }
-            }
-            return
-        }
-        waitingForStandbyRelease = false
         val request = pendingCameraOpenRequest ?: return
         pendingCameraOpenRequest = null
         cameraDeviceLifecycle = CameraDeviceLifecycle.OPENING
@@ -3917,23 +3902,6 @@ class Camera2Controller(private val context: Context) {
 
             _state.value = _state.value.copy(isPreviewActive = true)
             PLog.d(TAG, "Preview started")
-
-            val standbyState = _state.value
-            val standbyHandler = cameraHandler
-            if (standbyHandler != null &&
-                !standbyState.videoRecordingState.isRecording &&
-                !standbyState.videoRecordingState.isProcessing
-            ) {
-                standbyCameraController.prepare(
-                    activeCamera = standbyState.getCurrentCameraInfo(),
-                    availableCameras = standbyState.availableCameras,
-                    activeOpenCameraId = activeOpenCameraId,
-                    previewSize = standbyState.currentPreviewSize,
-                    callbackHandler = standbyHandler,
-                )
-            } else {
-                standbyCameraController.release("standby disabled while video recording is active")
-            }
 
         } catch (e: CameraAccessException) {
             PLog.e(TAG, "Failed to start preview")
