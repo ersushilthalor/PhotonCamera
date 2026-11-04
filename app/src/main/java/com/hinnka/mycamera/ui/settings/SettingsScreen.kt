@@ -1719,7 +1719,7 @@ fun SettingsScreen(
                             }
                         )
                         val aspectOptions = state.videoCapabilities.availableAspectRatios.ifEmpty { VideoAspectRatio.entries }
-                        val aspectLabels = aspectOptions.map(::videoAspectRatioLabel)
+                        val aspectLabels = aspectOptions.map { videoAspectRatioLabel(it) }
                         DropdownSettingItem(
                             title = stringResource(R.string.video_aspect_chip),
                             value = videoAspectRatioLabel(state.videoConfig.aspectRatio),
@@ -1734,7 +1734,7 @@ fun SettingsScreen(
                         DropdownSettingItem(
                             title = stringResource(R.string.video_log_chip),
                             value = videoLogProfileLabel(state.videoConfig.logProfile),
-                            options = logProfileOptions.map(::videoLogProfileLabel),
+                            options = logProfileOptions.map { videoLogProfileLabel(it) },
                             isLoading = false,
                             onExpanded = {},
                             onOptionSelected = { label ->
