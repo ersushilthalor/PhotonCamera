@@ -856,6 +856,131 @@ class StandbyCameraController(context: Context) {
         }
     }
 
+    /**
+     * Moves the previously active camera into the standby slot without closing its
+     * CameraDevice or CaptureSession. This is the reverse half of the persistent
+     * dual-session swap used by VCamera.
+     */
+    fun adoptFormerActiveStream(
+        stream: PromotedStandbyCamera,
+        newActiveOpenCameraId: String,
+        callbackHandler: Handler,
+    ) {
+        handler = callbackHandler
+        dispatch {
+            // Any previous standby slot was taken over before this call. Refuse to
+            // overwrite a live device if a caller races a second transition.
+            if (standbyCameraDevice != null || standbyCaptureSession != null) {
+                PLog.w(TAG, "Cannot adopt former active stream while standby slot is occupied")
+                return@dispatch
+            }
+            val plan = StandbyPlan(
+                key = listOf(
+                    newActiveOpenCameraId,
+                    stream.openCameraId,
+                    stream.physicalCameraId.orEmpty(),
+                    stream.cameraInfo.cameraId,
+                    System.identityHashCode(stream.previewSurfaceTexture),
+                    stream.previewSource.name,
+                ).joinToString("|"),
+                activeOpenCameraId = newActiveOpenCameraId,
+                standbyOpenCameraId = stream.openCameraId,
+                standbyPhysicalCameraId = stream.physicalCameraId,
+                standbyCameraId = stream.cameraInfo.cameraId,
+                lensType = stream.cameraInfo.lensType,
+                aspectRatio = stream.previewSize.width.toFloat() / stream.previewSize.height.toFloat(),
+                previewTextureIdentity = System.identityHashCode(stream.previewSurfaceTexture),
+                previewSource = stream.previewSource,
+                cameraInfo = stream.cameraInfo,
+            )
+            val nextGeneration = ++generation
+            activePlan = plan
+            pendingPlan = null
+            standbyCameraDevice = stream.cameraDevice
+            standbyCaptureSession = stream.captureSession
+            standbyRequestBuilder = stream.requestBuilder
+            standbyPreviewSurface = stream.previewSurface
+            standbyPreviewSurfaceTexture = stream.previewSurfaceTexture
+            standbyCaptureImageReader = stream.captureImageReader
+            standbyPreviewOutputSize = stream.previewSize
+            standbyCaptureOutputSize = stream.captureSize
+            standbyPreviewSource = stream.previewSource
+            usingSurfaceTexturePreview = true
+            imageTimestamps.clear()
+            captureResultTimestamps.clear()
+            previewFrameTimestamps.clear()
+            receivedFrameCount = 0L
+            matchedFrameCount = 0
+            _status.value = StandbyCameraStatus(
+                phase = StandbyCameraPhase.WAITING_FOR_FRAMES,
+                activeCameraId = newActiveOpenCameraId,
+                standbyCameraId = stream.cameraInfo.cameraId,
+                lensType = stream.cameraInfo.lensType,
+                message = "Former active camera retained as a live standby stream",
+            )
+
+            // The reader must be drained while this camera is in the background.
+            stream.captureImageReader.setOnImageAvailableListener({ reader ->
+                try {
+                    while (true) {
+                        val image = reader.acquireLatestImage() ?: break
+                        image.close()
+                    }
+                } catch (error: IllegalStateException) {
+                    PLog.w(TAG, "Standby capture reader drain failed", error)
+                }
+            }, callbackHandler)
+
+            try {
+                stream.captureSession.setRepeatingRequest(
+                    stream.requestBuilder.build(),
+                    object : CameraCaptureSession.CaptureCallback() {
+                        override fun onCaptureCompleted(
+                            session: CameraCaptureSession,
+                            request: CaptureRequest,
+                            result: TotalCaptureResult,
+                        ) {
+                            if (nextGeneration != generation || session !== standbyCaptureSession) return
+                            val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP) ?: return
+                            rememberTimestamp(captureResultTimestamps, timestamp)
+                            updateReadinessFromMatchedFrames(nextGeneration)
+                        }
+
+                        override fun onCaptureFailed(
+                            session: CameraCaptureSession,
+                            request: CaptureRequest,
+                            failure: android.hardware.camera2.CaptureFailure,
+                        ) {
+                            if (nextGeneration == generation && session === standbyCaptureSession) {
+                                PLog.w(TAG, "Retained standby camera capture failed: reason=${failure.reason}")
+                            }
+                        }
+                    },
+                    callbackHandler,
+                )
+                scheduleFrameReadyTimeout(nextGeneration, callbackHandler)
+            } catch (error: Exception) {
+                failCurrentPlan("Could not resume former active camera as standby: ${error.message}", error)
+            }
+        }
+    }
+
+    /** Called when a CameraDevice opened by Camera2Controller is later closed by this owner. */
+    fun onExternallyOpenedCameraClosed(camera: CameraDevice) {
+        dispatch {
+            if (closingCameraDevice === camera) {
+                closingCameraDevice = null
+            }
+            if (standbyCameraDevice === camera) {
+                standbyCameraDevice = null
+                failCurrentPlan("Retained standby camera closed: ${camera.id}", null)
+            }
+            if (openRequestGeneration == null && closingCameraDevice == null) {
+                setDeviceTransitioning(false)
+            }
+        }
+    }
+
     /** Transfers a fully warmed preview + still-capture session to Camera2Controller. */
     fun takeOverReadyStream(): PromotedStandbyCamera? {
         val plan = activePlan ?: return null
