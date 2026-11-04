@@ -8,14 +8,22 @@ import android.net.Uri
 import android.os.Build
 import android.view.HapticFeedbackConstants
 import android.widget.Toast
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalContext
@@ -49,6 +57,9 @@ import com.hinnka.mycamera.video.VideoResolutionPreset
 import com.hinnka.mycamera.video.VideoStabilizationMode
 import com.hinnka.mycamera.viewmodel.CameraViewModel
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 @Composable
 fun FocoCameraIntegrationScreen(
@@ -196,6 +207,86 @@ fun FocoCameraIntegrationScreen(
         viewModel.imageSavedEvent.collect { galleryViewModel.refreshLatestPhoto() }
     }
 
+    // Keep Foco as the UI, but route optical lens selection through PhotonCamera's
+    // existing Camera2 lens chooser and frozen-preview transition.
+    val zoomScope = rememberCoroutineScope()
+    val lensSwitchTransition = remember(viewModel, zoomScope) {
+        LensSwitchTransitionState(zoomScope, viewModel)
+    }
+    var zoomStopAnimationJob by remember { mutableStateOf<Job?>(null) }
+
+    DisposableEffect(lensSwitchTransition) {
+        onDispose { lensSwitchTransition.cancel() }
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
+        zoomStopAnimationJob?.cancel()
+        zoomStopAnimationJob = null
+        lensSwitchTransition.cancel()
+    }
+
+    fun cancelZoomStopAnimation() {
+        zoomStopAnimationJob?.cancel()
+        zoomStopAnimationJob = null
+    }
+
+    fun animateCurrentLensToZoomStop(targetZoom: Float) {
+        cancelZoomStopAnimation()
+        val startZoom = viewModel.zoomRatioByMain
+        if (abs(startZoom - targetZoom) <= 0.001f) {
+            viewModel.setZoomRatio(targetZoom)
+            return
+        }
+        zoomStopAnimationJob = zoomScope.launch {
+            val progress = Animatable(0f)
+            progress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = resolveZoomStopAnimationDurationMillis(startZoom, targetZoom),
+                    easing = FastOutSlowInEasing
+                )
+            ) {
+                viewModel.setZoomRatio(
+                    interpolateZoomRatio(
+                        startZoom = startZoom,
+                        targetZoom = targetZoom,
+                        progress = value
+                    )
+                )
+            }
+            viewModel.setZoomRatio(targetZoom)
+        }
+    }
+
+    fun applyPhotonLensZoom(targetZoom: Float, animateSameLens: Boolean) {
+        if (!targetZoom.isFinite() || targetZoom <= 0f) return
+        val safeZoom = targetZoom.coerceIn(minZoom, maxZoom)
+        lensSwitchTransition.cancelPendingSwitch()
+        cancelZoomStopAnimation()
+
+        if (viewModel.isVideoLensLocked() ||
+            viewModel.isCurrentLensCustomZoomRatioStop(safeZoom)
+        ) {
+            if (animateSameLens) animateCurrentLensToZoomStop(safeZoom)
+            else viewModel.setZoomRatio(safeZoom)
+            return
+        }
+
+        val selectedCamera = viewModel.findOptimalLens(
+            safeZoom,
+            photon.availableCameras,
+            currentCamera?.cameraId ?: "0"
+        )
+        if (selectedCamera != null && selectedCamera.cameraId != currentCamera?.cameraId) {
+            lensSwitchTransition.switchLens(selectedCamera.cameraId, safeZoom) {
+                viewModel.switchToLensAndSetZoomRatio(selectedCamera.cameraId, safeZoom)
+            }
+        } else if (animateSameLens) {
+            animateCurrentLensToZoomStop(safeZoom)
+        } else {
+            viewModel.setZoomRatio(safeZoom)
+        }
+    }
+
     val actions = remember(viewModel, galleryViewModel, onGalleryClick, onSettingsClick, onFilterManagementClick, onVideoLutClick, onFrameManagementClick, onToolboxClick, onPresetManagementClick) {
         object : FocoActions {
             override fun shutter() = viewModel.capture()
@@ -217,7 +308,9 @@ fun FocoCameraIntegrationScreen(
                 }
             }
             override fun flip() = viewModel.switchCamera()
-            override fun setZoom(zoom: Float, fromChip: Boolean) = viewModel.setZoomRatio(zoom.coerceIn(minZoom, maxZoom))
+            override fun setZoom(zoom: Float, fromChip: Boolean) {
+                applyPhotonLensZoom(zoom, animateSameLens = fromChip)
+            }
             override fun openGallery() = onGalleryClick()
             override fun focusAt(point: Offset, viewWidth: Int, viewHeight: Int, lock: Boolean) {
                 if (viewWidth <= 0 || viewHeight <= 0) return
@@ -341,6 +434,7 @@ fun FocoCameraIntegrationScreen(
                 settings = focoSettings,
                 actions = actions,
                 preview = { previewModifier ->
+                    Box(previewModifier) {
                     if (initialized && cameraPrepared) {
                         CameraPreviewGL(
                             aspectRatio = photon.getPreviewAspectRatio(),
@@ -393,8 +487,10 @@ fun FocoCameraIntegrationScreen(
                             videoPreviewStabilizationEnabled = photon.videoConfig.stabilizationMode == VideoStabilizationMode.ENHANCED,
                             videoPreviewStabilizationStrength = photon.videoConfig.enhancedStabilizationStrength,
                             videoPreviewStabilizationLookahead = photon.videoConfig.enhancedStabilizationLookahead,
-                            modifier = previewModifier
+                            modifier = Modifier.fillMaxSize()
                         )
+                    }
+                    LensSwitchTransitionOverlay(lensSwitchTransition, Modifier.fillMaxSize())
                     }
                 }
             )
