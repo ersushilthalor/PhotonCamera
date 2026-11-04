@@ -177,8 +177,9 @@ dependencies {
     // ViewModel Compose
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     
-    // Material Icons Core
+    // Material Icons Core + vectors used by the imported Foco camera UI
     implementation(libs.androidx.material.icons.core)
+    implementation("androidx.compose.material:material-icons-extended")
     
     // Coil for image loading
     implementation(libs.coil.compose)

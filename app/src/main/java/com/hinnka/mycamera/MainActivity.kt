@@ -73,6 +73,7 @@ import com.hinnka.mycamera.lut.creator.LutCreatorScreen
 import com.hinnka.mycamera.lut.creator.LutCreatorViewModel
 import com.hinnka.mycamera.screencapture.ScreenCaptureRenderConfigStore
 import com.hinnka.mycamera.ui.camera.CameraScreen
+import com.hinnka.mycamera.ui.camera.FocoCameraIntegrationScreen
 import com.hinnka.mycamera.data.FilmData
 import com.hinnka.mycamera.ui.camera.ColorWalkScreen
 import com.hinnka.mycamera.ui.camera.FilmDetailScreen
@@ -721,7 +722,7 @@ fun NavigationHost(
                         )
                     }
                 } else {
-                    CameraScreen(
+                    FocoCameraIntegrationScreen(
                         viewModel = cameraViewModel,
                         galleryViewModel = galleryViewModel,
                         onGalleryClick = {
