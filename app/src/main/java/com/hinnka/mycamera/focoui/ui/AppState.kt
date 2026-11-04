@@ -191,6 +191,7 @@ interface CameraActions {
     fun setZoom(zoom: Float, fromChip: Boolean = false) {}
     fun openGallery() {}
     fun focusAt(point: Offset, viewWidth: Int, viewHeight: Int, lock: Boolean) {}
+    fun unlockFocus() {}
     fun setPro(pro: ProState) {}
     fun settingChanged(key: SettingKey) {}
     fun pauseResume() {}
