@@ -285,6 +285,15 @@ class Camera2Controller(private val context: Context) {
     private var standbyPreviewSurfaceTexture: SurfaceTexture? = null
     private var standbyPreviewStreamSource: PreviewStreamSource = PreviewStreamSource.STANDBY
     private var detachedStandbyCameraDevice: CameraDevice? = null
+    private var logicalStandbyPreviewSurface: Surface? = null
+    private var logicalStandbyCaptureImageReader: ImageReader? = null
+    private var logicalStandbyCameraInfo: CameraInfo? = null
+    private var logicalStandbyPhysicalCameraId: String? = null
+    private var logicalStandbyPreviewOutputSize: Size? = null
+    private var logicalStandbyCaptureOutputSize: Size? = null
+    private var logicalStandbyPreviewSource: PreviewStreamSource = PreviewStreamSource.STANDBY
+    private var logicalDualStreamConfigured = false
+    private var logicalDualSessionGeneration = 0L
     private var activeClosingCameraDevice: CameraDevice? = null
     private var imageReader: ImageReader? = null
     private var stabilizationImageReader: StabilizationImageReader? = null
@@ -2186,6 +2195,35 @@ class Camera2Controller(private val context: Context) {
         availableCaptureRequestKeyNames = null
     }
 
+    private fun configureDiscardImageReaderListener(reader: ImageReader) {
+        reader.setOnImageAvailableListener({ source ->
+            try {
+                while (true) {
+                    val image = source.acquireLatestImage() ?: break
+                    image.close()
+                }
+            } catch (error: IllegalStateException) {
+                PLog.w(TAG, "Background capture reader drain failed", error)
+            }
+        }, cameraHandler)
+    }
+
+    private fun clearLogicalStandbyOutputs(reason: String) {
+        logicalDualStreamConfigured = false
+        logicalDualSessionGeneration++
+        val surface = logicalStandbyPreviewSurface
+        logicalStandbyPreviewSurface = null
+        runCatching { surface?.release() }
+            .onFailure { PLog.w(TAG, "Failed to release logical standby preview surface ($reason)", it) }
+        val reader = logicalStandbyCaptureImageReader
+        logicalStandbyCaptureImageReader = null
+        safeCloseImageReader(reader)
+        logicalStandbyCameraInfo = null
+        logicalStandbyPhysicalCameraId = null
+        logicalStandbyPreviewOutputSize = null
+        logicalStandbyCaptureOutputSize = null
+    }
+
     private fun clearCameraSessionState(reason: String, closeImageReader: Boolean = true) {
         standbyCameraController.release("main camera session cleared: " + reason)
         burstCapturing = false
@@ -2223,6 +2261,7 @@ class Camera2Controller(private val context: Context) {
         clearCaptureFocusState("session cleared: $reason")
         safeCloseCaptureSession(captureSession, reason)
         captureSession = null
+        clearLogicalStandbyOutputs(reason)
         _enginePreviewSource.value = null
         previewRequestBuilder = null
         safeReleasePreviewSurface(reason)
