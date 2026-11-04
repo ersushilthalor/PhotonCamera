@@ -271,6 +271,7 @@ class Camera2Controller(private val context: Context) {
             current.getCurrentCameraInfo()?.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
             !requestedRawCaptureEnabled &&
             !current.useRaw &&
+            !current.useLivePhoto &&
             reader != null &&
             reader.imageFormat == ImageFormat.YUV_420_888 &&
             stabilizationImageReader == null &&
@@ -2582,6 +2583,7 @@ class Camera2Controller(private val context: Context) {
         val handoffEligible = currentState.captureMode == CaptureMode.PHOTO &&
             !requestedRawCaptureEnabled &&
             !currentState.useRaw &&
+            !currentState.useLivePhoto &&
             imageReader?.imageFormat == ImageFormat.YUV_420_888 &&
             stabilizationImageReader == null &&
             !currentState.videoRecordingState.isRecording &&
