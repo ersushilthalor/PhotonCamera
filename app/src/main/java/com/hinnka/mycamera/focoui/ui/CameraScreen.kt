@@ -8,6 +8,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
@@ -47,6 +48,7 @@ import androidx.compose.material.icons.outlined.FlashOn
 import androidx.compose.material.icons.outlined.FlashlightOff
 import androidx.compose.material.icons.outlined.FlashlightOn
 import androidx.compose.material.icons.outlined.LocalFlorist
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.MicOff
 import androidx.compose.material.icons.outlined.ModeNight
 import androidx.compose.material.icons.outlined.Palette
@@ -163,6 +165,9 @@ fun CameraScreen(
             statusTop + 56.dp,
             maxHeight - navBottom - CONTROLS_BELOW_PICTURE - previewHeight
         )
+        val previewSizePx = with(LocalDensity.current) {
+            IntSize(previewWidth.roundToPx(), previewHeight.roundToPx())
+        }
         Box(
             Modifier
                 .align(Alignment.TopCenter)
@@ -172,11 +177,26 @@ fun CameraScreen(
         ) {
             preview(Modifier.fillMaxSize())
             ViewfinderOverlays(state, settings, actions)
+            if (!state.proBarOpen && !state.burstActive && state.zoomChips.size > 1) {
+                ZoomChips(
+                    state,
+                    actions,
+                    iconRotation,
+                    Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
+                )
+            }
         }
 
         TopBar(state, settings, actions, iconRotation, Modifier.align(Alignment.TopCenter).padding(top = statusTop))
 
-        BottomControls(state, settings, actions, iconRotation, Modifier.align(Alignment.BottomCenter))
+        BottomControls(
+            state,
+            settings,
+            actions,
+            iconRotation,
+            previewSizePx,
+            Modifier.align(Alignment.BottomCenter),
+        )
 
         if (state.viewerItems == null && !state.fullSettingsOpen) MessageToast(state)
 
@@ -211,8 +231,8 @@ fun MessageToast(state: AppState) {
     }
 }
 
-/** Height of everything under the zoom chips: shutter row, mode strip, bottom row and spacing. */
-private val CONTROLS_BELOW_PICTURE = 300.dp
+/** Reserved space below the 3:4 viewfinder: shutter, mode strip, bottom controls and system navigation. */
+private val CONTROLS_BELOW_PICTURE = 245.dp
 
 @Composable
 private fun rememberIconRotation(deviceRotation: Int): Float {
@@ -725,9 +745,16 @@ private fun RecordingTimer(state: AppState, modifier: Modifier) {
 // ------------------------------------------------------------------------------------- bottom
 
 @Composable
-private fun BottomControls(state: AppState, settings: AppSettings, actions: CameraActions, iconRotation: Float, modifier: Modifier) {
+private fun BottomControls(
+    state: AppState,
+    settings: AppSettings,
+    actions: CameraActions,
+    iconRotation: Float,
+    previewSize: IntSize,
+    modifier: Modifier,
+) {
     Column(
-        modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 32.dp),
+        modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         state.qrText?.let { if (!state.recording && !state.burstActive) QrChip(it, actions) }
@@ -751,18 +778,15 @@ private fun BottomControls(state: AppState, settings: AppSettings, actions: Came
                 )
             }
         }
-        Box(Modifier.fillMaxWidth().height(104.dp), contentAlignment = Alignment.BottomCenter) {
-            val tool = state.activeTool
-            when {
-                state.burstActive -> Unit
-                tool != null && state.proBarOpen -> ToolSlider(state, tool, actions, Modifier.padding(bottom = 4.dp))
-                state.zoomChips.size > 1 ->
-                    ZoomChips(state, actions, iconRotation, Modifier.padding(bottom = 34.dp))
+        if (state.proBarOpen && !state.recording) {
+            Box(Modifier.fillMaxWidth().height(84.dp), contentAlignment = Alignment.BottomCenter) {
+                state.activeTool?.let { tool ->
+                    ToolSlider(state, tool, actions, Modifier.padding(bottom = 4.dp))
+                }
             }
         }
-        Spacer(Modifier.height(8.dp))
-        ShutterRow(state, settings, actions, iconRotation)
-        Spacer(Modifier.height(24.dp))
+        ShutterRow(state, settings, actions, iconRotation, previewSize)
+        Spacer(Modifier.height(28.dp))
         if (state.proBarOpen && !state.recording) {
             ProToolbar(state, actions, onClose = {
                 state.proBarOpen = false
@@ -770,7 +794,7 @@ private fun BottomControls(state: AppState, settings: AppSettings, actions: Came
             })
         } else {
             ModeStrip(state, actions)
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(12.dp))
             BottomRow(state, settings, actions)
         }
     }
@@ -800,7 +824,7 @@ private fun ZoomChips(state: AppState, actions: CameraActions, iconRotation: Flo
             val isSelected = i == selected
             Box(
                 Modifier
-                    .size(33.dp)
+                    .size(36.dp)
                     .clip(CircleShape)
                     .background(if (isSelected) primary else Color.Transparent)
                     .clickable {
@@ -813,7 +837,7 @@ private fun ZoomChips(state: AppState, actions: CameraActions, iconRotation: Flo
                 Text(
                     ZoomMath.chipLabel(chip, state.zoom, isSelected),
                     color = if (isSelected) onPrimary else Color.White,
-                    fontSize = if (isSelected) 14.sp else 13.sp,
+                    fontSize = if (isSelected) 15.sp else 14.sp,
                     fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                     modifier = Modifier.rotate(iconRotation),
                 )
@@ -823,9 +847,15 @@ private fun ZoomChips(state: AppState, actions: CameraActions, iconRotation: Flo
 }
 
 @Composable
-private fun ShutterRow(state: AppState, settings: AppSettings, actions: CameraActions, iconRotation: Float) {
+private fun ShutterRow(
+    state: AppState,
+    settings: AppSettings,
+    actions: CameraActions,
+    iconRotation: Float,
+    previewSize: IntSize,
+) {
     Row(
-        Modifier.fillMaxWidth().height(96.dp).padding(horizontal = 36.dp),
+        Modifier.fillMaxWidth().height(80.dp).padding(horizontal = 68.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -834,8 +864,8 @@ private fun ShutterRow(state: AppState, settings: AppSettings, actions: CameraAc
                 icon = { Icon(if (state.recordingPaused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause, "Pause", tint = Color.White) },
                 onClick = actions::pauseResume,
             )
-            state.intentMode != IntentMode.NORMAL -> Spacer(Modifier.size(56.dp))
-            else -> Thumbnail(state, actions, iconRotation)
+            state.intentMode != IntentMode.NORMAL -> Spacer(Modifier.size(48.dp))
+            else -> FocusLockButton(state, actions, previewSize)
         }
         Shutter(state, settings, actions)
         when {
@@ -845,18 +875,49 @@ private fun ShutterRow(state: AppState, settings: AppSettings, actions: CameraAc
                     onClick = actions::snapshot,
                 )
             } else {
-                Spacer(Modifier.size(56.dp))
+                Spacer(Modifier.size(48.dp))
             }
             state.caps.hasFront && !state.burstActive -> FlipButton(actions, iconRotation)
-            else -> Spacer(Modifier.size(56.dp))
+            else -> Spacer(Modifier.size(48.dp))
         }
+    }
+}
+
+@Composable
+private fun FocusLockButton(state: AppState, actions: CameraActions, previewSize: IntSize) {
+    Box(
+        Modifier
+            .size(48.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(FocoColors.Button)
+            .combinedClickable(
+                onClick = {
+                    if (state.focusLocked) {
+                        actions.unlockFocus()
+                    } else if (previewSize.width > 0 && previewSize.height > 0) {
+                        actions.focusAt(
+                            Offset(previewSize.width / 2f, previewSize.height / 2f),
+                            previewSize.width,
+                            previewSize.height,
+                            lock = true,
+                        )
+                    }
+                },
+                onLongClick = actions::openGallery,
+            )
+            .semantics {
+                contentDescription = if (state.focusLocked) "Unlock focus; long press for gallery" else "Lock focus; long press for gallery"
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Outlined.Lock, null, tint = Color.White, modifier = Modifier.size(24.dp))
     }
 }
 
 @Composable
 private fun RoundButton(icon: @Composable () -> Unit, onClick: () -> Unit) {
     Box(
-        Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)).background(FocoColors.Button).clickable(onClick = onClick),
+        Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(FocoColors.Button).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { icon() }
 }
@@ -906,7 +967,7 @@ private fun Shutter(state: AppState, settings: AppSettings, actions: CameraActio
     Box(contentAlignment = Alignment.Center) {
         Canvas(
             Modifier
-                .size(84.dp)
+                .size(72.dp)
                 .alpha(if (state.cameraReady) 1f else 0.5f)
                 .clickable(interactionSource = interaction, indication = null) { actions.shutter() }
                 .semantics {
@@ -970,7 +1031,7 @@ private fun FlipButton(actions: CameraActions, iconRotation: Float) {
                 Icons.Outlined.Sync,
                 "Switch camera",
                 tint = Color.White,
-                modifier = Modifier.size(30.dp).rotate(iconRotation + spin),
+                modifier = Modifier.size(26.dp).rotate(iconRotation + spin),
             )
         },
         onClick = {
@@ -1020,7 +1081,7 @@ private fun ModeStrip(state: AppState, actions: CameraActions) {
         },
         modifier = Modifier
             .fillMaxWidth()
-            .height(40.dp)
+            .height(36.dp)
             .pointerInput(isPhoto) {
                 if (!isPhoto) return@pointerInput
                 detectHorizontalDragGestures(
@@ -1065,12 +1126,12 @@ private fun ModeStrip(state: AppState, actions: CameraActions) {
 /** Settings (left) · Photo/Video (middle) · Pro controls or the Night chip (right) – as in Pixel Camera. */
 @Composable
 private fun BottomRow(state: AppState, settings: AppSettings, actions: CameraActions) {
-    Box(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 16.dp)) {
+    Box(Modifier.fillMaxWidth().height(46.dp).padding(horizontal = 20.dp)) {
         if (state.recording || state.burstActive) return@Box
         Box(
             Modifier
                 .align(Alignment.CenterStart)
-                .size(52.dp)
+                .size(44.dp)
                 .clip(CircleShape)
                 .background(FocoColors.ToggleBg)
                 .clickable { state.settingsOpen = true }
@@ -1086,7 +1147,7 @@ private fun BottomRow(state: AppState, settings: AppSettings, actions: CameraAct
             Row(
                 Modifier
                     .align(Alignment.CenterEnd)
-                    .height(52.dp)
+                    .height(44.dp)
                     .clip(CircleShape)
                     .background(FocoColors.ToggleBg)
                     .clickable {
@@ -1105,7 +1166,7 @@ private fun BottomRow(state: AppState, settings: AppSettings, actions: CameraAct
             Box(
                 Modifier
                     .align(Alignment.CenterEnd)
-                    .size(52.dp)
+                    .size(44.dp)
                     .clip(CircleShape)
                     .background(FocoColors.ToggleBg)
                     .clickable { state.proBarOpen = !state.proBarOpen }
@@ -1137,8 +1198,8 @@ private fun PhotoVideoToggle(state: AppState, actions: CameraActions, modifier: 
     val primary = MaterialTheme.colorScheme.primary
     val onPrimary = MaterialTheme.colorScheme.onPrimary
     Row(
-        modifier.clip(CircleShape).background(FocoColors.ToggleBg).padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier.clip(CircleShape).background(FocoColors.ToggleBg).padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         listOf(
             CaptureKind.PHOTO to Icons.Filled.PhotoCamera,
@@ -1147,7 +1208,7 @@ private fun PhotoVideoToggle(state: AppState, actions: CameraActions, modifier: 
             val selected = state.kind == kind
             Box(
                 Modifier
-                    .size(width = 48.dp, height = 44.dp)
+                    .size(width = 40.dp, height = 40.dp)
                     .clip(CircleShape)
                     .background(if (selected) primary else Color.Transparent)
                     .clickable { actions.setKind(kind) }
