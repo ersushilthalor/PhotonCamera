@@ -253,6 +253,7 @@ class Camera2Controller(private val context: Context) {
         }
         standbyPreviewSurfaceTexture = surfaceTexture
         if (surfaceTexture == null) {
+            publishPreviewSource(false)
             standbyCameraController.release("secondary GL preview surface destroyed")
         } else {
             prepareStandbyCameraIfEligible()
