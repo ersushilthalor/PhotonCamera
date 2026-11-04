@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -145,17 +146,30 @@ fun CameraScreen(
     val wide = state.kind == CaptureKind.VIDEO || settings.ratio == RatioSetting.WIDE_9_16
 
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
-        // 4:3 sits just above the shutter row so the zoom chips always overlap the picture (as on Pixel);
-        // 9:16 starts at the top. Never under the top bar.
-        val previewHeight = maxWidth * (if (wide) 16f / 9f else 4f / 3f)
-        val anchoredTop = maxHeight - navBottom - CONTROLS_BELOW_PICTURE - previewHeight
-        val previewTop = if (wide) statusTop else anchoredTop.coerceAtLeast(statusTop + 56.dp)
+        // Keep the Foco viewfinder between the top controls and the shutter area.
+        // On shorter displays, scale the preview down uniformly instead of allowing a
+        // full-width 3:4 / 9:16 frame to extend behind the shutter controls.
+        val previewAspectWidth = if (wide) 9f else 3f
+        val previewAspectHeight = if (wide) 16f else 4f
+        val requestedPreviewHeight = maxWidth * (previewAspectHeight / previewAspectWidth)
+        val availablePreviewHeight = (
+            maxHeight - statusTop - 56.dp - navBottom - CONTROLS_BELOW_PICTURE
+        ).coerceAtLeast(0.dp)
+        val previewHeight = minOf(requestedPreviewHeight, availablePreviewHeight)
+        val previewWidth = minOf(
+            maxWidth,
+            previewHeight * (previewAspectWidth / previewAspectHeight)
+        )
+        val previewTop = maxOf(
+            statusTop + 56.dp,
+            maxHeight - navBottom - CONTROLS_BELOW_PICTURE - previewHeight
+        )
         Box(
             Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = previewTop)
-                .fillMaxWidth()
-                .aspectRatio(if (wide) 9f / 16f else 3f / 4f),
+                .width(previewWidth)
+                .height(previewHeight),
         ) {
             preview(Modifier.fillMaxSize())
             ViewfinderOverlays(state, settings, actions)
