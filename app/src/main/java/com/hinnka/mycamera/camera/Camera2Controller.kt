@@ -9703,7 +9703,10 @@ class Camera2Controller(private val context: Context) {
             }
             return
         }
-        val expectedSurfaceIsCurrent = previewSurfaceTexture === expectedSurfaceTexture
+        val expectedSurfaceIsCurrent =
+            previewSurfaceTexture === expectedSurfaceTexture ||
+                rootPreviewSurfaceTexture === expectedSurfaceTexture ||
+                standbyPreviewSurfaceTexture === expectedSurfaceTexture
         val expectedSurfaceIsPending = pendingCameraOpenRequest?.surfaceTexture === expectedSurfaceTexture
         if (
             expectedSurfaceTexture != null &&
@@ -9722,6 +9725,10 @@ class Camera2Controller(private val context: Context) {
             preserveVideoRecording = preserveVideoRecording,
             clearPendingOpen = true,
         )
+        if (expectedSurfaceTexture == null || rootPreviewSurfaceTexture === expectedSurfaceTexture) {
+            rootPreviewSurfaceTexture = null
+        }
+        _displayedPreviewSource.value = PreviewStreamSource.MAIN
     }
 
     private fun closeCameraInternal(
