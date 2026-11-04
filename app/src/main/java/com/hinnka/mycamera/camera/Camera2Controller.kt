@@ -5930,15 +5930,17 @@ class Camera2Controller(private val context: Context) {
     private fun tryPromoteStandbyCamera(cameraId: String, targetZoomRatio: Float): Boolean {
         val current = _state.value
         val target = current.availableCameras.firstOrNull { it.cameraId == cameraId } ?: return false
+        val oldCameraInfo = current.getCurrentCameraInfo() ?: return false
         val oldDevice = cameraDevice ?: return false
         val oldSession = captureSession ?: return false
         val oldBuilder = previewRequestBuilder ?: return false
         val oldSurface = previewSurface ?: return false
         val oldSurfaceTexture = previewSurfaceTexture ?: return false
         val oldReader = imageReader ?: return false
+        val handler = cameraHandler ?: return false
 
         if (current.captureMode != CaptureMode.PHOTO ||
-            current.getCurrentCameraInfo()?.lensFacing != CameraCharacteristics.LENS_FACING_BACK ||
+            oldCameraInfo.lensFacing != CameraCharacteristics.LENS_FACING_BACK ||
             target.lensFacing != CameraCharacteristics.LENS_FACING_BACK ||
             current.videoRecordingState.isRecording ||
             current.videoRecordingState.isProcessing ||
@@ -5969,8 +5971,7 @@ class Camera2Controller(private val context: Context) {
             next.cameraDevice.id != next.openCameraId ||
             next.previewSurfaceTexture === oldSurfaceTexture
         ) {
-            // This should be unreachable after a READY status, but never strand a
-            // mismatched session if a device callback races the lens tap.
+            // Keep the old active session intact if a stale or mismatched standby result races a tap.
             runCatching { next.captureSession.close() }
             runCatching { next.previewSurface.release() }
             runCatching { next.captureImageReader.close() }
@@ -5979,10 +5980,25 @@ class Camera2Controller(private val context: Context) {
         }
 
         val oldPreviewSource = _displayedPreviewSource.value
+        val oldStream = PromotedStandbyCamera(
+            cameraDevice = oldDevice,
+            captureSession = oldSession,
+            requestBuilder = oldBuilder,
+            previewSurface = oldSurface,
+            previewSurfaceTexture = oldSurfaceTexture,
+            captureImageReader = oldReader,
+            cameraInfo = oldCameraInfo,
+            openCameraId = activeOpenCameraId.ifBlank { oldDevice.id },
+            physicalCameraId = activeOutputPhysicalCameraId,
+            previewSize = current.currentPreviewSize,
+            captureSize = current.currentCaptureSize,
+            previewSource = oldPreviewSource,
+        )
         val targetState = current.copy(
             currentCameraId = target.cameraId,
             currentLensType = target.lensType,
             zoomRatio = targetZoomRatio.takeIf { it.isFinite() && it > 0f } ?: 1f,
+            currentPreviewSize = next.previewSize,
             currentCaptureSize = next.captureSize,
             isPreviewActive = true,
             isCapturing = false,
@@ -5990,7 +6006,7 @@ class Camera2Controller(private val context: Context) {
             isFocusing = false,
         )
 
-        // Transfer the ready session and its output surfaces to the active controller.
+        // Swap the two live CameraDevices and sessions. Neither session is stopped or closed.
         cameraDevice = next.cameraDevice
         captureSession = next.captureSession
         previewRequestBuilder = next.requestBuilder
@@ -6008,6 +6024,7 @@ class Camera2Controller(private val context: Context) {
         _displayedPreviewSource.value = next.previewSource
         standbyPreviewSurfaceTexture = oldSurfaceTexture
         standbyPreviewStreamSource = oldPreviewSource
+        detachedStandbyCameraDevice = oldDevice
         _enginePreviewSource.value = null
         lastCaptureResult = null
         lastWhiteBalanceResult = null
@@ -6022,30 +6039,22 @@ class Camera2Controller(private val context: Context) {
             PLog.w(TAG, "Could not fully refresh promoted preview settings; keeping standby defaults", it)
         }
 
-        // The promoted session already has a valid repeating request. Re-submit it with
-        // PhotonCamera's regular result callback and the newly-selected camera settings.
+        // The now-inactive camera remains open and streaming on its original GL texture.
+        // StandbyCameraController owns it until the next lens tap, enabling a true two-way swap.
+        standbyCameraController.adoptFormerActiveStream(
+            stream = oldStream,
+            newActiveOpenCameraId = next.openCameraId,
+            callbackHandler = handler,
+        )
+
+        // Re-submit the promoted repeating request with PhotonCamera's normal capture-result callback.
         updatePreview()
         _state.update { it.copy(isPreviewActive = true) }
 
-        // Retire the old foreground session, but keep its GL SurfaceTexture alive. Once
-        // CameraDevice.onClosed arrives it is reopened as the next standby stream on that
-        // now-free preview texture.
-        pendingStandbyRewarm = PendingStandbyRewarm(
-            closingDevice = oldDevice,
-            previewTexture = oldSurfaceTexture,
-            previewSource = oldPreviewSource,
-        )
-        runCatching { oldSession.stopRepeating() }
-        runCatching { oldSession.abortCaptures() }
-        safeCloseCaptureSession(oldSession, "retired after instant rear-lens promotion")
-        runCatching { oldSurface.release() }
-        safeCloseImageReader(oldReader)
-        closeCameraDeviceSafely(oldDevice, "retired after instant rear-lens promotion")
-
         PLog.i(
             TAG,
-            "Instant rear-lens promotion complete: ${current.currentCameraId} -> ${target.cameraId}; " +
-                "activeSource=${next.previewSource}, standby rewarm waits for old device close"
+            "Persistent dual-session lens swap complete: ${current.currentCameraId} -> ${target.cameraId}; " +
+                "activeSource=${next.previewSource}, standbySource=$oldPreviewSource"
         )
         return true
     }
