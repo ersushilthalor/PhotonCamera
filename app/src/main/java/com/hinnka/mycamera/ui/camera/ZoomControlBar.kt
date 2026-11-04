@@ -525,6 +525,9 @@ private fun ZoomContinuousSlider(
     }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        // Capture the layout width before nested iteration lambdas, which do not
+        // inherit BoxWithConstraintsScope's implicit receiver.
+        val sliderWidth = maxWidth
         val safeMinZoom = minZoom.coerceAtLeast(0.001f)
         val safeMaxZoom = maxZoom.coerceAtLeast(safeMinZoom + 0.001f)
         val logMinimum = ln(safeMinZoom.toDouble())
@@ -593,7 +596,7 @@ private fun ZoomContinuousSlider(
                     ).toFloat().coerceIn(0f, 1f)
                     val labelOffset = (
                         sideInset + usableWidth * stopProgress - 11.dp
-                    ).coerceIn(0.dp, (maxWidth - 22.dp).coerceAtLeast(0.dp))
+                    ).coerceIn(0.dp, (sliderWidth - 22.dp).coerceAtLeast(0.dp))
                     Text(
                         text = if (stop == 0.5f) ".5" else stop.roundToInt().toString(),
                         modifier = Modifier
