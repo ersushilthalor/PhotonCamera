@@ -9,6 +9,7 @@ import android.util.AttributeSet
 import android.view.Surface
 import com.hinnka.mycamera.livephoto.LivePhotoRecorder
 import com.hinnka.mycamera.camera.MeteringMode
+import com.hinnka.mycamera.camera.PreviewStreamSource
 import com.hinnka.mycamera.lut.LutConfig
 import com.hinnka.mycamera.lut.LutRenderer
 import com.hinnka.mycamera.raw.RawEnginePreviewPlan
@@ -70,6 +71,7 @@ class CameraGLSurfaceView @JvmOverloads constructor(
     var onFirstPreviewFrame: (() -> Unit)? = null
     var onStandbySurfaceTextureReady: ((SurfaceTexture) -> Unit)? = null
     var onStandbyPreviewFrameAvailable: ((Long) -> Unit)? = null
+    var onMainPreviewFrameAvailable: ((Long) -> Unit)? = null
     private var currentSurface: Surface? = null
 
     init {
@@ -104,6 +106,9 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         }
         renderer.onStandbyFrameAvailable = { timestampNs ->
             post { onStandbyPreviewFrameAvailable?.invoke(timestampNs) }
+        }
+        renderer.onMainFrameAvailable = { timestampNs ->
+            post { onMainPreviewFrameAvailable?.invoke(timestampNs) }
         }
 
         renderer.onHistogramUpdated = { histogram ->
@@ -328,6 +333,13 @@ class CameraGLSurfaceView @JvmOverloads constructor(
     fun getSurfaceTexture(): SurfaceTexture? = renderer.getSurfaceTexture()
 
     fun getStandbySurfaceTexture(): SurfaceTexture? = renderer.getStandbySurfaceTexture()
+
+    fun setDisplayedPreviewSource(source: PreviewStreamSource) {
+        queueEvent {
+            renderer.setDisplayedPreviewSource(source)
+            requestRender()
+        }
+    }
 
     fun getRenderSurface(): Surface? = currentSurface
 
