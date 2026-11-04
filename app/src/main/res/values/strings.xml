@@ -8,6 +8,7 @@
     <string name="flash">Flash</string>
     <string name="timer">Timer</string>
     <string name="toolbox_title">Toolbox</string>
+    <string name="settings_toolbox_description">Open camera tools and utilities.</string>
     <string name="toolbox_description">Utility tools and creative features</string>
     <string name="film_library_title">Film Library</string>
     <string name="film_library_desc">Explore a wide range of film stocks and their characteristics.</string>
