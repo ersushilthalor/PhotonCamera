@@ -50,7 +50,9 @@ jobs:
           grep -Fq 'fun landscapeRearCameraCropRemainsUnchanged()' "$test_file"
           grep -Fq 'return resolveOutputQuadCropRect(' "$renderer_file"
           grep -Fq 'val shouldFlipEncodedFrame = isCurrentCameraFrontFacing()' "$controller_file"
-          grep -Fq 'if (oesFrameUpdated) useCurrentOesFrame()' "$preview_renderer_file"
+          grep -Fq 'if (oesFrameUpdated) useCurrentOesFrame(useStandbySource)' "$preview_renderer_file"
+          grep -Fq 'getStandbySurfaceTexture()' "$preview_renderer_file"
+          grep -Fq 'setActivePreviewSource(useStandby: Boolean)' "$preview_renderer_file"
           grep -Fq 'fun enhancedStabilizationSupportsFrontAndRearCamerasOnly()' "$stabilization_test_file"
 
       - name: Protect Foco UI and Photon camera integration
