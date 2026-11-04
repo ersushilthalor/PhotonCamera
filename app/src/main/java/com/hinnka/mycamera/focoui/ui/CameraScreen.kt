@@ -87,7 +87,6 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.StrokeCap
@@ -793,19 +792,15 @@ private fun ZoomChips(state: AppState, actions: CameraActions, iconRotation: Flo
                     actions.setZoom((state.zoom * exp(dragAmount / 260f)).coerceIn(state.minZoom, state.maxZoom))
                 }
             }
-            .padding(4.dp)
-            .graphicsLayer {
-                scaleX = 0.75f
-                scaleY = 0.75f
-            },
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         chips.forEachIndexed { i, chip ->
             val isSelected = i == selected
             Box(
                 Modifier
-                    .size(44.dp)
+                    .size(33.dp)
                     .clip(CircleShape)
                     .background(if (isSelected) primary else Color.Transparent)
                     .clickable {
