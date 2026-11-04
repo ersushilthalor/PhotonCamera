@@ -5887,6 +5887,257 @@ class Camera2Controller(private val context: Context) {
     }
 
     /**
+     * Promotes the already-streaming rear standby session without closing/reopening
+     * the target CameraDevice. The standby session includes its own YUV still output,
+     * so a successful promotion also switches the shutter pipeline to that lens.
+     *
+     * Unsupported capture profiles deliberately return false; the ViewModel then uses
+     * the original, fully-configured camera reopen path.
+     */
+    fun tryInstantSwitchToCameraId(
+        cameraId: String,
+        targetZoomRatio: Float,
+        onResult: (Boolean) -> Unit,
+    ) {
+        val handler = cameraHandler
+        if (handler == null) {
+            onResult(false)
+            return
+        }
+        val action = {
+            val switched = tryPromoteStandbyCamera(cameraId, targetZoomRatio)
+            onResult(switched)
+        }
+        if (Looper.myLooper() == handler.looper) action() else handler.post(action)
+    }
+
+    private fun tryPromoteStandbyCamera(cameraId: String, targetZoomRatio: Float): Boolean {
+        val current = _state.value
+        val target = current.availableCameras.firstOrNull { it.cameraId == cameraId } ?: return false
+        val oldDevice = cameraDevice ?: return false
+        val oldSession = captureSession ?: return false
+        val oldBuilder = previewRequestBuilder ?: return false
+        val oldSurface = previewSurface ?: return false
+        val oldSurfaceTexture = previewSurfaceTexture ?: return false
+        val oldReader = imageReader ?: return false
+
+        if (current.captureMode != CaptureMode.PHOTO ||
+            current.lensFacing != CameraCharacteristics.LENS_FACING_BACK ||
+            target.lensFacing != CameraCharacteristics.LENS_FACING_BACK ||
+            current.videoRecordingState.isRecording ||
+            current.videoRecordingState.isProcessing ||
+            current.useRaw ||
+            current.useP010 ||
+            current.photoPreviewStabilizationEnabled ||
+            oldReader.imageFormat != ImageFormat.YUV_420_888 ||
+            activePhotoCapture != null ||
+            photoCaptures.isNotEmpty() ||
+            pendingImages.isNotEmpty() ||
+            pendingResults.isNotEmpty() ||
+            _state.value.isCapturing
+        ) {
+            return false
+        }
+        if (target.cameraId == current.currentCameraId) return false
+
+        val standbyStatus = standbyCameraController.status.value
+        if (standbyStatus.phase != StandbyCameraPhase.READY ||
+            standbyStatus.standbyCameraId != cameraId
+        ) {
+            return false
+        }
+
+        val next = standbyCameraController.takeOverReadyStream() ?: return false
+        if (next.cameraInfo.cameraId != cameraId ||
+            next.captureImageReader.imageFormat != ImageFormat.YUV_420_888 ||
+            next.cameraDevice.id != next.openCameraId ||
+            next.previewSurfaceTexture === oldSurfaceTexture
+        ) {
+            // This should be unreachable after a READY status, but never strand a
+            // mismatched session if a device callback races the lens tap.
+            runCatching { next.captureSession.close() }
+            runCatching { next.previewSurface.release() }
+            runCatching { next.captureImageReader.close() }
+            runCatching { next.cameraDevice.close() }
+            return false
+        }
+
+        val oldPreviewSource = _displayedPreviewSource.value
+        val targetState = current.copy(
+            currentCameraId = target.cameraId,
+            currentLensType = target.lensType,
+            zoomRatio = targetZoomRatio.takeIf { it.isFinite() && it > 0f } ?: 1f,
+            currentCaptureSize = next.captureSize,
+            isPreviewActive = true,
+            isCapturing = false,
+            previewFirstFrameTimestampNs = null,
+            isFocusing = false,
+        )
+
+        // Transfer the ready session and its output surfaces to the active controller.
+        cameraDevice = next.cameraDevice
+        captureSession = next.captureSession
+        previewRequestBuilder = next.requestBuilder
+        previewSurface = next.previewSurface
+        previewSurfaceTexture = next.previewSurfaceTexture
+        imageReader = next.captureImageReader
+        activeOpenCameraId = next.openCameraId
+        activeOutputPhysicalCameraId = next.physicalCameraId
+        cameraDeviceLifecycle = CameraDeviceLifecycle.OPEN
+        cameraOpenGeneration++
+        previewSessionGeneration++
+        pendingVendorSessionParameterRestart = false
+        _state.value = targetState
+        _displayedPreviewSource.value = next.previewSource
+        standbyPreviewSurfaceTexture = oldSurfaceTexture
+        standbyPreviewStreamSource = oldPreviewSource
+        _enginePreviewSource.value = null
+        lastCaptureResult = null
+        lastWhiteBalanceResult = null
+        manualWhiteBalanceAnchor = null
+
+        refreshCapabilitiesForPromotedCamera(next.cameraInfo, next.openCameraId, next.physicalCameraId)
+        runCatching {
+            next.requestBuilder.apply {
+                applyBaseCameraSettings(this, isCapture = false, currentState = _state.value)
+            }
+        }.onFailure {
+            PLog.w(TAG, "Could not fully refresh promoted preview settings; keeping standby defaults", it)
+        }
+
+        // The promoted session already has a valid repeating request. Re-submit it with
+        // PhotonCamera's regular result callback and the newly-selected camera settings.
+        updatePreview()
+        _state.update { it.copy(isPreviewActive = true) }
+
+        // Retire the old foreground session, but keep its GL SurfaceTexture alive. Once
+        // CameraDevice.onClosed arrives it is reopened as the next standby stream on that
+        // now-free preview texture.
+        pendingStandbyRewarm = PendingStandbyRewarm(
+            closingDevice = oldDevice,
+            previewTexture = oldSurfaceTexture,
+            previewSource = oldPreviewSource,
+        )
+        runCatching { oldSession.stopRepeating() }
+        runCatching { oldSession.abortCaptures() }
+        safeCloseCaptureSession(oldSession, "retired after instant rear-lens promotion")
+        runCatching { oldSurface.release() }
+        safeCloseImageReader(oldReader)
+        closeCameraDeviceSafely(oldDevice, "retired after instant rear-lens promotion")
+
+        PLog.i(
+            TAG,
+            "Instant rear-lens promotion complete: ${current.currentCameraId} -> ${target.cameraId}; " +
+                "activeSource=${next.previewSource}, standby rewarm waits for old device close"
+        )
+        return true
+    }
+
+    private fun refreshCapabilitiesForPromotedCamera(
+        cameraInfo: CameraInfo,
+        openCameraId: String,
+        physicalCameraId: String?,
+    ) {
+        val openCharacteristics = getCameraCharacteristicsCached(openCameraId)
+        val capabilityCameraId = physicalCameraId ?: openCameraId
+        val capabilityCharacteristics = if (capabilityCameraId == openCameraId) {
+            openCharacteristics
+        } else {
+            getCameraCharacteristicsOrNull(capabilityCameraId, "instant lens promotion")
+                ?: openCharacteristics
+        }
+        cacheActiveCameraCharacteristics(openCameraId, openCharacteristics)
+        availableCaptureRequestKeyNames = loadAvailableCaptureRequestKeyNames(openCharacteristics)
+        cachedSensorOrientation = openCharacteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: cameraInfo.sensorOrientation
+        cachedLensFacing = openCharacteristics.get(CameraCharacteristics.LENS_FACING)
+            ?: cameraInfo.lensFacing
+        cachedHardwareLevel = openCharacteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)
+            ?: CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED
+
+        val capabilities = openCharacteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+            ?: intArrayOf()
+        isManualSensorSupported =
+            capabilities.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR) &&
+                openCharacteristics.readMetadataOrNull(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE) != null &&
+                openCharacteristics.readMetadataOrNull(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) != null
+        isManualPostProcessingSupported =
+            capabilities.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING)
+        isFlashSupported = capabilityCharacteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
+        maxAfRegions = capabilityCharacteristics.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AF) ?: 0
+        maxAeRegions = capabilityCharacteristics.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AE) ?: 0
+        availableAfModes = capabilityCharacteristics.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: intArrayOf()
+        availableAeModes = openCharacteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES) ?: intArrayOf()
+        availableAwbModes = openCharacteristics.get(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES) ?: intArrayOf()
+        availableEdgeModes = capabilityCharacteristics.get(CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES) ?: intArrayOf()
+        availableNoiseReductionModes =
+            capabilityCharacteristics.get(CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES)
+                ?: intArrayOf()
+        availableTonemapModes = capabilityCharacteristics.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES)
+            ?: intArrayOf()
+        availableColorCorrectionAberrationModes =
+            capabilityCharacteristics.get(CameraCharacteristics.COLOR_CORRECTION_ABERRATION_AVAILABLE_MODES)
+                ?: intArrayOf()
+        availableHotPixelModes = capabilityCharacteristics.get(CameraCharacteristics.HOT_PIXEL_AVAILABLE_HOT_PIXEL_MODES)
+            ?: intArrayOf()
+        availableShadingModes = capabilityCharacteristics.get(CameraCharacteristics.SHADING_AVAILABLE_MODES)
+            ?: intArrayOf()
+        availableDistortionCorrectionModes =
+            capabilityCharacteristics.get(CameraCharacteristics.DISTORTION_CORRECTION_AVAILABLE_MODES)
+                ?: intArrayOf()
+        availableVideoStabilizationModes =
+            capabilityCharacteristics.get(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES)
+                ?: intArrayOf()
+        availableOpticalStabilizationModes =
+            capabilityCharacteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)
+                ?: intArrayOf()
+        availableLensShadingMapModes =
+            capabilityCharacteristics.get(CameraCharacteristics.STATISTICS_INFO_AVAILABLE_LENS_SHADING_MAP_MODES)
+                ?: intArrayOf()
+        availableFaceDetectModes = capabilityCharacteristics.get(CameraCharacteristics.STATISTICS_INFO_AVAILABLE_FACE_DETECT_MODES)
+            ?: intArrayOf()
+        maxFaceCount = capabilityCharacteristics.get(CameraCharacteristics.STATISTICS_INFO_MAX_FACE_COUNT) ?: 0
+        faceDetectMode = resolveFaceDetectMode(availableFaceDetectModes, maxFaceCount)
+        availableColorCorrectionModes = loadAvailableColorCorrectionModes(capabilityCharacteristics)
+        awbColorTemperatureRange = loadAwbColorTemperatureRange(capabilityCharacteristics)
+        isRawSupported = resolveRawCaptureOutput(capabilityCharacteristics, physicalCameraId) != null
+        isP010Supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            isOutputFormatAdvertised(capabilityCharacteristics, ImageFormat.YCBCR_P010)
+        isStreamUseCaseSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            capabilities.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_STREAM_USE_CASE)
+        availableStreamUseCases = if (isStreamUseCaseSupported) {
+            openCharacteristics.get(CameraCharacteristics.SCALER_AVAILABLE_STREAM_USE_CASES) ?: longArrayOf()
+        } else {
+            longArrayOf()
+        }
+        isZslControlSupported = null
+        lastAfState = null
+        lastWhiteBalanceResult = null
+        manualWhiteBalanceAnchor = null
+
+        val minimumFocusDistance =
+            capabilityCharacteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+        _state.update {
+            it.copy(
+                isRawSupported = isRawSupported,
+                isP010Supported = isP010Supported,
+                supportsCctWhiteBalance = supportsCctWhiteBalance(),
+                canAdjustWhiteBalance = false,
+                actualAwbTemperature = null,
+                actualAwbTint = null,
+                actualAwbGains = null,
+                minimumFocusDistance = minimumFocusDistance,
+                supportsPointAutoFocus = supportsPointAutoFocus(
+                    minimumFocusDistance = minimumFocusDistance,
+                    maxRegions = maxAfRegions,
+                    afModes = availableAfModes,
+                ),
+                supportsPointMetering = maxAeRegions > 0,
+            )
+        }
+        refreshActiveFocusLimit()
+    }
+
+    /**
      * 切换摄像头（前后置切换）
      */
     fun switchCamera() {
@@ -5926,6 +6177,7 @@ class Camera2Controller(private val context: Context) {
      * 切换到指定的相机 ID
      */
     fun switchToCameraId(cameraId: String) {
+        _displayedPreviewSource.value = PreviewStreamSource.MAIN
         val cameras = _state.value.availableCameras
         val targetCamera = cameras.find { it.cameraId == cameraId }
 
