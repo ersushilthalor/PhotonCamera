@@ -3543,6 +3543,14 @@ class Camera2Controller(private val context: Context) {
         invalidateCaptureSession(captureSession, "preview session replacement")
         val captureMode = _state.value.captureMode
         val reader = imageReader
+        val logicalPreviewSurface = logicalStandbyPreviewSurface.takeIf {
+            captureMode == CaptureMode.PHOTO &&
+                logicalStandbyCaptureImageReader != null &&
+                logicalSecondaryPreviewPhysicalCameraId != null
+        }
+        val logicalCaptureReader = logicalStandbyCaptureImageReader.takeIf { logicalPreviewSurface != null }
+        val logicalDualForSession = logicalPreviewSurface != null && logicalCaptureReader != null
+        val logicalSessionGeneration = logicalDualSessionGeneration
         val stabilizationReader = ensureStabilizationImageReader()
         val useEnhancedStabilization = shouldUseVideoEnhancedStabilization()
         val videoSurface = if (
@@ -3575,6 +3583,7 @@ class Camera2Controller(private val context: Context) {
         try {
             previewRequestBuilder = device.createCaptureRequest(templateType).apply {
                 addTarget(surface)
+                logicalPreviewSurface?.let(::addTarget)
                 stabilizationReader?.surface?.let(::addTarget)
                 videoSurface?.let(::addTarget)
 
@@ -3669,12 +3678,37 @@ class Camera2Controller(private val context: Context) {
                         "isP010Supported=$isP010Supported"
             )
             val outputConfigs = buildList {
-                add(createOutputConfiguration(surface))
+                if (logicalDualForSession) {
+                    add(
+                        createOutputConfiguration(
+                            surface,
+                            physicalCameraId = logicalMainPreviewPhysicalCameraId,
+                        )
+                    )
+                    logicalPreviewSurface?.let { secondPreview ->
+                        add(
+                            createOutputConfiguration(
+                                secondPreview,
+                                physicalCameraId = logicalSecondaryPreviewPhysicalCameraId,
+                            )
+                        )
+                    }
+                } else {
+                    add(createOutputConfiguration(surface))
+                }
                 stabilizationReader?.surface?.let { eisSurface ->
                     add(createOutputConfiguration(eisSurface))
                 }
                 reader?.surface?.let { captureSurface ->
                     add(createOutputConfiguration(captureSurface))
+                }
+                logicalCaptureReader?.surface?.let { secondCapture ->
+                    add(
+                        createOutputConfiguration(
+                            secondCapture,
+                            physicalCameraId = logicalStandbyPhysicalCameraId,
+                        )
+                    )
                 }
             }
             val sessionConfig = SessionConfiguration(
@@ -3693,12 +3727,22 @@ class Camera2Controller(private val context: Context) {
                             return
                         }
                         closeUnusedStabilizationImageReader(stabilizationReader)
+                        if (logicalDualForSession && logicalSessionGeneration == logicalDualSessionGeneration) {
+                            logicalDualStreamConfigured = true
+                        }
                         onSessionConfigured(session, openGeneration, sessionGeneration)
                     }
 
                     override fun onConfigureFailed(session: CameraCaptureSession) {
                         if (openGeneration != cameraOpenGeneration || sessionGeneration != previewSessionGeneration) {
                             safeCloseCaptureSession(session, "stale configure failure")
+                            return
+                        }
+                        if (logicalDualForSession && logicalSessionGeneration == logicalDualSessionGeneration) {
+                            safeCloseCaptureSession(session, "logical dual-physical session rejected")
+                            clearLogicalStandbyOutputs("logical dual-physical session rejected")
+                            PLog.w(TAG, "Logical dual-physical output session rejected; falling back to the active camera stream")
+                            createPreviewSession(openGeneration = openGeneration)
                             return
                         }
                         PLog.e(
