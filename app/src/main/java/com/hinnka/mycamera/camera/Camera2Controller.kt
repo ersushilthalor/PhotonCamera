@@ -2982,7 +2982,7 @@ class Camera2Controller(private val context: Context) {
                             !isPhysicalOutputProfileFailed(it, ImageFormat.YCBCR_P010)
                         } ?: true)
                 val resolvedVideoPreviewSize = refreshVideoCapabilities(openCharacteristics)
-                previewSize = when (captureMode) {
+                previewSize = preopenedHandoff?.previewSize ?: when (captureMode) {
                     CaptureMode.VIDEO -> resolvedVideoPreviewSize
                     CaptureMode.PHOTO -> CameraUtils.getFixedPreviewSize(openCharacteristics, _state.value.aspectRatio)
                 }
@@ -3081,9 +3081,9 @@ class Camera2Controller(private val context: Context) {
                 return
             }
 
-            // 配置 SurfaceTexture
-            previewSurfaceTexture = surfaceTexture
-            previewSurface = Surface(surfaceTexture)
+            // Keep the already-configured preview Surface when adopting a live standby session.
+            previewSurfaceTexture = preopenedHandoff?.previewSurfaceTexture ?: surfaceTexture
+            previewSurface = preopenedHandoff?.previewSurface ?: Surface(surfaceTexture)
 
             if (captureMode == CaptureMode.PHOTO) {
                 val aspectRatio = state.value.aspectRatio
@@ -3126,9 +3126,12 @@ class Camera2Controller(private val context: Context) {
                     rawOutput = null
                     captureFormat = ImageFormat.YUV_420_888
                 }
-                previewSize = CameraUtils.getFixedPreviewSize(outputCharacteristicsForStreams, aspectRatio)
+                previewSize = preopenedHandoff?.previewSize
+                    ?: CameraUtils.getFixedPreviewSize(outputCharacteristicsForStreams, aspectRatio)
                 surfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height)
-                val captureSize = if (rawOutput != null) {
+                val captureSize = preopenedHandoff?.let {
+                    Size(it.imageReader.width, it.imageReader.height)
+                } ?: if (rawOutput != null) {
                     rawOutput.size
                 } else {
                     CameraUtils.getBestCaptureSize(outputCharacteristicsForStreams, aspectRatio, captureFormat)
@@ -3159,25 +3162,16 @@ class Camera2Controller(private val context: Context) {
                         }
                     }, stream=$outputCameraIdForStreams, isP3Supported: $isP3Supported, imageReaderMaxImages: $readerMaxImages"
                 )
-                imageReader = ImageReader.newInstance(
-                    captureSize.width,
-                    captureSize.height,
-                    captureFormat,
-                    readerMaxImages
-                ).apply {
-                    setOnImageAvailableListener({ reader ->
-                        try {
-                            while (canAcquireImage("Too many open images")) {
-                                val image = trackImage(reader.acquireNextImage()) ?: break
-                                processOrBufferImageForCaptureResult(image)
-                            }
-                        } catch (e: Exception) {
-                            PLog.e(TAG, "Error in onImageAvailable", e)
-                            photoCaptures.values.filter { it.reader === reader }.toList()
-                                .forEach { failPhotoCapture(it, "image acquisition failed") }
-                        }
-                    }, cameraHandler)
+                if (preopenedHandoff != null &&
+                    (preopenedHandoff.imageReader.imageFormat != captureFormat ||
+                        preopenedHandoff.imageReader.width != captureSize.width ||
+                        preopenedHandoff.imageReader.height != captureSize.height)
+                ) {
+                    throw IllegalStateException("Prewarmed still-output profile no longer matches current capture settings")
                 }
+                imageReader = preopenedHandoff?.imageReader
+                    ?: ImageReader.newInstance(captureSize.width, captureSize.height, captureFormat, readerMaxImages)
+                imageReader?.let(::configureImageReaderCaptureListener)
 
             } else {
                 safeCloseImageReader(imageReader)
