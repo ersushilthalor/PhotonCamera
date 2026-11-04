@@ -292,6 +292,8 @@ class Camera2Controller(private val context: Context) {
     private var logicalStandbyPreviewOutputSize: Size? = null
     private var logicalStandbyCaptureOutputSize: Size? = null
     private var logicalStandbyPreviewSource: PreviewStreamSource = PreviewStreamSource.STANDBY
+    private var logicalMainPreviewPhysicalCameraId: String? = null
+    private var logicalSecondaryPreviewPhysicalCameraId: String? = null
     private var logicalDualStreamConfigured = false
     private var logicalDualSessionGeneration = 0L
     private var activeClosingCameraDevice: CameraDevice? = null
@@ -2222,6 +2224,8 @@ class Camera2Controller(private val context: Context) {
         logicalStandbyPhysicalCameraId = null
         logicalStandbyPreviewOutputSize = null
         logicalStandbyCaptureOutputSize = null
+        logicalMainPreviewPhysicalCameraId = null
+        logicalSecondaryPreviewPhysicalCameraId = null
     }
 
     private fun clearCameraSessionState(reason: String, closeImageReader: Boolean = true) {
