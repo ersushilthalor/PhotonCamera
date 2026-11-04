@@ -21,6 +21,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.hinnka.mycamera.livephoto.LivePhotoRecorder
 import com.hinnka.mycamera.camera.FocusPointSource
 import com.hinnka.mycamera.camera.MeteringMode
+import com.hinnka.mycamera.camera.PreviewStreamSource
 import com.hinnka.mycamera.lut.LutConfig
 import com.hinnka.mycamera.raw.RawEnginePreviewPlan
 import kotlinx.coroutines.flow.StateFlow
@@ -79,6 +80,8 @@ fun CameraPreviewGL(
     onGLSurfaceViewReady: ((CameraGLSurfaceView) -> Unit)? = null,
     onStandbySurfaceTextureReady: (SurfaceTexture) -> Unit = {},
     onStandbyPreviewFrameAvailable: (Long) -> Unit = {},
+    displayedPreviewSource: PreviewStreamSource = PreviewStreamSource.MAIN,
+    onMainPreviewFrameAvailable: (Long) -> Unit = {},
     isAutoFocus: Boolean = true,
     focusPeakingEnabled: Boolean = true,
     stabilizationCoordinator: RealtimeStabilizationCoordinator? = null,
@@ -249,6 +252,12 @@ fun CameraPreviewGL(
                                 onStandbyPreviewFrameAvailable(timestampNs)
                             }
                         }
+                        glSurfaceView.onMainPreviewFrameAvailable = { timestampNs ->
+                            if (glSurfaceViewRef === glSurfaceView) {
+                                onMainPreviewFrameAvailable(timestampNs)
+                            }
+                        }
+                        glSurfaceView.setDisplayedPreviewSource(displayedPreviewSource)
 
                         viewWidth = glSurfaceView.width
                         viewHeight = glSurfaceView.height
