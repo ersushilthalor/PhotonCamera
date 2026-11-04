@@ -13,6 +13,7 @@ import com.hinnka.mycamera.preview.EyeFocusProcessingTiming
 import com.hinnka.mycamera.raw.ColorSpace
 import com.hinnka.mycamera.screencapture.PhantomPipCrop
 import com.hinnka.mycamera.camera.MeteringMode
+import com.hinnka.mycamera.camera.PreviewStreamSource
 import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD
 import com.hinnka.mycamera.stabilization.RealtimeStabilizationCoordinator
 import com.hinnka.mycamera.stabilization.StabilizationUseCase
@@ -496,6 +497,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     var onSurfaceTextureAvailable: ((SurfaceTexture) -> Unit)? = null
     var onStandbySurfaceTextureAvailable: ((SurfaceTexture) -> Unit)? = null
     var onStandbyFrameAvailable: ((Long) -> Unit)? = null
+    var onMainFrameAvailable: ((Long) -> Unit)? = null
     var onRequestRender: (() -> Unit)? = null
     var onHistogramUpdated: ((IntArray) -> Unit)? = null
     var onMeteringUpdated: ((Double, Double) -> Unit)? = null
@@ -518,6 +520,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private var lastCaptureWidth = 0
     private var lastCaptureHeight = 0
     private var firstFrameRendered = false
+    @Volatile
+    private var displayedPreviewSource: PreviewStreamSource = PreviewStreamSource.MAIN
 
     /**
      * Surface 创建时调用
@@ -1032,10 +1036,11 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             stabilizationSessionStarted = stabilizationSession?.start() == true
         }
         val oesFrameUpdated = frameAvailable.getAndSet(false) && acquireLatestCameraFrame()
-        if (standbyFrameAvailable.getAndSet(false)) {
-            acquireLatestStandbyFrame()
+        val standbyOesFrameUpdated = standbyFrameAvailable.getAndSet(false) && acquireLatestStandbyFrame()
+        var cameraFrameUpdated = when (displayedPreviewSource) {
+            PreviewStreamSource.MAIN -> oesFrameUpdated
+            PreviewStreamSource.STANDBY -> standbyOesFrameUpdated
         }
-        var cameraFrameUpdated = oesFrameUpdated
 
         if (delayedStabilizationEnabled) {
             val session = stabilizationSession
@@ -1079,7 +1084,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             if (currentCameraTextureSource != PreviewColorTextureSource.TEXTURE_2D) {
                 // Keep showing the real Camera2 preview while EIS+ waits for its first
                 // timestamp-matched result. EIS+ remains enabled and keeps processing frames.
-                if (oesFrameUpdated) useCurrentOesFrame()
+                if (displayedPreviewSource == PreviewStreamSource.MAIN && oesFrameUpdated) useCurrentOesFrame()
             }
         } else if (cameraFrameUpdated) {
             useCurrentOesFrame()
@@ -1334,12 +1339,26 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         )
     }
 
+    fun setDisplayedPreviewSource(source: PreviewStreamSource) {
+        if (displayedPreviewSource == source) return
+        displayedPreviewSource = source
+        // The two SurfaceTextures are continuously updated. Request an immediate GL draw
+        // so the next frame comes from the newly selected stream without waiting on camera open.
+        onRequestRender?.invoke()
+    }
+
     private fun useCurrentOesFrame() {
         currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
         currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
-        currentCameraTextureId = cameraTextureId
-        currentCameraTextureMatrix = stMatrix
-        currentFrameTimestampNs = surfaceTexture?.timestamp ?: 0L
+        if (displayedPreviewSource == PreviewStreamSource.STANDBY) {
+            currentCameraTextureId = standbyCameraTextureId
+            currentCameraTextureMatrix = standbyStMatrix
+            currentFrameTimestampNs = standbySurfaceTexture?.timestamp ?: 0L
+        } else {
+            currentCameraTextureId = cameraTextureId
+            currentCameraTextureMatrix = stMatrix
+            currentFrameTimestampNs = surfaceTexture?.timestamp ?: 0L
+        }
     }
 
     private fun acquireLatestStandbyFrame(): Boolean {
@@ -1365,6 +1384,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             ) {
                 PLog.w(TAG, "MGC cannot derive a cardinal presentation orientation yet")
             }
+            surfaceTexture?.timestamp?.takeIf { it > 0L }?.let { onMainFrameAvailable?.invoke(it) }
             surfaceTexture != null
         } catch (error: RuntimeException) {
             PLog.e(
