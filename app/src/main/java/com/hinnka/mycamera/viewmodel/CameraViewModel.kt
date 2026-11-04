@@ -2917,6 +2917,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /**
      * 打开相机（Camera2 接口）
      */
+    fun setStandbyPreviewSurfaceTexture(surfaceTexture: SurfaceTexture?) {
+        cameraController.setStandbyPreviewSurfaceTexture(surfaceTexture)
+    }
+
+    fun onStandbyPreviewFrameAvailable(timestampNs: Long) {
+        cameraController.onStandbyPreviewFrameAvailable(timestampNs)
+    }
+
     fun openCamera(surfaceTexture: SurfaceTexture) {
         PLog.d(TAG, "openCamera")
         if (currentSurfaceTexture === surfaceTexture && (state.value.isPreviewActive || cameraOpenInFlight)) {
@@ -2978,6 +2986,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraReopenJob?.cancel()
         cameraOpenInFlight = false
         currentSurfaceTexture = null
+        cameraController.setStandbyPreviewSurfaceTexture(null)
         cameraController.closeCamera(expectedSurfaceTexture = surfaceTexture)
     }
 

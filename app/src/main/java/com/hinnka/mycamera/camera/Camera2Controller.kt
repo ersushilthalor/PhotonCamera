@@ -281,6 +281,7 @@ class Camera2Controller(private val context: Context) {
 
     private var previewSurface: Surface? = null
     private var previewSurfaceTexture: SurfaceTexture? = null
+    private var standbyPreviewSurfaceTexture: SurfaceTexture? = null
     private var imageReader: ImageReader? = null
     private var stabilizationImageReader: StabilizationImageReader? = null
 
@@ -2487,6 +2488,44 @@ class Camera2Controller(private val context: Context) {
      * @param surfaceTexture SurfaceTexture 用于预览
      */
     @SuppressLint("MissingPermission")
+    fun setStandbyPreviewSurfaceTexture(surfaceTexture: SurfaceTexture?) {
+        val action = {
+            if (standbyPreviewSurfaceTexture !== surfaceTexture) {
+                standbyPreviewSurfaceTexture = surfaceTexture
+                if (surfaceTexture == null) {
+                    standbyCameraController.release("standby preview SurfaceTexture detached")
+                } else {
+                    val device = cameraDevice
+                    val activeState = _state.value
+                    val handler = cameraHandler
+                    if (device != null && captureSession != null && handler != null &&
+                        !activeState.videoRecordingState.isRecording &&
+                        !activeState.videoRecordingState.isProcessing
+                    ) {
+                        standbyCameraController.prepare(
+                            activeCamera = activeState.getCurrentCameraInfo(),
+                            availableCameras = activeState.availableCameras,
+                            activeOpenCameraId = device.id,
+                            previewSize = activeState.currentPreviewSize,
+                            callbackHandler = handler,
+                            previewSurfaceTexture = surfaceTexture,
+                        )
+                    }
+                }
+            }
+        }
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { action() }
+        } else {
+            action()
+        }
+    }
+
+    fun onStandbyPreviewFrameAvailable(timestampNs: Long) {
+        standbyCameraController.onPreviewFrameAvailable(timestampNs)
+    }
+
     fun openCamera(surfaceTexture: SurfaceTexture, preserveVideoRecording: Boolean = false) {
         val handler = cameraHandler
         if (handler != null && Looper.myLooper() != handler.looper) {
@@ -3930,6 +3969,7 @@ class Camera2Controller(private val context: Context) {
                     activeOpenCameraId = activeOpenCameraId,
                     previewSize = standbyState.currentPreviewSize,
                     callbackHandler = standbyHandler,
+                    previewSurfaceTexture = standbyPreviewSurfaceTexture,
                 )
             } else {
                 standbyCameraController.release("standby disabled while video recording is active")

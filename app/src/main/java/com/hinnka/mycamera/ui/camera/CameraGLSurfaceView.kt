@@ -68,6 +68,8 @@ class CameraGLSurfaceView @JvmOverloads constructor(
     var onSurfaceReady: ((Surface) -> Unit)? = null
     var onSurfaceDestroyed: (() -> Unit)? = null
     var onFirstPreviewFrame: (() -> Unit)? = null
+    var onStandbySurfaceTextureReady: ((SurfaceTexture) -> Unit)? = null
+    var onStandbyPreviewFrameAvailable: ((Long) -> Unit)? = null
     private var currentSurface: Surface? = null
 
     init {
@@ -95,6 +97,13 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         // 设置渲染请求回调（当有新帧可用时由 LutRenderer 调用）
         renderer.onRequestRender = {
             requestRender()
+        }
+
+        renderer.onStandbySurfaceTextureAvailable = { surfaceTexture ->
+            post { onStandbySurfaceTextureReady?.invoke(surfaceTexture) }
+        }
+        renderer.onStandbyFrameAvailable = { timestampNs ->
+            post { onStandbyPreviewFrameAvailable?.invoke(timestampNs) }
         }
 
         renderer.onHistogramUpdated = { histogram ->
@@ -318,6 +327,8 @@ class CameraGLSurfaceView @JvmOverloads constructor(
      */
     fun getSurfaceTexture(): SurfaceTexture? = renderer.getSurfaceTexture()
 
+    fun getStandbySurfaceTexture(): SurfaceTexture? = renderer.getStandbySurfaceTexture()
+
     fun getRenderSurface(): Surface? = currentSurface
 
     fun setSourceCrop(crop: PhantomPipCrop) {
@@ -482,6 +493,10 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         // 通知 Surface 销毁
         onSurfaceDestroyed?.invoke()
         onEyeFocusInputAvailable = null
+        onStandbySurfaceTextureReady = null
+        onStandbyPreviewFrameAvailable = null
+        renderer.onStandbySurfaceTextureAvailable = null
+        renderer.onStandbyFrameAvailable = null
 
         // 释放 Surface
         currentSurface?.release()
