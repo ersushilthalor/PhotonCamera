@@ -120,6 +120,7 @@ private const val DefaultIso = 100f
 private const val DefaultAwbTemperature = 5000f
 private const val DefaultFocusDistance = 0f
 private val CameraTopBarBaseTopPadding = 20.dp
+private val VideoTopBarBaseTopPadding = 24.dp
 private val CameraTopBarBaseHeight = 64.dp
 private val VideoTopBarBaseHeight = 80.dp
 private val VideoTopBarLoweredOffset = 36.dp
@@ -132,7 +133,7 @@ private fun formatVirtualApertureFStop(aperture: Float): String {
 }
 
 @Composable
-private fun cameraTopSafePadding(): Dp {
+private fun cameraTopSafePadding(baseTopPadding: Dp): Dp {
     val density = LocalDensity.current
     val topInset = with(density) {
         maxOf(
@@ -140,7 +141,7 @@ private fun cameraTopSafePadding(): Dp {
             WindowInsets.displayCutout.getTop(this).toDp()
         )
     }
-    return (topInset - CameraTopBarBaseTopPadding).coerceAtLeast(0.dp)
+    return (topInset - baseTopPadding).coerceAtLeast(0.dp)
 }
 
 private fun Bitmap.copyForCaptureAnimation(): Bitmap? {
@@ -892,7 +893,9 @@ fun CameraScreen(
         val density = LocalDensity.current
         val width = with(density) { constraints.maxWidth.toDp() }
         val height = with(density) { constraints.maxHeight.toDp() }
-        val topSafePadding = cameraTopSafePadding()
+        val topSafePadding = cameraTopSafePadding(
+            if (isVideoMode) VideoTopBarBaseTopPadding else CameraTopBarBaseTopPadding
+        )
         val topBarOffset = 0.dp
         val topBarBaseHeight = if (isVideoMode) {
             VideoTopBarBaseHeight
