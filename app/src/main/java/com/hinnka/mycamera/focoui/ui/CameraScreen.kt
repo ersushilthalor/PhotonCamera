@@ -144,27 +144,40 @@ fun CameraScreen(
     // Status bar is hidden (like Pixel Camera); keep clear of the camera cut-out.
     val statusTop = WindowInsets.safeDrawing.asPaddingValues().calculateTopPadding()
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val wide = state.kind == CaptureKind.VIDEO || settings.ratio == RatioSetting.WIDE_9_16
+    val isVideo = state.kind == CaptureKind.VIDEO
+    val wide = isVideo || settings.ratio == RatioSetting.WIDE_9_16
 
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
-        // Keep the Foco viewfinder between the top controls and the shutter area.
-        // On shorter displays, scale the preview down uniformly instead of allowing a
-        // full-width 3:4 / 9:16 frame to extend behind the shutter controls.
+        // The video viewfinder is a true full-width 9:16 frame. Keep the still-photo
+        // layout's reserved shutter area, but let the video preview continue behind
+        // the bottom controls (which are drawn later and remain fully interactive).
         val previewAspectWidth = if (wide) 9f else 3f
         val previewAspectHeight = if (wide) 16f else 4f
         val requestedPreviewHeight = maxWidth * (previewAspectHeight / previewAspectWidth)
-        val availablePreviewHeight = (
-            maxHeight - statusTop - 56.dp - navBottom - CONTROLS_BELOW_PICTURE
+        val availableVideoHeight = (
+            maxHeight - statusTop - 56.dp - navBottom
         ).coerceAtLeast(0.dp)
-        val previewHeight = minOf(requestedPreviewHeight, availablePreviewHeight)
-        // Keep the viewfinder edge-to-edge even when its height is constrained
-        // by the controls. CameraPreviewGL center-crops the sensor frame to this
-        // viewport, so the preview fills the width without distorting the image.
+        val availablePreviewHeight = (
+            availableVideoHeight - CONTROLS_BELOW_PICTURE
+        ).coerceAtLeast(0.dp)
+        val previewHeight = if (isVideo) {
+            minOf(requestedPreviewHeight, availableVideoHeight)
+        } else {
+            minOf(requestedPreviewHeight, availablePreviewHeight)
+        }
+        // CameraPreviewGL center-crops to this full-width viewport without stretching.
         val previewWidth = maxWidth
-        val previewTop = maxOf(
-            statusTop + 56.dp,
-            maxHeight - navBottom - CONTROLS_BELOW_PICTURE - previewHeight
-        )
+        val previewTop = if (isVideo) {
+            statusTop + 56.dp
+        } else {
+            maxOf(
+                statusTop + 56.dp,
+                maxHeight - navBottom - CONTROLS_BELOW_PICTURE - previewHeight
+            )
+        }
+        // Preserve the zoom chips' position above the shutter when the video
+        // preview extends behind the overlaid controls.
+        val videoPreviewExtension = (previewHeight - availablePreviewHeight).coerceAtLeast(0.dp)
         val previewSizePx = with(LocalDensity.current) {
             IntSize(previewWidth.roundToPx(), previewHeight.roundToPx())
         }
@@ -182,7 +195,9 @@ fun CameraScreen(
                     state,
                     actions,
                     iconRotation,
-                    Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
+                    Modifier.align(Alignment.BottomCenter).padding(
+                        bottom = 8.dp + if (isVideo) videoPreviewExtension else 0.dp
+                    ),
                 )
             }
         }
