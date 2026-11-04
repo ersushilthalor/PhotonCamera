@@ -267,7 +267,7 @@ class Camera2Controller(private val context: Context) {
         val secondaryTexture = standbyPreviewSurfaceTexture
         val activeTexture = previewSurfaceTexture
         val eligible = current.captureMode == CaptureMode.PHOTO &&
-            current.lensFacing != CameraCharacteristics.LENS_FACING_FRONT &&
+            current.getCurrentCameraInfo()?.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
             !requestedRawCaptureEnabled &&
             !current.useRaw &&
             reader != null &&
@@ -2568,9 +2568,18 @@ class Camera2Controller(private val context: Context) {
             }
             return
         }
-        val targetCamera = _state.value.getCurrentCameraInfo()
+        primaryPreviewSurfaceTexture = surfaceTexture
+        val currentState = _state.value
+        val handoffEligible = currentState.captureMode == CaptureMode.PHOTO &&
+            !requestedRawCaptureEnabled &&
+            !currentState.useRaw &&
+            imageReader?.imageFormat == ImageFormat.YUV_420_888 &&
+            stabilizationImageReader == null &&
+            !currentState.videoRecordingState.isRecording &&
+            !currentState.videoRecordingState.isProcessing
+        val targetCamera = currentState.getCurrentCameraInfo()
         val standbyCameraId = targetCamera
-            ?.takeIf(standbyCameraController::canHandoffTo)
+            ?.takeIf { handoffEligible && standbyCameraController.canHandoffTo(it) }
             ?.cameraId
         pendingCameraOpenRequest = CameraOpenRequest(
             surfaceTexture = surfaceTexture,
@@ -2630,14 +2639,20 @@ class Camera2Controller(private val context: Context) {
             return
         }
 
-        standbyCameraController.takeOver(standbyCameraId, targetOpenCameraId) { warmCamera ->
-            if (warmCamera != null) {
-                openCameraNow(request, preopenedCamera = warmCamera)
+        standbyCameraController.takeOver(standbyCameraId, targetOpenCameraId) { handoff ->
+            if (handoff != null) {
+                val useStandbyInput = handoff.previewSurfaceTexture === standbyPreviewSurfaceTexture
+                onPreviewSourceChanged?.invoke(useStandbyInput)
+                openCameraNow(
+                    request.copy(surfaceTexture = handoff.previewSurfaceTexture),
+                    preopenedHandoff = handoff,
+                )
             } else {
-                PLog.w(TAG, "Ready standby camera became unavailable; waiting for its release before cold open")
+                PLog.w(TAG, "Ready standby stream became unavailable; waiting for its release before cold open")
                 standbyCameraController.release("standby handoff unavailable")
                 standbyCameraController.whenDeviceIdle {
                     if (cameraDeviceLifecycle == CameraDeviceLifecycle.OPENING) {
+                        onPreviewSourceChanged?.invoke(false)
                         openCameraNow(request.copy(standbyCameraId = null))
                     }
                 }
@@ -2648,8 +2663,9 @@ class Camera2Controller(private val context: Context) {
     @SuppressLint("MissingPermission")
     private fun openCameraNow(
         request: CameraOpenRequest,
-        preopenedCamera: CameraDevice? = null,
+        preopenedHandoff: StandbyCameraHandoff? = null,
     ) {
+        val preopenedCamera = preopenedHandoff?.camera
         val surfaceTexture = request.surfaceTexture
         val preserveVideoRecording = request.preserveVideoRecording
         clearPointFocusState()
@@ -2707,7 +2723,12 @@ class Camera2Controller(private val context: Context) {
                 if (restartCameraForRawCaptureOutputMismatch("camera opened")) {
                     return
                 }
-                createPreviewSession(openGeneration = openGeneration)
+                if (preopenedHandoff != null) {
+                    attachPrewarmedCaptureSession(preopenedHandoff, openGeneration)
+                } else {
+                    onPreviewSourceChanged?.invoke(surfaceTexture === standbyPreviewSurfaceTexture)
+                    createPreviewSession(openGeneration = openGeneration)
+                }
             }
 
             override fun onDisconnected(camera: CameraDevice) {
