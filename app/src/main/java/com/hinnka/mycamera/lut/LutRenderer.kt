@@ -496,6 +496,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
 
     // 回调
     var onSurfaceTextureAvailable: ((SurfaceTexture) -> Unit)? = null
+    var onStandbySurfaceTextureAvailable: ((SurfaceTexture) -> Unit)? = null
     var onRequestRender: (() -> Unit)? = null
     var onHistogramUpdated: ((IntArray) -> Unit)? = null
     var onMeteringUpdated: ((Double, Double) -> Unit)? = null
@@ -586,8 +587,9 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             setBaselineLutInternal(config)
         }
 
-        // 通知调用者 SurfaceTexture 已准备好
+        // Notify both camera inputs only after their OES textures and BufferQueues exist.
         surfaceTexture?.let { onSurfaceTextureAvailable?.invoke(it) }
+        standbySurfaceTexture?.let { onStandbySurfaceTextureAvailable?.invoke(it) }
 
         GlUtils.checkGlError("initShaderProgram")
     }
@@ -603,6 +605,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         mgcEisHardwareBufferRenderer.resetAfterContextLoss()
         mgcEisYuvRenderer.resetAfterContextLoss()
         cameraTextureId = 0
+        standbyCameraTextureId = 0
         currentCameraTextureId = 0
         currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
         currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
