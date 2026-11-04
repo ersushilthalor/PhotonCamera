@@ -23,7 +23,26 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.Executor
+import java.util.Collections
+import java.util.IdentityHashMap
 import kotlin.math.abs
+
+enum class PreviewStreamSource { MAIN, STANDBY }
+
+data class PromotedStandbyCamera(
+    val cameraDevice: CameraDevice,
+    val captureSession: CameraCaptureSession,
+    val requestBuilder: CaptureRequest.Builder,
+    val previewSurface: Surface,
+    val previewSurfaceTexture: SurfaceTexture,
+    val captureImageReader: ImageReader,
+    val cameraInfo: CameraInfo,
+    val openCameraId: String,
+    val physicalCameraId: String?,
+    val previewSize: Size,
+    val captureSize: Size,
+    val previewSource: PreviewStreamSource,
+)
 
 /**
  * Owns the secondary rear-camera stream used to keep the next lens warm.
@@ -53,6 +72,8 @@ class StandbyCameraController(context: Context) {
         val lensType: LensType,
         val aspectRatio: Float,
         val previewTextureIdentity: Int,
+        val previewSource: PreviewStreamSource,
+        val cameraInfo: CameraInfo,
     )
 
     private data class PreviewOutput(
@@ -71,6 +92,18 @@ class StandbyCameraController(context: Context) {
     private var closingCameraDevice: CameraDevice? = null
     private var standbyCaptureSession: CameraCaptureSession? = null
     private var standbyImageReader: ImageReader? = null
+    private var standbyCaptureImageReader: ImageReader? = null
+    private var standbyRequestBuilder: CaptureRequest.Builder? = null
+    private var standbyPreviewOutputSize: Size? = null
+    private var standbyCaptureOutputSize: Size? = null
+    private var standbyPreviewSource: PreviewStreamSource = PreviewStreamSource.STANDBY
+    private var captureFormatForStandby: Int? = null
+    private var preferredCaptureSizeForStandby: Size? = null
+    private var captureMaxImagesForStandby: Int = 4
+    private var captureImageAvailableListener: ((ImageReader) -> Unit)? = null
+    private val promotedCameraDevices = Collections.newSetFromMap(IdentityHashMap<CameraDevice, Boolean>())
+    var onPromotedCameraClosed: ((CameraDevice) -> Unit)? = null
+    var onPromotedCameraUnavailable: ((CameraDevice, String) -> Unit)? = null
     private var standbyPreviewSurface: Surface? = null
     private var standbyPreviewSurfaceTexture: SurfaceTexture? = null
     private var usingSurfaceTexturePreview = false
@@ -98,25 +131,36 @@ class StandbyCameraController(context: Context) {
         previewSize: Size,
         callbackHandler: Handler,
         previewSurfaceTexture: SurfaceTexture? = null,
+        previewSource: PreviewStreamSource = PreviewStreamSource.STANDBY,
+        captureFormat: Int? = null,
+        preferredCaptureSize: Size? = null,
+        captureMaxImages: Int = 4,
+        onCaptureImageAvailable: ((ImageReader) -> Unit)? = null,
     ) {
         handler = callbackHandler
+        captureFormatForStandby = captureFormat
+        preferredCaptureSizeForStandby = preferredCaptureSize
+        captureMaxImagesForStandby = captureMaxImages.coerceAtLeast(2)
+        captureImageAvailableListener = onCaptureImageAvailable
         dispatch {
             standbyPreviewSurfaceTexture = previewSurfaceTexture
+            standbyPreviewSource = previewSource
             prepareOnCameraThread(
                 activeCamera = activeCamera,
                 availableCameras = availableCameras,
                 activeOpenCameraId = activeOpenCameraId,
                 previewSize = previewSize,
                 previewSurfaceTexture = previewSurfaceTexture,
+                previewSource = previewSource,
             )
         }
     }
 
     /** Receives a frame after the GL thread has consumed it with updateTexImage(). */
-    fun onPreviewFrameAvailable(timestampNs: Long) {
+    fun onPreviewFrameAvailable(timestampNs: Long, source: PreviewStreamSource = PreviewStreamSource.STANDBY) {
         if (timestampNs <= 0L || _status.value.phase == StandbyCameraPhase.READY) return
         dispatch {
-            if (!usingSurfaceTexturePreview) return@dispatch
+            if (!usingSurfaceTexturePreview || source != standbyPreviewSource) return@dispatch
             receivedFrameCount += 1L
             rememberTimestamp(previewFrameTimestamps, timestampNs)
             updateReadinessFromMatchedFrames(generation)
@@ -170,6 +214,7 @@ class StandbyCameraController(context: Context) {
         activeOpenCameraId: String,
         previewSize: Size,
         previewSurfaceTexture: SurfaceTexture?,
+        previewSource: PreviewStreamSource,
     ) {
         val plan = resolvePlan(
             activeCamera = activeCamera,
@@ -177,6 +222,7 @@ class StandbyCameraController(context: Context) {
             activeOpenCameraId = activeOpenCameraId,
             previewSize = previewSize,
             previewSurfaceTexture = previewSurfaceTexture,
+            previewSource = previewSource,
         ) ?: run {
             pendingPlan = null
             releaseResources("standby plan unavailable", resetStatus = false)
@@ -202,6 +248,7 @@ class StandbyCameraController(context: Context) {
         activeOpenCameraId: String,
         previewSize: Size,
         previewSurfaceTexture: SurfaceTexture?,
+        previewSource: PreviewStreamSource,
     ): StandbyPlan? {
         if (activeCamera == null || activeOpenCameraId.isBlank()) {
             publishUnavailable(StandbyCameraPhase.NO_TARGET_LENS, "Active camera information unavailable")
@@ -297,6 +344,8 @@ class StandbyCameraController(context: Context) {
             lensType = targetCamera.lensType,
             aspectRatio = ratio,
             previewTextureIdentity = System.identityHashCode(previewSurfaceTexture),
+            previewSource = previewSource,
+            cameraInfo = targetCamera,
         )
     }
 
@@ -360,6 +409,35 @@ class StandbyCameraController(context: Context) {
         } else {
             null
         }
+        val captureOutput = resolveCaptureOutput(
+            plan = plan,
+            format = captureFormatForStandby,
+            preferredSize = preferredCaptureSizeForStandby,
+        )
+        val captureReader = if (captureOutput != null) {
+            try {
+                ImageReader.newInstance(
+                    captureOutput.size.width,
+                    captureOutput.size.height,
+                    captureOutput.format,
+                    captureMaxImagesForStandby,
+                ).also { reader ->
+                    reader.setOnImageAvailableListener({ source ->
+                        if (source !== standbyCaptureImageReader) {
+                            runCatching { source.acquireLatestImage()?.close() }
+                            return@setOnImageAvailableListener
+                        }
+                        runCatching { captureImageAvailableListener?.invoke(source) }
+                            .onFailure { error -> PLog.e(TAG, "Standby capture image callback failed", error) }
+                    }, callbackHandler)
+                }
+            } catch (error: Exception) {
+                PLog.w(TAG, "Could not allocate standby still-capture ImageReader", error)
+                null
+            }
+        } else {
+            null
+        }
         val previewSurface = if (previewTexture != null) {
             try {
                 previewTexture.setDefaultBufferSize(output.size.width, output.size.height)
@@ -382,6 +460,10 @@ class StandbyCameraController(context: Context) {
         val openGeneration = ++generation
         activePlan = plan
         standbyImageReader = reader
+        standbyCaptureImageReader = captureReader
+        standbyRequestBuilder = null
+        standbyPreviewOutputSize = output.size
+        standbyCaptureOutputSize = captureOutput?.size
         standbyPreviewSurface = previewSurface
         usingSurfaceTexturePreview = previewTexture != null
         imageTimestamps.clear()
@@ -437,10 +519,14 @@ class StandbyCameraController(context: Context) {
                         openRequestGeneration = null
                         standbyCameraDevice = camera
                         setDeviceTransitioning(false)
-                        configureStandbySession(camera, reader, previewSurface, plan, openGeneration)
+                        configureStandbySession(camera, reader, captureReader, previewSurface, plan, openGeneration)
                     }
 
                     override fun onDisconnected(camera: CameraDevice) {
+                        if (promotedCameraDevices.contains(camera)) {
+                            onPromotedCameraUnavailable?.invoke(camera, "Promoted camera disconnected: ${camera.id}")
+                            return
+                        }
                         if (openRequestGeneration == openGeneration) {
                             openRequestGeneration = null
                         }
@@ -453,6 +539,10 @@ class StandbyCameraController(context: Context) {
                     }
 
                     override fun onError(camera: CameraDevice, error: Int) {
+                        if (promotedCameraDevices.contains(camera)) {
+                            onPromotedCameraUnavailable?.invoke(camera, "Promoted camera error $error: ${camera.id}")
+                            return
+                        }
                         if (openRequestGeneration == openGeneration) {
                             openRequestGeneration = null
                         }
@@ -465,6 +555,10 @@ class StandbyCameraController(context: Context) {
                     }
 
                     override fun onClosed(camera: CameraDevice) {
+                        if (promotedCameraDevices.remove(camera)) {
+                            onPromotedCameraClosed?.invoke(camera)
+                            return
+                        }
                         if (closingCameraDevice === camera) {
                             closingCameraDevice = null
                         }
@@ -529,9 +623,43 @@ class StandbyCameraController(context: Context) {
         return null
     }
 
+    private fun resolveCaptureOutput(
+        plan: StandbyPlan,
+        format: Int?,
+        preferredSize: Size?,
+    ): PreviewOutput? {
+        // The instant-swap path uses the same YUV still-capture pipeline as PhotonCamera.
+        // RAW/P010 and specialised capture outputs keep the normal, fully reinitialised path.
+        if (format != ImageFormat.YUV_420_888) return null
+        val outputCameraId = plan.standbyPhysicalCameraId ?: plan.standbyOpenCameraId
+        val characteristics = runCatching { cameraManager.getCameraCharacteristics(outputCameraId) }
+            .getOrElse {
+                PLog.w(TAG, "Could not read standby capture characteristics for $outputCameraId", it)
+                return null
+            }
+        val sizes = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            ?.getOutputSizes(format)
+            ?.toList()
+            .orEmpty()
+        if (sizes.isEmpty()) return null
+        val matchingAspect = sizes.filter {
+            abs(it.width.toFloat() / it.height.toFloat() - plan.aspectRatio) < 0.08f
+        }.ifEmpty { sizes }
+        val preferredArea = preferredSize?.let { it.width.toLong() * it.height.toLong() }
+        val notLargerThanPreferred = if (preferredArea == null) matchingAspect else {
+            matchingAspect.filter { it.width.toLong() * it.height.toLong() <= preferredArea }
+                .ifEmpty { matchingAspect }
+        }
+        val selected = notLargerThanPreferred.maxByOrNull {
+            it.width.toLong() * it.height.toLong()
+        } ?: return null
+        return PreviewOutput(selected, format)
+    }
+
     private fun configureStandbySession(
         camera: CameraDevice,
         reader: ImageReader?,
+        captureReader: ImageReader?,
         previewSurface: Surface?,
         plan: StandbyPlan,
         openGeneration: Long,
@@ -586,6 +714,13 @@ class StandbyCameraController(context: Context) {
                         }
                     })
                 }
+                captureReader?.surface?.let { captureSurface ->
+                    add(OutputConfiguration(captureSurface).apply {
+                        plan.standbyPhysicalCameraId?.let { physicalId ->
+                            setPhysicalCameraId(physicalId)
+                        }
+                    })
+                }
             }
             val sessionConfiguration = SessionConfiguration(
                 SessionConfiguration.SESSION_REGULAR,
@@ -595,12 +730,14 @@ class StandbyCameraController(context: Context) {
                     override fun onConfigured(session: CameraCaptureSession) {
                         if (openGeneration != generation ||
                             camera !== standbyCameraDevice ||
-                            reader !== standbyImageReader
+                            reader !== standbyImageReader ||
+                            captureReader !== standbyCaptureImageReader
                         ) {
                             runCatching { session.close() }
                             return
                         }
                         standbyCaptureSession = session
+                        standbyRequestBuilder = builder
                         _status.value = _status.value.copy(
                             phase = StandbyCameraPhase.WAITING_FOR_FRAMES,
                             message = "Standby session active; waiting for matching camera frames",
@@ -719,6 +856,59 @@ class StandbyCameraController(context: Context) {
         }
     }
 
+    /** Transfers a fully warmed preview + still-capture session to Camera2Controller. */
+    fun takeOverReadyStream(): PromotedStandbyCamera? {
+        val plan = activePlan ?: return null
+        if (_status.value.phase != StandbyCameraPhase.READY) return null
+        val device = standbyCameraDevice ?: return null
+        val session = standbyCaptureSession ?: return null
+        val builder = standbyRequestBuilder ?: return null
+        val previewSurface = standbyPreviewSurface ?: return null
+        val previewTexture = standbyPreviewSurfaceTexture ?: return null
+        val captureReader = standbyCaptureImageReader ?: return null
+        val previewSize = standbyPreviewOutputSize ?: return null
+        val captureSize = standbyCaptureOutputSize ?: return null
+
+        frameReadyTimeout?.let { handler?.removeCallbacks(it) }
+        frameReadyTimeout = null
+        standbyCameraDevice = null
+        standbyCaptureSession = null
+        standbyImageReader = null
+        standbyCaptureImageReader = null
+        standbyRequestBuilder = null
+        standbyPreviewSurface = null
+        standbyPreviewSurfaceTexture = null
+        standbyPreviewOutputSize = null
+        standbyCaptureOutputSize = null
+        usingSurfaceTexturePreview = false
+        activePlan = null
+        pendingPlan = null
+        generation += 1L
+        isDeviceTransitioning = false
+        imageTimestamps.clear()
+        captureResultTimestamps.clear()
+        previewFrameTimestamps.clear()
+        receivedFrameCount = 0L
+        matchedFrameCount = 0
+        promotedCameraDevices.add(device)
+        _status.value = StandbyCameraStatus()
+
+        return PromotedStandbyCamera(
+            cameraDevice = device,
+            captureSession = session,
+            requestBuilder = builder,
+            previewSurface = previewSurface,
+            previewSurfaceTexture = previewTexture,
+            captureImageReader = captureReader,
+            cameraInfo = plan.cameraInfo,
+            openCameraId = plan.standbyOpenCameraId,
+            physicalCameraId = plan.standbyPhysicalCameraId,
+            previewSize = previewSize,
+            captureSize = captureSize,
+            previewSource = plan.previewSource,
+        )
+    }
+
     private fun failCurrentPlan(message: String, error: Throwable?) {
         val plan = activePlan
         if (error != null) {
@@ -787,6 +977,15 @@ class StandbyCameraController(context: Context) {
             runCatching { reader.setOnImageAvailableListener(null, null) }
             runCatching { reader.close() }
         }
+        val captureReader = standbyCaptureImageReader
+        standbyCaptureImageReader = null
+        if (captureReader != null) {
+            runCatching { captureReader.setOnImageAvailableListener(null, null) }
+            runCatching { captureReader.close() }
+        }
+        standbyRequestBuilder = null
+        standbyPreviewOutputSize = null
+        standbyCaptureOutputSize = null
     }
 
     private fun closeOpenedCamera(camera: CameraDevice) {
