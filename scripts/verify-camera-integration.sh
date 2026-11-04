@@ -11,6 +11,9 @@ require() {
 require "app/src/main/java/com/hinnka/mycamera/MainActivity.kt" "FocoCameraIntegrationScreen("
 # Photon remains the camera/lens engine behind the Foco UI.
 require "app/src/main/java/com/hinnka/mycamera/ui/camera/FocoCameraIntegrationScreen.kt" "viewModel.setZoomRatio("
+require "app/src/main/java/com/hinnka/mycamera/ui/camera/FocoCameraIntegrationScreen.kt" "viewModel.findOptimalLens("
+require "app/src/main/java/com/hinnka/mycamera/ui/camera/FocoCameraIntegrationScreen.kt" "viewModel.switchToLensAndSetZoomRatio("
+require "app/src/main/java/com/hinnka/mycamera/ui/camera/FocoCameraIntegrationScreen.kt" "LensSwitchTransitionOverlay("
 require "app/src/main/java/com/hinnka/mycamera/ui/camera/FocoCameraIntegrationScreen.kt" "CameraPreviewGL("
 require "app/src/main/java/com/hinnka/mycamera/ui/camera/FocoCameraIntegrationScreen.kt" "viewModel.switchCamera()"
 # One merged full-settings destination.
