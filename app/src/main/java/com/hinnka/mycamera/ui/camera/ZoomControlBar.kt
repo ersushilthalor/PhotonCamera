@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
@@ -167,6 +168,10 @@ fun ZoomControlBar(
             .fillMaxWidth()
             .padding(horizontal = 8.dp)
             .height(CameraControlsLayoutDefaults.ZoomBarHeight)
+            .graphicsLayer {
+                scaleX = CameraControlsLayoutDefaults.ZoomBarScale
+                scaleY = CameraControlsLayoutDefaults.ZoomBarScale
+            }
             .pointerInput(isCameraReady, minZoom, maxZoom, zoomStops) {
                 if (!isCameraReady) return@pointerInput
                 var dragAccumulated = 0f
