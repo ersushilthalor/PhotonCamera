@@ -310,15 +310,15 @@ private fun ZoomPresetPill(
     onPresetClick: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val basePresets = listOf(0.6f, 1f, 2f, 3f)
-    val visiblePresets = if (zoomRatio >= 3f) basePresets + listOf(5f, 10f) else basePresets
+    // Keep the same five quick zoom stops visible at every zoom level.
+    val visiblePresets = listOf(0.5f, 1f, 2f, 5f, 10f)
     val selectedPreset = visiblePresets.firstOrNull { abs(it - zoomRatio) <= 0.05f }
 
     Row(
         modifier = modifier
             .clip(CircleShape)
-            .background(Color(0xFF25242C))
-            .padding(horizontal = 4.dp, vertical = 2.dp),
+            .background(Color(0xFF141216))
+            .padding(horizontal = 6.dp, vertical = 3.dp),
         horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -326,29 +326,29 @@ private fun ZoomPresetPill(
             val selected = selectedPreset != null && abs(selectedPreset - preset) <= 0.01f
             Box(
                 modifier = Modifier
-                    .width(37.dp)
-                    .height(29.dp)
+                    .width(38.dp)
+                    .height(34.dp)
                     .clickable { onPresetClick(preset) },
                 contentAlignment = Alignment.Center
             ) {
                 if (selected) {
                     Box(
                         modifier = Modifier
-                            .size(29.dp)
+                            .size(34.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF484651))
+                            .background(Color(0xFFF0C4B8))
                     )
                 }
                 val label = when {
-                    abs(preset - 0.6f) <= 0.01f -> ".6"
+                    abs(preset - 0.5f) <= 0.01f -> ".5"
                     else -> preset.toInt().toString()
                 }
                 Text(
                     text = if (selected) "${label}x" else label,
                     style = TextStyle(
-                        fontSize = if (selected) 14.sp else 13.sp,
+                        fontSize = if (selected) 15.sp else 14.sp,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                        color = Color.White,
+                        color = if (selected) Color(0xFF332321) else Color.White,
                         textAlign = TextAlign.Center
                     ),
                     maxLines = 1,
