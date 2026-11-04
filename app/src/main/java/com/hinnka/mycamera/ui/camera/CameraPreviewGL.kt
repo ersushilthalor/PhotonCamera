@@ -64,6 +64,7 @@ fun CameraPreviewGL(
     focusSuccess: Boolean?,
     meteringMode: MeteringMode = MeteringMode.SYSTEM_DEFAULT,
     onSurfaceTextureReady: (SurfaceTexture) -> Unit,
+    onStandbySurfaceTextureReady: (SurfaceTexture?) -> Unit = {},
     onSurfaceDestroyed: (SurfaceTexture?) -> Unit,
     onTap: (Float, Float, Int, Int) -> Unit,
     onLongPress: (Float, Float, Int, Int) -> Unit,
@@ -169,6 +170,12 @@ fun CameraPreviewGL(
                     },
                     update = { glSurfaceView ->
                         // 更新闭包捕获的状态
+                        glSurfaceView.onStandbySurfaceTextureReady = { standbyTexture ->
+                            if (glSurfaceViewRef === glSurfaceView) {
+                                onStandbySurfaceTextureReady(standbyTexture)
+                            }
+                        }
+
                         glSurfaceView.onSurfaceReady = { _ ->
                             if (glSurfaceViewRef !== glSurfaceView) {
                                 PLog.d("CameraPreviewGL", "Ignoring stale onSurfaceReady")
@@ -202,6 +209,7 @@ fun CameraPreviewGL(
                                 notifiedResumeGeneration = -1
                                 notifiedSurfaceTexture = null
                                 glSurfaceViewRef = null
+                                onStandbySurfaceTextureReady(null)
                                 onSurfaceDestroyed(destroyedSurfaceTexture)
                             } else if (destroyedSurfaceTexture != null) {
                                 onSurfaceDestroyed(destroyedSurfaceTexture)
