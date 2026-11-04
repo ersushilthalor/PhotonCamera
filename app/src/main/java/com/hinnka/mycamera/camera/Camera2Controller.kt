@@ -243,6 +243,20 @@ class Camera2Controller(private val context: Context) {
     private var primaryPreviewSurfaceTexture: SurfaceTexture? = null
     @Volatile
     private var standbyPreviewSurfaceTexture: SurfaceTexture? = null
+    @Volatile
+    private var logicalDualPreviewSurface: Surface? = null
+    @Volatile
+    private var logicalDualPreviewSurfaceTexture: SurfaceTexture? = null
+    @Volatile
+    private var logicalDualPreviewEnabled = false
+    @Volatile
+    private var logicalDualPreviewReady = false
+    @Volatile
+    private var logicalDualPreviewFailedOpenGeneration = -1L
+    private var logicalPrimaryLensCameraId: String? = null
+    private var logicalSecondaryLensCameraId: String? = null
+    private var logicalPrimaryPhysicalCameraId: String? = null
+    private var logicalSecondaryPhysicalCameraId: String? = null
 
     /** Called by the GL view when its second OES input becomes available or is destroyed. */
     fun setStandbyPreviewSurfaceTexture(surfaceTexture: SurfaceTexture?) {
