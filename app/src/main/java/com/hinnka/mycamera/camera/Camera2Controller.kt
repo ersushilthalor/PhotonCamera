@@ -2683,8 +2683,13 @@ class Camera2Controller(private val context: Context) {
             activeState.currentPreviewSize,
         ) ?: return false
         val currentCaptureSize = activeState.currentCaptureSize
+        val standbyCharacteristics = if (activeIsUltraWide) {
+            mainCharacteristics
+        } else {
+            ultraWideCharacteristics
+        }
         val targetCaptureSize = closestSize(
-            ultraWideCharacteristics,
+            standbyCharacteristics,
             ImageFormat.YUV_420_888,
             currentCaptureSize,
         ) ?: return false
@@ -2735,6 +2740,12 @@ class Camera2Controller(private val context: Context) {
                 PreviewStreamSource.STANDBY
             } else {
                 PreviewStreamSource.MAIN
+            }
+            _state.update {
+                it.copy(
+                    currentPreviewSize = if (activeIsUltraWide) ultraWidePreviewSize else mainPreviewSize,
+                    isPreviewActive = false,
+                )
             }
             standbyCameraController.release("logical multi-camera physical session is used instead")
             PLog.i(
