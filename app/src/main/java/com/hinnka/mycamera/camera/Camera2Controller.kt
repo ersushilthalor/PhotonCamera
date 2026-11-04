@@ -2721,6 +2721,9 @@ class Camera2Controller(private val context: Context) {
                 ),
             )
         }
+        // Keep the adopted device owned by the main controller during capability/session setup,
+        // so any setup exception follows the normal close-and-release error path.
+        if (preopenedCamera != null) cameraDevice = preopenedCamera
 
         PLog.i(
             TAG,
@@ -3104,7 +3107,6 @@ class Camera2Controller(private val context: Context) {
                             "Expected warm camera $openCameraId but received ${preopenedCamera.id}"
                         ),
                     )
-                    closeCameraDeviceSafely(preopenedCamera, "mismatched standby handoff")
                     return
                 }
                 PLog.i(TAG, "Reusing prewarmed CameraDevice without reopening: ${preopenedCamera.id}")
