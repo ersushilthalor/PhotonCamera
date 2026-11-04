@@ -2650,7 +2650,7 @@ class Camera2Controller(private val context: Context) {
         standbyCameraController.takeOver(standbyCameraId, targetOpenCameraId) { handoff ->
             if (handoff != null) {
                 val useStandbyInput = handoff.previewSurfaceTexture === standbyPreviewSurfaceTexture
-                onPreviewSourceChanged?.invoke(useStandbyInput)
+                publishPreviewSource(useStandbyInput)
                 openCameraNow(
                     request.copy(surfaceTexture = handoff.previewSurfaceTexture),
                     preopenedHandoff = handoff,
@@ -4160,7 +4160,7 @@ class Camera2Controller(private val context: Context) {
             }
             previewRequestBuilder = builder
             val useStandbyInput = handoff.previewSurfaceTexture === standbyPreviewSurfaceTexture
-            onPreviewSourceChanged?.invoke(useStandbyInput)
+            publishPreviewSource(useStandbyInput)
             PLog.i(
                 TAG,
                 "Reusing live standby session: camera=${device.id}, " +
