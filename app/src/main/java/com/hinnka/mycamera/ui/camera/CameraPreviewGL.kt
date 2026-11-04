@@ -13,7 +13,6 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -118,32 +117,15 @@ fun CameraPreviewGL(
         }
     }
 
-    // 计算预览区域尺寸，保持目标比例
-    BoxWithConstraints(
+    // Render into the full viewfinder slot. LutRenderer applies a center-crop
+    // matrix using the real sensor and viewport dimensions; do not constrain this
+    // surface to the sensor aspect ratio or horizontal gutters appear on phones.
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black),
         contentAlignment = Alignment.Center
     ) {
-        val containerWidth = constraints.maxWidth.toFloat()
-        val containerHeight = constraints.maxHeight.toFloat()
-
-        // 目标显示比例
-        val targetRatio = aspectRatio
-
-        // 计算裁切后的显示区域大小
-        val displayWidth: Float
-        val displayHeight: Float
-
-        if (containerWidth / containerHeight > targetRatio) {
-            // 容器更宽，以高度为基准
-            displayHeight = containerHeight
-            displayWidth = displayHeight * targetRatio
-        } else {
-            // 容器更高，以宽度为基准
-            displayWidth = containerWidth
-            displayHeight = displayWidth / targetRatio
-        }
 
         var viewWidth by remember { mutableIntStateOf(0) }
         var viewHeight by remember { mutableIntStateOf(0) }
@@ -158,8 +140,7 @@ fun CameraPreviewGL(
 
         Box(
             modifier = Modifier
-                .width(with(LocalDensity.current) { displayWidth.toDp() })
-                .height(with(LocalDensity.current) { displayHeight.toDp() })
+                .fillMaxSize()
                 .clipToBounds()
                 .onSizeChanged { size ->
                     viewWidth = size.width

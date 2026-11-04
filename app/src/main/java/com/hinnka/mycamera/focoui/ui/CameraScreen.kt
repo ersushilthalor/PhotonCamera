@@ -157,10 +157,10 @@ fun CameraScreen(
             maxHeight - statusTop - 56.dp - navBottom - CONTROLS_BELOW_PICTURE
         ).coerceAtLeast(0.dp)
         val previewHeight = minOf(requestedPreviewHeight, availablePreviewHeight)
-        val previewWidth = minOf(
-            maxWidth,
-            previewHeight * (previewAspectWidth / previewAspectHeight)
-        )
+        // Keep the viewfinder edge-to-edge even when its height is constrained
+        // by the controls. CameraPreviewGL center-crops the sensor frame to this
+        // viewport, so the preview fills the width without distorting the image.
+        val previewWidth = maxWidth
         val previewTop = maxOf(
             statusTop + 56.dp,
             maxHeight - navBottom - CONTROLS_BELOW_PICTURE - previewHeight
