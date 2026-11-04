@@ -130,7 +130,7 @@ class StandbyCameraController(context: Context) {
         if (Looper.myLooper() == callbackHandler.looper) {
             action()
         } else {
-            callbackHandler.post(action)
+            callbackHandler.post { action() }
         }
     }
 
@@ -139,7 +139,7 @@ class StandbyCameraController(context: Context) {
         if (Looper.myLooper() == callbackHandler.looper) {
             action()
         } else {
-            callbackHandler.post(action)
+            callbackHandler.post { action() }
         }
     }
 
