@@ -916,7 +916,9 @@ fun CameraScreen(
             (contentHeight - topBarBottom - CameraControlsLayoutDefaults.XpanViewfinderClearance)
                 .coerceAtLeast(viewfinderFramePadding)
         } else {
-            contentHeight
+            // Keep the preview above the zoom bar, shutter/gallery row, and mode selector.
+            (contentHeight - topBarBottom - CameraControlsLayoutDefaults.BottomControlsReservedHeight)
+                .coerceAtLeast(0.dp)
         }
         val maxViewfinderContentWidth = (maxCardWidth - viewfinderFramePadding)
             .coerceAtLeast(0.dp)
@@ -1663,8 +1665,8 @@ fun CameraScreen(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
-                            .padding(bottom = 8.dp)
-                            .height(CameraControlsLayoutDefaults.ZoomBarHeight),
+                            .height(CameraControlsLayoutDefaults.ZoomBarHeight)
+                            .offset(y = CameraControlsLayoutDefaults.ZoomBarDownwardOffset),
                         contentAlignment = Alignment.Center
                     ) {
                         zoomBar()
@@ -2028,7 +2030,7 @@ private fun Controls(
                 Box(
                     modifier = Modifier
                         .align(Alignment.CenterStart)
-                        .padding(start = sideControlInset ?: 32.dp)
+                        .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.GallerySideInset)
                         .onGloballyPositioned { coordinates ->
                             onGalleryThumbnailBoundsChanged(coordinates.boundsInRoot())
                         }
@@ -2100,7 +2102,10 @@ private fun Controls(
                         },
                         modifier = Modifier
                             .align(Alignment.CenterStart)
-                            .padding(start = 100.dp)
+                            .padding(
+                                start = (sideControlInset ?: CameraControlsLayoutDefaults.GallerySideInset) +
+                                    48.dp + CameraControlsLayoutDefaults.CapturePauseButtonSpacing
+                            )
                             .size(48.dp)
                             .autoRotate()
                     ) {

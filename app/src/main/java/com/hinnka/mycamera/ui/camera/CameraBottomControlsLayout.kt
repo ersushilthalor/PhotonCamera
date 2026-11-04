@@ -12,8 +12,12 @@ import androidx.compose.ui.unit.dp
 internal object CameraControlsLayoutDefaults {
     val ParameterBarHeight = 48.dp
     val ZoomBarHeight = 40.dp
+    val ZoomBarScale = 0.75f
+    val ZoomBarDownwardOffset = ZoomBarHeight
     val CaptureButtonSize = 72.dp
     val SideButtonSize = 48.dp
+    val GallerySideInset = 16.dp
+    val CapturePauseButtonSpacing = 4.dp
     val ModeSwitcherHeight = 36.dp
     val ModeSwitcherSpacing = 30.dp
     val BottomPadding = 8.dp
@@ -24,8 +28,9 @@ internal object CameraControlsLayoutDefaults {
     val ModeAreaHeight = ModeSwitcherSpacing + ModeSwitcherHeight + BottomPadding
     val XpanViewfinderClearance = ViewfinderModeSpacing + ModeSwitcherHeight + BottomPadding
     val CaptureAreaHeight = CaptureButtonSize + ModeAreaHeight
-    val CollapsedControlsHeight = CaptureAreaHeight + CaptureClearance +
-        ParameterBarHeight + BarSpacing + ZoomBarHeight
+    // Reserve a separate lane below the preview for the shifted zoom bar and capture row.
+    val BottomControlsReservedHeight = CaptureAreaHeight + CaptureClearance + ZoomBarDownwardOffset
+    val CollapsedControlsHeight = BottomControlsReservedHeight
 }
 
 /**
