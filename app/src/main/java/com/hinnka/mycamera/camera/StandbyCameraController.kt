@@ -288,6 +288,7 @@ class StandbyCameraController(context: Context) {
                 standbyPhysicalId.orEmpty(),
                 targetCamera.cameraId,
                 System.identityHashCode(previewSurfaceTexture),
+                previewSource.name,
             ).joinToString("|"),
             activeOpenCameraId = activeOpenCameraId,
             standbyOpenCameraId = standbyOpenCameraId,
