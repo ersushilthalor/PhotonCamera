@@ -302,7 +302,15 @@ class Camera2Controller(private val context: Context) {
     }
 
     /** The renderer changes only its OES input; Camera2 sessions are not rebuilt. */
+    @Volatile
+    var isUsingStandbyPreviewInput: Boolean = false
+        private set
     var onPreviewSourceChanged: ((useStandbyInput: Boolean) -> Unit)? = null
+
+    private fun publishPreviewSource(useStandbyInput: Boolean) {
+        isUsingStandbyPreviewInput = useStandbyInput
+        onPreviewSourceChanged?.invoke(useStandbyInput)
+    }
 
     // --- 拍照状态机相关 ---
 
@@ -2652,7 +2660,7 @@ class Camera2Controller(private val context: Context) {
                 standbyCameraController.release("standby handoff unavailable")
                 standbyCameraController.whenDeviceIdle {
                     if (cameraDeviceLifecycle == CameraDeviceLifecycle.OPENING) {
-                        onPreviewSourceChanged?.invoke(false)
+                        publishPreviewSource(false)
                         openCameraNow(request.copy(standbyCameraId = null))
                     }
                 }
@@ -2726,7 +2734,7 @@ class Camera2Controller(private val context: Context) {
                 if (preopenedHandoff != null) {
                     attachPrewarmedCaptureSession(preopenedHandoff, openGeneration)
                 } else {
-                    onPreviewSourceChanged?.invoke(surfaceTexture === standbyPreviewSurfaceTexture)
+                    publishPreviewSource(surfaceTexture === standbyPreviewSurfaceTexture)
                     createPreviewSession(openGeneration = openGeneration)
                 }
             }
