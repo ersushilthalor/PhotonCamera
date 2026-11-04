@@ -621,12 +621,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val locationManager = LocationManager(application)
 
     val state: StateFlow<CameraState> = cameraController.state
+    val isUsingStandbyPreviewInput: Boolean
+        get() = cameraController.isUsingStandbyPreviewInput
     val livePhotoRecorder get() = cameraController.livePhotoRecorder
     val realtimeStabilizationCoordinator get() = cameraController.realtimeStabilizationCoordinator
     val isAlgorithmicStabilizationSupported: Boolean
         get() = cameraController.realtimeStabilizationCoordinator.isGyroscopeAvailable
 
     init {
+        cameraController.onPreviewSourceChanged = { useStandbyInput ->
+            glSurfaceView?.setActivePreviewSource(useStandbyInput)
+        }
         viewModelScope.launch {
             oppoPhotoSettings.collect { settings ->
                 cameraController.setAutoHdrEnabled(settings.autoHdrEnabled)
@@ -2917,6 +2922,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /**
      * 打开相机（Camera2 接口）
      */
+    fun setStandbyPreviewSurfaceTexture(surfaceTexture: SurfaceTexture?) {
+        cameraController.setStandbyPreviewSurfaceTexture(surfaceTexture)
+    }
+
     fun openCamera(surfaceTexture: SurfaceTexture) {
         PLog.d(TAG, "openCamera")
         if (currentSurfaceTexture === surfaceTexture && (state.value.isPreviewActive || cameraOpenInFlight)) {
