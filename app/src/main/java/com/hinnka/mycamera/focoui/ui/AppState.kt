@@ -18,16 +18,9 @@ import java.io.File
 enum class CaptureKind { PHOTO, VIDEO }
 enum class IntentMode { NORMAL, IMAGE_CAPTURE, VIDEO_CAPTURE }
 enum class SettingsTab { GENERAL, PRO }
-/** Photo modes in the order of the mode strip (like Pixel Camera, without Portrait). */
+/** Photo modes available in the camera mode strip. */
 enum class PhotoMode(val label: String) {
-    ACTION_PAN("Action Pan"), LONG_EXPOSURE("Long Exposure"), PHOTO("Photo"), NIGHT("Night"), PANORAMA("Panorama"),
-}
-
-/** A captured panorama frame for the live strip at the top. */
-class PanoThumb(val yaw: Float, val bitmap: android.graphics.Bitmap)
-
-enum class PanoHint(val text: String) {
-    START("Turn slowly to one side"), SLOW_DOWN("Slow down"), KEEP_LEVEL("Keep the phone level"),
+    PHOTO("Photo"), NIGHT("Night"),
 }
 enum class ProTool(val label: String) {
     NIGHT("Night"), BRIGHTNESS("Brightness"), SHADOWS("Shadows"), WHITE_BALANCE("White balance"),
@@ -127,13 +120,6 @@ class AppState {
     var burstNight by mutableStateOf(false)
     var burstKind by mutableStateOf<com.hinnka.mycamera.focoui.processing.ShotKind?>(null)
 
-    // Panorama being taken
-    var panoActive by mutableStateOf(false)
-    val panoShots = mutableStateListOf<PanoThumb>()
-    var panoYaw by mutableFloatStateOf(0f)
-    var panoPitch by mutableFloatStateOf(0f)
-    var panoFov by mutableFloatStateOf(0.9f)
-    var panoHint by mutableStateOf(PanoHint.START)
     /** Short explanation shown when a mode is picked. */
     var modeHint by mutableStateOf<String?>(null)
     var burstProgress by mutableFloatStateOf(0f)
