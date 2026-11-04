@@ -22,8 +22,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalContext
@@ -287,6 +287,11 @@ fun FocoCameraIntegrationScreen(
         }
     }
 
+    // The remembered Foco action object must always use the latest camera selection.
+    val latestPhotonZoomAction = rememberUpdatedState<(Float, Boolean) -> Unit> { zoom, fromChip ->
+        applyPhotonLensZoom(zoom, animateSameLens = fromChip)
+    }
+
     val actions = remember(viewModel, galleryViewModel, onGalleryClick, onSettingsClick, onFilterManagementClick, onVideoLutClick, onFrameManagementClick, onToolboxClick, onPresetManagementClick) {
         object : FocoActions {
             override fun shutter() = viewModel.capture()
@@ -309,7 +314,7 @@ fun FocoCameraIntegrationScreen(
             }
             override fun flip() = viewModel.switchCamera()
             override fun setZoom(zoom: Float, fromChip: Boolean) {
-                applyPhotonLensZoom(zoom, animateSameLens = fromChip)
+                latestPhotonZoomAction.value(zoom, fromChip)
             }
             override fun openGallery() = onGalleryClick()
             override fun focusAt(point: Offset, viewWidth: Int, viewHeight: Int, lock: Boolean) {
