@@ -1,6 +1,8 @@
 package com.hinnka.mycamera.ui.camera
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -152,6 +154,12 @@ fun ZoomControlBar(
         }
     }
 
+    // Animate the center control expanding from the preset stops into the full slider.
+    val centerHorizontalPadding by animateDpAsState(
+        targetValue = if (isContinuousZooming) 0.dp else 40.dp,
+        animationSpec = tween(durationMillis = 220)
+    )
+
     // 自动恢复默认 UI 的定时器
     LaunchedEffect(isContinuousZooming, lastInteractionTime, isDragging, viewModel.isZooming) {
         if (isContinuousZooming && !isDragging && !viewModel.isZooming) {
@@ -178,9 +186,12 @@ fun ZoomControlBar(
                         replacedStopIndex = -1
                     },
                     onHorizontalDrag = { change, dragAmount ->
-                        if (!isContinuousZooming) {
+                        val wasContinuousZooming = isContinuousZooming
+                        if (!wasContinuousZooming) {
                             dragAccumulated += dragAmount
-                            if (abs(dragAccumulated) > 10.dp.toPx()) {
+                            // Expand only on a left-to-right swipe. Once expanded, both
+                            // directions scrub the slider normally.
+                            if (dragAccumulated > 10.dp.toPx()) {
                                 isContinuousZooming = true
                             }
                         }
@@ -188,13 +199,18 @@ fun ZoomControlBar(
                         if (isContinuousZooming) {
                             change.consume()
                             lastInteractionTime = System.currentTimeMillis()
-                            // 使用指数变焦公式计算新倍率
-                            // Match Oppocam's 1.35x zoom-slider sensitivity multiplier while retaining
-                            // this slider's logarithmic zoom mapping.
-                            val sensitivity = 0.0027f
-                            val newZoom = (internalZoomRatio * exp(-dragAmount.toDouble() * sensitivity).toFloat()).coerceIn(minZoom, maxZoom)
+                            // Map horizontal movement to the full logarithmic zoom range.
+                            // The first swipe also moves the handle by the distance that
+                            // triggered the morph, so the UI and zoom stay in sync.
+                            val effectiveDrag = if (wasContinuousZooming) dragAmount else dragAccumulated
+                            val safeMinZoom = minZoom.coerceAtLeast(0.001f)
+                            val safeMaxZoom = maxZoom.coerceAtLeast(safeMinZoom + 0.001f)
+                            val logZoomRange = ln((safeMaxZoom / safeMinZoom).toDouble())
+                            val normalizedDrag = effectiveDrag / size.width.coerceAtLeast(1).toFloat()
+                            val newZoom = (
+                                internalZoomRatio * exp(normalizedDrag.toDouble() * logZoomRange).toFloat()
+                            ).coerceIn(minZoom, maxZoom)
                             internalZoomRatio = newZoom
-                            
                             onZoomChange(newZoom)
                         }
                     },
@@ -266,60 +282,62 @@ fun ZoomControlBar(
         Box(
             modifier = Modifier
                 .fillMaxHeight()
-                .padding(horizontal = if (isContinuousZooming) 0.dp else 40.dp)
+                .padding(horizontal = centerHorizontalPadding)
                 .fillMaxWidth(),
             contentAlignment = Alignment.Center
         ) {
-            if (!isCameraReady) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    color = AccentColor,
-                    strokeWidth = 2.dp
-                )
-            } else if (isContinuousZooming) {
-                ZoomContinuousRuler(
-                    zoomRatio = internalZoomRatio,
-                    minZoom = minZoom,
-                    maxZoom = maxZoom,
-                    mainCamera = mainCamera,
-                    displayMode = displayMode,
-                    onClose = {
-                        lastInteractionTime = System.currentTimeMillis()
-                        closeContinuousZoomBar()
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                val effectiveStops = remember(zoomStops, customZoomStop, replacedStopIndex) {
-                    buildEffectiveZoomStops(
-                        zoomStops = zoomStops,
-                        customZoomStop = customZoomStop,
-                        replacedStopIndex = replacedStopIndex
+            AnimatedContent(
+                targetState = isContinuousZooming,
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) { showContinuousSlider ->
+                if (!isCameraReady) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = AccentColor,
+                        strokeWidth = 2.dp
+                    )
+                } else if (showContinuousSlider) {
+                    ZoomContinuousSlider(
+                        zoomRatio = internalZoomRatio,
+                        minZoom = minZoom,
+                        maxZoom = maxZoom,
+                        mainCamera = mainCamera,
+                        displayMode = displayMode,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    val effectiveStops = remember(zoomStops, customZoomStop, replacedStopIndex) {
+                        buildEffectiveZoomStops(
+                            zoomStops = zoomStops,
+                            customZoomStop = customZoomStop,
+                            replacedStopIndex = replacedStopIndex
+                        )
+                    }
+                    val stopItems = remember(effectiveStops, availableCameras, currentCamera) {
+                        buildZoomStopItems(
+                            stops = effectiveStops,
+                            availableCameras = availableCameras,
+                            currentCamera = currentCamera
+                        )
+                    }
+                    ZoomRuler(
+                        zoomRatio = internalZoomRatio,
+                        stopItems = stopItems,
+                        macroCameras = macroCameras,
+                        currentCameraId = currentCameraIdState,
+                        mainCamera = mainCamera,
+                        displayMode = displayMode,
+                        onZoomChange = { stop ->
+                            val targetStop = if (customZoomStop != null && stop == customZoomStop) originalStopRatio else stop
+                            onZoomStopClick(targetStop)
+                            customZoomStop = null
+                            replacedStopIndex = -1
+                        },
+                        onLensSwitch = onLensSwitch,
+                        modifier = Modifier.fillMaxHeight()
                     )
                 }
-                val stopItems = remember(effectiveStops, availableCameras, currentCamera) {
-                    buildZoomStopItems(
-                        stops = effectiveStops,
-                        availableCameras = availableCameras,
-                        currentCamera = currentCamera
-                    )
-                }
-                ZoomRuler(
-                    zoomRatio = internalZoomRatio,
-                    stopItems = stopItems,
-                    macroCameras = macroCameras,
-                    currentCameraId = currentCameraIdState,
-                    mainCamera = mainCamera,
-                    displayMode = displayMode,
-                    onZoomChange = { stop ->
-                        val targetStop = if (customZoomStop != null && stop == customZoomStop) originalStopRatio else stop
-                        onZoomStopClick(targetStop)
-                        customZoomStop = null
-                        replacedStopIndex = -1
-                    },
-                    onLensSwitch = onLensSwitch,
-                    modifier = Modifier.fillMaxHeight()
-                )
             }
         }
     }
@@ -484,124 +502,142 @@ private fun ZoomRuler(
  * 连续变焦标尺
  */
 @Composable
-fun ZoomContinuousRuler(
+private fun ZoomContinuousSlider(
     zoomRatio: Float,
     minZoom: Float,
     maxZoom: Float,
     mainCamera: CameraInfo?,
     displayMode: ZoomDisplayMode,
-    onClose: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val rulerYellow = Color(0xFFFFD52A)
-    val closeDescription = stringResource(R.string.close)
+    val handleColor = Color(0xFFE8B8E8)
+    val valuePillColor = Color(0xFFF2DDF1)
     val currentText = when (displayMode) {
         ZoomDisplayMode.ZOOM_RATIO -> formatZoomRatioLabel(zoomRatio)
         ZoomDisplayMode.FOCAL_LENGTH -> zoomRatioToFocalLength(zoomRatio, mainCamera) + "mm"
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
-        // Keep the ruler track at the native 32dp PhotonCamera control height.
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val safeMinZoom = minZoom.coerceAtLeast(0.001f)
+        val safeMaxZoom = maxZoom.coerceAtLeast(safeMinZoom + 0.001f)
+        val logMinimum = ln(safeMinZoom.toDouble())
+        val logRange = (ln(safeMaxZoom.toDouble()) - logMinimum).coerceAtLeast(0.0001)
+        val safeCurrentZoom = zoomRatio.coerceIn(safeMinZoom, safeMaxZoom)
+        val progress = (
+            (ln(safeCurrentZoom.toDouble()) - logMinimum) / logRange
+        ).toFloat().coerceIn(0f, 1f)
+
+        val sideInset = 12.dp
+        val usableWidth = (maxWidth - sideInset * 2).coerceAtLeast(0.dp)
+        val handleOffset = (
+            sideInset + usableWidth * progress - 2.dp
+        ).coerceIn(0.dp, (maxWidth - 4.dp).coerceAtLeast(0.dp))
+        val valuePillOffset = (
+            sideInset + usableWidth * progress - 28.dp
+        ).coerceIn(0.dp, (maxWidth - 56.dp).coerceAtLeast(0.dp))
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .clip(CircleShape)
-                .background(Color(0xFF292929))
+                .background(Color(0xD91D1D1D))
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val safeZoom = zoomRatio.coerceAtLeast(0.001f).toDouble()
-                val centerX = size.width / 2f
-                val centerY = size.height / 2f
-                val halfTickRange = (size.width / 2f - 48.dp.toPx()).coerceAtLeast(0f)
-                if (halfTickRange > 0f) {
-                    // Logarithmic ticks glide beneath the fixed center indicator as zoom changes.
-                    val logRangePerPixel = ln(1.5) / (halfTickRange * 2.0)
-                    val visibleMin = maxOf(
-                        minZoom.toDouble(),
-                        safeZoom * exp(-halfTickRange * logRangePerPixel)
-                    )
-                    val visibleMax = minOf(
-                        maxZoom.toDouble(),
-                        safeZoom * exp(halfTickRange * logRangePerPixel)
-                    )
-                    val tickLogStep = ln(1.01)
-                    if (visibleMin > 0.0 && visibleMax >= visibleMin) {
-                        val firstTick = kotlin.math.ceil(ln(visibleMin) / tickLogStep).toInt()
-                        val lastTick = kotlin.math.floor(ln(visibleMax) / tickLogStep).toInt()
-                        for (tickIndex in firstTick..lastTick) {
-                            val tickZoom = exp(tickIndex * tickLogStep)
-                            val x = centerX +
-                                (ln(tickZoom / safeZoom) / logRangePerPixel).toFloat()
-                            if (x < centerX - halfTickRange || x > centerX + halfTickRange) continue
+                val insetPx = sideInset.toPx()
+                val tickWidth = (size.width - insetPx * 2).coerceAtLeast(0f)
+                val tickCount = (tickWidth / 6.dp.toPx()).roundToInt().coerceIn(12, 100)
+                val tickCenterY = 11.dp.toPx()
 
-                            val majorTick = tickIndex % 5 == 0
-                            val tickHeight = if (majorTick) 17.dp.toPx() else 11.dp.toPx()
-                            drawLine(
-                                color = Color.White.copy(alpha = if (majorTick) 0.86f else 0.58f),
-                                start = Offset(x, centerY - tickHeight / 2f),
-                                end = Offset(x, centerY + tickHeight / 2f),
-                                strokeWidth = if (majorTick) 1.35.dp.toPx() else 1.dp.toPx()
-                            )
-                        }
+                // The scale stays stationary; the highlighted handle travels across it.
+                for (index in 0..tickCount) {
+                    val x = insetPx + tickWidth * index / tickCount
+                    val majorTick = index % 5 == 0
+                    val tickHeight = if (majorTick) 13.dp.toPx() else 7.dp.toPx()
+                    drawLine(
+                        color = Color.White.copy(alpha = if (majorTick) 0.72f else 0.38f),
+                        start = Offset(x, tickCenterY - tickHeight / 2f),
+                        end = Offset(x, tickCenterY + tickHeight / 2f),
+                        strokeWidth = if (majorTick) 1.2.dp.toPx() else 0.85.dp.toPx()
+                    )
+                }
+
+                // Emphasize the familiar optical zoom stops without moving the scale.
+                listOf(0.5f, 1f, 2f, 4f, 8f, 16f).forEach { stop ->
+                    if (stop >= safeMinZoom && stop <= safeMaxZoom) {
+                        val stopProgress = (
+                            (ln(stop.toDouble()) - logMinimum) / logRange
+                        ).toFloat()
+                        val x = insetPx + tickWidth * stopProgress
+                        drawLine(
+                            color = Color.White.copy(alpha = 0.94f),
+                            start = Offset(x, 3.dp.toPx()),
+                            end = Offset(x, 19.dp.toPx()),
+                            strokeWidth = 1.35.dp.toPx()
+                        )
                     }
                 }
             }
 
-            // Fixed yellow indicator and close control, matching the reference screenshot.
-            Box(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .width(2.5.dp)
-                    .height(22.dp)
-                    .clip(CircleShape)
-                    .background(rulerYellow)
-            )
-
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 6.dp)
-                    .size(25.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFF3A3A3A))
-                    .clickable(onClick = onClose)
-                    .semantics { contentDescription = closeDescription },
-                contentAlignment = Alignment.Center
-            ) {
-                Canvas(modifier = Modifier.size(11.dp)) {
-                    val stroke = 1.7.dp.toPx()
-                    val inset = size.width * 0.22f
-                    drawLine(
-                        color = Color.White.copy(alpha = 0.94f),
-                        start = Offset(inset, inset),
-                        end = Offset(size.width - inset, size.height - inset),
-                        strokeWidth = stroke
-                    )
-                    drawLine(
-                        color = Color.White.copy(alpha = 0.94f),
-                        start = Offset(size.width - inset, inset),
-                        end = Offset(inset, size.height - inset),
-                        strokeWidth = stroke
+            listOf(0.5f, 1f, 2f, 4f, 8f, 16f)
+                .filter { it >= safeMinZoom && it <= safeMaxZoom }
+                .forEach { stop ->
+                    val stopProgress = (
+                        (ln(stop.toDouble()) - logMinimum) / logRange
+                    ).toFloat().coerceIn(0f, 1f)
+                    val labelOffset = (
+                        sideInset + usableWidth * stopProgress - 11.dp
+                    ).coerceIn(0.dp, (maxWidth - 22.dp).coerceAtLeast(0.dp))
+                    Text(
+                        text = if (stop == 0.5f) ".5" else stop.roundToInt().toString(),
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .offset(x = labelOffset, y = (-1).dp)
+                            .width(22.dp),
+                        style = TextStyle(
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White.copy(alpha = 0.88f),
+                            textAlign = TextAlign.Center,
+                            shadow = ViewfinderTextShadow
+                        ),
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
-            }
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset(x = handleOffset, y = 3.dp)
+                    .width(4.dp)
+                    .height(17.dp)
+                    .clip(CircleShape)
+                    .background(handleColor)
+            )
         }
 
-        // Keep the live zoom readout just above the pill, as in the screenshot.
-        Text(
-            text = currentText,
+        // The live value pill follows the draggable handle, matching the reference UI.
+        Box(
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .offset(y = (-20).dp),
-            style = TextStyle(
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = rulerYellow,
-                shadow = ViewfinderTextShadow
-            ),
-            maxLines = 1,
-            softWrap = false
-        )
+                .align(Alignment.TopStart)
+                .offset(x = valuePillOffset, y = (-22).dp)
+                .width(56.dp)
+                .clip(CircleShape)
+                .background(valuePillColor)
+                .padding(vertical = 3.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = currentText,
+                style = TextStyle(
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF28202B)
+                ),
+                maxLines = 1,
+                softWrap = false
+            )
+        }
     }
 }
 
