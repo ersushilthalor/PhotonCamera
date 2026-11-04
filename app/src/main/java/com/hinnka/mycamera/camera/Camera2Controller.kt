@@ -554,6 +554,8 @@ class Camera2Controller(private val context: Context) {
     private var cachedCharacteristicsCameraId: String = ""
     private var activeOpenCameraId: String = ""
     private var activeOutputPhysicalCameraId: String? = null
+    /** Last lens whose CameraCaptureSession was actually running; survives UI state changes during a switch. */
+    private var runningCameraInfo: CameraInfo? = null
     private val failedPhysicalOutputProfiles = mutableSetOf<PhysicalOutputFailureKey>()
     private var cachedSensorOrientation: Int = 0
     private var cachedLensFacing: Int = CameraCharacteristics.LENS_FACING_BACK
@@ -2361,6 +2363,7 @@ class Camera2Controller(private val context: Context) {
         cachedCharacteristicsCameraId = ""
         activeOpenCameraId = ""
         activeOutputPhysicalCameraId = null
+        runningCameraInfo = null
         cachedSensorOrientation = 0
         cachedLensFacing = CameraCharacteristics.LENS_FACING_BACK
         cachedHardwareLevel = CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED
@@ -4283,9 +4286,15 @@ class Camera2Controller(private val context: Context) {
             return
         }
         captureSession = session
+        runningCameraInfo = _state.value.getCurrentCameraInfo()
         logicalDualPreviewReady = logicalDualPreviewEnabled &&
             logicalDualPreviewSurface?.isValid == true &&
-            _state.value.captureMode == CaptureMode.PHOTO
+            _state.value.captureMode == CaptureMode.PHOTO &&
+            !_state.value.useRaw &&
+            !_state.value.useLivePhoto &&
+            !requestedRawCaptureEnabled &&
+            imageReader?.imageFormat == ImageFormat.YUV_420_888 &&
+            stabilizationImageReader == null
         _state.update { it.copy(previewFirstFrameTimestampNs = null) }
 
         try {
