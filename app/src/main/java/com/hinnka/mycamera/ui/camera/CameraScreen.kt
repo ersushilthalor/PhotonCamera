@@ -1133,7 +1133,9 @@ fun CameraScreen(
         val viewfinder = @Composable {
             Card(
                 modifier = Modifier
-                    .animateContentSize(alignment = Alignment.Center)
+                    // GLSurfaceView is backed by an independent SurfaceView layer. Animating
+                    // this host while photo/video aspect ratios change can leave that surface
+                    // at its previous position. The preview transition already masks mode changes.
                     .width(cardWidth)
                     .height(cardHeight),
                 shape = RoundedCornerShape(if (isXpan) XpanViewfinderInnerBorder else 0.dp),
