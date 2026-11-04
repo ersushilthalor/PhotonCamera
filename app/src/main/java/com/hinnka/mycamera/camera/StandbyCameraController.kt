@@ -356,6 +356,29 @@ class StandbyCameraController(context: Context) {
         return standbyCameraDevice === camera || closingCameraDevice === camera
     }
 
+    /** Dispose a detached warm handoff when the old active stream cannot be retained. */
+    fun discardHandoff(handoff: StandbyCameraHandoff, reason: String) {
+        dispatch {
+            if (adoptedCameraDevice !== handoff.camera) return@dispatch
+            PLog.w(TAG, "Discarding detached handoff camera ${handoff.camera.id}: $reason")
+            runCatching { handoff.session.stopRepeating() }
+            runCatching { handoff.session.abortCaptures() }
+            runCatching { handoff.session.close() }
+            runCatching { handoff.imageReader.setOnImageAvailableListener(null, null) }
+            runCatching { handoff.imageReader.close() }
+            runCatching { handoff.previewSurface.release() }
+            adoptedDeviceCallbacks = null
+            adoptedCameraDevice = null
+            closingCameraDevice = handoff.camera
+            isDeviceTransitioning = true
+            runCatching { handoff.camera.close() }.onFailure { error ->
+                PLog.w(TAG, "Could not close discarded handoff camera", error)
+                if (closingCameraDevice === handoff.camera) closingCameraDevice = null
+                setDeviceTransitioning(false)
+            }
+        }
+    }
+
     fun handleStandbyDeviceUnavailable(camera: CameraDevice, reason: String) {
         dispatch {
             if (standbyCameraDevice !== camera) return@dispatch
