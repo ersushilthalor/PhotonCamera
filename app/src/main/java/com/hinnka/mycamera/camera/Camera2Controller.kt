@@ -928,6 +928,21 @@ class Camera2Controller(private val context: Context) {
         return image?.let { SafeImage(it, this) }
     }
 
+    private fun configureCaptureImageReaderListener(reader: ImageReader) {
+        reader.setOnImageAvailableListener({ source ->
+            try {
+                while (canAcquireImage("Too many open images")) {
+                    val image = trackImage(source.acquireNextImage()) ?: break
+                    processOrBufferImageForCaptureResult(image)
+                }
+            } catch (error: Exception) {
+                PLog.e(TAG, "Error in onImageAvailable", error)
+                photoCaptures.values.filter { it.reader === source }.toList()
+                    .forEach { failPhotoCapture(it, "image acquisition failed") }
+            }
+        }, cameraHandler)
+    }
+
     private fun getCaptureTimestamp(result: TotalCaptureResult): Long? {
         val frameNumber = result.frameNumber
         val startedTimestamp = pendingCaptureStartedTimestamps.remove(frameNumber)
@@ -3019,20 +3034,7 @@ class Camera2Controller(private val context: Context) {
                     captureSize.height,
                     captureFormat,
                     readerMaxImages
-                ).apply {
-                    setOnImageAvailableListener({ reader ->
-                        try {
-                            while (canAcquireImage("Too many open images")) {
-                                val image = trackImage(reader.acquireNextImage()) ?: break
-                                processOrBufferImageForCaptureResult(image)
-                            }
-                        } catch (e: Exception) {
-                            PLog.e(TAG, "Error in onImageAvailable", e)
-                            photoCaptures.values.filter { it.reader === reader }.toList()
-                                .forEach { failPhotoCapture(it, "image acquisition failed") }
-                        }
-                    }, cameraHandler)
-                }
+                ).also(::configureCaptureImageReaderListener)
 
             } else {
                 safeCloseImageReader(imageReader)
