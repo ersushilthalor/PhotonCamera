@@ -1271,6 +1271,7 @@ fun CameraScreen(
                             onSurfaceTextureReady = { surfaceTexture ->
                                 previewSurfaceTexture = surfaceTexture
                             },
+                            onStandbySurfaceTextureReady = viewModel::setStandbyPreviewSurfaceTexture,
                             onSurfaceDestroyed = { surfaceTexture ->
                                 if (previewSurfaceTexture === surfaceTexture) {
                                     previewSurfaceTexture = null
@@ -1309,6 +1310,7 @@ fun CameraScreen(
                             onFirstPreviewFrame = viewModel::onFirstPreviewFrame,
                             onGLSurfaceViewReady = {
                                 viewModel.glSurfaceView = it
+                                it.setActivePreviewSource(viewModel.isUsingStandbyPreviewInput)
                             },
                             livePhotoRecorder = viewModel.livePhotoRecorder,
                             videoLogProfile = state.videoConfig.logProfile,
