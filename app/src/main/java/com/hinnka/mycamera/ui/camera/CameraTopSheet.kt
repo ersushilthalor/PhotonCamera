@@ -571,7 +571,7 @@ fun CameraTopSheet(
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
-private fun OppoPhotoPipelineSheet(
+internal fun OppoPhotoPipelineSheet(
     settings: OppoPhotoSettings,
     onSettingsChange: (OppoPhotoSettings) -> Unit,
     onDismiss: () -> Unit,
@@ -780,7 +780,7 @@ private fun VideoOptionChip(
 }
 
 @Composable
-private fun selectedVideoAudioInputLabel(
+internal fun selectedVideoAudioInputLabel(
     selectedAudioInputId: String,
     options: List<VideoAudioInputOption>
 ): String {
@@ -792,7 +792,7 @@ private fun selectedVideoAudioInputLabel(
 }
 
 @Composable
-private fun videoAudioInputLabel(option: VideoAudioInputOption): String {
+internal fun videoAudioInputLabel(option: VideoAudioInputOption): String {
     val baseLabel = when (option.type) {
         AudioDeviceInfo.TYPE_BUILTIN_MIC -> stringResource(R.string.video_microphone_builtin)
         AudioDeviceInfo.TYPE_WIRED_HEADSET -> stringResource(R.string.video_microphone_wired)
@@ -818,7 +818,7 @@ private fun videoAudioInputLabel(option: VideoAudioInputOption): String {
 }
 
 @Composable
-private fun videoAspectRatioLabel(aspectRatio: VideoAspectRatio): String {
+internal fun videoAspectRatioLabel(aspectRatio: VideoAspectRatio): String {
     return when (aspectRatio) {
         VideoAspectRatio.RATIO_16_9 -> stringResource(R.string.video_aspect_16_9)
         VideoAspectRatio.RATIO_21_9 -> stringResource(R.string.video_aspect_21_9)
@@ -827,7 +827,7 @@ private fun videoAspectRatioLabel(aspectRatio: VideoAspectRatio): String {
 }
 
 @Composable
-private fun videoLogProfileLabel(profile: VideoLogProfile): String {
+internal fun videoLogProfileLabel(profile: VideoLogProfile): String {
     return when (profile) {
         VideoLogProfile.OFF -> stringResource(R.string.video_log_off)
         else -> profile.displayName
