@@ -178,7 +178,33 @@ private fun VideoTopBar(
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var stabilizationMenuExpanded by remember { mutableStateOf(false) }
+    var lastNonEnhancedStabilizationMode by remember {
+        mutableStateOf(
+            videoConfig.stabilizationMode.takeUnless {
+                it == VideoStabilizationMode.ENHANCED
+            } ?: VideoStabilizationMode.OIS
+        )
+    }
+    LaunchedEffect(videoConfig.stabilizationMode) {
+        videoConfig.stabilizationMode.takeUnless {
+            it == VideoStabilizationMode.ENHANCED
+        }?.let { lastNonEnhancedStabilizationMode = it }
+    }
+    val availableStabilizationModes = videoCapabilities.availableStabilizationModes
+    val enhancedStabilizationAvailable =
+        availableStabilizationModes.contains(VideoStabilizationMode.ENHANCED)
+    val enhancedStabilizationActive =
+        videoConfig.stabilizationMode == VideoStabilizationMode.ENHANCED
+    val normalStabilizationMode = lastNonEnhancedStabilizationMode.takeIf {
+        it != VideoStabilizationMode.ENHANCED && availableStabilizationModes.contains(it)
+    } ?: when {
+        availableStabilizationModes.contains(VideoStabilizationMode.OIS) ->
+            VideoStabilizationMode.OIS
+        availableStabilizationModes.contains(VideoStabilizationMode.EIS) ->
+            VideoStabilizationMode.EIS
+        else -> VideoStabilizationMode.OFF
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -229,49 +255,19 @@ private fun VideoTopBar(
                         contentDescription = stringResource(R.string.video_torch_chip)
                     )
 
-                    if (videoCapabilities.availableStabilizationModes.size > 1) {
-                        Box {
-                            VideoActionIcon(
-                                icon = AppIcons.Stabilization,
-                                active = videoConfig.stabilizationMode !=
-                                    VideoStabilizationMode.OFF,
-                                enabled = true,
-                                onClick = { stabilizationMenuExpanded = true },
-                                contentDescription = stringResource(
-                                    R.string.settings_video_stabilization_default
+                    if (enhancedStabilizationAvailable) {
+                        VideoEisPlusActionButton(
+                            active = enhancedStabilizationActive,
+                            onClick = {
+                                onVideoStabilizationModeChange(
+                                    if (enhancedStabilizationActive) {
+                                        normalStabilizationMode
+                                    } else {
+                                        VideoStabilizationMode.ENHANCED
+                                    }
                                 )
-                            )
-                            DropdownMenu(
-                                expanded = stabilizationMenuExpanded,
-                                onDismissRequest = {
-                                    stabilizationMenuExpanded = false
-                                }
-                            ) {
-                                videoCapabilities.availableStabilizationModes.forEach { mode ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(videoStabilizationModeLabel(mode))
-                                        },
-                                        onClick = {
-                                            stabilizationMenuExpanded = false
-                                            onVideoStabilizationModeChange(mode)
-                                        },
-                                        trailingIcon = if (
-                                            mode == videoConfig.stabilizationMode
-                                        ) {
-                                            {
-                                                Icon(
-                                                    imageVector = Icons.Default.Check,
-                                                    contentDescription = null
-                                                )
-                                            }
-                                        } else {
-                                            null
-                                        }
-                                    )
-                                }
                             }
-                        }
+                        )
                     }
 
                     IconButton(onClick = onSettingsClick) {
@@ -373,6 +369,24 @@ private fun VideoActionIcon(
             } else {
                 Color.White.copy(alpha = 0.3f)
             }
+        )
+    }
+}
+
+@Composable
+private fun VideoEisPlusActionButton(
+    active: Boolean,
+    onClick: () -> Unit
+) {
+    IconButton(onClick = onClick) {
+        Text(
+            text = "EIS+",
+            color = if (active) AccentColor else Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = (-0.3).sp,
+            maxLines = 1,
+            modifier = Modifier.autoRotate()
         )
     }
 }
