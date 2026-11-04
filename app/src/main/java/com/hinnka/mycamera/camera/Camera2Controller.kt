@@ -148,6 +148,7 @@ class Camera2Controller(private val context: Context) {
     private data class CameraOpenRequest(
         val surfaceTexture: SurfaceTexture,
         val preserveVideoRecording: Boolean,
+        val standbyCameraId: String? = null,
     )
 
     private enum class CameraDeviceLifecycle {
@@ -2146,8 +2147,16 @@ class Camera2Controller(private val context: Context) {
         availableCaptureRequestKeyNames = null
     }
 
-    private fun clearCameraSessionState(reason: String, closeImageReader: Boolean = true) {
-        standbyCameraController.release("main camera session cleared: " + reason)
+    private fun clearCameraSessionState(
+        reason: String,
+        closeImageReader: Boolean = true,
+        preserveStandbyCamera: Boolean = false,
+    ) {
+        if (preserveStandbyCamera) {
+            PLog.d(TAG, "Preserving ready standby camera for lens handoff: $reason")
+        } else {
+            standbyCameraController.release("main camera session cleared: " + reason)
+        }
         burstCapturing = false
         _state.update { it.copy(burstCapturing = false) }
         photoCaptures.values.toList().forEach {
@@ -2495,13 +2504,22 @@ class Camera2Controller(private val context: Context) {
             }
             return
         }
-        pendingCameraOpenRequest = CameraOpenRequest(surfaceTexture, preserveVideoRecording)
+        val targetCamera = _state.value.getCurrentCameraInfo()
+        val standbyCameraId = targetCamera
+            ?.takeIf(standbyCameraController::canHandoffTo)
+            ?.cameraId
+        pendingCameraOpenRequest = CameraOpenRequest(
+            surfaceTexture = surfaceTexture,
+            preserveVideoRecording = preserveVideoRecording,
+            standbyCameraId = standbyCameraId,
+        )
         when (cameraDeviceLifecycle) {
             CameraDeviceLifecycle.CLOSED -> openPendingCameraRequest()
             CameraDeviceLifecycle.OPENING,
             CameraDeviceLifecycle.OPEN -> closeCameraInternal(
                 preserveVideoRecording = preserveVideoRecording,
                 clearPendingOpen = false,
+                preserveStandbyCamera = standbyCameraId != null,
             )
             CameraDeviceLifecycle.CLOSING -> {
                 PLog.d(TAG, "Camera open queued while previous device is closing")
@@ -2525,11 +2543,44 @@ class Camera2Controller(private val context: Context) {
         val request = pendingCameraOpenRequest ?: return
         pendingCameraOpenRequest = null
         cameraDeviceLifecycle = CameraDeviceLifecycle.OPENING
-        openCameraNow(request)
+        val standbyCameraId = request.standbyCameraId
+        if (standbyCameraId == null) {
+            openCameraNow(request)
+            return
+        }
+
+        val targetCamera = _state.value.availableCameras.firstOrNull {
+            it.cameraId == standbyCameraId
+        }
+        val targetOpenCameraId = targetCamera?.let {
+            runCatching { it.getOpenCameraId() }.getOrNull()
+        }
+        if (targetOpenCameraId.isNullOrBlank()) {
+            PLog.w(TAG, "Standby handoff target disappeared; falling back to normal camera open")
+            openCameraNow(request.copy(standbyCameraId = null))
+            return
+        }
+
+        standbyCameraController.takeOver(standbyCameraId, targetOpenCameraId) { warmCamera ->
+            if (warmCamera != null) {
+                openCameraNow(request, preopenedCamera = warmCamera)
+            } else {
+                PLog.w(TAG, "Ready standby camera became unavailable; waiting for its release before cold open")
+                standbyCameraController.release("standby handoff unavailable")
+                standbyCameraController.whenDeviceIdle {
+                    if (cameraDeviceLifecycle == CameraDeviceLifecycle.OPENING) {
+                        openCameraNow(request.copy(standbyCameraId = null))
+                    }
+                }
+            }
+        }
     }
 
     @SuppressLint("MissingPermission")
-    private fun openCameraNow(request: CameraOpenRequest) {
+    private fun openCameraNow(
+        request: CameraOpenRequest,
+        preopenedCamera: CameraDevice? = null,
+    ) {
         val surfaceTexture = request.surfaceTexture
         val preserveVideoRecording = request.preserveVideoRecording
         clearPointFocusState()
@@ -2943,7 +2994,7 @@ class Camera2Controller(private val context: Context) {
 
             PLog.d(TAG, "Opening camera: open=$openCameraId, selected=$cameraId")
 
-            cameraManager.openCamera(openCameraId, object : CameraDevice.StateCallback() {
+            val cameraStateCallback = object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
                     if (
                         openGeneration != cameraOpenGeneration ||
@@ -3031,7 +3082,34 @@ class Camera2Controller(private val context: Context) {
                 override fun onClosed(camera: CameraDevice) {
                     handleCameraDeviceClosed(camera)
                 }
-            }, cameraHandler)
+            }
+
+            if (preopenedCamera != null) {
+                if (preopenedCamera.id != openCameraId) {
+                    handleCameraOpenFailure(
+                        cameraId = openCameraId,
+                        errorCode = ERROR_CAMERA_OPEN_FAILED,
+                        message = "预热摄像头与目标镜头不匹配",
+                        error = IllegalStateException(
+                            "Expected warm camera $openCameraId but received ${preopenedCamera.id}"
+                        ),
+                    )
+                    closeCameraDeviceSafely(preopenedCamera, "mismatched standby handoff")
+                    return
+                }
+                standbyCameraController.setAdoptedCameraCallbacks(
+                    preopenedCamera,
+                    AdoptedCameraDeviceCallbacks(
+                        onDisconnected = { camera -> cameraStateCallback.onDisconnected(camera) },
+                        onError = { camera, error -> cameraStateCallback.onError(camera, error) },
+                        onClosed = { camera -> cameraStateCallback.onClosed(camera) },
+                    ),
+                )
+                PLog.i(TAG, "Reusing prewarmed CameraDevice without reopening: ${preopenedCamera.id}")
+                cameraStateCallback.onOpened(preopenedCamera)
+            } else {
+                cameraManager.openCamera(openCameraId, cameraStateCallback, cameraHandler)
+            }
 
         } catch (e: Exception) {
             handleCameraOpenFailure(
@@ -9360,6 +9438,7 @@ class Camera2Controller(private val context: Context) {
     private fun closeCameraInternal(
         preserveVideoRecording: Boolean,
         clearPendingOpen: Boolean,
+        preserveStandbyCamera: Boolean = false,
     ) {
         if (clearPendingOpen) {
             pendingCameraOpenRequest = null
@@ -9385,7 +9464,10 @@ class Camera2Controller(private val context: Context) {
                 PLog.d(TAG, "Closing camera while video recording is finalizing")
             }
 
-            clearCameraSessionState("closeCamera")
+            clearCameraSessionState(
+                reason = "closeCamera",
+                preserveStandbyCamera = preserveStandbyCamera,
+            )
             val deviceToClose = cameraDevice
             cameraDevice = null
             clearCameraCapabilityCache()
