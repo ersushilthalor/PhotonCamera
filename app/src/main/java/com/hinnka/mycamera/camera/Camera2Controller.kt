@@ -2772,20 +2772,42 @@ class Camera2Controller(private val context: Context) {
         val device = cameraDevice ?: return
         val handler = cameraHandler ?: return
         val activeState = _state.value
-        if (previewTexture == null ||
-            activeState.captureMode != CaptureMode.PHOTO ||
-            activeState.videoRecordingState.isRecording ||
-            activeState.videoRecordingState.isProcessing
-        ) {
-            standbyCameraController.release("standby unavailable for current capture mode")
+        val eligibleForStillStandby = previewTexture != null &&
+            activeState.captureMode == CaptureMode.PHOTO &&
+            !activeState.videoRecordingState.isRecording &&
+            !activeState.videoRecordingState.isProcessing &&
+            !activeState.useRaw &&
+            !activeState.useP010 &&
+            !activeState.photoPreviewStabilizationEnabled &&
+            imageReader?.imageFormat == ImageFormat.YUV_420_888
+        if (!eligibleForStillStandby) {
+            standbyCameraController.release("standby unavailable for current capture mode/profile")
+            if (logicalStandbyPreviewSurface != null) {
+                clearLogicalStandbyOutputs("standby no longer eligible")
+            }
             return
         }
+
+        val activeCameraInfo = activeState.getCurrentCameraInfo()
+        val activeOpenId = activeOpenCameraId.ifBlank { device.id }
+        if (activeCameraInfo != null &&
+            prepareLogicalMultiCameraStandby(
+                activeCamera = activeCameraInfo,
+                availableCameras = activeState.availableCameras,
+                activeOpenId = activeOpenId,
+                standbyTexture = previewTexture!!,
+                handler = handler,
+            )
+        ) {
+            return
+        }
+
         val captureFormat = imageReader?.imageFormat
-            ?.takeIf { it == ImageFormat.YUV_420_888 && !activeState.useRaw && !activeState.useP010 }
+            ?.takeIf { it == ImageFormat.YUV_420_888 }
         standbyCameraController.prepare(
-            activeCamera = activeState.getCurrentCameraInfo(),
+            activeCamera = activeCameraInfo,
             availableCameras = activeState.availableCameras,
-            activeOpenCameraId = activeOpenCameraId.ifBlank { device.id },
+            activeOpenCameraId = activeOpenId,
             previewSize = activeState.currentPreviewSize,
             callbackHandler = handler,
             previewSurfaceTexture = previewTexture,
@@ -2796,7 +2818,6 @@ class Camera2Controller(private val context: Context) {
             onCaptureImageAvailable = ::configureCaptureImageReaderListener,
         )
     }
-
     fun setStandbyPreviewSurfaceTexture(surfaceTexture: SurfaceTexture?) {
         val action = {
             if (standbyPreviewSurfaceTexture !== surfaceTexture) {
