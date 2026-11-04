@@ -94,6 +94,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -1038,7 +1039,7 @@ fun SettingsScreen(
                 }
 
                 MergedSettingsCategoryTitle(stringResource(R.string.settings_section_assist))
-                if (true) {
+                key("settings-assist") {
                     // 辅助工具
                     SettingsSection(
                         title = stringResource(R.string.settings_section_assist),
@@ -1146,7 +1147,7 @@ fun SettingsScreen(
                 }
 
                 MergedSettingsCategoryTitle(stringResource(R.string.settings_section_focus_lens))
-                if (true) {
+                key("settings-focus_lens") {
                     // 对焦与镜头
                     SettingsSection(
                         title = stringResource(R.string.settings_focus_lens_group_autofocus)
@@ -1420,7 +1421,7 @@ fun SettingsScreen(
                 }
 
                 MergedSettingsCategoryTitle(stringResource(R.string.settings_section_capture_storage))
-                if (true) {
+                key("settings-capture_storage") {
                     // 拍摄行为
                     SettingsSection(
                         title = stringResource(R.string.settings_section_capture_storage),
@@ -1664,7 +1665,7 @@ fun SettingsScreen(
                 }
 
                 MergedSettingsCategoryTitle(stringResource(R.string.settings_section_video))
-                if (true) {
+                key("settings-video") {
                     val stabilizationModes = state.videoCapabilities
                         .availableStabilizationModes
                         .ifEmpty {
@@ -2070,7 +2071,7 @@ fun SettingsScreen(
                 }
 
                 MergedSettingsCategoryTitle(stringResource(R.string.settings_section_interface))
-                if (true) {
+                key("settings-interface") {
                     // 界面样式
                     SettingsSection(
                         title = stringResource(R.string.settings_section_interface),
@@ -2169,7 +2170,7 @@ fun SettingsScreen(
                 }
 
                 MergedSettingsCategoryTitle(stringResource(R.string.settings_section_management))
-                if (true) {
+                key("settings-content_management") {
                     // 内容管理
                     SettingsSection(
                         title = stringResource(R.string.settings_section_management),
@@ -2217,7 +2218,7 @@ fun SettingsScreen(
                 }
 
                 MergedSettingsCategoryTitle(stringResource(R.string.ai_service))
-                if (true) {
+                key("settings-ai_service") {
                     // AI 服务设置
                     SettingsSection(
                         title = stringResource(R.string.ai_service),
@@ -2271,7 +2272,7 @@ fun SettingsScreen(
                 }
 
                 MergedSettingsCategoryTitle(stringResource(R.string.settings_section_system_control))
-                if (true) {
+                key("settings-system_control") {
                     // 系统与控制
                     SettingsSection(
                         title = stringResource(R.string.settings_section_system_control),
@@ -2379,7 +2380,7 @@ fun SettingsScreen(
                 }
 
                 MergedSettingsCategoryTitle(stringResource(R.string.settings_section_data_maintenance))
-                if (true) {
+                key("settings-data_maintenance") {
                     // 数据维护
                     SettingsSection(
                         title = stringResource(R.string.settings_section_data_maintenance),
@@ -2425,7 +2426,7 @@ fun SettingsScreen(
                 }
 
                 MergedSettingsCategoryTitle(stringResource(R.string.settings_section_help_about))
-                if (true) {
+                key("settings-help_about") {
                     // 帮助与关于
                     val isGoogleFlavor = BuildConfig.FLAVOR == "google"
 
