@@ -239,6 +239,70 @@ class Camera2Controller(private val context: Context) {
     private val standbyCameraController = StandbyCameraController(context)
     val standbyCameraStatus: StateFlow<StandbyCameraStatus> = standbyCameraController.status
     private var waitingForStandbyRelease = false
+    @Volatile
+    private var primaryPreviewSurfaceTexture: SurfaceTexture? = null
+    @Volatile
+    private var standbyPreviewSurfaceTexture: SurfaceTexture? = null
+
+    /** Called by the GL view when its second OES input becomes available or is destroyed. */
+    fun setStandbyPreviewSurfaceTexture(surfaceTexture: SurfaceTexture?) {
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { setStandbyPreviewSurfaceTexture(surfaceTexture) }
+            return
+        }
+        standbyPreviewSurfaceTexture = surfaceTexture
+        if (surfaceTexture == null) {
+            standbyCameraController.release("secondary GL preview surface destroyed")
+        } else {
+            prepareStandbyCameraIfEligible()
+        }
+    }
+
+    private fun prepareStandbyCameraIfEligible() {
+        val current = _state.value
+        val reader = imageReader
+        val handler = cameraHandler
+        val primaryTexture = primaryPreviewSurfaceTexture
+        val secondaryTexture = standbyPreviewSurfaceTexture
+        val activeTexture = previewSurfaceTexture
+        val eligible = current.captureMode == CaptureMode.PHOTO &&
+            current.lensFacing != CameraCharacteristics.LENS_FACING_FRONT &&
+            !requestedRawCaptureEnabled &&
+            !current.useRaw &&
+            reader != null &&
+            reader.imageFormat == ImageFormat.YUV_420_888 &&
+            stabilizationImageReader == null &&
+            !current.videoRecordingState.isRecording &&
+            !current.videoRecordingState.isProcessing
+        if (!eligible || handler == null || primaryTexture == null || secondaryTexture == null) {
+            standbyCameraController.release("active configuration is not eligible for persistent handoff")
+            return
+        }
+        val standbyTexture = when (activeTexture) {
+            primaryTexture -> secondaryTexture
+            secondaryTexture -> primaryTexture
+            else -> secondaryTexture
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && standbyTexture.isReleased) {
+            standbyCameraController.release("standby SurfaceTexture was released")
+            return
+        }
+        standbyCameraController.prepare(
+            activeCamera = current.getCurrentCameraInfo(),
+            availableCameras = current.availableCameras,
+            activeOpenCameraId = getActiveOpenCameraId(),
+            previewSize = current.currentPreviewSize,
+            captureSize = Size(reader.width, reader.height),
+            captureFormat = reader.imageFormat,
+            maxImages = imageReaderMaxImages,
+            standbyPreviewSurfaceTexture = standbyTexture,
+            callbackHandler = handler,
+        )
+    }
+
+    /** The renderer changes only its OES input; Camera2 sessions are not rebuilt. */
+    var onPreviewSourceChanged: ((useStandbyInput: Boolean) -> Unit)? = null
 
     // --- 拍照状态机相关 ---
 
