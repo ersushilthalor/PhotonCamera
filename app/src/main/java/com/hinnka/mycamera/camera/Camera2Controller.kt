@@ -5922,7 +5922,7 @@ class Camera2Controller(private val context: Context) {
         val oldReader = imageReader ?: return false
 
         if (current.captureMode != CaptureMode.PHOTO ||
-            current.lensFacing != CameraCharacteristics.LENS_FACING_BACK ||
+            current.getCurrentCameraInfo()?.lensFacing != CameraCharacteristics.LENS_FACING_BACK ||
             target.lensFacing != CameraCharacteristics.LENS_FACING_BACK ||
             current.videoRecordingState.isRecording ||
             current.videoRecordingState.isProcessing ||
@@ -5981,6 +5981,7 @@ class Camera2Controller(private val context: Context) {
         previewSurface = next.previewSurface
         previewSurfaceTexture = next.previewSurfaceTexture
         imageReader = next.captureImageReader
+        configureCaptureImageReaderListener(next.captureImageReader)
         activeOpenCameraId = next.openCameraId
         activeOutputPhysicalCameraId = next.physicalCameraId
         cameraDeviceLifecycle = CameraDeviceLifecycle.OPEN
@@ -6075,7 +6076,7 @@ class Camera2Controller(private val context: Context) {
         availableTonemapModes = capabilityCharacteristics.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES)
             ?: intArrayOf()
         availableColorCorrectionAberrationModes =
-            capabilityCharacteristics.get(CameraCharacteristics.COLOR_CORRECTION_ABERRATION_AVAILABLE_MODES)
+            capabilityCharacteristics.get(CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_ABERRATION_MODES)
                 ?: intArrayOf()
         availableHotPixelModes = capabilityCharacteristics.get(CameraCharacteristics.HOT_PIXEL_AVAILABLE_HOT_PIXEL_MODES)
             ?: intArrayOf()
