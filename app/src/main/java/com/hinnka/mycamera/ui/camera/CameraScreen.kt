@@ -228,6 +228,7 @@ fun CameraScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
+    val displayedPreviewSource by viewModel.displayedPreviewSource.collectAsState()
     val uiStyle by viewModel.uiStyle.collectAsState()
     val isCameraInitialized by viewModel.isInitialized.collectAsState()
     val latestPhoto by galleryViewModel.latestPhoto.collectAsState()
@@ -1275,6 +1276,8 @@ fun CameraScreen(
                             },
                             onStandbySurfaceTextureReady = viewModel::setStandbyPreviewSurfaceTexture,
                             onStandbyPreviewFrameAvailable = viewModel::onStandbyPreviewFrameAvailable,
+                            displayedPreviewSource = displayedPreviewSource,
+                            onMainPreviewFrameAvailable = viewModel::onMainPreviewFrameAvailable,
                             onSurfaceDestroyed = { surfaceTexture ->
                                 if (previewSurfaceTexture === surfaceTexture) {
                                     previewSurfaceTexture = null
