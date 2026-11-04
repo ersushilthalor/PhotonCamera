@@ -33,7 +33,7 @@ import androidx.compose.material.icons.outlined.HdrAuto
 import androidx.compose.material.icons.outlined.Iso
 import androidx.compose.material.icons.outlined.SettingsBackupRestore
 import androidx.compose.material.icons.outlined.ShutterSpeed
-import androidx.compose.material3.Icon
+import com.hinnka.mycamera.ui.components.ScaledIcon as Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
