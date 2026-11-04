@@ -119,8 +119,8 @@ private const val DefaultShutterSpeedNs = 1_000_000_000f / 60f
 private const val DefaultIso = 100f
 private const val DefaultAwbTemperature = 5000f
 private const val DefaultFocusDistance = 0f
-private val CameraTopBarBaseTopPadding = 32.dp
-private val CameraTopBarBaseHeight = 80.dp
+private val CameraTopBarBaseTopPadding = 20.dp
+private val CameraTopBarBaseHeight = 64.dp
 private val VideoTopBarBaseHeight = 80.dp
 private val VideoTopBarLoweredOffset = 36.dp
 private val XpanViewfinderInnerBorder = 4.dp
@@ -929,7 +929,9 @@ fun CameraScreen(
         val placeViewfinderBelowTopBar = contentHeight - cardHeight >= topBarBottom
         // Balance small previews between the toolbar and collapsed controls. Reserving both
         // bars first prevents the downward shift from pushing parameters back into the image.
-        val extraViewfinderTopSpacing = if (isXpan) {
+        val extraViewfinderTopSpacing = if (isXpan || previewAspectRatio < 1f) {
+            // Portrait viewfinders begin immediately below the top bar, matching the
+            // edge-to-edge camera framing. Landscape previews retain balanced centering.
             0.dp
         } else {
             ((contentHeight - topBarBottom - cardHeight -
@@ -1653,7 +1655,7 @@ fun CameraScreen(
                 contentAlignment = Alignment.Center
             ) {
                 viewfinder()
-                if (uiStyle == "OPPO" && activePanel == ActivePanel.NONE && !isXpan) {
+                if (activePanel == ActivePanel.NONE && !isXpan) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
@@ -1700,20 +1702,11 @@ fun CameraScreen(
             CameraBottomControlsLayout(
                 viewfinderBottom = viewfinderTop + cardHeight,
                 modifier = Modifier.fillMaxSize(),
+                // The zoom selector is overlaid at the lower edge of the viewfinder.
+                // Keep this measurement slot empty so it cannot shift the shutter or
+                // reserve a second row beneath the preview.
                 zoomBar = {
-                    // Panel visibility changes the zoom content, not the space used to
-                    // position the parameter row beneath it. XPAN has no horizontal bar.
-                    if (uiStyle != "OPPO" || isXpan) {
-                        Box(
-                            modifier = if (isXpan) Modifier else Modifier
-                                .fillMaxWidth()
-                                .height(CameraControlsLayoutDefaults.ZoomBarHeight)
-                        ) {
-                            zoomBar()
-                        }
-                    } else {
-                        Spacer(modifier = Modifier.height(0.dp))
-                    }
+                    Spacer(modifier = Modifier.height(0.dp))
                 },
                 // Hide the manual controls (EV/Tv/ISO/AF/AWB and their value ruler)
                 // in both Photo and Video modes without changing capture functionality.
