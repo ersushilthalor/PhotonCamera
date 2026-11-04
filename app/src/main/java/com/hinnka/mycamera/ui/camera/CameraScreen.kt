@@ -99,7 +99,6 @@ import com.hinnka.mycamera.ui.icons.AppIcons
  */
 enum class ActivePanel {
     NONE,
-    SETTINGS,
     FILTERS,
     EDIT,
     PRESETS
@@ -975,9 +974,7 @@ fun CameraScreen(
                 onVideoHdrToggle = {
                     viewModel.setVideoHdrEnabled(!videoHdrEnabled)
                 },
-                onSettingsClick = {
-                    activePanel = if (activePanel == ActivePanel.SETTINGS) ActivePanel.NONE else ActivePanel.SETTINGS
-                },
+                onSettingsClick = onSettingsClick,
                 modifier = Modifier
                     .padding(top = topSafePadding)
                     .offset(y = topBarOffset)
@@ -1737,100 +1734,12 @@ fun CameraScreen(
             PanelDismissPreviewOverlay(
                 bounds = panelDismissBounds,
                 parentBounds = cameraScreenBounds,
-                dimBackground = activePanel == ActivePanel.SETTINGS,
+                dimBackground = false,
                 onDismiss = { activePanel = ActivePanel.NONE }
             )
         }
 
         // TopSheet for settings
-        CameraTopSheet(
-            visible = activePanel == ActivePanel.SETTINGS,
-            captureMode = state.captureMode,
-            aspectRatio = state.aspectRatio,
-            topSheetAspectRatios = topSheetAspectRatios,
-            onAspectRatioChange = { runPreviewTransition { viewModel.setAspectRatio(it) } },
-            videoAspectRatio = state.videoConfig.aspectRatio,
-            onVideoAspectRatioChange = { runPreviewTransition { viewModel.setVideoAspectRatio(it) } },
-            videoLogProfile = state.videoConfig.logProfile,
-            availableVideoLogProfiles = state.videoCapabilities.availableLogProfiles,
-            onVideoLogProfileChange = { viewModel.setVideoLogProfile(it) },
-            videoBitrate = state.videoConfig.bitrate,
-            onVideoBitrateChange = { viewModel.setVideoBitrate(it) },
-            videoCodec = videoCodec,
-            onVideoCodecChange = { viewModel.setVideoCodec(it) },
-            videoAudioInputId = state.videoConfig.audioInputId,
-            videoAudioInputOptions = videoAudioInputOptions,
-            onVideoAudioInputChange = { viewModel.setVideoAudioInputId(it) },
-            useRaw = useRaw && state.isRawSupported,
-            isRawSupported = state.isRawSupported,
-            rawDcpId = rawDcpId,
-            rawDcpIdsByLens = rawDcpIdsByLens,
-            rawDcpLensOptions = rawDcpLensOptions(state.availableCameras),
-            availableDcps = viewModel.availableDcps,
-            rawHncsFilmCurveMode = rawHncsFilmCurveMode,
-            rawRenderingEngine = rawColorEngine,
-            rawToneMappingParameters = rawToneMappingParameters,
-            rawSpectralFilmSelection = rawSpectralFilmSelection ?: SpectralFilmSelection(rawSpectralFilmStock ?: "kodak_portra_400"),
-            rawSpectralFilmPrint = rawSpectralFilmPrint ?: "kodak_portra_endura",
-            ultraHdrEnabled = ultraHdrEnabled,
-            onUltraHdrToggle = viewModel::setUltraHdrGainMapEnabled,
-            photoPreviewStabilizationEnabled =
-                state.photoPreviewStabilizationEnabled,
-            photoPreviewStabilizationAvailable =
-                viewModel.realtimeStabilizationCoordinator.isCurrentCameraSupported,
-            onPhotoPreviewStabilizationChange =
-                viewModel::setPhotoPreviewStabilizationEnabled,
-            onRawDcpChange = { viewModel.setRawDcpId(it) },
-            onRawDcpIdsByLensChange = { viewModel.setRawDcpIdsByLens(it) },
-            onRawHncsFilmCurveModeChange = { viewModel.setRawHncsFilmCurveMode(it) },
-            onImportRawDcp = { dcpImportLauncher.launch(arrayOf("*/*")) },
-            onDeleteRawDcp = { dcp ->
-                viewModel.deleteRawDcp(dcp.id) { success ->
-                    android.widget.Toast.makeText(
-                        context,
-                        if (success) R.string.raw_dcp_delete_success else R.string.raw_dcp_delete_failed,
-                        android.widget.Toast.LENGTH_SHORT
-                    ).show()
-                }
-            },
-            onRawColorEngineChange = { viewModel.setRawColorEngine(it) },
-            onRawToneMappingParametersChange = { viewModel.setRawToneMappingParameters(it) },
-            onRawSpectralFilmSelectionChange = { viewModel.setRawSpectralFilmSelection(it) },
-            onRawSpectralFilmPrintChange = { viewModel.setRawSpectralFilmPrint(it) },
-            meteringMode = state.meteringMode,
-            onMeteringModeChange = { viewModel.setMeteringMode(it) },
-            onFilterManageClick = {
-                activePanel = ActivePanel.NONE
-                onFilterManagementClick(null)
-            },
-            onFrameManageClick = {
-                activePanel = ActivePanel.NONE
-                onFrameManagementClick()
-            },
-            onPresetManageClick = {
-                activePanel = ActivePanel.NONE
-                onPresetManagementClick()
-            },
-            onToolboxClick = {
-                activePanel = ActivePanel.NONE
-                onToolboxClick()
-            },
-            onMoreSettingsClick = {
-                activePanel = ActivePanel.NONE
-                onSettingsClick()
-            },
-            useJpgMax = useJpgMax,
-            onJpgMaxToggle = {
-                viewModel.setUseJpgMax(it)
-            },
-            useMultipleExposure = useMultipleExposure,
-            onMultipleExposureToggle = { viewModel.setUseMultipleExposure(it) },
-            oppoPhotoSettings = oppoPhotoSettings,
-            onOppoPhotoSettingsChange = viewModel::updateOppoPhotoSettings,
-            refocusAvailable = state.minimumFocusDistance > 0f,
-            contentTopPadding = CameraTopBarBaseTopPadding + topSafePadding
-        )
-
         // During navigation measurement or window resizing, the viewport can be
         // shorter than the toolbar. The panel then has no available vertical space.
         val filterPanelTop = minOf(
