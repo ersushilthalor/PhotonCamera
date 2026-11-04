@@ -1720,26 +1720,29 @@ fun SettingsScreen(
                             }
                         )
                         val aspectOptions = state.videoCapabilities.availableAspectRatios.ifEmpty { VideoAspectRatio.entries }
-                        val aspectLabels = aspectOptions.map { videoAspectRatioLabel(it) }
+                        val aspectRows = aspectOptions.map { it to videoAspectRatioLabel(it) }
                         DropdownSettingItem(
                             title = stringResource(R.string.video_aspect_chip),
-                            value = videoAspectRatioLabel(state.videoConfig.aspectRatio),
-                            options = aspectLabels,
+                            value = aspectRows.firstOrNull { it.first == state.videoConfig.aspectRatio }?.second
+                                ?: videoAspectRatioLabel(state.videoConfig.aspectRatio),
+                            options = aspectRows.map { it.second },
                             isLoading = false,
                             onExpanded = {},
                             onOptionSelected = { label ->
-                                aspectOptions.firstOrNull { videoAspectRatioLabel(it) == label }?.let(viewModel::setVideoAspectRatio)
+                                aspectRows.firstOrNull { it.second == label }?.first?.let(viewModel::setVideoAspectRatio)
                             }
                         )
                         val logProfileOptions = state.videoCapabilities.availableLogProfiles.ifEmpty { VideoLogProfile.SELECTABLE_PROFILES }
+                        val logProfileRows = logProfileOptions.map { it to videoLogProfileLabel(it) }
                         DropdownSettingItem(
                             title = stringResource(R.string.video_log_chip),
-                            value = videoLogProfileLabel(state.videoConfig.logProfile),
-                            options = logProfileOptions.map { videoLogProfileLabel(it) },
+                            value = logProfileRows.firstOrNull { it.first == state.videoConfig.logProfile }?.second
+                                ?: videoLogProfileLabel(state.videoConfig.logProfile),
+                            options = logProfileRows.map { it.second },
                             isLoading = false,
                             onExpanded = {},
                             onOptionSelected = { label ->
-                                logProfileOptions.firstOrNull { videoLogProfileLabel(it) == label }?.let(viewModel::setVideoLogProfile)
+                                logProfileRows.firstOrNull { it.second == label }?.first?.let(viewModel::setVideoLogProfile)
                             }
                         )
                         val bitrateOptions = state.videoCapabilities.availableBitrates.ifEmpty { VideoBitratePreset.entries }
