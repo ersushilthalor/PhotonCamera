@@ -193,7 +193,7 @@ import kotlin.math.roundToInt
 import com.hinnka.mycamera.ui.icons.AppIcons
 
 private enum class SettingsPage {
-    ASSIST,
+    PHOTON,
     FOCUS_LENS,
     CAPTURE_STORAGE,
     VIDEO,
@@ -330,6 +330,7 @@ fun SettingsScreen(
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.state.collectAsState()
+    var selectedSettingsPage by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
     val oppoPhotoSettings by viewModel.oppoPhotoSettings.collectAsState()
     val rawRenderingEngine by viewModel.rawRenderingEngine.collectAsState()
     val videoAudioInputOptions by viewModel.videoAudioInputOptions.collectAsState()
@@ -520,12 +521,14 @@ fun SettingsScreen(
     }
 
     LaunchedEffect(
+        selectedSettingsPage,
         customLensIds,
         lensIdBlacklist,
         preferredMacroCameraId,
         enableLogicalMultiCameraDiscovery,
         logicalCameraBindingWhitelist
     ) {
+        if (selectedSettingsPage != SettingsPage.FOCUS_LENS) return@LaunchedEffect
         mainCameraIdOptions = runCatching {
             viewModel.discoverMainCameraIdOptions()
         }.getOrElse {
@@ -984,9 +987,26 @@ fun SettingsScreen(
             rippleAlpha = SettingsRippleAlpha
         )
     }
-    val screenTitle = stringResource(R.string.settings_title)
-    BackHandler { onBack() }
+    val screenTitle = when (selectedSettingsPage) {
+        SettingsPage.PHOTON -> stringResource(R.string.settings_category_photon)
+        SettingsPage.FOCUS_LENS -> stringResource(R.string.settings_section_focus_lens)
+        SettingsPage.CAPTURE_STORAGE -> stringResource(R.string.settings_section_capture_storage)
+        SettingsPage.VIDEO -> stringResource(R.string.settings_section_video)
+        SettingsPage.INTERFACE -> stringResource(R.string.settings_section_interface)
+        SettingsPage.CONTENT_MANAGEMENT -> stringResource(R.string.settings_section_management)
+        SettingsPage.AI_SERVICE -> stringResource(R.string.ai_service)
+        SettingsPage.SYSTEM_CONTROL -> stringResource(R.string.settings_section_system_control)
+        SettingsPage.DATA_MAINTENANCE -> stringResource(R.string.settings_section_data_maintenance)
+        SettingsPage.HELP_ABOUT -> stringResource(R.string.settings_section_help_about)
+        null -> stringResource(R.string.settings_title)
+    }
+    BackHandler {
+        if (selectedSettingsPage != null) selectedSettingsPage = null else onBack()
+    }
     val settingsScrollState = rememberScrollState()
+    LaunchedEffect(selectedSettingsPage) {
+        settingsScrollState.scrollTo(0)
+    }
 
     CompositionLocalProvider(LocalRippleConfiguration provides settingsRippleConfiguration) {
         Column(
@@ -1009,7 +1029,9 @@ fun SettingsScreen(
                 },
                 navigationIcon = {
                     IconButton(
-                        onClick = onBack,
+                        onClick = {
+                            if (selectedSettingsPage != null) selectedSettingsPage = null else onBack()
+                        },
                         modifier = Modifier.autoRotate()
                     ) {
                         Icon(
@@ -1032,14 +1054,16 @@ fun SettingsScreen(
                     .padding(horizontal = 16.dp)
             ) {
                 Spacer(modifier = Modifier.height(16.dp))
-
-                if (!isPurchased) {
-                    PremiumCard(onClick = { context.findActivity()?.let(viewModel::purchase) })
-                    Spacer(modifier = Modifier.height(20.dp))
-                }
-
-                MergedSettingsCategoryTitle(stringResource(R.string.settings_section_assist))
-                key("settings-assist") {
+                when (selectedSettingsPage) {
+                    null -> {
+                        SettingsCategoryOverview(
+                            showPremium = !isPurchased,
+                            onPremiumClick = { context.findActivity()?.let(viewModel::purchase) },
+                            onPageSelected = { selectedSettingsPage = it }
+                        )
+                    }
+                SettingsPage.PHOTON -> {
+key("settings-assist") {
                     // 辅助工具
                     SettingsSection(
                         title = stringResource(R.string.settings_section_assist),
@@ -1145,9 +1169,10 @@ fun SettingsScreen(
 
 
                 }
+                }
 
-                MergedSettingsCategoryTitle(stringResource(R.string.settings_section_focus_lens))
-                key("settings-focus_lens") {
+                SettingsPage.FOCUS_LENS -> {
+key("settings-focus_lens") {
                     // 对焦与镜头
                     SettingsSection(
                         title = stringResource(R.string.settings_focus_lens_group_autofocus)
@@ -1419,9 +1444,10 @@ fun SettingsScreen(
 
 
                 }
+                }
 
-                MergedSettingsCategoryTitle(stringResource(R.string.settings_section_capture_storage))
-                key("settings-capture_storage") {
+                SettingsPage.CAPTURE_STORAGE -> {
+key("settings-capture_storage") {
                     // 拍摄行为
                     SettingsSection(
                         title = stringResource(R.string.settings_section_capture_storage),
@@ -1663,9 +1689,10 @@ fun SettingsScreen(
 
 
                 }
+                }
 
-                MergedSettingsCategoryTitle(stringResource(R.string.settings_section_video))
-                key("settings-video") {
+                SettingsPage.VIDEO -> {
+key("settings-video") {
                     val stabilizationModes = state.videoCapabilities
                         .availableStabilizationModes
                         .ifEmpty {
@@ -2072,9 +2099,10 @@ fun SettingsScreen(
                     }
                 
                 }
+                }
 
-                MergedSettingsCategoryTitle(stringResource(R.string.settings_section_interface))
-                key("settings-interface") {
+                SettingsPage.INTERFACE -> {
+key("settings-interface") {
                     // 界面样式
                     SettingsSection(
                         title = stringResource(R.string.settings_section_interface),
@@ -2171,9 +2199,10 @@ fun SettingsScreen(
                     }
                 
                 }
+                }
 
-                MergedSettingsCategoryTitle(stringResource(R.string.settings_section_management))
-                key("settings-content_management") {
+                SettingsPage.CONTENT_MANAGEMENT -> {
+key("settings-content_management") {
                     // 内容管理
                     SettingsSection(
                         title = stringResource(R.string.settings_section_management),
@@ -2219,9 +2248,10 @@ fun SettingsScreen(
 
 
                 }
+                }
 
-                MergedSettingsCategoryTitle(stringResource(R.string.ai_service))
-                key("settings-ai_service") {
+                SettingsPage.AI_SERVICE -> {
+key("settings-ai_service") {
                     // AI 服务设置
                     SettingsSection(
                         title = stringResource(R.string.ai_service),
@@ -2273,9 +2303,10 @@ fun SettingsScreen(
                     }
                 
                 }
+                }
 
-                MergedSettingsCategoryTitle(stringResource(R.string.settings_section_system_control))
-                key("settings-system_control") {
+                SettingsPage.SYSTEM_CONTROL -> {
+key("settings-system_control") {
                     // 系统与控制
                     SettingsSection(
                         title = stringResource(R.string.settings_section_system_control),
@@ -2381,9 +2412,10 @@ fun SettingsScreen(
                     }
                 
                 }
+                }
 
-                MergedSettingsCategoryTitle(stringResource(R.string.settings_section_data_maintenance))
-                key("settings-data_maintenance") {
+                SettingsPage.DATA_MAINTENANCE -> {
+key("settings-data_maintenance") {
                     // 数据维护
                     SettingsSection(
                         title = stringResource(R.string.settings_section_data_maintenance),
@@ -2427,9 +2459,10 @@ fun SettingsScreen(
                     }
                 
                 }
+                }
 
-                MergedSettingsCategoryTitle(stringResource(R.string.settings_section_help_about))
-                key("settings-help_about") {
+                SettingsPage.HELP_ABOUT -> {
+key("settings-help_about") {
                     // 帮助与关于
                     val isGoogleFlavor = BuildConfig.FLAVOR == "google"
 
@@ -2590,8 +2623,8 @@ fun SettingsScreen(
                     }
                 
                 }
-
-
+                }
+                }
                 Spacer(modifier = Modifier.height(32.dp))
             }
         }
@@ -2756,13 +2789,14 @@ private fun SettingsCategoryOverview(
 
     SettingsSection(title = stringResource(R.string.settings_tab_camera)) {
         NavigationSettingItem(
-            title = stringResource(R.string.settings_section_assist),
+            title = stringResource(R.string.settings_category_photon),
             description = listOf(
                 stringResource(R.string.settings_grid_lines),
                 stringResource(R.string.settings_level_indicator),
-                stringResource(R.string.settings_focus_peaking)
+                stringResource(R.string.settings_focus_peaking),
+                stringResource(R.string.metering_mode)
             ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.ASSIST) }
+            onClick = { onPageSelected(SettingsPage.PHOTON) }
         )
 
         SettingsCategoryDivider()
@@ -2801,20 +2835,50 @@ private fun SettingsCategoryOverview(
                 stringResource(R.string.settings_edge_level),
                 stringResource(R.string.settings_separate_video_lut),
                 stringResource(R.string.settings_video_lock_lens),
-                stringResource(R.string.settings_video_lock_white_balance),
-                stringResource(
-                    R.string.settings_storage_path_title,
-                    stringResource(R.string.settings_storage_path_video_title_arg)
-                )
+                stringResource(R.string.settings_video_lock_white_balance)
             ).joinToString(" · "),
             onClick = { onPageSelected(SettingsPage.VIDEO) }
         )
-
     }
 
     Spacer(modifier = Modifier.height(24.dp))
 
-SettingsSection(title = stringResource(R.string.settings_tab_system)) {
+    SettingsSection(title = stringResource(R.string.settings_tab_system)) {
+        NavigationSettingItem(
+            title = stringResource(R.string.settings_section_interface),
+            description = listOf(
+                stringResource(R.string.settings_language),
+                stringResource(R.string.settings_develop_animation)
+            ).joinToString(" · "),
+            onClick = { onPageSelected(SettingsPage.INTERFACE) }
+        )
+
+        SettingsCategoryDivider()
+
+        NavigationSettingItem(
+            title = stringResource(R.string.settings_section_management),
+            description = listOf(
+                stringResource(R.string.settings_filter_management),
+                stringResource(R.string.settings_frame_management),
+                stringResource(R.string.settings_preset_management),
+                stringResource(R.string.toolbox_title)
+            ).joinToString(" · "),
+            onClick = { onPageSelected(SettingsPage.CONTENT_MANAGEMENT) }
+        )
+
+        SettingsCategoryDivider()
+
+        NavigationSettingItem(
+            title = stringResource(R.string.ai_service),
+            description = listOf(
+                stringResource(R.string.settings_openai_api_key),
+                stringResource(R.string.settings_ai_model)
+            ).joinToString(" · "),
+            onClick = { onPageSelected(SettingsPage.AI_SERVICE) }
+        )
+
+        SettingsCategoryDivider()
+
         NavigationSettingItem(
             title = stringResource(R.string.settings_section_system_control),
             description = listOf(
@@ -2824,6 +2888,28 @@ SettingsSection(title = stringResource(R.string.settings_tab_system)) {
                 stringResource(R.string.settings_volume_key_action)
             ).joinToString(" · "),
             onClick = { onPageSelected(SettingsPage.SYSTEM_CONTROL) }
+        )
+
+        SettingsCategoryDivider()
+
+        NavigationSettingItem(
+            title = stringResource(R.string.settings_section_data_maintenance),
+            description = listOf(
+                stringResource(R.string.settings_backup_settings),
+                stringResource(R.string.settings_restore_settings)
+            ).joinToString(" · "),
+            onClick = { onPageSelected(SettingsPage.DATA_MAINTENANCE) }
+        )
+
+        SettingsCategoryDivider()
+
+        NavigationSettingItem(
+            title = stringResource(R.string.settings_section_help_about),
+            description = listOf(
+                stringResource(R.string.settings_log_viewer),
+                stringResource(R.string.settings_community_group)
+            ).joinToString(" · "),
+            onClick = { onPageSelected(SettingsPage.HELP_ABOUT) }
         )
     }
 }
