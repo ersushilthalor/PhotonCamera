@@ -2524,6 +2524,38 @@ class Camera2Controller(private val context: Context) {
      * @param surfaceTexture SurfaceTexture 用于预览
      */
     @SuppressLint("MissingPermission")
+    private fun prepareStandbyForActiveCamera(
+        previewTexture: SurfaceTexture?,
+        previewSource: PreviewStreamSource,
+    ) {
+        val device = cameraDevice ?: return
+        val handler = cameraHandler ?: return
+        val activeState = _state.value
+        if (previewTexture == null ||
+            activeState.captureMode != CaptureMode.PHOTO ||
+            activeState.videoRecordingState.isRecording ||
+            activeState.videoRecordingState.isProcessing
+        ) {
+            standbyCameraController.release("standby unavailable for current capture mode")
+            return
+        }
+        val captureFormat = imageReader?.imageFormat
+            ?.takeIf { it == ImageFormat.YUV_420_888 && !activeState.useRaw && !activeState.useP010 }
+        standbyCameraController.prepare(
+            activeCamera = activeState.getCurrentCameraInfo(),
+            availableCameras = activeState.availableCameras,
+            activeOpenCameraId = activeOpenCameraId.ifBlank { device.id },
+            previewSize = activeState.currentPreviewSize,
+            callbackHandler = handler,
+            previewSurfaceTexture = previewTexture,
+            previewSource = previewSource,
+            captureFormat = captureFormat,
+            preferredCaptureSize = activeState.currentCaptureSize,
+            captureMaxImages = imageReaderMaxImages,
+            onCaptureImageAvailable = ::configureCaptureImageReaderListener,
+        )
+    }
+
     fun setStandbyPreviewSurfaceTexture(surfaceTexture: SurfaceTexture?) {
         val action = {
             if (standbyPreviewSurfaceTexture !== surfaceTexture) {
@@ -3985,23 +4017,10 @@ class Camera2Controller(private val context: Context) {
             _state.value = _state.value.copy(isPreviewActive = true)
             PLog.d(TAG, "Preview started")
 
-            val standbyState = _state.value
-            val standbyHandler = cameraHandler
-            if (standbyHandler != null &&
-                !standbyState.videoRecordingState.isRecording &&
-                !standbyState.videoRecordingState.isProcessing
-            ) {
-                standbyCameraController.prepare(
-                    activeCamera = standbyState.getCurrentCameraInfo(),
-                    availableCameras = standbyState.availableCameras,
-                    activeOpenCameraId = activeOpenCameraId,
-                    previewSize = standbyState.currentPreviewSize,
-                    callbackHandler = standbyHandler,
-                    previewSurfaceTexture = standbyPreviewSurfaceTexture,
-                )
-            } else {
-                standbyCameraController.release("standby disabled while video recording is active")
-            }
+            prepareStandbyForActiveCamera(
+                previewTexture = standbyPreviewSurfaceTexture,
+                previewSource = standbyPreviewStreamSource,
+            )
 
         } catch (e: CameraAccessException) {
             PLog.e(TAG, "Failed to start preview")
