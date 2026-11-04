@@ -3826,15 +3826,22 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun switchToLens(cameraId: String) {
         if (isVideoLensLocked()) return
+        val currentCamera = state.value.getCurrentCameraInfo()
         val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId }
+        val sharesOpenCameraDevice = currentCamera != null && targetCamera != null &&
+            runCatching { currentCamera.getOpenCameraId() == targetCamera.getOpenCameraId() }
+                .getOrDefault(false)
         syncVendorCaptureSettingsToController()
         cameraController.switchToCameraId(cameraId)
         targetCamera?.let { camera ->
             setZoomRatioForCamera(camera.defaultVisibleZoomRatio(), camera.cameraId)
         }
-        reopenCamera(
-            preserveVideoRecording = true
-        )
+        // Physical lenses exposed by one logical Camera2 device can be switched by
+        // rebuilding only its capture session. Closing the CameraDevice here adds an
+        // avoidable black-frame/cold-open gap and defeats seamless physical handoff.
+        if (!sharesOpenCameraDevice) {
+            reopenCamera(preserveVideoRecording = true)
+        }
     }
 
     fun switchToLensAndSetZoomRatio(cameraId: String, ratio: Float) {
@@ -3842,12 +3849,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             setZoomRatio(ratio)
             return
         }
+        val currentCamera = state.value.getCurrentCameraInfo()
+        val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId }
+        val sharesOpenCameraDevice = currentCamera != null && targetCamera != null &&
+            runCatching { currentCamera.getOpenCameraId() == targetCamera.getOpenCameraId() }
+                .getOrDefault(false)
         syncVendorCaptureSettingsToController()
         cameraController.switchToCameraId(cameraId)
         setZoomRatioForCamera(ratio, cameraId)
-        reopenCamera(
-            preserveVideoRecording = true
-        )
+        if (!sharesOpenCameraDevice) {
+            reopenCamera(preserveVideoRecording = true)
+        }
     }
 
     /**

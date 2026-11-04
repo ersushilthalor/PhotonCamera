@@ -23,6 +23,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.Executor
 import kotlin.math.abs
 
+data class AdoptedCameraDeviceCallbacks(
+    val onDisconnected: (CameraDevice) -> Unit,
+    val onError: (CameraDevice, Int) -> Unit,
+    val onClosed: (CameraDevice) -> Unit,
+)
+
 /**
  * Owns the secondary rear-camera stream used to keep the next lens warm.
  *
@@ -65,6 +71,10 @@ class StandbyCameraController(context: Context) {
 
     private var handler: Handler? = null
     private var standbyCameraDevice: CameraDevice? = null
+    // Once handed to Camera2Controller, this device is no longer owned by the prewarm path.
+    // Its StateCallback still belongs to this controller, so lifecycle events are forwarded.
+    private var adoptedCameraDevice: CameraDevice? = null
+    private var adoptedDeviceCallbacks: AdoptedCameraDeviceCallbacks? = null
     private var closingCameraDevice: CameraDevice? = null
     private var standbyCaptureSession: CameraCaptureSession? = null
     private var standbyImageReader: ImageReader? = null
@@ -83,6 +93,77 @@ class StandbyCameraController(context: Context) {
     private val captureResultTimestamps = linkedSetOf<Long>()
     private var receivedFrameCount = 0L
     private var matchedFrameCount = 0
+
+    /** True only when the already-streaming standby device exactly matches this lens. */
+    fun canHandoffTo(targetCamera: CameraInfo): Boolean {
+        val plan = activePlan ?: return false
+        return _status.value.phase == StandbyCameraPhase.READY &&
+            plan.standbyCameraId == targetCamera.cameraId &&
+            plan.standbyOpenCameraId == runCatching { targetCamera.getOpenCameraId() }.getOrNull() &&
+            standbyCameraDevice != null &&
+            standbyCaptureSession != null &&
+            matchedFrameCount >= REQUIRED_MATCHED_FRAMES
+    }
+
+    /**
+     * Detach the ready standby device without closing it. The active controller will
+     * configure its normal preview/capture session on this same CameraDevice.
+     */
+    fun takeOver(
+        cameraId: String,
+        expectedOpenCameraId: String,
+        onReady: (CameraDevice?) -> Unit,
+    ) {
+        dispatch {
+            val plan = activePlan
+            val camera = standbyCameraDevice
+            val ready = plan != null &&
+                plan.standbyCameraId == cameraId &&
+                plan.standbyOpenCameraId == expectedOpenCameraId &&
+                camera != null &&
+                camera.id == expectedOpenCameraId &&
+                standbyCaptureSession != null &&
+                _status.value.phase == StandbyCameraPhase.READY &&
+                matchedFrameCount >= REQUIRED_MATCHED_FRAMES
+            if (!ready || camera == null) {
+                PLog.w(TAG, "Standby handoff unavailable for camera=$cameraId open=$expectedOpenCameraId")
+                onReady(null)
+                return@dispatch
+            }
+
+            frameReadyTimeout?.let { handler?.removeCallbacks(it) }
+            frameReadyTimeout = null
+            closeSessionAndReader()
+            standbyCameraDevice = null
+            adoptedCameraDevice = camera
+            adoptedDeviceCallbacks = null
+            activePlan = null
+            pendingPlan = null
+            imageTimestamps.clear()
+            captureResultTimestamps.clear()
+            receivedFrameCount = 0L
+            matchedFrameCount = 0
+            _status.value = StandbyCameraStatus(
+                phase = StandbyCameraPhase.IDLE,
+                activeCameraId = camera.id,
+                standbyCameraId = cameraId,
+                lensType = plan.lensType,
+                message = "Warm camera handed to active capture pipeline",
+            )
+            PLog.i(TAG, "Handing off warm CameraDevice ${camera.id} for lens=$cameraId")
+            onReady(camera)
+        }
+    }
+
+    /** Register the main controller's lifecycle handlers after ownership is transferred. */
+    fun setAdoptedCameraCallbacks(
+        camera: CameraDevice,
+        callbacks: AdoptedCameraDeviceCallbacks,
+    ) {
+        if (adoptedCameraDevice === camera) {
+            adoptedDeviceCallbacks = callbacks
+        }
+    }
 
     fun prepare(
         activeCamera: CameraInfo?,
@@ -382,6 +463,12 @@ class StandbyCameraController(context: Context) {
                     }
 
                     override fun onDisconnected(camera: CameraDevice) {
+                        if (camera === adoptedCameraDevice) {
+                            val callbacks = adoptedDeviceCallbacks
+                            if (callbacks != null) callbacks.onDisconnected(camera)
+                            else closeOpenedCamera(camera)
+                            return
+                        }
                         if (openRequestGeneration == openGeneration) {
                             openRequestGeneration = null
                         }
@@ -394,6 +481,12 @@ class StandbyCameraController(context: Context) {
                     }
 
                     override fun onError(camera: CameraDevice, error: Int) {
+                        if (camera === adoptedCameraDevice) {
+                            val callbacks = adoptedDeviceCallbacks
+                            if (callbacks != null) callbacks.onError(camera, error)
+                            else closeOpenedCamera(camera)
+                            return
+                        }
                         if (openRequestGeneration == openGeneration) {
                             openRequestGeneration = null
                         }
@@ -406,6 +499,18 @@ class StandbyCameraController(context: Context) {
                     }
 
                     override fun onClosed(camera: CameraDevice) {
+                        if (camera === adoptedCameraDevice) {
+                            val callbacks = adoptedDeviceCallbacks
+                            adoptedCameraDevice = null
+                            adoptedDeviceCallbacks = null
+                            if (callbacks != null) {
+                                callbacks.onClosed(camera)
+                                return
+                            }
+                            // A handoff can fail before the active controller installs its
+                            // callbacks. Fall through so a forced close still releases the
+                            // standby transition latch instead of leaving opens blocked.
+                        }
                         if (closingCameraDevice === camera) {
                             closingCameraDevice = null
                         }
