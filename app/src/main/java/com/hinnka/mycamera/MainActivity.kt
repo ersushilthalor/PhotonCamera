@@ -877,6 +877,9 @@ fun NavigationHost(
                     },
                     onPresetManagementClick = {
                         navController.navigate(Routes.PRESET_MANAGEMENT)
+                    },
+                    onToolboxClick = {
+                        navController.navigate(Routes.TOOLBOX)
                     }
                 )
             }
