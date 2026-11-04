@@ -82,6 +82,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
 
     // 纹理 ID
     private var cameraTextureId: Int = 0
+    private var standbyCameraTextureId: Int = 0
     private var lutTextureId: Int = 0
     private var baselineLutTextureId: Int = 0
     private val basicToneTextures = BasicToneGlTextures()
@@ -221,7 +222,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
 
     // 相机 SurfaceTexture
     private var surfaceTexture: SurfaceTexture? = null
+    private var standbySurfaceTexture: SurfaceTexture? = null
     private val frameAvailable = AtomicBoolean(false)
+    private val standbyFrameAvailable = AtomicBoolean(false)
+    private val standbyStMatrix = FloatArray(16).apply { Matrix.setIdentityM(this, 0) }
     private var stabilizationCoordinator: RealtimeStabilizationCoordinator? = null
     @Volatile
     private var stabilizationSession: RealtimeStabilizationCoordinator.Session? = null
@@ -490,6 +494,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
 
     // 回调
     var onSurfaceTextureAvailable: ((SurfaceTexture) -> Unit)? = null
+    var onStandbySurfaceTextureAvailable: ((SurfaceTexture) -> Unit)? = null
+    var onStandbyFrameAvailable: ((Long) -> Unit)? = null
     var onRequestRender: (() -> Unit)? = null
     var onHistogramUpdated: ((IntArray) -> Unit)? = null
     var onMeteringUpdated: ((Double, Double) -> Unit)? = null
@@ -533,6 +539,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
 
         // 创建相机纹理
         cameraTextureId = GlUtils.createOESTexture()
+        standbyCameraTextureId = GlUtils.createOESTexture()
 
         // 创建 SurfaceTexture
         frameAvailable.set(false)
@@ -546,6 +553,16 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 ) {
                     onRequestRender?.invoke()
                 }
+            }
+        }
+
+        standbyFrameAvailable.set(false)
+        standbySurfaceTexture?.release()
+        standbySurfaceTexture = SurfaceTexture(standbyCameraTextureId).apply {
+            setDefaultBufferSize(previewWidth, previewHeight)
+            setOnFrameAvailableListener {
+                standbyFrameAvailable.set(true)
+                onRequestRender?.invoke()
             }
         }
 
@@ -567,6 +584,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
 
         // 通知调用者 SurfaceTexture 已准备好
         surfaceTexture?.let { onSurfaceTextureAvailable?.invoke(it) }
+        standbySurfaceTexture?.let { onStandbySurfaceTextureAvailable?.invoke(it) }
 
         GlUtils.checkGlError("initShaderProgram")
     }
@@ -582,6 +600,9 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         mgcEisHardwareBufferRenderer.resetAfterContextLoss()
         mgcEisYuvRenderer.resetAfterContextLoss()
         cameraTextureId = 0
+        standbyCameraTextureId = 0
+        standbyFrameAvailable.set(false)
+        Matrix.setIdentityM(standbyStMatrix, 0)
         currentCameraTextureId = 0
         currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
         currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
@@ -1011,6 +1032,9 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             stabilizationSessionStarted = stabilizationSession?.start() == true
         }
         val oesFrameUpdated = frameAvailable.getAndSet(false) && acquireLatestCameraFrame()
+        if (standbyFrameAvailable.getAndSet(false)) {
+            acquireLatestStandbyFrame()
+        }
         var cameraFrameUpdated = oesFrameUpdated
 
         if (delayedStabilizationEnabled) {
@@ -1316,6 +1340,20 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         currentCameraTextureId = cameraTextureId
         currentCameraTextureMatrix = stMatrix
         currentFrameTimestampNs = surfaceTexture?.timestamp ?: 0L
+    }
+
+    private fun acquireLatestStandbyFrame(): Boolean {
+        val texture = standbySurfaceTexture ?: return false
+        return try {
+            texture.updateTexImage()
+            texture.getTransformMatrix(standbyStMatrix)
+            val timestamp = texture.timestamp
+            if (timestamp > 0L) onStandbyFrameAvailable?.invoke(timestamp)
+            true
+        } catch (error: RuntimeException) {
+            PLog.w(TAG, "Standby preview updateTexImage failed", error)
+            false
+        }
     }
 
     private fun acquireLatestCameraFrame(): Boolean {
@@ -3178,6 +3216,9 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
      */
     fun getSurfaceTexture(): SurfaceTexture? = surfaceTexture
 
+    /** Secondary real camera stream kept current on the GL thread for instant handoff. */
+    fun getStandbySurfaceTexture(): SurfaceTexture? = standbySurfaceTexture
+
     /**
      * 释放资源
      */
@@ -3196,6 +3237,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         if (cameraTextureId != 0) {
             GlUtils.deleteTexture(cameraTextureId)
             cameraTextureId = 0
+        }
+        if (standbyCameraTextureId != 0) {
+            GlUtils.deleteTexture(standbyCameraTextureId)
+            standbyCameraTextureId = 0
         }
         if (lutTextureId != 0) {
             GlUtils.deleteTexture(lutTextureId)
@@ -3315,7 +3360,12 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         // 释放 SurfaceTexture
         surfaceTexture?.release()
         surfaceTexture = null
+        standbySurfaceTexture?.release()
+        standbySurfaceTexture = null
         frameAvailable.set(false)
+        standbyFrameAvailable.set(false)
+        onStandbySurfaceTextureAvailable = null
+        onStandbyFrameAvailable = null
 
         // 重置状态
         surfaceReady = false

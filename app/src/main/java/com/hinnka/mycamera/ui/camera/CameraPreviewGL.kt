@@ -77,6 +77,8 @@ fun CameraPreviewGL(
     videoLogProfile: VideoLogProfile = VideoLogProfile.OFF,
     isEyeFocusBusy: Boolean = false,
     onGLSurfaceViewReady: ((CameraGLSurfaceView) -> Unit)? = null,
+    onStandbySurfaceTextureReady: (SurfaceTexture) -> Unit = {},
+    onStandbyPreviewFrameAvailable: (Long) -> Unit = {},
     isAutoFocus: Boolean = true,
     focusPeakingEnabled: Boolean = true,
     stabilizationCoordinator: RealtimeStabilizationCoordinator? = null,
@@ -196,6 +198,7 @@ fun CameraPreviewGL(
                                 // SurfaceTexture 已经准备好，可以开始预览
                                 surfaceAvailable = true
                                 glSurfaceView.getSurfaceTexture()?.let { surfaceTexture ->
+                                    glSurfaceView.getStandbySurfaceTexture()?.let(onStandbySurfaceTextureReady)
                                     glSurfaceView.setPreviewSize(previewSize.width, previewSize.height)
                                     glSurfaceView.setStabilizationInputSize(
                                         stabilizationInputSize.width,
@@ -234,6 +237,16 @@ fun CameraPreviewGL(
                         glSurfaceView.onFirstPreviewFrame = {
                             if (glSurfaceViewRef === glSurfaceView) {
                                 onFirstPreviewFrame?.invoke()
+                            }
+                        }
+                        glSurfaceView.onStandbySurfaceTextureReady = { surfaceTexture ->
+                            if (glSurfaceViewRef === glSurfaceView) {
+                                onStandbySurfaceTextureReady(surfaceTexture)
+                            }
+                        }
+                        glSurfaceView.onStandbyPreviewFrameAvailable = { timestampNs ->
+                            if (glSurfaceViewRef === glSurfaceView) {
+                                onStandbyPreviewFrameAvailable(timestampNs)
                             }
                         }
 

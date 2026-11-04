@@ -1273,6 +1273,8 @@ fun CameraScreen(
                             onSurfaceTextureReady = { surfaceTexture ->
                                 previewSurfaceTexture = surfaceTexture
                             },
+                            onStandbySurfaceTextureReady = viewModel::setStandbyPreviewSurfaceTexture,
+                            onStandbyPreviewFrameAvailable = viewModel::onStandbyPreviewFrameAvailable,
                             onSurfaceDestroyed = { surfaceTexture ->
                                 if (previewSurfaceTexture === surfaceTexture) {
                                     previewSurfaceTexture = null
