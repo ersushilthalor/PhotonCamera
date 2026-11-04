@@ -2622,6 +2622,106 @@ class Camera2Controller(private val context: Context) {
         var outputPhysicalCameraId = requestedPhysicalCameraId
         activeOutputPhysicalCameraId = outputPhysicalCameraId
 
+            val cameraStateCallback = object : CameraDevice.StateCallback() {
+                override fun onOpened(camera: CameraDevice) {
+                    if (
+                        openGeneration != cameraOpenGeneration ||
+                        cameraDeviceLifecycle != CameraDeviceLifecycle.OPENING
+                    ) {
+                        PLog.w(TAG, "Ignoring stale camera open callback: camera=${camera.id}")
+                        closeCameraDeviceAndAwait(camera, "stale camera open")
+                        return
+                    }
+                    PLog.d(TAG, "Camera opened: ${camera.id}")
+                    cameraDeviceLifecycle = CameraDeviceLifecycle.OPEN
+                    cameraDevice = camera
+                    if (restartCameraForRawCaptureOutputMismatch("camera opened")) {
+                        return
+                    }
+                    createPreviewSession(openGeneration = openGeneration)
+                }
+
+                override fun onDisconnected(camera: CameraDevice) {
+                    if (openGeneration != cameraOpenGeneration) {
+                        closeCameraDeviceAndAwait(camera, "stale camera disconnect")
+                        return
+                    }
+                    PLog.w(TAG, "Camera disconnected: ${camera.id} - 相机被其他应用或系统接管")
+                    handleCameraDeviceUnavailable(
+                        camera = camera,
+                        reason = "camera disconnected: ${camera.id}"
+                    )
+
+                    // 通知上层：相机断开连接，可以在 onResume 时重试
+                    onCameraError?.invoke(
+                        ERROR_CAMERA_DISCONNECTED,
+                        "相机已被其他应用或系统接管",
+                        true  // canRetry = true
+                    )
+                }
+
+                override fun onError(camera: CameraDevice, error: Int) {
+                    if (openGeneration != cameraOpenGeneration) {
+                        closeCameraDeviceAndAwait(camera, "stale camera error")
+                        return
+                    }
+                    val errorMessage = when (error) {
+                        ERROR_CAMERA_IN_USE ->
+                            "相机正在被其他应用使用"
+
+                        ERROR_MAX_CAMERAS_IN_USE ->
+                            "已达到相机最大打开数量"
+
+                        ERROR_CAMERA_DISABLED ->
+                            "相机被系统策略禁用"
+
+                        ERROR_CAMERA_DEVICE ->
+                            "相机设备遇到严重错误"
+
+                        ERROR_CAMERA_SERVICE ->
+                            "相机服务遇到严重错误"
+
+                        else -> "未知相机错误 ($error)"
+                    }
+
+                    PLog.e(TAG, "Camera error: ${camera.id}, error=$error - $errorMessage")
+                    handleCameraDeviceUnavailable(
+                        camera = camera,
+                        reason = "camera error ${camera.id}: $error"
+                    )
+
+                    // 判断是否可以重试
+                    val canRetry = when (error) {
+                        ERROR_CAMERA_IN_USE,
+                        ERROR_MAX_CAMERAS_IN_USE -> true
+
+                        ERROR_CAMERA_DISABLED,
+                        ERROR_CAMERA_DEVICE,
+                        ERROR_CAMERA_SERVICE -> false
+
+                        else -> false
+                    }
+
+                    // 通知上层
+                    onCameraError?.invoke(error, errorMessage, canRetry)
+                    _state.value = _state.value.copy(isCapturing = false)
+                }
+
+                override fun onClosed(camera: CameraDevice) {
+                    handleCameraDeviceClosed(camera)
+                }
+            }
+        if (preopenedCamera != null) {
+            standbyCameraController.setAdoptedCameraCallbacks(
+                preopenedCamera,
+                AdoptedCameraDeviceCallbacks(
+                    onDisconnected = { camera -> cameraStateCallback.onDisconnected(camera) },
+                    onError = { camera, error -> cameraStateCallback.onError(camera, error) },
+                    onClosed = { camera -> cameraStateCallback.onClosed(camera) },
+                ),
+            )
+        }
+
         PLog.i(
             TAG,
             "打开相机: selected=$cameraId, open=$openCameraId, targetZoom=$targetZoomRatioByMain, " +
@@ -2994,96 +3094,6 @@ class Camera2Controller(private val context: Context) {
 
             PLog.d(TAG, "Opening camera: open=$openCameraId, selected=$cameraId")
 
-            val cameraStateCallback = object : CameraDevice.StateCallback() {
-                override fun onOpened(camera: CameraDevice) {
-                    if (
-                        openGeneration != cameraOpenGeneration ||
-                        cameraDeviceLifecycle != CameraDeviceLifecycle.OPENING
-                    ) {
-                        PLog.w(TAG, "Ignoring stale camera open callback: camera=${camera.id}")
-                        closeCameraDeviceAndAwait(camera, "stale camera open")
-                        return
-                    }
-                    PLog.d(TAG, "Camera opened: ${camera.id}")
-                    cameraDeviceLifecycle = CameraDeviceLifecycle.OPEN
-                    cameraDevice = camera
-                    if (restartCameraForRawCaptureOutputMismatch("camera opened")) {
-                        return
-                    }
-                    createPreviewSession(openGeneration = openGeneration)
-                }
-
-                override fun onDisconnected(camera: CameraDevice) {
-                    if (openGeneration != cameraOpenGeneration) {
-                        closeCameraDeviceAndAwait(camera, "stale camera disconnect")
-                        return
-                    }
-                    PLog.w(TAG, "Camera disconnected: ${camera.id} - 相机被其他应用或系统接管")
-                    handleCameraDeviceUnavailable(
-                        camera = camera,
-                        reason = "camera disconnected: ${camera.id}"
-                    )
-
-                    // 通知上层：相机断开连接，可以在 onResume 时重试
-                    onCameraError?.invoke(
-                        ERROR_CAMERA_DISCONNECTED,
-                        "相机已被其他应用或系统接管",
-                        true  // canRetry = true
-                    )
-                }
-
-                override fun onError(camera: CameraDevice, error: Int) {
-                    if (openGeneration != cameraOpenGeneration) {
-                        closeCameraDeviceAndAwait(camera, "stale camera error")
-                        return
-                    }
-                    val errorMessage = when (error) {
-                        ERROR_CAMERA_IN_USE ->
-                            "相机正在被其他应用使用"
-
-                        ERROR_MAX_CAMERAS_IN_USE ->
-                            "已达到相机最大打开数量"
-
-                        ERROR_CAMERA_DISABLED ->
-                            "相机被系统策略禁用"
-
-                        ERROR_CAMERA_DEVICE ->
-                            "相机设备遇到严重错误"
-
-                        ERROR_CAMERA_SERVICE ->
-                            "相机服务遇到严重错误"
-
-                        else -> "未知相机错误 ($error)"
-                    }
-
-                    PLog.e(TAG, "Camera error: ${camera.id}, error=$error - $errorMessage")
-                    handleCameraDeviceUnavailable(
-                        camera = camera,
-                        reason = "camera error ${camera.id}: $error"
-                    )
-
-                    // 判断是否可以重试
-                    val canRetry = when (error) {
-                        ERROR_CAMERA_IN_USE,
-                        ERROR_MAX_CAMERAS_IN_USE -> true
-
-                        ERROR_CAMERA_DISABLED,
-                        ERROR_CAMERA_DEVICE,
-                        ERROR_CAMERA_SERVICE -> false
-
-                        else -> false
-                    }
-
-                    // 通知上层
-                    onCameraError?.invoke(error, errorMessage, canRetry)
-                    _state.value = _state.value.copy(isCapturing = false)
-                }
-
-                override fun onClosed(camera: CameraDevice) {
-                    handleCameraDeviceClosed(camera)
-                }
-            }
-
             if (preopenedCamera != null) {
                 if (preopenedCamera.id != openCameraId) {
                     handleCameraOpenFailure(
@@ -3097,14 +3107,6 @@ class Camera2Controller(private val context: Context) {
                     closeCameraDeviceSafely(preopenedCamera, "mismatched standby handoff")
                     return
                 }
-                standbyCameraController.setAdoptedCameraCallbacks(
-                    preopenedCamera,
-                    AdoptedCameraDeviceCallbacks(
-                        onDisconnected = { camera -> cameraStateCallback.onDisconnected(camera) },
-                        onError = { camera, error -> cameraStateCallback.onError(camera, error) },
-                        onClosed = { camera -> cameraStateCallback.onClosed(camera) },
-                    ),
-                )
                 PLog.i(TAG, "Reusing prewarmed CameraDevice without reopening: ${preopenedCamera.id}")
                 cameraStateCallback.onOpened(preopenedCamera)
             } else {
