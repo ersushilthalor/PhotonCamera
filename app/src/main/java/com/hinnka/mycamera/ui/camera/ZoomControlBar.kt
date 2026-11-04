@@ -289,7 +289,14 @@ fun ZoomControlBar(
             AnimatedContent(
                 targetState = isContinuousZooming,
                 modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
+                contentAlignment = Alignment.Center,
+                transitionSpec = {
+                    (fadeIn(animationSpec = tween(durationMillis = 200)) +
+                        scaleIn(initialScale = 0.94f, animationSpec = tween(durationMillis = 200))) togetherWith
+                        (fadeOut(animationSpec = tween(durationMillis = 130)) +
+                            scaleOut(targetScale = 0.98f, animationSpec = tween(durationMillis = 130))) using
+                        SizeTransform(clip = false)
+                }
             ) { showContinuousSlider ->
                 if (!isCameraReady) {
                     CircularProgressIndicator(
