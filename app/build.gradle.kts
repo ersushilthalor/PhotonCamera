@@ -179,6 +179,7 @@ dependencies {
     
     // Material Icons Core
     implementation(libs.androidx.material.icons.core)
+    implementation("androidx.compose.material:material-icons-extended")
     
     // Coil for image loading
     implementation(libs.coil.compose)
