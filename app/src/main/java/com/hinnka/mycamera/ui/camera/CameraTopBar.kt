@@ -82,7 +82,7 @@ fun CameraTopBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 32.dp, bottom = 8.dp),
+            .padding(top = 20.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
