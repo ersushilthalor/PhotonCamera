@@ -12,7 +12,7 @@ import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material3.Icon
+import com.hinnka.mycamera.ui.components.ScaledIcon as Icon
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
