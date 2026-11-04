@@ -85,12 +85,14 @@ fun SettingsScreen(state: AppState, settings: AppSettings, actions: CameraAction
             item {
                 SwitchRow("Camera sounds", "Shutter and recording sounds", settings.shutterSound) {
                     settings.shutterSound = it
+                    actions.settingChanged(SettingKey.SHUTTER_SOUND)
                 }
             }
-            item { SwitchRow("Vibration", "Haptic feedback for buttons and sliders", settings.haptics) { settings.haptics = it } }
+            item { SwitchRow("Vibration", "Haptic feedback for buttons and sliders", settings.haptics) { settings.haptics = it; actions.settingChanged(SettingKey.HAPTICS) } }
             item {
                 SwitchRow("Framing hints", "Level line while taking photos", settings.level) {
                     settings.level = it
+                    actions.settingChanged(SettingKey.LEVEL)
                 }
             }
             item {
@@ -98,7 +100,7 @@ fun SettingsScreen(state: AppState, settings: AppSettings, actions: CameraAction
                     "Grid type",
                     listOf("None", "3 × 3", "4 × 4", "Golden"),
                     GridSetting.entries.indexOf(settings.grid),
-                ) { settings.grid = GridSetting.entries[it] }
+                ) { settings.grid = GridSetting.entries[it]; actions.settingChanged(SettingKey.GRID) }
             }
             item {
                 SwitchRow("Scan QR codes", "Show links and text from QR codes in the viewfinder", settings.qrDetection) {
@@ -121,6 +123,7 @@ fun SettingsScreen(state: AppState, settings: AppSettings, actions: CameraAction
             item {
                 SwitchRow("Mirror selfies", "Save front-camera photos the way the preview shows them", settings.mirrorFront) {
                     settings.mirrorFront = it
+                    actions.settingChanged(SettingKey.MIRROR_FRONT)
                 }
             }
             item {
@@ -128,7 +131,7 @@ fun SettingsScreen(state: AppState, settings: AppSettings, actions: CameraAction
                     "Volume keys",
                     listOf("Shutter", "Zoom", "Volume"),
                     VolumeKeyAction.entries.indexOf(settings.volumeKeys),
-                ) { settings.volumeKeys = VolumeKeyAction.entries[it] }
+                ) { settings.volumeKeys = VolumeKeyAction.entries[it]; actions.settingChanged(SettingKey.VOLUME_KEYS) }
             }
             item { Section("Privacy") }
             item {
@@ -140,12 +143,13 @@ fun SettingsScreen(state: AppState, settings: AppSettings, actions: CameraAction
                 InfoRow("No internet access", "Foco can't connect to the internet. Nothing leaves your phone.")
             }
             item { Section("About") }
-            item { InfoRow("Foco ${"Photon integration"}", "Free software under the GNU GPL v3") }
+            item { InfoRow("Foco + Photon Camera", "Foco interface with Photon camera engine") }
             item { InfoRow("Source code", SOURCE_URL.removePrefix("https://"), onClick = { actions.openUrl(SOURCE_URL) }) }
             item { Section("Photon Camera") }
             item { InfoRow("Photon camera settings", "Open the original advanced settings", onClick = { state.fullSettingsOpen = false; actions.openPhotonSettings() }) }
             item { InfoRow("LUTs and filters", "Manage Photon photo and video looks", onClick = { state.fullSettingsOpen = false; actions.openPhotonFilters() }) }
-            item { InfoRow("Frames and presets", "Open Photon frame and preset management", onClick = { state.fullSettingsOpen = false; actions.openPhotonFrames(); actions.openPhotonPresets() }) }
+            item { InfoRow("Frames", "Open Photon frame management", onClick = { state.fullSettingsOpen = false; actions.openPhotonFrames() }) }
+            item { InfoRow("Presets", "Open Photon preset management", onClick = { state.fullSettingsOpen = false; actions.openPhotonPresets() }) }
             item { InfoRow("Advanced tools", "Open Photon camera tools", onClick = { state.fullSettingsOpen = false; actions.openPhotonToolbox() }) }
             item { Spacer(Modifier.height(24.dp)) }
         }

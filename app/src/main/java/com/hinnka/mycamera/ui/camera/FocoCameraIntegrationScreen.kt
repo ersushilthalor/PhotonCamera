@@ -24,6 +24,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.GridStyle
+import com.hinnka.mycamera.data.VolumeKeyAction as PhotonVolumeKeyAction
 import com.hinnka.mycamera.focoui.camera.LensKind
 import com.hinnka.mycamera.focoui.device.MicStatus
 import com.hinnka.mycamera.focoui.settings.AppSettings as FocoSettings
@@ -276,8 +277,24 @@ fun FocoCameraIntegrationScreen(
                         viewModel.setGridStyle(if (focoSettings.grid == GridSetting.GOLDEN) GridStyle.GOLDEN_RATIO else GridStyle.THIRDS)
                     }
                     SettingKey.LEVEL -> viewModel.setShowLevelIndicator(focoSettings.level)
+                    SettingKey.LOCATION -> viewModel.setSaveLocation(focoSettings.saveLocation)
+                    SettingKey.SHUTTER_SOUND -> viewModel.setShutterSoundEnabled(focoSettings.shutterSound)
+                    SettingKey.HAPTICS -> viewModel.setVibrationEnabled(focoSettings.haptics)
+                    SettingKey.MIRROR_FRONT -> viewModel.setMirrorFrontCamera(focoSettings.mirrorFront)
+                    SettingKey.VOLUME_KEYS -> viewModel.setVolumeKeyAction(when (focoSettings.volumeKeys) {
+                        com.hinnka.mycamera.focoui.settings.VolumeKeyAction.SHUTTER -> PhotonVolumeKeyAction.CAPTURE
+                        com.hinnka.mycamera.focoui.settings.VolumeKeyAction.ZOOM -> PhotonVolumeKeyAction.ZOOM
+                        com.hinnka.mycamera.focoui.settings.VolumeKeyAction.VOLUME -> PhotonVolumeKeyAction.NONE
+                    })
                     SettingKey.ULTRA_HDR -> viewModel.setUltraHdrGainMapEnabled(focoSettings.ultraHdr)
                     SettingKey.PROCESSING -> viewModel.setUseJpgMax(focoSettings.processing)
+                    SettingKey.QR -> {
+                        focoSettings.qrDetection = false
+                        focoState.message = "QR scanning is not connected to PhotonCamera yet."
+                    }
+                    SettingKey.LENS_SELECTION -> {
+                        focoState.message = "PhotonCamera selects physical lenses through its native zoom and lens controls."
+                    }
                     else -> Unit
                 }
             }
