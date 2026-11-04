@@ -503,8 +503,13 @@ class StandbyCameraController(context: Context) {
                             val callbacks = adoptedDeviceCallbacks
                             adoptedCameraDevice = null
                             adoptedDeviceCallbacks = null
-                            callbacks?.onClosed?.invoke(camera)
-                            return
+                            if (callbacks != null) {
+                                callbacks.onClosed(camera)
+                                return
+                            }
+                            // A handoff can fail before the active controller installs its
+                            // callbacks. Fall through so a forced close still releases the
+                            // standby transition latch instead of leaving opens blocked.
                         }
                         if (closingCameraDevice === camera) {
                             closingCameraDevice = null
