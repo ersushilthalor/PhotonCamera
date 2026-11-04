@@ -71,6 +71,7 @@ class StandbyCameraController(context: Context) {
         val standbyCameraId: String,
         val lensType: LensType,
         val aspectRatio: Float,
+        val desiredPreviewSize: Size,
         val previewTextureIdentity: Int,
         val previewSource: PreviewStreamSource,
         val cameraInfo: CameraInfo,
@@ -334,6 +335,8 @@ class StandbyCameraController(context: Context) {
                 standbyOpenCameraId,
                 standbyPhysicalId.orEmpty(),
                 targetCamera.cameraId,
+                previewSize.width,
+                previewSize.height,
                 System.identityHashCode(previewSurfaceTexture),
                 previewSource.name,
             ).joinToString("|"),
@@ -343,6 +346,7 @@ class StandbyCameraController(context: Context) {
             standbyCameraId = targetCamera.cameraId,
             lensType = targetCamera.lensType,
             aspectRatio = ratio,
+            desiredPreviewSize = previewSize,
             previewTextureIdentity = System.identityHashCode(previewSurfaceTexture),
             previewSource = previewSource,
             cameraInfo = targetCamera,
@@ -380,6 +384,7 @@ class StandbyCameraController(context: Context) {
         val output = resolvePreviewOutput(
             plan.standbyOpenCameraId,
             plan.aspectRatio,
+            plan.desiredPreviewSize,
             preferPrivate = previewTexture != null,
         )
         if (output == null) {
@@ -590,6 +595,7 @@ class StandbyCameraController(context: Context) {
     private fun resolvePreviewOutput(
         cameraId: String,
         desiredAspectRatio: Float,
+        preferredSize: Size,
         preferPrivate: Boolean,
     ): PreviewOutput? {
         val characteristics = try {
@@ -609,13 +615,12 @@ class StandbyCameraController(context: Context) {
         for (format in candidateFormats) {
             val sizes = streamMap.getOutputSizes(format)?.toList().orEmpty()
             if (sizes.isEmpty()) continue
-            val boundedSizes = sizes.filter {
-                maxOf(it.width, it.height) <= MAX_PREVIEW_DIMENSION
-            }.ifEmpty { sizes }
-            val selectedSize = boundedSizes.minWithOrNull(
+            val preferredArea = preferredSize.width.toLong() * preferredSize.height.toLong()
+            val selectedSize = sizes.minWithOrNull(
                 compareBy<Size>(
                     { abs(it.width.toFloat() / it.height.toFloat() - desiredAspectRatio) },
-                    { abs(it.width.toLong() * it.height.toLong() - TARGET_PREVIEW_AREA) },
+                    { abs(it.width.toLong() * it.height.toLong() - preferredArea) },
+                    { abs(it.width - preferredSize.width) + abs(it.height - preferredSize.height) },
                 ),
             ) ?: continue
             return PreviewOutput(selectedSize, format)
@@ -880,6 +885,8 @@ class StandbyCameraController(context: Context) {
                     stream.openCameraId,
                     stream.physicalCameraId.orEmpty(),
                     stream.cameraInfo.cameraId,
+                    stream.previewSize.width,
+                    stream.previewSize.height,
                     System.identityHashCode(stream.previewSurfaceTexture),
                     stream.previewSource.name,
                 ).joinToString("|"),
@@ -889,6 +896,7 @@ class StandbyCameraController(context: Context) {
                 standbyCameraId = stream.cameraInfo.cameraId,
                 lensType = stream.cameraInfo.lensType,
                 aspectRatio = stream.previewSize.width.toFloat() / stream.previewSize.height.toFloat(),
+                desiredPreviewSize = stream.previewSize,
                 previewTextureIdentity = System.identityHashCode(stream.previewSurfaceTexture),
                 previewSource = stream.previewSource,
                 cameraInfo = stream.cameraInfo,
