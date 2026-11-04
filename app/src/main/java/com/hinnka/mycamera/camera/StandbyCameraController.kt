@@ -33,6 +33,7 @@ data class StandbyCameraHandoff(
     val imageReader: ImageReader,
     val previewSurface: Surface,
     val previewSurfaceTexture: SurfaceTexture,
+    val previewSize: Size,
     val cameraId: String,
 )
 
@@ -168,7 +169,8 @@ class StandbyCameraController(context: Context) {
             val handoff = StandbyCameraHandoff(
                 camera = camera, session = session, requestBuilder = builder,
                 imageReader = reader, previewSurface = previewSurface,
-                previewSurfaceTexture = previewTexture, cameraId = cameraId,
+                previewSurfaceTexture = previewTexture, previewSize = plan.previewSize,
+                cameraId = cameraId,
             )
             standbyCameraDevice = null
             standbyCaptureSession = null
