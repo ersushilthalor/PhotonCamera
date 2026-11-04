@@ -48,10 +48,7 @@ import androidx.compose.material.icons.outlined.FlashlightOn
 import androidx.compose.material.icons.outlined.LocalFlorist
 import androidx.compose.material.icons.outlined.MicOff
 import androidx.compose.material.icons.outlined.ModeNight
-import androidx.compose.material.icons.outlined.Panorama
 import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.ShutterSpeed
-import androidx.compose.material.icons.automirrored.outlined.DirectionsRun
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.PlayArrow
@@ -279,8 +276,6 @@ private fun ViewfinderOverlays(state: AppState, settings: AppSettings, actions: 
         if (!state.burstActive) FocusRing(state)
         CaptureFlash(state.flashTick)
         if (state.burstActive && state.burstNight) HoldStill(state)
-        if (state.burstActive && state.burstKind == com.hinnka.mycamera.focoui.processing.ShotKind.ACTION_PAN) FollowSubject(state)
-        if (state.panoActive) PanoramaGuide(state)
         state.countdown?.let { n ->
             Text(
                 n.toString(),
@@ -457,111 +452,6 @@ private fun HoldStill(state: AppState) {
     }
 }
 
-/** Action Pan: keep the moving subject inside this frame while the photo is taken. */
-@Composable
-private fun FollowSubject(state: AppState) {
-    val primary = MaterialTheme.colorScheme.primary
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSize()) {
-            val w = size.width * 0.3f
-            val h = size.height * 0.4f
-            drawRoundRect(
-                primary, topLeft = Offset((size.width - w) / 2, (size.height - h) / 2), size = Size(w, h),
-                cornerRadius = CornerRadius(18.dp.toPx()), style = Stroke(2.5.dp.toPx()),
-            )
-        }
-        Text(
-            "Follow the subject",
-            color = Color.White,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier
-                .offset(y = 120.dp)
-                .rotate(-state.deviceRotation.toFloat())
-                .clip(RoundedCornerShape(14.dp))
-                .background(Color(0x99000000))
-                .padding(horizontal = 12.dp, vertical = 5.dp),
-        )
-    }
-}
-
-/**
- * Panorama while turning: a line across the middle with a target circle and a dot that shows the tilt
- * (keep the dot on the line), plus the hint text.
- */
-@Composable
-private fun PanoramaGuide(state: AppState) {
-    val primary = MaterialTheme.colorScheme.primary
-    val density = LocalDensity.current
-    val pxPerRad = with(density) { 400.dp.toPx() }
-    val dotY by animateFloatAsState((-state.panoPitch * pxPerRad).coerceIn(-200f, 200f), tween(60), label = "panoDot")
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSize()) {
-            val c = Offset(size.width / 2, size.height / 2)
-            val stroke = 1.5.dp.toPx()
-            drawLine(Color.White.copy(alpha = 0.8f), Offset(0f, c.y), Offset(size.width, c.y), stroke)
-            drawCircle(Color.White, radius = 26.dp.toPx(), center = c, style = Stroke(2.dp.toPx()))
-            drawCircle(primary, radius = 9.dp.toPx(), center = Offset(c.x, c.y + dotY))
-        }
-        Text(
-            state.panoHint.text,
-            color = Color.White,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier
-                .offset(y = 64.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(if (state.panoHint == PanoHint.START) Color(0x99000000) else Color(0xE6601410))
-                .padding(horizontal = 12.dp, vertical = 5.dp),
-        )
-    }
-}
-
-/**
- * The panorama so far, as a strip at the top: the frames taken, placed by how far you turned,
- * and a white box where the camera points now.
- */
-@Composable
-private fun PanoramaStrip(state: AppState, modifier: Modifier) {
-    val shots = state.panoShots.toList()
-    if (shots.isEmpty()) return
-    val fov = state.panoFov.coerceAtLeast(0.1f)
-    val minYaw = minOf(shots.minOf { it.yaw }, state.panoYaw) - fov / 2
-    val maxYaw = maxOf(shots.maxOf { it.yaw }, state.panoYaw) + fov / 2
-    Canvas(
-        modifier
-            .fillMaxWidth()
-            .height(84.dp)
-            .padding(horizontal = 16.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xB3000000)),
-    ) {
-        val stripH = size.height - 8.dp.toPx()
-        val first = shots.first().bitmap
-        val frameW = stripH * first.width / first.height
-        var pxPerRad = frameW / fov
-        val total = (maxYaw - minYaw) * pxPerRad
-        if (total > size.width - 8.dp.toPx()) pxPerRad *= (size.width - 8.dp.toPx()) / total
-        val fw = fov * pxPerRad
-        val fh = fw * first.height / first.width
-        val top = (size.height - fh) / 2
-        val x0 = (size.width - (maxYaw - minYaw) * pxPerRad) / 2
-        shots.sortedBy { it.yaw }.forEach { shot ->
-            val left = x0 + (shot.yaw - fov / 2 - minYaw) * pxPerRad
-            drawImage(
-                shot.bitmap.asImageBitmap(),
-                dstOffset = androidx.compose.ui.unit.IntOffset(left.roundToInt(), top.roundToInt()),
-                dstSize = IntSize(fw.roundToInt().coerceAtLeast(1), fh.roundToInt().coerceAtLeast(1)),
-            )
-        }
-        val cur = x0 + (state.panoYaw - fov / 2 - minYaw) * pxPerRad
-        drawRoundRect(
-            Color.White, topLeft = Offset(cur, top - 2.dp.toPx()), size = Size(fw, fh + 4.dp.toPx()),
-            cornerRadius = CornerRadius(4.dp.toPx()), style = Stroke(2.dp.toPx()),
-        )
-    }
-}
-
 @Composable
 private fun CaptureFlash(tick: Int) {
     val alpha = remember { Animatable(0f) }
@@ -596,7 +486,6 @@ private fun TopBar(state: AppState, settings: AppSettings, actions: CameraAction
         }
         if (state.proBarOpen && !state.recording) ReadoutRow(state)
         if (state.kind == CaptureKind.VIDEO && !state.recording) MicChip(state, actions)
-        if (state.panoActive) PanoramaStrip(state, Modifier.padding(top = 4.dp))
     }
 }
 
@@ -853,7 +742,7 @@ private fun BottomControls(state: AppState, settings: AppSettings, actions: Came
             when {
                 state.burstActive -> Unit
                 tool != null && state.proBarOpen -> ToolSlider(state, tool, actions, Modifier.padding(bottom = 4.dp))
-                state.zoomChips.size > 1 && !(state.kind == CaptureKind.PHOTO && state.photoMode == PhotoMode.PANORAMA) ->
+                state.zoomChips.size > 1 ->
                     ZoomChips(state, actions, iconRotation, Modifier.padding(bottom = 34.dp))
             }
         }
@@ -997,7 +886,7 @@ private fun Shutter(state: AppState, settings: AppSettings, actions: CameraActio
     val inner by animateFloatAsState(if (pressed) 0.86f else 1f, tween(90), label = "shutter")
     val isVideo = state.kind == CaptureKind.VIDEO
     val night = !isVideo && (state.burstNight && state.burstActive || !state.burstActive && state.nightWillRun(settings))
-    val ringProgress = state.burstActive && (state.burstNight || state.burstKind == com.hinnka.mycamera.focoui.processing.ShotKind.ACTION_PAN)
+    val ringProgress = state.burstActive && state.burstNight
     val progress by animateFloatAsState(if (state.burstActive) state.burstProgress else 0f, tween(250), label = "progress")
     val primary = MaterialTheme.colorScheme.primary
     Box(contentAlignment = Alignment.Center) {
@@ -1046,14 +935,10 @@ private fun Shutter(state: AppState, settings: AppSettings, actions: CameraActio
         }
         val modeIcon = when {
             isVideo -> null
-            state.photoMode == PhotoMode.LONG_EXPOSURE -> Icons.Outlined.ShutterSpeed
-            state.photoMode == PhotoMode.ACTION_PAN -> Icons.AutoMirrored.Outlined.DirectionsRun
-            state.photoMode == PhotoMode.PANORAMA -> Icons.Outlined.Panorama
             night -> Icons.Outlined.ModeNight
             else -> null
         }
         when {
-            state.panoActive -> Box(Modifier.size(24.dp).clip(RoundedCornerShape(5.dp)).background(primary))
             state.burstActive && state.burstNight && state.burstSecondsLeft > 0 ->
                 Text("${state.burstSecondsLeft}", color = Color.Black, fontSize = 22.sp, fontWeight = FontWeight.Medium)
             modeIcon != null -> Icon(modeIcon, null, tint = Color.Black, modifier = Modifier.size(30.dp))
@@ -1082,8 +967,7 @@ private fun FlipButton(actions: CameraActions, iconRotation: Float) {
 }
 
 /**
- * The mode strip (Action Pan · Long Exposure · Photo · Night · Panorama). The selected mode sits in the middle in
- * a lavender pill, like Pixel Camera. Swipe it (or the viewfinder) left for the mode on the right and back, or tap.
+ * The mode strip (Photo · Night). Swipe it or the viewfinder to switch modes, or tap a label.
  */
 @Composable
 private fun ModeStrip(state: AppState, actions: CameraActions) {
