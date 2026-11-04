@@ -87,7 +87,9 @@ fun FocoCameraIntegrationScreen(
     val focoState = remember { FocoAppState().apply { permissionGranted = true } }
     val focoSettings = remember(context) { FocoSettings(context) }
     var previewSurfaceTexture by remember { mutableStateOf<SurfaceTexture?>(null) }
-    var cameraPrepared by remember { mutableStateOf(false) }
+    var preparedCaptureMode by remember { mutableStateOf<CaptureMode?>(null) }
+    var camerasPrepared by remember { mutableStateOf(false) }
+    val cameraPrepared = preparedCaptureMode == photon.captureMode
     val currentCamera = photon.getCurrentCameraInfo()
     val minZoom = viewModel.globalMinZoom.coerceAtLeast(0.1f)
     val maxZoom = viewModel.globalMaxZoom.coerceAtLeast(minZoom)
@@ -190,8 +192,24 @@ fun FocoCameraIntegrationScreen(
         focoSettings.level = levelIndicator
     }
 
-    LaunchedEffect(initialized) {
-        cameraPrepared = initialized && viewModel.prepareCamera()
+    LaunchedEffect(initialized, photon.captureMode) {
+        if (!initialized) {
+            preparedCaptureMode = null
+            return@LaunchedEffect
+        }
+
+        // Keep the GL surface detached until its buffer size matches the new mode.
+        // This prevents a Photo 4:3 buffer from being reused by the Video 9:16 session.
+        val targetMode = photon.captureMode
+        preparedCaptureMode = null
+        val prepared = if (!camerasPrepared) {
+            viewModel.prepareCamera().also { camerasPrepared = it }
+        } else {
+            viewModel.preparePreviewSizeForCurrentMode()
+        }
+        if (prepared && photon.captureMode == targetMode) {
+            preparedCaptureMode = targetMode
+        }
     }
     LaunchedEffect(initialized, cameraPrepared, previewSurfaceTexture) {
         val surface = previewSurfaceTexture ?: return@LaunchedEffect
