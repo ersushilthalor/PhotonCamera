@@ -306,10 +306,6 @@ fun FocoCameraIntegrationScreen(
                         viewModel.setUseJpgMax(true)
                         focoState.message = "Night mode uses Photon multi-frame capture; dedicated Foco Night processing is not ported."
                     }
-                    PhotoMode.LONG_EXPOSURE, PhotoMode.ACTION_PAN, PhotoMode.PANORAMA -> {
-                        focoState.photoMode = PhotoMode.PHOTO
-                        focoState.message = "${mode.label} needs Foco's separate multi-frame processing engine and is not yet connected to Photon capture."
-                    }
                 }
             }
             override fun flip() = viewModel.switchCamera()
