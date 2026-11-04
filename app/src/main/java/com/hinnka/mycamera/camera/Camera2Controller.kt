@@ -150,12 +150,6 @@ class Camera2Controller(private val context: Context) {
         val preserveVideoRecording: Boolean,
     )
 
-    private data class PendingStandbyRewarm(
-        val closingDevice: CameraDevice,
-        val previewTexture: SurfaceTexture,
-        val previewSource: PreviewStreamSource,
-    )
-
     private enum class CameraDeviceLifecycle {
         CLOSED,
         OPENING,
@@ -290,7 +284,7 @@ class Camera2Controller(private val context: Context) {
     private var rootPreviewSurfaceTexture: SurfaceTexture? = null
     private var standbyPreviewSurfaceTexture: SurfaceTexture? = null
     private var standbyPreviewStreamSource: PreviewStreamSource = PreviewStreamSource.STANDBY
-    private var pendingStandbyRewarm: PendingStandbyRewarm? = null
+    private var detachedStandbyCameraDevice: CameraDevice? = null
     private var activeClosingCameraDevice: CameraDevice? = null
     private var imageReader: ImageReader? = null
     private var stabilizationImageReader: StabilizationImageReader? = null
@@ -388,10 +382,17 @@ class Camera2Controller(private val context: Context) {
         }
         standbyCameraController.onPromotedCameraUnavailable = { camera, reason ->
             val handler = cameraHandler
+            val action = {
+                if (cameraDevice === camera) {
+                    handleCameraDeviceUnavailable(camera, reason)
+                } else {
+                    standbyCameraController.release(reason)
+                }
+            }
             if (handler != null && Looper.myLooper() != handler.looper) {
-                handler.post { handleCameraDeviceUnavailable(camera, reason) }
+                handler.post { action() }
             } else {
-                handleCameraDeviceUnavailable(camera, reason)
+                action()
             }
         }
         realtimeStabilizationCoordinator.onEnhancedStabilizationUnavailable = {
@@ -2279,6 +2280,14 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    private fun closeCameraDeviceForStaleCallback(camera: CameraDevice, reason: String) {
+        if (cameraDevice === camera) {
+            closeCameraDeviceAndAwait(camera, reason)
+        } else {
+            closeCameraDeviceSafely(camera, reason)
+        }
+    }
+
     private fun closeCameraDeviceAndAwait(camera: CameraDevice, reason: String) {
         if (cameraDevice === camera) {
             cameraDevice = null
@@ -2305,10 +2314,9 @@ class Camera2Controller(private val context: Context) {
             PLog.d(TAG, "Detached camera device closed: ${camera.id}")
         }
 
-        val rewarm = pendingStandbyRewarm
-        if (rewarm?.closingDevice === camera) {
-            pendingStandbyRewarm = null
-            prepareStandbyForActiveCamera(rewarm.previewTexture, rewarm.previewSource)
+        if (detachedStandbyCameraDevice === camera) {
+            detachedStandbyCameraDevice = null
+            standbyCameraController.onExternallyOpenedCameraClosed(camera)
         }
     }
 
@@ -3051,7 +3059,7 @@ class Camera2Controller(private val context: Context) {
                         cameraDeviceLifecycle != CameraDeviceLifecycle.OPENING
                     ) {
                         PLog.w(TAG, "Ignoring stale camera open callback: camera=${camera.id}")
-                        closeCameraDeviceAndAwait(camera, "stale camera open")
+                        closeCameraDeviceForStaleCallback(camera, "stale camera open")
                         return
                     }
                     PLog.d(TAG, "Camera opened: ${camera.id}")
@@ -3064,8 +3072,12 @@ class Camera2Controller(private val context: Context) {
                 }
 
                 override fun onDisconnected(camera: CameraDevice) {
+                    if (detachedStandbyCameraDevice === camera) {
+                        standbyCameraController.release("detached standby camera disconnected")
+                        return
+                    }
                     if (openGeneration != cameraOpenGeneration) {
-                        closeCameraDeviceAndAwait(camera, "stale camera disconnect")
+                        closeCameraDeviceForStaleCallback(camera, "stale camera disconnect")
                         return
                     }
                     PLog.w(TAG, "Camera disconnected: ${camera.id} - 相机被其他应用或系统接管")
@@ -3083,8 +3095,12 @@ class Camera2Controller(private val context: Context) {
                 }
 
                 override fun onError(camera: CameraDevice, error: Int) {
+                    if (detachedStandbyCameraDevice === camera) {
+                        standbyCameraController.release("detached standby camera error: $error")
+                        return
+                    }
                     if (openGeneration != cameraOpenGeneration) {
-                        closeCameraDeviceAndAwait(camera, "stale camera error")
+                        closeCameraDeviceForStaleCallback(camera, "stale camera error")
                         return
                     }
                     val errorMessage = when (error) {
