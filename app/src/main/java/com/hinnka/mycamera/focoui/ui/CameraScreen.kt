@@ -66,6 +66,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import android.hardware.camera2.CameraMetadata
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -682,7 +683,7 @@ private fun QuickAccess(state: AppState, settings: AppSettings, actions: CameraA
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         if (state.kind == CaptureKind.PHOTO) {
             QuickButton("More light", {
-                val front = state.lensFacing == androidx.camera.core.CameraSelector.LENS_FACING_FRONT
+                val front = state.lensFacing == CameraMetadata.LENS_FACING_FRONT
                 val options = buildList {
                     add(FlashSetting.OFF)
                     add(FlashSetting.NIGHT_AUTO)
@@ -712,7 +713,7 @@ private fun QuickAccess(state: AppState, settings: AppSettings, actions: CameraA
             }) {
                 if (settings.ratio == RatioSetting.FULL_4_3) RatioGlyph(3f, 4f, Color.White) else RatioGlyph(9f, 16f, Color.White)
             }
-            if (state.caps.macroAvailable && state.lensFacing == androidx.camera.core.CameraSelector.LENS_FACING_BACK) {
+            if (state.caps.macroAvailable && state.lensFacing == CameraMetadata.LENS_FACING_BACK) {
                 QuickButton("Macro", {
                     settings.macro = !settings.macro
                     actions.settingChanged(SettingKey.MACRO)
