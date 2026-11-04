@@ -198,6 +198,189 @@ class StandbyCameraController(context: Context) {
         }
     }
 
+    /**
+     * Moves the previously active stream into the standby slot after a successful
+     * warm-session swap. Its CameraDevice and CameraCaptureSession stay open and
+     * keep streaming; only the capture callback is replaced so standby frames do
+     * not mutate the active camera's UI/capture state.
+     */
+    fun adoptActiveStream(
+        camera: CameraDevice,
+        session: CameraCaptureSession,
+        requestBuilder: CaptureRequest.Builder,
+        imageReader: ImageReader,
+        previewSurface: Surface,
+        previewSurfaceTexture: SurfaceTexture,
+        cameraInfo: CameraInfo,
+        newActiveOpenCameraId: String,
+        standbyPhysicalCameraId: String?,
+        previewSize: Size,
+        callbackHandler: Handler,
+    ): Boolean {
+        handler = callbackHandler
+        if (Looper.myLooper() != callbackHandler.looper ||
+            camera.id.isBlank() ||
+            camera.id == newActiveOpenCameraId ||
+            !previewSurface.isValid
+        ) {
+            return false
+        }
+
+        val captureSize = Size(imageReader.width, imageReader.height)
+        if (captureSize.width <= 0 || captureSize.height <= 0 ||
+            imageReader.imageFormat != ImageFormat.YUV_420_888
+        ) {
+            return false
+        }
+
+        // Do not transfer an in-flight standby or a stream with a live capture reader
+        // listener. The active controller only calls this after eligibility checks.
+        if (standbyCameraDevice != null || standbyCaptureSession != null ||
+            standbyImageReader != null
+        ) {
+            PLog.w(TAG, "Cannot adopt active stream while another standby stream is owned")
+            return false
+        }
+
+        val plan = StandbyPlan(
+            key = listOf(
+                newActiveOpenCameraId,
+                camera.id,
+                standbyPhysicalCameraId.orEmpty(),
+                cameraInfo.cameraId,
+                previewSize.width,
+                previewSize.height,
+                captureSize.width,
+                captureSize.height,
+                imageReader.imageFormat,
+            ).joinToString("|"),
+            activeOpenCameraId = newActiveOpenCameraId,
+            standbyOpenCameraId = camera.id,
+            standbyPhysicalCameraId = standbyPhysicalCameraId,
+            standbyCameraId = cameraInfo.cameraId,
+            lensType = cameraInfo.lensType,
+            aspectRatio = previewSize.width.toFloat() / previewSize.height.coerceAtLeast(1),
+            previewSize = previewSize,
+            captureSize = captureSize,
+            captureFormat = imageReader.imageFormat,
+            maxImages = imageReader.maxImages,
+            previewSurfaceTexture = previewSurfaceTexture,
+        )
+
+        val standbyGeneration = ++generation
+        activePlan = plan
+        pendingPlan = null
+        standbyCameraDevice = camera
+        standbyCaptureSession = session
+        standbyImageReader = imageReader
+        standbyPreviewSurface = previewSurface
+        standbyPreviewSurfaceTexture = previewSurfaceTexture
+        standbyRequestBuilder = requestBuilder
+        openRequestGeneration = null
+        imageTimestamps.clear()
+        captureResultTimestamps.clear()
+        receivedFrameCount = 0L
+        matchedFrameCount = 0
+        _status.value = StandbyCameraStatus(
+            phase = StandbyCameraPhase.WAITING_FOR_FRAMES,
+            activeCameraId = newActiveOpenCameraId,
+            standbyCameraId = cameraInfo.cameraId,
+            lensType = cameraInfo.lensType,
+            message = "Previous active camera retained as a live standby stream",
+        )
+
+        return try {
+            // The session already owns this ImageReader as a configured output, but
+            // the standby repeating request targets only its preview surface.
+            session.setRepeatingRequest(
+                requestBuilder.build(),
+                object : CameraCaptureSession.CaptureCallback() {
+                    override fun onCaptureCompleted(
+                        session: CameraCaptureSession,
+                        request: CaptureRequest,
+                        result: TotalCaptureResult,
+                    ) {
+                        if (standbyGeneration != generation ||
+                            session !== standbyCaptureSession ||
+                            camera !== standbyCameraDevice
+                        ) return
+                        val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP) ?: return
+                        receivedFrameCount += 1L
+                        rememberTimestamp(captureResultTimestamps, timestamp)
+                        updateReadinessFromMatchedFrames(standbyGeneration)
+                    }
+
+                    override fun onCaptureFailed(
+                        session: CameraCaptureSession,
+                        request: CaptureRequest,
+                        failure: android.hardware.camera2.CaptureFailure,
+                    ) {
+                        if (standbyGeneration == generation &&
+                            session === standbyCaptureSession
+                        ) {
+                            PLog.w(TAG, "Retained standby capture failed: reason=" + failure.reason)
+                        }
+                    }
+                },
+                callbackHandler,
+            )
+            runCatching { imageReader.setOnImageAvailableListener(null, null) }
+            scheduleFrameReadyTimeout(standbyGeneration, callbackHandler)
+            PLog.i(TAG, "Retained old active CameraDevice/session as standby: camera=" +
+                camera.id + ", lens=" + cameraInfo.cameraId)
+            true
+        } catch (error: Exception) {
+            PLog.w(TAG, "Could not retain old active stream as standby", error)
+            activePlan = null
+            standbyCameraDevice = null
+            standbyCaptureSession = null
+            standbyImageReader = null
+            standbyPreviewSurface = null
+            standbyPreviewSurfaceTexture = null
+            standbyRequestBuilder = null
+            imageTimestamps.clear()
+            captureResultTimestamps.clear()
+            _status.value = StandbyCameraStatus(
+                phase = StandbyCameraPhase.FAILED,
+                activeCameraId = newActiveOpenCameraId,
+                standbyCameraId = cameraInfo.cameraId,
+                lensType = cameraInfo.lensType,
+                message = "Retained standby session could not start repeating",
+            )
+            false
+        }
+    }
+
+    /** True while this device is owned by the background standby lifecycle. */
+    fun managesStandbyDevice(camera: CameraDevice): Boolean {
+        return standbyCameraDevice === camera || closingCameraDevice === camera
+    }
+
+    fun handleStandbyDeviceUnavailable(camera: CameraDevice, reason: String) {
+        dispatch {
+            if (standbyCameraDevice !== camera) return@dispatch
+            failCurrentPlan(reason, null)
+        }
+    }
+
+    fun handleStandbyDeviceClosed(camera: CameraDevice) {
+        dispatch {
+            if (closingCameraDevice === camera) closingCameraDevice = null
+            if (standbyCameraDevice === camera) {
+                standbyCameraDevice = null
+                closeSessionAndReader()
+                activePlan = null
+                _status.value = StandbyCameraStatus(
+                    phase = StandbyCameraPhase.FAILED,
+                    message = "Standby camera closed unexpectedly",
+                )
+            }
+            if (openRequestGeneration == null && closingCameraDevice == null) {
+                setDeviceTransitioning(false)
+            }
+        }
+    }
+
     /** Register the main controller's lifecycle handlers after ownership is transferred. */
     fun setAdoptedCameraCallbacks(
         camera: CameraDevice,
