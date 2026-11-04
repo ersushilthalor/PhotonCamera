@@ -621,6 +621,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val locationManager = LocationManager(application)
 
     val state: StateFlow<CameraState> = cameraController.state
+    val displayedPreviewSource: StateFlow<PreviewStreamSource> = cameraController.displayedPreviewSource
     val livePhotoRecorder get() = cameraController.livePhotoRecorder
     val realtimeStabilizationCoordinator get() = cameraController.realtimeStabilizationCoordinator
     val isAlgorithmicStabilizationSupported: Boolean
@@ -2925,6 +2926,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraController.onStandbyPreviewFrameAvailable(timestampNs)
     }
 
+    fun onMainPreviewFrameAvailable(timestampNs: Long) {
+        cameraController.onMainPreviewFrameAvailable(timestampNs)
+    }
+
     fun openCamera(surfaceTexture: SurfaceTexture) {
         PLog.d(TAG, "openCamera")
         if (currentSurfaceTexture === surfaceTexture && (state.value.isPreviewActive || cameraOpenInFlight)) {
@@ -3835,15 +3840,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun switchToLens(cameraId: String) {
         if (isVideoLensLocked()) return
-        val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId }
-        syncVendorCaptureSettingsToController()
-        cameraController.switchToCameraId(cameraId)
-        targetCamera?.let { camera ->
-            setZoomRatioForCamera(camera.defaultVisibleZoomRatio(), camera.cameraId)
-        }
-        reopenCamera(
-            preserveVideoRecording = true
-        )
+        val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId } ?: return
+        switchToLensWithInstantFallback(cameraId, targetCamera.defaultVisibleZoomRatio())
     }
 
     fun switchToLensAndSetZoomRatio(cameraId: String, ratio: Float) {
@@ -3851,12 +3849,22 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             setZoomRatio(ratio)
             return
         }
+        switchToLensWithInstantFallback(cameraId, ratio)
+    }
+
+    private fun switchToLensWithInstantFallback(cameraId: String, ratio: Float) {
         syncVendorCaptureSettingsToController()
-        cameraController.switchToCameraId(cameraId)
-        setZoomRatioForCamera(ratio, cameraId)
-        reopenCamera(
-            preserveVideoRecording = true
-        )
+        cameraController.tryInstantSwitchToCameraId(cameraId, ratio) { switchedInstantly ->
+            if (switchedInstantly) {
+                setZoomRatioForCamera(ratio, cameraId)
+            } else {
+                // Keep PhotonCamera's established open/close path for unsupported devices,
+                // video/RAW/P010 profiles, or a standby stream that has not reached READY.
+                cameraController.switchToCameraId(cameraId)
+                setZoomRatioForCamera(ratio, cameraId)
+                reopenCamera(preserveVideoRecording = true)
+            }
+        }
     }
 
     /**
