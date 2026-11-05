@@ -6219,6 +6219,212 @@ class Camera2Controller(private val context: Context) {
     }
 
     /**
+     * Whether a second, independently opened rear CameraDevice is already streaming
+     * to its own GL input and can be adopted without a camera/session restart.
+     */
+    fun canSwitchToReadyStandby(cameraId: String): Boolean {
+        val current = activeCameraInfo ?: return false
+        val target = _state.value.availableCameras.firstOrNull { it.cameraId == cameraId } ?: return false
+        val isRearPair = setOf(current.lensType, target.lensType) ==
+            setOf(LensType.BACK_MAIN, LensType.BACK_ULTRA_WIDE)
+        val currentOpen = runCatching { current.getOpenCameraId() }.getOrNull() ?: return false
+        val targetOpen = runCatching { target.getOpenCameraId() }.getOrNull() ?: return false
+        val modeSupported = _state.value.captureMode == CaptureMode.PHOTO &&
+            !_state.value.useRaw &&
+            !_state.value.useP010 &&
+            !requestedRawCaptureEnabled &&
+            imageReader?.imageFormat == ImageFormat.YUV_420_888 &&
+            !_state.value.photoPreviewStabilizationEnabled &&
+            !shouldUseAlgorithmicStabilization() &&
+            !_state.value.videoRecordingState.isRecording &&
+            !_state.value.videoRecordingState.isProcessing
+        return isRearPair && currentOpen != targetOpen && modeSupported &&
+            cameraDevice != null &&
+            cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN &&
+            captureSession != null &&
+            imageReader != null &&
+            previewSurface?.isValid == true &&
+            previewSurfaceTexture != null &&
+            previewRequestBuilder != null &&
+            standbyCameraController.canHandoffTo(target)
+    }
+
+    /**
+     * Swap the active CameraDevice/CaptureSession/ImageReader pointers with the
+     * already-repeating standby pair. No CameraDevice.close(), Session.close(), openCamera()
+     * or createCaptureSession() is performed on the successful path.
+     *
+     * Returns true when the swap has been queued. Completion reports whether the active
+     * preview and image pipeline were successfully adopted.
+     */
+    fun switchToReadyStandbyCamera(
+        cameraId: String,
+        onComplete: (Boolean) -> Unit,
+    ): Boolean {
+        val handler = cameraHandler ?: return false
+        val target = _state.value.availableCameras.firstOrNull { it.cameraId == cameraId } ?: return false
+        if (!canSwitchToReadyStandby(cameraId)) return false
+
+        handler.post {
+            if (!canSwitchToReadyStandby(cameraId)) {
+                onComplete(false)
+                return@post
+            }
+            val outgoingCamera = cameraDevice
+            val outgoingSession = captureSession
+            val outgoingReader = imageReader
+            val outgoingSurface = previewSurface
+            val outgoingTexture = previewSurfaceTexture
+            val outgoingBuilder = previewRequestBuilder
+            val outgoingInfo = activeCameraInfo
+            if (outgoingCamera == null || outgoingSession == null || outgoingReader == null ||
+                outgoingSurface == null || outgoingTexture == null || outgoingBuilder == null ||
+                outgoingInfo == null
+            ) {
+                onComplete(false)
+                return@post
+            }
+
+            val outgoing = StandbyCameraHandoff(
+                camera = outgoingCamera,
+                session = outgoingSession,
+                imageReader = outgoingReader,
+                previewSurface = outgoingSurface,
+                previewSurfaceTexture = outgoingTexture,
+                requestBuilder = outgoingBuilder,
+                cameraId = outgoingInfo.cameraId,
+                openCameraId = activeOpenCameraId,
+                physicalCameraId = activeOutputPhysicalCameraId,
+                lensType = outgoingInfo.lensType,
+                cameraInfo = outgoingInfo,
+                previewSize = _state.value.currentPreviewSize,
+                captureSize = _state.value.currentCaptureSize,
+                aspectRatio = _state.value.currentPreviewSize.let {
+                    it.width.toFloat() / it.height.coerceAtLeast(1)
+                },
+                openedByStandbyController = standbyCameraController.isAdoptedCamera(outgoingCamera),
+            )
+
+            standbyCameraController.swapForInstant(target, outgoing) { incoming ->
+                if (incoming == null) {
+                    PLog.w(TAG, "Instant standby swap rejected for cameraId=$cameraId; caller must use safe reopen")
+                    onComplete(false)
+                    return@swapForInstant
+                }
+
+                try {
+                    // Adopt the preconfigured session and all of its producer/reader surfaces.
+                    // The outgoing active session remains running in StandbyCameraController.
+                    cameraDevice = incoming.camera
+                    cameraDeviceLifecycle = CameraDeviceLifecycle.OPEN
+                    captureSession = incoming.session
+                    imageReader = incoming.imageReader
+                    previewSurface = incoming.previewSurface
+                    previewSurfaceTexture = incoming.previewSurfaceTexture
+                    previewRequestBuilder = incoming.requestBuilder
+                    activeCameraInfo = incoming.cameraInfo
+                    activeOpenCameraId = incoming.openCameraId
+                    activeOutputPhysicalCameraId = incoming.physicalCameraId
+                    cachedCharacteristics = getCameraCharacteristicsCached(incoming.openCameraId)
+                    cachedCharacteristicsCameraId = incoming.openCameraId
+                    cachedSensorOrientation = cachedCharacteristics?.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+                    cachedLensFacing = cachedCharacteristics?.get(CameraCharacteristics.LENS_FACING)
+                        ?: CameraCharacteristics.LENS_FACING_BACK
+                    cachedHardwareLevel = cachedCharacteristics?.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)
+                        ?: CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED
+                    availableCaptureRequestKeyNames = cachedCharacteristics?.let(::loadAvailableCaptureRequestKeyNames)
+
+                    // The standby builder has both valid output targets. Refresh controls against
+                    // the newly selected CameraInfo, then replace only the repeating request.
+                    val template = CameraDevice.TEMPLATE_PREVIEW
+                    val builder = incoming.camera.createCaptureRequest(template).apply {
+                        addTarget(incoming.previewSurface)
+                        addTarget(incoming.imageReader.surface)
+                        applyBaseCameraSettings(this, isCapture = false)
+                    }
+                    previewRequestBuilder = builder
+                    attachImageReaderListener(incoming.imageReader)
+                    applyMeteringRegions()
+                    incoming.session.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
+
+                    _logicalDualPreviewReady.value = false
+                    activeLogicalDualPreviewPlan = null
+                    logicalDualPreviewRequestedForSession = false
+                    logicalDualMatchedCaptureFrames = 0
+                    lastCaptureResult = null
+                    _state.update {
+                        it.copy(
+                            isPreviewActive = true,
+                            previewFirstFrameTimestampNs = null,
+                            currentPreviewSize = incoming.previewSize,
+                            currentCaptureSize = incoming.captureSize,
+                            isRawSupported = incoming.cameraInfo.supportsRaw,
+                            isP010Supported = false,
+                        )
+                    }
+
+                    if (incoming.openedByStandbyController) {
+                        standbyCameraController.setAdoptedCameraCallbacks(
+                            incoming.camera,
+                            AdoptedCameraDeviceCallbacks(
+                                onDisconnected = { device ->
+                                    if (cameraDevice === device) {
+                                        handleCameraDeviceUnavailable(
+                                            device,
+                                            "adopted standby camera disconnected: " + device.id,
+                                        )
+                                        onCameraError?.invoke(
+                                            ERROR_CAMERA_DISCONNECTED,
+                                            "相机已断开连接",
+                                            true,
+                                        )
+                                    } else {
+                                        standbyCameraController.handleExternalStandbyDisconnected(
+                                            device,
+                                            "adopted camera disconnected while in standby",
+                                        )
+                                    }
+                                },
+                                onError = { device, error ->
+                                    if (cameraDevice === device) {
+                                        handleCameraDeviceUnavailable(
+                                            device,
+                                            "adopted standby camera error: " + error,
+                                        )
+                                        onCameraError?.invoke(
+                                            error,
+                                            "相机设备错误 ($error)",
+                                            error == ERROR_CAMERA_IN_USE || error == ERROR_MAX_CAMERAS_IN_USE,
+                                        )
+                                    } else {
+                                        standbyCameraController.handleExternalStandbyDisconnected(
+                                            device,
+                                            "adopted camera error while in standby: " + error,
+                                        )
+                                    }
+                                },
+                                onClosed = { device -> handleCameraDeviceClosed(device) },
+                            ),
+                        )
+                    }
+
+                    PLog.i(
+                        TAG,
+                        "ZERO-REOPEN standby session swap completed: active=" + incoming.openCameraId +
+                            ", standby=" + outgoing.openCameraId +
+                            ", captureSessionReused=true",
+                    )
+                    onComplete(true)
+                } catch (error: Exception) {
+                    PLog.e(TAG, "Failed adopting already-running standby session", error)
+                    onComplete(false)
+                }
+            }
+        }
+        return true
+    }
+
+    /**
      * 切换到指定的相机 ID
      */
     fun switchToCameraId(cameraId: String) {
