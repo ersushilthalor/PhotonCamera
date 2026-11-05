@@ -43,7 +43,10 @@ data class StandbyCameraHandoff(
     val openCameraId: String,
     val physicalCameraId: String?,
     val lensType: LensType,
+    val cameraInfo: CameraInfo,
+    val previewSize: Size,
     val captureSize: Size,
+    val aspectRatio: Float,
     val openedByStandbyController: Boolean,
 )
 
@@ -100,6 +103,7 @@ class StandbyCameraController(context: Context) {
     private var standbyPreviewSurface: Surface? = null
     private var standbyPreviewRequestBuilder: CaptureRequest.Builder? = null
     private var standbyCaptureSize: Size? = null
+    private var standbyPreviewSize: Size? = null
     private var standbyCameraInfo: CameraInfo? = null
     private var standbyOpenedByController = true
     private var activePlan: StandbyPlan? = null
@@ -187,7 +191,9 @@ class StandbyCameraController(context: Context) {
                 physicalCameraId = plan.standbyPhysicalCameraId,
                 lensType = plan.lensType,
                 cameraInfo = info,
+                previewSize = standbyPreviewSize ?: Size(640, 480),
                 captureSize = standbyCaptureSize ?: Size(reader.width, reader.height),
+                aspectRatio = plan.aspectRatio,
                 openedByStandbyController = standbyOpenedByController,
             )
 
@@ -198,6 +204,7 @@ class StandbyCameraController(context: Context) {
             standbyPreviewSurfaceTexture = outgoingActive.previewSurfaceTexture
             standbyPreviewRequestBuilder = outgoingActive.requestBuilder
             standbyCaptureSize = outgoingActive.captureSize
+            standbyPreviewSize = outgoingActive.previewSize
             standbyCameraInfo = outgoingActive.cameraInfo
             standbyOpenedByController = outgoingActive.openedByStandbyController
             activePlan = StandbyPlan(
@@ -207,7 +214,7 @@ class StandbyCameraController(context: Context) {
                 standbyPhysicalCameraId = outgoingActive.physicalCameraId,
                 standbyCameraId = outgoingActive.cameraId,
                 lensType = outgoingActive.lensType,
-                aspectRatio = 4f / 3f,
+                aspectRatio = outgoingActive.aspectRatio,
             )
             pendingPlan = null
             imageTimestamps.clear()
@@ -226,7 +233,7 @@ class StandbyCameraController(context: Context) {
             runCatching {
                 outgoingActive.session.setRepeatingRequest(
                     outgoingActive.requestBuilder.build(),
-                    standbyCaptureCallback,
+                    createStandbyCaptureCallback(),
                     handler,
                 )
             }.onFailure { PLog.w(TAG, "Could not keep old active session in standby: " + it.message) }
@@ -590,6 +597,7 @@ class StandbyCameraController(context: Context) {
         standbyPreviewSurfaceTexture = previewSurfaceTexture
         standbyPreviewSurface = previewSurface
         standbyCaptureSize = output.size
+        standbyPreviewSize = previewSize
         standbyPreviewRequestBuilder = null
         standbyOpenedByController = true
         standbyImageReader = reader
@@ -735,6 +743,30 @@ class StandbyCameraController(context: Context) {
         }
         return null
     }
+
+    private fun createStandbyCaptureCallback(): CameraCaptureSession.CaptureCallback =
+        object : CameraCaptureSession.CaptureCallback() {
+            override fun onCaptureCompleted(
+                session: CameraCaptureSession,
+                request: CaptureRequest,
+                result: TotalCaptureResult,
+            ) {
+                if (session !== standbyCaptureSession) return
+                val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP) ?: return
+                rememberTimestamp(captureResultTimestamps, timestamp)
+                updateReadinessFromMatchedFrames(generation)
+            }
+
+            override fun onCaptureFailed(
+                session: CameraCaptureSession,
+                request: CaptureRequest,
+                failure: android.hardware.camera2.CaptureFailure,
+            ) {
+                if (session === standbyCaptureSession) {
+                    PLog.w(TAG, "Standby capture failed: reason=" + failure.reason)
+                }
+            }
+        }
 
     private fun attachStandbyReaderListener(reader: ImageReader, listenerGeneration: Long) {
         val callbackHandler = handler ?: return
@@ -995,6 +1027,7 @@ class StandbyCameraController(context: Context) {
         standbyPreviewSurface = null
         standbyPreviewSurfaceTexture = null
         standbyCaptureSize = null
+        standbyPreviewSize = null
         standbyCameraInfo = null
         if (session != null) {
             runCatching { session.stopRepeating() }
