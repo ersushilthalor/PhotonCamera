@@ -481,14 +481,14 @@ class StandbyCameraController(context: Context) {
         }
 
         if (!concurrentPairSupported) {
-            publishUnavailable(
-                phase = StandbyCameraPhase.CONCURRENT_COMBINATION_UNSUPPORTED,
-                message = "Android does not advertise this camera pair as a concurrent combination",
-                activeCameraId = activeOpenCameraId,
-                standbyCameraId = targetCamera.cameraId,
-                lensType = targetCamera.lensType,
+            // VCamera deliberately attempts a persistent dual-session open even when
+            // concurrentCameraIds is not advertised; some vendor HALs still allow it.
+            // Let openCamera/createCaptureSession decide instead of rejecting it here.
+            PLog.w(
+                TAG,
+                "Pair not declared concurrent; attempting persistent dual session anyway: " +
+                    activeOpenCameraId + " + " + standbyOpenCameraId
             )
-            return null
         }
 
         val ratio = if (previewSize.width > 0 && previewSize.height > 0) {
