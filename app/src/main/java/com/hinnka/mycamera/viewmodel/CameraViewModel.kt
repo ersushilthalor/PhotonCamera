@@ -591,7 +591,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     )
 
     private val cameraController = Camera2Controller(application)
-
+    val logicalDualPreviewReady: StateFlow<Boolean> = cameraController.logicalDualPreviewReady
 
     // 内容仓库（单例，与 GalleryViewModel 共享）
     private val contentRepository = ContentRepository.getInstance(application)
@@ -2917,6 +2917,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /**
      * 打开相机（Camera2 接口）
      */
+    fun setUltraWidePreviewSurfaceTexture(surfaceTexture: SurfaceTexture?) {
+        cameraController.setUltraWidePreviewSurfaceTexture(surfaceTexture)
+    }
+
     fun openCamera(surfaceTexture: SurfaceTexture) {
         PLog.d(TAG, "openCamera")
         if (currentSurfaceTexture === surfaceTexture && (state.value.isPreviewActive || cameraOpenInFlight)) {
@@ -3844,10 +3848,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         targetCamera?.let { camera ->
             setZoomRatioForCamera(camera.defaultVisibleZoomRatio(), camera.cameraId)
         }
-        // Physical lenses exposed by one logical Camera2 device can be switched by
-        // rebuilding only its capture session. Closing the CameraDevice here adds an
-        // avoidable black-frame/cold-open gap and defeats seamless physical handoff.
-        if (!sharesOpenCameraDevice) {
+        val isMainUltraWidePair = currentCamera != null && targetCamera != null &&
+            setOf(currentCamera.lensType, targetCamera.lensType) ==
+                setOf(LensType.BACK_MAIN, LensType.BACK_ULTRA_WIDE)
+        val canSwapLivePhysicalSources = sharesOpenCameraDevice &&
+            isMainUltraWidePair &&
+            cameraController.logicalDualPreviewReady.value
+        // Keep the same CameraDevice and its already-repeating dual-physical session only
+        // when both preview sources are confirmed live. Otherwise use the normal cold
+        // Camera2 path instead of displaying a stale/black secondary texture.
+        if (!canSwapLivePhysicalSources) {
             reopenCamera(preserveVideoRecording = true)
         }
     }
@@ -3865,7 +3875,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         syncVendorCaptureSettingsToController()
         cameraController.switchToCameraId(cameraId)
         setZoomRatioForCamera(ratio, cameraId)
-        if (!sharesOpenCameraDevice) {
+        val isMainUltraWidePair = currentCamera != null && targetCamera != null &&
+            setOf(currentCamera.lensType, targetCamera.lensType) ==
+                setOf(LensType.BACK_MAIN, LensType.BACK_ULTRA_WIDE)
+        val canSwapLivePhysicalSources = sharesOpenCameraDevice &&
+            isMainUltraWidePair &&
+            cameraController.logicalDualPreviewReady.value
+        if (!canSwapLivePhysicalSources) {
             reopenCamera(preserveVideoRecording = true)
         }
     }
