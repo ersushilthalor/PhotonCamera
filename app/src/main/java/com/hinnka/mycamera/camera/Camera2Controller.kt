@@ -2567,6 +2567,19 @@ class Camera2Controller(private val context: Context) {
                         !_state.value.videoRecordingState.isRecording &&
                         !_state.value.videoRecordingState.isProcessing
                     ) {
+                        val activeInfo = activeCameraInfo ?: _state.value.getCurrentCameraInfo()
+                        if (activeInfo?.lensType == LensType.BACK_ULTRA_WIDE &&
+                            previewSurfaceTexture !== texture
+                        ) {
+                            val oldSurface = previewSurface
+                            previewSurface = runCatching { Surface(texture) }.getOrNull()
+                            previewSurfaceTexture = texture
+                            if (previewSurface != null) {
+                                runCatching { oldSurface?.release() }
+                            } else {
+                                previewSurface = oldSurface
+                            }
+                        }
                         createPreviewSession()
                     }
                 } else {
@@ -4267,20 +4280,40 @@ class Camera2Controller(private val context: Context) {
             PLog.d(TAG, "Preview started")
 
             val standbyState = _state.value
+            val activeInfo = activeCameraInfo ?: standbyState.getCurrentCameraInfo()
             val standbyHandler = cameraHandler
-            if (standbyHandler != null &&
-                !standbyState.videoRecordingState.isRecording &&
-                !standbyState.videoRecordingState.isProcessing
-            ) {
+            val standbyTexture = when (activeInfo?.lensType) {
+                LensType.BACK_ULTRA_WIDE -> mainPreviewSurfaceTexture
+                else -> ultraWidePreviewSurfaceTexture
+            }
+            val standbyModeSupported =
+                standbyState.captureMode == CaptureMode.PHOTO &&
+                    !standbyState.useRaw &&
+                    !standbyState.useP010 &&
+                    !standbyState.photoPreviewStabilizationEnabled &&
+                    !shouldUseAlgorithmicStabilization() &&
+                    !standbyState.videoRecordingState.isRecording &&
+                    !standbyState.videoRecordingState.isProcessing
+            if (standbyHandler != null && standbyModeSupported && standbyTexture != null) {
                 standbyCameraController.prepare(
-                    activeCamera = standbyState.getCurrentCameraInfo(),
+                    activeCamera = activeInfo,
                     availableCameras = standbyState.availableCameras,
                     activeOpenCameraId = activeOpenCameraId,
                     previewSize = standbyState.currentPreviewSize,
                     callbackHandler = standbyHandler,
+                    previewSurfaceTexture = standbyTexture,
+                    preferredCaptureSize = standbyState.currentCaptureSize,
+                )
+                PLog.i(
+                    TAG,
+                    "Persistent standby preview requested: active=" + activeInfo?.cameraId +
+                        ", standbyTexture=" + System.identityHashCode(standbyTexture) +
+                        ", size=" + standbyState.currentPreviewSize + ", capture=" + standbyState.currentCaptureSize
                 )
             } else {
-                standbyCameraController.release("standby disabled while video recording is active")
+                standbyCameraController.release(
+                    "instant standby unavailable for this capture mode, stabilization, or missing GL surface"
+                )
             }
 
         } catch (e: CameraAccessException) {
