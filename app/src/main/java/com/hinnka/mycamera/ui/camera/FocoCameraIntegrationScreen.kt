@@ -154,6 +154,7 @@ fun FocoCameraIntegrationScreen(
             uhdSupported = VideoResolutionPreset.UHD_2160P in photon.videoCapabilities.availableResolutions,
             fps60Supported = VideoFpsPreset.FPS_60 in photon.videoCapabilities.availableFps,
             stabilizationSupported = photon.videoCapabilities.availableStabilizationModes.isNotEmpty(),
+            enhancedStabilizationSupported = VideoStabilizationMode.ENHANCED in photon.videoCapabilities.availableStabilizationModes,
             hdrVideoSupported = photon.videoCapabilities.linearTonemapSupported,
             evMin = photon.getExposureCompensationRange().lower,
             evMax = photon.getExposureCompensationRange().upper,
@@ -182,7 +183,7 @@ fun FocoCameraIntegrationScreen(
         focoSettings.resolution = if (photon.currentCaptureSize.width.toLong() * photon.currentCaptureSize.height >= 40_000_000L) ResolutionSetting.MP50 else ResolutionSetting.MP12
         focoSettings.videoResolution = if (photon.videoConfig.resolution == VideoResolutionPreset.UHD_2160P) VideoResolution.UHD else VideoResolution.FHD
         focoSettings.frameRate = if (photon.videoConfig.fps == VideoFpsPreset.FPS_60) FrameRate.FPS60 else FrameRate.FPS30
-        focoSettings.stabilization = photon.videoConfig.stabilizationMode != VideoStabilizationMode.OFF
+        focoSettings.stabilization = photon.videoConfig.stabilizationMode == VideoStabilizationMode.ENHANCED
         focoSettings.hdrVideo = videoHdrEnabled
         focoSettings.torch = photon.videoConfig.torchEnabled
         focoSettings.grid = if (!photon.showGrid) GridSetting.NONE else when (photon.gridStyle) {
@@ -376,7 +377,7 @@ fun FocoCameraIntegrationScreen(
                         if (target in viewModel.state.value.videoCapabilities.availableFps) viewModel.setVideoFps(target)
                     }
                     SettingKey.STABILIZATION -> viewModel.setVideoStabilizationMode(
-                        if (focoSettings.stabilization) VideoStabilizationMode.EIS else VideoStabilizationMode.OFF
+                        if (focoSettings.stabilization) VideoStabilizationMode.ENHANCED else VideoStabilizationMode.OFF
                     )
                     SettingKey.HDR_VIDEO -> viewModel.setVideoHdrEnabled(focoSettings.hdrVideo)
                     SettingKey.TORCH -> if (viewModel.state.value.captureMode == CaptureMode.VIDEO) {

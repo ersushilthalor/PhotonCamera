@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.BackHand
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Camera
 import androidx.compose.material.icons.outlined.FlashOn
@@ -301,10 +300,10 @@ private fun videoGeneral(state: AppState, settings: AppSettings): List<RowSpec> 
     ) { settings.frameRate = FrameRate.entries[it] },
     RowSpec(
         label = "Video stabilization",
-        values = listOf("Off", "Standard"),
-        choices = listOf(iconChoice("Off", Icons.Outlined.Block), iconChoice("Standard", Icons.Outlined.BackHand)),
-        selected = if (settings.stabilization && state.caps.stabilizationSupported) 1 else 0,
-        enabled = state.caps.stabilizationSupported,
+        values = listOf("Off", "EIS+"),
+        choices = listOf(iconChoice("Off", Icons.Outlined.Block), textChoice("EIS+", "EIS+")),
+        selected = if (settings.stabilization && state.caps.enhancedStabilizationSupported) 1 else 0,
+        enabled = state.caps.enhancedStabilizationSupported,
         key = SettingKey.STABILIZATION,
     ) { settings.stabilization = it == 1 },
     RowSpec(

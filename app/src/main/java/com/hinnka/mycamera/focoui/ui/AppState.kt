@@ -42,6 +42,7 @@ data class Capabilities(
     val uhdSupported: Boolean = false,
     val fps60Supported: Boolean = false,
     val stabilizationSupported: Boolean = false,
+    val enhancedStabilizationSupported: Boolean = false,
     val hdrVideoSupported: Boolean = false,
     val evMin: Int = 0,
     val evMax: Int = 0,
