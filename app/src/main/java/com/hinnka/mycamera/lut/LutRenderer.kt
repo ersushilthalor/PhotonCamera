@@ -2418,7 +2418,14 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         val sizeChanged = previewWidth != width || previewHeight != height
         previewWidth = width
         previewHeight = height
-        surfaceTexture?.setDefaultBufferSize(width, height)
+        // Resize only the currently displayed lens input. The inactive camera is
+        // still streaming into its own SurfaceTexture and must keep its negotiated size.
+        val activeInputSurfaceTexture = if (useUltraWidePreviewSource) {
+            ultraWideSurfaceTexture
+        } else {
+            surfaceTexture
+        }
+        activeInputSurfaceTexture?.setDefaultBufferSize(width, height)
         if (sizeChanged && previewStabilizationUseCase != null) {
             mgcEisHardwareBufferRenderer.release()
             mgcEisYuvRenderer.release()
