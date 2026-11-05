@@ -6422,7 +6422,7 @@ class Camera2Controller(private val context: Context) {
                                         onCameraError?.invoke(
                                             error,
                                             "相机设备错误 ($error)",
-                                            error == ERROR_CAMERA_IN_USE || error == ERROR_MAX_CAMERAS_IN_USE,
+                                            true,
                                         )
                                     } else {
                                         standbyCameraController.handleExternalStandbyDisconnected(
