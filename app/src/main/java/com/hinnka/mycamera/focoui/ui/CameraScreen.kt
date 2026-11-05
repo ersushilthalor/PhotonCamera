@@ -831,6 +831,8 @@ private fun ZoomChips(state: AppState, actions: CameraActions, iconRotation: Flo
 
     val currentMinZoom = state.minZoom.coerceAtLeast(0.001f)
     val currentMaxZoom = state.maxZoom.coerceAtLeast(currentMinZoom + 0.001f)
+    val sliderExpandThresholdPx = with(LocalDensity.current) { 56.dp.toPx() }
+    val compactZoomSensitivityPx = 260f
 
     // Return to the compact lens chips after the user has finished adjusting zoom.
     LaunchedEffect(sliderExpanded, zoomDragging, lastZoomInteraction) {
@@ -852,7 +854,7 @@ private fun ZoomChips(state: AppState, actions: CameraActions, iconRotation: Flo
             Modifier
                 .width(animatedWidth)
                 .height(42.dp)
-                .pointerInput(currentMinZoom, currentMaxZoom) {
+                .pointerInput(currentMinZoom, currentMaxZoom, sliderExpandThresholdPx) {
                     var dragDistance = 0f
                     var gestureStartZoom = state.zoom
                     detectHorizontalDragGestures(
@@ -866,26 +868,28 @@ private fun ZoomChips(state: AppState, actions: CameraActions, iconRotation: Flo
                             lastZoomInteraction = System.currentTimeMillis()
 
                             if (!sliderExpanded) {
+                                // Short swipes zoom immediately in either direction. A longer
+                                // horizontal drag opens the expanded swipe surface instead.
                                 dragDistance += dragAmount
-                                if (dragDistance > 10.dp.toPx()) {
-                                    // A right swipe morphs the existing chip bar into the slider.
+                                if (kotlin.math.abs(dragDistance) >= sliderExpandThresholdPx) {
                                     sliderExpanded = true
                                     dragDistance = 0f
-                                    gestureStartZoom = state.zoom.coerceIn(currentMinZoom, currentMaxZoom)
-                                } else if (dragDistance < 0f) {
-                                    // Preserve the compact bar's original left-swipe zoom behaviour.
-                                    actions.setZoom(
-                                        (state.zoom * exp(dragAmount / 260f))
-                                            .coerceIn(currentMinZoom, currentMaxZoom)
-                                    )
+                                    // Do not carry the compact swipe's temporary zoom into the slider.
+                                    actions.setZoom(gestureStartZoom)
+                                } else {
+                                    val nextZoom = (
+                                        gestureStartZoom *
+                                            exp(-dragDistance.toDouble() / compactZoomSensitivityPx).toFloat()
+                                    ).coerceIn(currentMinZoom, currentMaxZoom)
+                                    actions.setZoom(nextZoom)
                                 }
                             } else {
-                                // The expanded control is a directly draggable slider, not a scrollable row.
+                                // Swipe directly on the expanded surface: left = zoom in, right = zoom out.
                                 dragDistance += dragAmount
                                 val logRange = ln((currentMaxZoom / currentMinZoom).toDouble())
                                 val fraction = dragDistance / size.width.coerceAtLeast(1).toFloat()
                                 val nextZoom = (
-                                    gestureStartZoom * exp(fraction.toDouble() * logRange).toFloat()
+                                    gestureStartZoom * exp(-fraction.toDouble() * logRange).toFloat()
                                 ).coerceIn(currentMinZoom, currentMaxZoom)
                                 actions.setZoom(nextZoom)
                             }
@@ -966,110 +970,51 @@ private fun FocoZoomSliderTrack(
     val safeMax = maxZoom.coerceAtLeast(safeMin + 0.001f)
     val logMin = ln(safeMin.toDouble())
     val logRange = (ln(safeMax.toDouble()) - logMin).coerceAtLeast(0.0001)
-    val progress = (
-        (ln(zoom.coerceIn(safeMin, safeMax).toDouble()) - logMin) / logRange
-    ).toFloat().coerceIn(0f, 1f)
-    val trackInset = 12.dp
-    val handleColor = Color(0xFFE9BDEB)
-    val bubbleColor = Color(0xFFF0DDF0)
+    val labelInset = 12.dp
 
     BoxWithConstraints(modifier) {
-        // Capture before the nested stop-label lambda to avoid losing the layout receiver.
         val sliderWidth = maxWidth
-        val trackWidth = (sliderWidth - trackInset * 2).coerceAtLeast(0.dp)
-        val handleOffset = (
-            trackInset + trackWidth * progress - 2.dp
-        ).coerceIn(0.dp, (maxWidth - 4.dp).coerceAtLeast(0.dp))
-        val bubbleOffset = (
-            trackInset + trackWidth * progress - 28.dp
-        ).coerceIn(0.dp, (maxWidth - 56.dp).coerceAtLeast(0.dp))
+        val labelWidth = 22.dp
+        val labelTrackWidth = (sliderWidth - labelInset * 2).coerceAtLeast(0.dp)
 
+        // Keep the zoom readout fixed; the user controls zoom by swiping anywhere
+        // on this expanded surface rather than dragging a movable thumb.
         Box(
             Modifier
                 .fillMaxSize()
                 .clip(CircleShape)
                 .background(Color(0xD91D1D1D))
-        ) {
-            Canvas(Modifier.fillMaxSize()) {
-                val insetPx = trackInset.toPx()
-                val innerWidth = (size.width - insetPx * 2).coerceAtLeast(0f)
-                val tickCount = (innerWidth / 6.dp.toPx()).roundToInt().coerceIn(12, 90)
-                val centerY = 17.dp.toPx()
-                for (index in 0..tickCount) {
-                    val x = insetPx + innerWidth * index / tickCount
-                    val major = index % 5 == 0
-                    val tickHeight = if (major) 14.dp.toPx() else 7.dp.toPx()
-                    drawLine(
-                        color = Color.White.copy(alpha = if (major) 0.78f else 0.4f),
-                        start = Offset(x, centerY - tickHeight / 2f),
-                        end = Offset(x, centerY + tickHeight / 2f),
-                        strokeWidth = if (major) 1.25.dp.toPx() else 0.9.dp.toPx()
-                    )
-                }
-                stops.forEach { stop ->
-                    if (stop in safeMin..safeMax) {
-                        val stopProgress = (
-                            (ln(stop.toDouble()) - logMin) / logRange
-                        ).toFloat().coerceIn(0f, 1f)
-                        val x = insetPx + innerWidth * stopProgress
-                        drawLine(
-                            color = Color.White.copy(alpha = 0.92f),
-                            start = Offset(x, 5.dp.toPx()),
-                            end = Offset(x, 29.dp.toPx()),
-                            strokeWidth = 1.35.dp.toPx()
-                        )
-                    }
-                }
-            }
+        )
 
-            stops.filter { it in safeMin..safeMax }.forEach { stop ->
-                val stopProgress = (
-                    (ln(stop.toDouble()) - logMin) / logRange
-                ).toFloat().coerceIn(0f, 1f)
-                val labelOffset = (
-                    trackInset + trackWidth * stopProgress - 11.dp
-                ).coerceIn(0.dp, (sliderWidth - 22.dp).coerceAtLeast(0.dp))
-                Text(
-                    text = ZoomMath.formatZoom(stop).removeSuffix("×"),
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .offset(x = labelOffset, y = (-1).dp)
-                        .width(22.dp),
-                    color = Color.White.copy(alpha = 0.9f),
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Medium,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    softWrap = false
-                )
-            }
+        Text(
+            text = ZoomMath.formatZoom(zoom),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 2.dp),
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false
+        )
 
-            Box(
-                Modifier
-                    .align(Alignment.TopStart)
-                    .offset(x = handleOffset, y = 5.dp)
-                    .width(4.dp)
-                    .height(25.dp)
-                    .clip(CircleShape)
-                    .background(handleColor)
-            )
-        }
-
-        Box(
-            Modifier
-                .align(Alignment.TopStart)
-                .offset(x = bubbleOffset, y = (-21).dp)
-                .width(56.dp)
-                .clip(CircleShape)
-                .background(bubbleColor)
-                .padding(vertical = 3.dp),
-            contentAlignment = Alignment.Center
-        ) {
+        stops.filter { it in safeMin..safeMax }.forEach { stop ->
+            val stopProgress = (
+                (ln(stop.toDouble()) - logMin) / logRange
+            ).toFloat().coerceIn(0f, 1f)
+            val labelOffset = (
+                labelInset + labelTrackWidth * stopProgress - labelWidth / 2
+            ).coerceIn(0.dp, (sliderWidth - labelWidth).coerceAtLeast(0.dp))
             Text(
-                ZoomMath.formatZoom(zoom),
-                color = Color(0xFF28202B),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
+                text = ZoomMath.formatZoom(stop).removeSuffix("×"),
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .offset(x = labelOffset, y = (-1).dp)
+                    .width(labelWidth),
+                color = Color.White.copy(alpha = 0.9f),
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
                 maxLines = 1,
                 softWrap = false
             )
