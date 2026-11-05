@@ -1171,11 +1171,16 @@ class Camera2Controller(private val context: Context) {
                 }
             }
 
-            realtimeStabilizationCoordinator.submitCaptureResult(
-                result = result,
-                request = request,
-                outputPhysicalCameraId = activeOutputPhysicalCameraId,
-            )
+            // Only the currently active CameraCaptureSession may feed the EIS timeline.
+            // Results from a retired session can arrive after a physical-output handoff; using
+            // the new global physical-camera ID for those old frames mixes two sensors' metadata.
+            if (session === captureSession) {
+                realtimeStabilizationCoordinator.submitCaptureResult(
+                    result = result,
+                    request = request,
+                    outputPhysicalCameraId = activeOutputPhysicalCameraId,
+                )
+            }
 
             lastCaptureResult = result
             logVideoCaptureStats(result)
@@ -6809,19 +6814,71 @@ class Camera2Controller(private val context: Context) {
         if (desiredPhysicalCameraId == activeOutputPhysicalCameraId) return false
         if (cameraDevice == null || previewSurface == null) return false
 
+        val openCameraId = getActiveOpenCameraId()
+        val openCharacteristics = getCameraCharacteristicsOrNull(
+            openCameraId,
+            "physical zoom stabilization timing",
+        ) ?: run {
+            PLog.e(TAG, "Cannot update EIS calibration: open camera characteristics unavailable")
+            return false
+        }
+        val requestedPhysicalCameraId = desiredPhysicalCameraId
+            ?.takeIf { it != openCameraId }
+        val physicalCharacteristics = requestedPhysicalCameraId?.let {
+            getCameraCharacteristicsOrNull(it, "physical zoom stabilization calibration")
+        }
+        // Match the session's existing safe fallback: if a physical sensor's metadata cannot
+        // be read, use the logical output instead of keeping the previous lens calibration.
+        val resolvedPhysicalCameraId = requestedPhysicalCameraId
+            ?.takeIf { physicalCharacteristics != null }
+        if (requestedPhysicalCameraId != null && resolvedPhysicalCameraId == null) {
+            PLog.w(
+                TAG,
+                "Physical output calibration unavailable for $requestedPhysicalCameraId; " +
+                    "falling back to logical camera $openCameraId",
+            )
+        }
+        val stabilizationCharacteristics = physicalCharacteristics ?: openCharacteristics
+        val stabilizationCameraId = resolvedPhysicalCameraId ?: openCameraId
+
         PLog.i(
             TAG,
             "Recreating session for zoom physical output: " +
-                    "old=$activeOutputPhysicalCameraId, new=$desiredPhysicalCameraId, " +
+                    "old=$activeOutputPhysicalCameraId, new=$resolvedPhysicalCameraId, " +
                     "targetZoom=${getTargetZoomRatioByMain(state, state.getCurrentCameraInfo())}"
         )
 
-        activeOutputPhysicalCameraId = desiredPhysicalCameraId
-        refreshActiveFocusLimit()
-        refreshHyperfocalFocusDistanceIfEnabled(updatePreview = false)
+        // Retire the old session before changing the coordinator's camera calibration. Its
+        // late CaptureResults must never be tagged with the new active physical-camera ID.
         safeCloseCaptureSession(captureSession, "physical zoom output changed")
         captureSession = null
         _enginePreviewSource.value = null
+        activeOutputPhysicalCameraId = resolvedPhysicalCameraId
+
+        // Flush timestamped YUV images still queued by the previous sensor before the new
+        // calibration starts accepting CaptureResults and image boundaries.
+        stabilizationImageReader?.let { reader ->
+            realtimeStabilizationCoordinator.discardStabilizationImages(reader)
+            reader.discardPendingImages()
+        }
+
+        val stabilizationCameraChanged = realtimeStabilizationCoordinator.configureCamera(
+            cameraId = stabilizationCameraId,
+            characteristics = stabilizationCharacteristics,
+            timingCharacteristics = openCharacteristics,
+        )
+        if (_state.value.videoRecordingState.isRecording) {
+            videoRecorder.onCameraSwitched(
+                sensorOrientationDegrees = stabilizationCharacteristics.get(
+                    CameraCharacteristics.SENSOR_ORIENTATION,
+                ) ?: cachedSensorOrientation,
+                frontFacing = isCurrentCameraFrontFacing(),
+                restartStabilization = stabilizationCameraChanged,
+            )
+        }
+
+        refreshActiveFocusLimit()
+        refreshHyperfocalFocusDistanceIfEnabled(updatePreview = false)
         createPreviewSession(openGeneration = cameraOpenGeneration)
         return true
     }
