@@ -917,6 +917,21 @@ class Camera2Controller(private val context: Context) {
         shot.submitted = true
     }
 
+    private fun attachImageReaderListener(reader: ImageReader) {
+        reader.setOnImageAvailableListener({ source ->
+            try {
+                while (canAcquireImage("Too many open images")) {
+                    val image = trackImage(source.acquireNextImage()) ?: break
+                    processOrBufferImageForCaptureResult(image)
+                }
+            } catch (error: Exception) {
+                PLog.e(TAG, "Error in onImageAvailable", error)
+                photoCaptures.values.filter { it.reader === source }.toList()
+                    .forEach { failPhotoCapture(it, "image acquisition failed") }
+            }
+        }, cameraHandler)
+    }
+
     private fun trackImage(image: Image?): SafeImage? {
         if (image != null) {
             openImagesCount.getAndIncrement()
@@ -2204,6 +2219,7 @@ class Camera2Controller(private val context: Context) {
         closeImageReader: Boolean = true,
         preserveStandbyCamera: Boolean = false,
     ) {
+        activeCameraInfo = null
         _logicalDualPreviewReady.value = false
         logicalDualMatchedCaptureFrames = 0
         activeLogicalDualPreviewPlan = null
@@ -3273,20 +3289,8 @@ class Camera2Controller(private val context: Context) {
                     captureSize.height,
                     captureFormat,
                     readerMaxImages
-                ).apply {
-                    setOnImageAvailableListener({ reader ->
-                        try {
-                            while (canAcquireImage("Too many open images")) {
-                                val image = trackImage(reader.acquireNextImage()) ?: break
-                                processOrBufferImageForCaptureResult(image)
-                            }
-                        } catch (e: Exception) {
-                            PLog.e(TAG, "Error in onImageAvailable", e)
-                            photoCaptures.values.filter { it.reader === reader }.toList()
-                                .forEach { failPhotoCapture(it, "image acquisition failed") }
-                        }
-                    }, cameraHandler)
-                }
+                )
+                imageReader?.let(::attachImageReaderListener)
 
             } else {
                 safeCloseImageReader(imageReader)
@@ -9788,7 +9792,9 @@ class Camera2Controller(private val context: Context) {
             }
             return
         }
-        val expectedSurfaceIsCurrent = previewSurfaceTexture === expectedSurfaceTexture
+        val expectedSurfaceIsCurrent =
+            previewSurfaceTexture === expectedSurfaceTexture ||
+                mainPreviewSurfaceTexture === expectedSurfaceTexture
         val expectedSurfaceIsPending = pendingCameraOpenRequest?.surfaceTexture === expectedSurfaceTexture
         if (
             expectedSurfaceTexture != null &&
