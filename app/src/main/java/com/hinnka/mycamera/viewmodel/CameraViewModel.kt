@@ -3836,6 +3836,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /**
      * 切换到指定的镜头类型
      */
+    fun isInstantLogicalLensSwitchReady(cameraId: String): Boolean {
+        val currentCamera = state.value.getCurrentCameraInfo() ?: return false
+        val targetCamera = state.value.availableCameras.firstOrNull { it.cameraId == cameraId } ?: return false
+        val isMainUltraWidePair = setOf(currentCamera.lensType, targetCamera.lensType) ==
+            setOf(LensType.BACK_MAIN, LensType.BACK_ULTRA_WIDE)
+        val sharesOpenCameraDevice = runCatching {
+            currentCamera.getOpenCameraId() == targetCamera.getOpenCameraId()
+        }.getOrDefault(false)
+        return isMainUltraWidePair && sharesOpenCameraDevice && logicalDualPreviewReady.value
+    }
+
     fun switchToLens(cameraId: String) {
         if (isVideoLensLocked()) return
         val currentCamera = state.value.getCurrentCameraInfo()
