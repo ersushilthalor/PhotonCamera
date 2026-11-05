@@ -69,6 +69,7 @@ import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.CameraState
 import com.hinnka.mycamera.camera.FocusPointSource
+import com.hinnka.mycamera.camera.LensType
 import com.hinnka.mycamera.camera.PhotoCaptureProgress
 import com.hinnka.mycamera.data.CaptureButtonStyle
 import com.hinnka.mycamera.data.DevelopAnimationStyle
@@ -228,6 +229,7 @@ fun CameraScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
+    val logicalDualPreviewReady by viewModel.logicalDualPreviewReady.collectAsState()
     val uiStyle by viewModel.uiStyle.collectAsState()
     val isCameraInitialized by viewModel.isInitialized.collectAsState()
     val latestPhoto by galleryViewModel.latestPhoto.collectAsState()
@@ -1277,6 +1279,9 @@ fun CameraScreen(
                                 }
                                 viewModel.closeCamera(surfaceTexture)
                             },
+                            onUltraWideSurfaceTextureReady = viewModel::setUltraWidePreviewSurfaceTexture,
+                            useUltraWidePreviewSource = logicalDualPreviewReady &&
+                                state.currentLensType == LensType.BACK_ULTRA_WIDE,
                             onTap = { x, y, w, h ->
                                 if (state.isFocusLocked) {
                                     viewModel.unlockFocus()
