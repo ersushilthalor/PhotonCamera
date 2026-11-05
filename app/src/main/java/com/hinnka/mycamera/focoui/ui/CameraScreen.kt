@@ -201,8 +201,8 @@ fun CameraScreen(
                     Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .height(44.dp)
                         .padding(bottom = 8.dp + if (isVideo) videoPreviewExtension else 0.dp)
+                        .height(44.dp)
                 ) {
                     if (state.zoomChips.size > 1) {
                         ZoomChips(
@@ -224,7 +224,7 @@ fun CameraScreen(
                                     actions.haptic()
                                     state.lutPanelOpen = !state.lutPanelOpen
                                 }
-                                .semantics { contentDescription = "Open LUT selector" },
+                                .semantics { contentDescription = if (state.lutPanelOpen) "Close LUT selector" else "Open LUT selector" },
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(Icons.Outlined.Palette, null, tint = Color.White, modifier = Modifier.size(25.dp))
