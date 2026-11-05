@@ -293,6 +293,8 @@ class Camera2Controller(private val context: Context) {
     private var ultraWidePreviewSurface: Surface? = null
     private var logicalDualPreviewRequestedForSession = false
     private var forceSinglePreviewAfterDualFailure = false
+    private var activeLogicalDualPreviewPlan: LogicalDualPreviewPlan? = null
+    private var logicalDualMatchedCaptureFrames = 0
     private val _logicalDualPreviewReady = MutableStateFlow(false)
     val logicalDualPreviewReady: StateFlow<Boolean> = _logicalDualPreviewReady.asStateFlow()
     private var imageReader: ImageReader? = null
@@ -1181,6 +1183,30 @@ class Camera2Controller(private val context: Context) {
             if (session === captureSession && _state.value.previewFirstFrameTimestampNs == null) {
                 result.get(CaptureResult.SENSOR_TIMESTAMP)?.let { timestamp ->
                     _state.update { it.copy(previewFirstFrameTimestampNs = timestamp) }
+                }
+            }
+
+            // "Session configured" is not proof that both physical outputs are delivering
+            // frames. Arm zero-reopen lens switching only after metadata from BOTH sensors
+            // has actually reached the active repeating request.
+            if (session === captureSession && logicalDualPreviewRequestedForSession) {
+                val dualPlan = activeLogicalDualPreviewPlan
+                val physicalResultIds = result.physicalCameraResults.keys
+                val bothPhysicalSensorsReported = dualPlan != null &&
+                    physicalResultIds.contains(dualPlan.mainPhysicalCameraId) &&
+                    physicalResultIds.contains(dualPlan.ultraWidePhysicalCameraId)
+                if (bothPhysicalSensorsReported) {
+                    logicalDualMatchedCaptureFrames++
+                    if (logicalDualMatchedCaptureFrames >= 2 && !_logicalDualPreviewReady.value) {
+                        _logicalDualPreviewReady.value = true
+                        PLog.i(
+                            TAG,
+                            "Live dual preview READY after $logicalDualMatchedCaptureFrames physical result frames: " +
+                                "main=" + dualPlan.mainPhysicalCameraId + ", ultraWide=" + dualPlan.ultraWidePhysicalCameraId
+                        )
+                    }
+                } else {
+                    logicalDualMatchedCaptureFrames = 0
                 }
             }
 
@@ -2170,6 +2196,8 @@ class Camera2Controller(private val context: Context) {
         closeImageReader: Boolean = true,
         preserveStandbyCamera: Boolean = false,
     ) {
+        _logicalDualPreviewReady.value = false
+        logicalDualMatchedCaptureFrames = 0
         if (preserveStandbyCamera) {
             PLog.d(TAG, "Preserving ready standby camera for lens handoff: $reason")
         } else {
@@ -2570,6 +2598,7 @@ class Camera2Controller(private val context: Context) {
         val mainPhysicalId = main.getBoundPhysicalCameraId(1f)
             ?.takeIf { physicalIds.contains(it) && it != ultraWidePhysicalId }
             ?: main.cameraId.takeIf { physicalIds.contains(it) && it != ultraWidePhysicalId }
+            ?: return null
         if (mainPhysicalId == ultraWidePhysicalId) return null
 
         val target = state.currentPreviewSize
@@ -2585,7 +2614,7 @@ class Camera2Controller(private val context: Context) {
             val targetArea = target.width.toLong() * target.height
             val areaError = kotlin.math.abs(size.width.toLong() * size.height - targetArea).toDouble() /
                 targetArea.coerceAtLeast(1L).toDouble()
-            ratioError * 4.0 + areaError * 0.2
+            ratioError.toDouble() * 4.0 + areaError * 0.2
         } ?: target
         runCatching { texture.setDefaultBufferSize(selectedSize.width, selectedSize.height) }
         return LogicalDualPreviewPlan(mainPhysicalId, ultraWidePhysicalId, selectedSize)
@@ -2598,6 +2627,8 @@ class Camera2Controller(private val context: Context) {
         if (!logicalDualPreviewRequestedForSession) return false
         PLog.w(TAG, "Logical dual preview rejected; retrying a single output: " + reason)
         logicalDualPreviewRequestedForSession = false
+        activeLogicalDualPreviewPlan = null
+        logicalDualMatchedCaptureFrames = 0
         forceSinglePreviewAfterDualFailure = true
         _logicalDualPreviewReady.value = false
         createPreviewSession(openGeneration = openGeneration)
@@ -3390,6 +3421,8 @@ class Camera2Controller(private val context: Context) {
             null
         }
         logicalDualPreviewRequestedForSession = ultraWideSurface != null && logicalDualPlan != null
+        activeLogicalDualPreviewPlan = logicalDualPlan.takeIf { logicalDualPreviewRequestedForSession }
+        logicalDualMatchedCaptureFrames = 0
         _logicalDualPreviewReady.value = false
         if (logicalDualPreviewRequestedForSession) {
             PLog.i(
@@ -4151,9 +4184,9 @@ class Camera2Controller(private val context: Context) {
             return
         }
         captureSession = session
-        _logicalDualPreviewReady.value = logicalDualPreviewRequestedForSession
-        if (_logicalDualPreviewReady.value) {
-            PLog.i(TAG, "Persistent logical ultra-wide preview is streaming alongside main")
+        _logicalDualPreviewReady.value = false
+        if (logicalDualPreviewRequestedForSession) {
+            PLog.i(TAG, "Logical dual outputs configured; waiting for physical frames before declaring ready")
         }
         _state.update { it.copy(previewFirstFrameTimestampNs = null) }
 
