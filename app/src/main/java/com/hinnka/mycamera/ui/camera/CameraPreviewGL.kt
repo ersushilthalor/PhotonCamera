@@ -65,6 +65,8 @@ fun CameraPreviewGL(
     meteringMode: MeteringMode = MeteringMode.SYSTEM_DEFAULT,
     onSurfaceTextureReady: (SurfaceTexture) -> Unit,
     onSurfaceDestroyed: (SurfaceTexture?) -> Unit,
+    onUltraWideSurfaceTextureReady: (SurfaceTexture?) -> Unit = {},
+    useUltraWidePreviewSource: Boolean = false,
     onTap: (Float, Float, Int, Int) -> Unit,
     onLongPress: (Float, Float, Int, Int) -> Unit,
     onHistogramUpdated: ((IntArray) -> Unit)? = null,
@@ -92,6 +94,7 @@ fun CameraPreviewGL(
     var resumeGeneration by remember { mutableIntStateOf(0) }
     val currentOnTap by rememberUpdatedState(onTap)
     val currentOnLongPress by rememberUpdatedState(onLongPress)
+    val currentOnUltraWideSurfaceTextureReady by rememberUpdatedState(onUltraWideSurfaceTextureReady)
 
     // AWB/CCM changes update only the engine pass, not the entire Compose/LUT layer.
     LaunchedEffect(glSurfaceViewRef, enginePreviewPlan, resumeGeneration) {
@@ -135,6 +138,7 @@ fun CameraPreviewGL(
         var notifiedPreviewSize by remember { mutableStateOf<Size?>(null) }
         var notifiedResumeGeneration by remember { mutableIntStateOf(-1) }
         var notifiedSurfaceTexture by remember { mutableStateOf<SurfaceTexture?>(null) }
+        var notifiedUltraWideSurfaceTexture by remember { mutableStateOf<SurfaceTexture?>(null) }
         // 标记 Surface 是否已经准备好
         var surfaceAvailable by remember { mutableStateOf(false) }
 
@@ -193,6 +197,19 @@ fun CameraPreviewGL(
                             }
                         }
 
+                        glSurfaceView.onUltraWideSurfaceReady = {
+                            val ultraWideTexture = glSurfaceView.getUltraWideSurfaceTexture()
+                            if (ultraWideTexture != null && notifiedUltraWideSurfaceTexture !== ultraWideTexture) {
+                                notifiedUltraWideSurfaceTexture = ultraWideTexture
+                                currentOnUltraWideSurfaceTextureReady(ultraWideTexture)
+                            }
+                        }
+                        glSurfaceView.onUltraWideSurfaceDestroyed = {
+                            if (glSurfaceViewRef === glSurfaceView) {
+                                notifiedUltraWideSurfaceTexture = null
+                                currentOnUltraWideSurfaceTextureReady(null)
+                            }
+                        }
                         glSurfaceView.onSurfaceDestroyed = {
                             val destroyedSurfaceTexture = glSurfaceView.getSurfaceTexture()
                             if (glSurfaceViewRef === glSurfaceView) {
@@ -208,6 +225,15 @@ fun CameraPreviewGL(
                             }
                         }
 
+                        // SurfaceTexture callbacks can fire before AndroidView.update installs
+                        // the callback; publish an already-created standby Surface here as well.
+                        glSurfaceView.getUltraWideSurfaceTexture()?.let { ultraWideTexture ->
+                            if (notifiedUltraWideSurfaceTexture !== ultraWideTexture) {
+                                notifiedUltraWideSurfaceTexture = ultraWideTexture
+                                currentOnUltraWideSurfaceTextureReady(ultraWideTexture)
+                            }
+                        }
+                        glSurfaceView.setPreviewSource(useUltraWidePreviewSource)
                         glSurfaceView.onHistogramUpdated = { onHistogramUpdated?.invoke(it) }
                         glSurfaceView.onMeteringUpdated = { w, l -> onMeteringUpdated?.invoke(w, l) }
                         glSurfaceView.onHighlightPointUpdated = { hx, hy -> onHighlightPointUpdated?.invoke(hx, hy) }
@@ -222,6 +248,7 @@ fun CameraPreviewGL(
                         viewHeight = glSurfaceView.height
                         glSurfaceView.setSensorOrientation(sensorOrientation)
                         glSurfaceView.setLensFacing(lensFacing)
+                        glSurfaceView.setPreviewSource(useUltraWidePreviewSource)
                         glSurfaceView.setDeviceRotation(rotationDegrees.toInt())
                         glSurfaceView.setCalibrationOffset(calibrationOffset)
                         glSurfaceView.setCaptureAspectRatio(aspectRatio)
