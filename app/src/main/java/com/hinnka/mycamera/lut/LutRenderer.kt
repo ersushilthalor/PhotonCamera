@@ -66,6 +66,9 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         private const val EYE_FOCUS_TIMING_HEADROOM = 1.15
         private const val EYE_FOCUS_TIMING_LOG_INTERVAL_MS = 2_000L
         private const val CLARITY_PYRAMID_LEVELS = 3
+        // Match MGC's fixed 5% per-edge safety crop while the first timestamp-matched
+        // stabilization frame is pending, avoiding a visible crop jump at EIS handoff.
+        private const val EIS_OUTPUT_CROP_ZOOM = 1.1111112f
     }
 
     private val colorProgramCache = PreviewColorProgramCache()
@@ -218,6 +221,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     // MVP 变换矩阵（用于 center crop）；EIS 输出可能使用不同于 OES 预览的输入尺寸。
     private val mvpMatrix = FloatArray(16)
     private val stabilizationMvpMatrix = FloatArray(16)
+    private val eisFallbackMvpMatrix = FloatArray(16)
 
     // 相机 SurfaceTexture
     private var surfaceTexture: SurfaceTexture? = null
@@ -1299,15 +1303,32 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         targetHeight: Int = viewportHeight,
     ): FloatArray {
         val stabilized = currentCameraTextureSource == PreviewColorTextureSource.TEXTURE_2D
+        val needsEisSafetyCrop = !stabilized &&
+            previewStabilizationUseCase != null &&
+            stabilizationCoordinator?.isCurrentCameraSupported == true
         if (targetWidth == viewportWidth && targetHeight == viewportHeight) {
-            return if (stabilized) stabilizationMvpMatrix else mvpMatrix
+            if (stabilized) return stabilizationMvpMatrix
+            if (!needsEisSafetyCrop) return mvpMatrix
+            System.arraycopy(mvpMatrix, 0, eisFallbackMvpMatrix, 0, eisFallbackMvpMatrix.size)
+            Matrix.scaleM(
+                eisFallbackMvpMatrix,
+                0,
+                EIS_OUTPUT_CROP_ZOOM,
+                EIS_OUTPUT_CROP_ZOOM,
+                1f,
+            )
+            return eisFallbackMvpMatrix
         }
         return buildMvpMatrix(
             targetWidth = targetWidth,
             targetHeight = targetHeight,
             sourceWidth = if (stabilized) stabilizationInputWidth else previewWidth,
             sourceHeight = if (stabilized) stabilizationInputHeight else previewHeight,
-        )
+        ).also { matrix ->
+            if (needsEisSafetyCrop) {
+                Matrix.scaleM(matrix, 0, EIS_OUTPUT_CROP_ZOOM, EIS_OUTPUT_CROP_ZOOM, 1f)
+            }
+        }
     }
 
     private fun useCurrentOesFrame() {
