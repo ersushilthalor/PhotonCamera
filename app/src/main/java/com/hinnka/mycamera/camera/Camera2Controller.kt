@@ -151,6 +151,12 @@ class Camera2Controller(private val context: Context) {
         val standbyCameraId: String? = null,
     )
 
+    private data class LogicalDualPreviewPlan(
+        val mainPhysicalCameraId: String?,
+        val ultraWidePhysicalCameraId: String,
+        val ultraWidePreviewSize: Size,
+    )
+
     private enum class CameraDeviceLifecycle {
         CLOSED,
         OPENING,
@@ -282,6 +288,13 @@ class Camera2Controller(private val context: Context) {
 
     private var previewSurface: Surface? = null
     private var previewSurfaceTexture: SurfaceTexture? = null
+    // Dedicated GL input for the always-running physical ultra-wide stream.
+    private var ultraWidePreviewSurfaceTexture: SurfaceTexture? = null
+    private var ultraWidePreviewSurface: Surface? = null
+    private var logicalDualPreviewRequestedForSession = false
+    private var forceSinglePreviewAfterDualFailure = false
+    private val _logicalDualPreviewReady = MutableStateFlow(false)
+    val logicalDualPreviewReady: StateFlow<Boolean> = _logicalDualPreviewReady.asStateFlow()
     private var imageReader: ImageReader? = null
     private var stabilizationImageReader: StabilizationImageReader? = null
 
@@ -2494,6 +2507,102 @@ class Camera2Controller(private val context: Context) {
     }
 
     // ==================== 相机控制 ====================
+
+    fun setUltraWidePreviewSurfaceTexture(texture: SurfaceTexture?) {
+        val handler = cameraHandler
+        val update = {
+            if (ultraWidePreviewSurfaceTexture === texture) {
+                return@let
+            }
+            val previousSurface = ultraWidePreviewSurface
+            ultraWidePreviewSurface = null
+            ultraWidePreviewSurfaceTexture = texture
+            _logicalDualPreviewReady.value = false
+            forceSinglePreviewAfterDualFailure = false
+            runCatching { previousSurface?.release() }
+            if (texture != null) {
+                val targetSize = _state.value.currentPreviewSize
+                runCatching { texture.setDefaultBufferSize(targetSize.width, targetSize.height) }
+                ultraWidePreviewSurface = runCatching { Surface(texture) }.getOrNull()
+                PLog.i(TAG, "Ultra-wide GL input attached: " + targetSize.width + "x" + targetSize.height)
+                if (cameraDevice != null && cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN) {
+                    createPreviewSession()
+                }
+            } else {
+                PLog.i(TAG, "Ultra-wide GL input detached")
+            }
+        }
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { update() }
+        } else {
+            update()
+        }
+    }
+
+    private fun resolveLogicalDualPreviewPlan(): LogicalDualPreviewPlan? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P ||
+            activeOpenCameraId.isBlank() ||
+            forceSinglePreviewAfterDualFailure
+        ) return null
+        val state = _state.value
+        if (state.getCurrentCameraInfo()?.lensFacing != CameraCharacteristics.LENS_FACING_BACK) return null
+        val main = state.availableCameras.firstOrNull {
+            it.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+                it.lensType == LensType.BACK_MAIN &&
+                runCatching { it.getOpenCameraId() == activeOpenCameraId }.getOrDefault(false)
+        } ?: return null
+        val ultraWide = state.availableCameras.firstOrNull {
+            it.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+                it.lensType == LensType.BACK_ULTRA_WIDE &&
+                runCatching { it.getOpenCameraId() == activeOpenCameraId }.getOrDefault(false)
+        } ?: return null
+        val texture = ultraWidePreviewSurfaceTexture ?: return null
+        val surface = ultraWidePreviewSurface?.takeIf { it.isValid } ?: return null
+        val logicalCharacteristics = runCatching {
+            cameraManager.getCameraCharacteristics(activeOpenCameraId)
+        }.getOrNull() ?: return null
+        val physicalIds = logicalCharacteristics.physicalCameraIds
+        if (physicalIds.isEmpty()) return null
+        val ultraWidePhysicalId = ultraWide.getBoundPhysicalCameraId()
+            ?.takeIf { physicalIds.contains(it) }
+            ?: ultraWide.cameraId.takeIf { physicalIds.contains(it) }
+            ?: return null
+        val mainPhysicalId = main.getBoundPhysicalCameraId(1f)
+            ?.takeIf { physicalIds.contains(it) && it != ultraWidePhysicalId }
+            ?: main.cameraId.takeIf { physicalIds.contains(it) && it != ultraWidePhysicalId }
+        if (mainPhysicalId == ultraWidePhysicalId) return null
+
+        val target = state.currentPreviewSize
+        val targetRatio = target.width.toFloat() / target.height.coerceAtLeast(1)
+        val physicalCharacteristics = runCatching {
+            logicalCharacteristics.getPhysicalCameraCharacteristics(ultraWidePhysicalId)
+        }.getOrNull() ?: logicalCharacteristics
+        val streamMap = physicalCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+        val supportedSizes = streamMap?.getOutputSizes(SurfaceTexture::class.java).orEmpty()
+        val selectedSize = supportedSizes.minByOrNull { size ->
+            val ratio = size.width.toFloat() / size.height.coerceAtLeast(1)
+            val ratioError = kotlin.math.abs(ratio - targetRatio)
+            val targetArea = target.width.toLong() * target.height
+            val areaError = kotlin.math.abs(size.width.toLong() * size.height - targetArea).toDouble() /
+                targetArea.coerceAtLeast(1L).toDouble()
+            ratioError * 4.0 + areaError * 0.2
+        } ?: target
+        runCatching { texture.setDefaultBufferSize(selectedSize.width, selectedSize.height) }
+        return LogicalDualPreviewPlan(mainPhysicalId, ultraWidePhysicalId, selectedSize)
+    }
+
+    private fun retryPreviewSessionWithoutLogicalDualOutput(
+        reason: String,
+        openGeneration: Long,
+    ): Boolean {
+        if (!logicalDualPreviewRequestedForSession) return false
+        PLog.w(TAG, "Logical dual preview rejected; retrying a single output: " + reason)
+        logicalDualPreviewRequestedForSession = false
+        forceSinglePreviewAfterDualFailure = true
+        _logicalDualPreviewReady.value = false
+        createPreviewSession(openGeneration = openGeneration)
+        return true
+    }
 
     /**
      * 打开相机并开始预览
