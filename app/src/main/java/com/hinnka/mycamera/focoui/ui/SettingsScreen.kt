@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,7 +30,7 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material.icons.outlined.VideoCameraBack
+import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.Visibility
 import com.hinnka.mycamera.ui.components.ScaledIcon as Icon
 import androidx.compose.material3.IconButton
@@ -38,7 +39,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -87,7 +87,7 @@ private enum class SettingsCategory(
     VIDEO(
         R.string.foco_settings_video,
         R.string.foco_settings_video_summary,
-        Icons.Outlined.VideoCameraBack,
+        Icons.Outlined.Videocam,
         Color(0xFFF3C5CC),
         Color(0xFF6C2633),
     ),
@@ -146,6 +146,7 @@ fun SettingsScreen(state: AppState, settings: AppSettings, actions: CameraAction
         Modifier
             .fillMaxSize()
             .background(SettingsBackground)
+            .statusBarsPadding()
             .navigationBarsPadding(),
     ) {
         Row(
