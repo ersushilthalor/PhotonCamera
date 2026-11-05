@@ -276,6 +276,7 @@ class Camera2Controller(private val context: Context) {
     // ---------------------
 
     private var cameraDevice: CameraDevice? = null
+    private var activeCameraInfo: CameraInfo? = null
     private var cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
     private var pendingCameraOpenRequest: CameraOpenRequest? = null
     @Volatile
@@ -289,6 +290,8 @@ class Camera2Controller(private val context: Context) {
 
     private var previewSurface: Surface? = null
     private var previewSurfaceTexture: SurfaceTexture? = null
+    // The UI's main GL input is retained separately from the currently active lens input.
+    private var mainPreviewSurfaceTexture: SurfaceTexture? = null
     // Dedicated GL input for the always-running physical ultra-wide stream.
     private var ultraWidePreviewSurfaceTexture: SurfaceTexture? = null
     private var ultraWidePreviewSurface: Surface? = null
@@ -2675,6 +2678,7 @@ class Camera2Controller(private val context: Context) {
             }
             return
         }
+        mainPreviewSurfaceTexture = surfaceTexture
         val targetCamera = _state.value.getCurrentCameraInfo()
         val standbyCameraId = targetCamera
             ?.takeIf(standbyCameraController::canHandoffTo)
@@ -2757,7 +2761,7 @@ class Camera2Controller(private val context: Context) {
         request: CameraOpenRequest,
         preopenedCamera: CameraDevice? = null,
     ) {
-        val surfaceTexture = request.surfaceTexture
+        var surfaceTexture = request.surfaceTexture
         val preserveVideoRecording = request.preserveVideoRecording
         clearPointFocusState()
         val openGeneration = ++cameraOpenGeneration
@@ -2781,6 +2785,12 @@ class Camera2Controller(private val context: Context) {
         val cameraId = _state.value.currentCameraId
         val selectedCamera = _state.value.getCurrentCameraInfo()
         val openCameraId = selectedCamera?.getOpenCameraId() ?: cameraId
+        activeCameraInfo = selectedCamera
+        if (selectedCamera?.lensType == LensType.BACK_ULTRA_WIDE) {
+            surfaceTexture = ultraWidePreviewSurfaceTexture ?: surfaceTexture
+        } else {
+            surfaceTexture = mainPreviewSurfaceTexture ?: surfaceTexture
+        }
         val targetZoomRatioByMain = getTargetZoomRatioByMain(_state.value, selectedCamera)
         val captureMode = _state.value.captureMode
         if (cameraId.isEmpty()) {
