@@ -482,6 +482,7 @@ fun FocoCameraIntegrationScreen(
                             focusSuccess = photon.focusSuccess,
                             meteringMode = photon.effectiveMeteringMode,
                             onSurfaceTextureReady = { previewSurfaceTexture = it },
+                            onStandbySurfaceTextureReady = viewModel::setStandbyPreviewSurfaceTexture,
                             onSurfaceDestroyed = { surface ->
                                 if (previewSurfaceTexture === surface) previewSurfaceTexture = null
                                 viewModel.closeCamera(surface)
@@ -492,7 +493,10 @@ fun FocoCameraIntegrationScreen(
                             onMeteringUpdated = viewModel::handleMeteringUpdate,
                             onHighlightPointUpdated = viewModel::handleHighlightPointUpdate,
                             onFirstPreviewFrame = viewModel::onFirstPreviewFrame,
-                            onGLSurfaceViewReady = { viewModel.glSurfaceView = it },
+                            onGLSurfaceViewReady = {
+                                viewModel.glSurfaceView = it
+                                it.setActivePreviewSource(viewModel.isUsingStandbyPreviewInput)
+                            },
                             livePhotoRecorder = viewModel.livePhotoRecorder,
                             videoLogProfile = photon.videoConfig.logProfile,
                             isAutoFocus = photon.isAutoFocus,

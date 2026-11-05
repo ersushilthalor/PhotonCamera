@@ -621,12 +621,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val locationManager = LocationManager(application)
 
     val state: StateFlow<CameraState> = cameraController.state
+    val isUsingStandbyPreviewInput: Boolean
+        get() = cameraController.isUsingStandbyPreviewInput
     val livePhotoRecorder get() = cameraController.livePhotoRecorder
     val realtimeStabilizationCoordinator get() = cameraController.realtimeStabilizationCoordinator
     val isAlgorithmicStabilizationSupported: Boolean
         get() = cameraController.realtimeStabilizationCoordinator.isGyroscopeAvailable
 
     init {
+        cameraController.onPreviewSourceChanged = { useStandbyInput ->
+            glSurfaceView?.setActivePreviewSource(useStandbyInput)
+        }
         viewModelScope.launch {
             oppoPhotoSettings.collect { settings ->
                 cameraController.setAutoHdrEnabled(settings.autoHdrEnabled)
@@ -2917,6 +2922,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /**
      * 打开相机（Camera2 接口）
      */
+    fun setStandbyPreviewSurfaceTexture(surfaceTexture: SurfaceTexture?) {
+        cameraController.setStandbyPreviewSurfaceTexture(surfaceTexture)
+    }
+
     fun openCamera(surfaceTexture: SurfaceTexture) {
         PLog.d(TAG, "openCamera")
         if (currentSurfaceTexture === surfaceTexture && (state.value.isPreviewActive || cameraOpenInFlight)) {
@@ -3844,10 +3853,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         targetCamera?.let { camera ->
             setZoomRatioForCamera(camera.defaultVisibleZoomRatio(), camera.cameraId)
         }
-        // Physical lenses exposed by one logical Camera2 device can be switched by
-        // rebuilding only its capture session. Closing the CameraDevice here adds an
-        // avoidable black-frame/cold-open gap and defeats seamless physical handoff.
-        if (!sharesOpenCameraDevice) {
+        if (sharesOpenCameraDevice) {
+            // setZoomRatioForCamera() queues its request on cameraHandler first. Queue the
+            // physical-output selection after it so session-reuse checks and request updates
+            // run in order on the Camera2 thread rather than racing the UI thread.
+            cameraController.selectLogicalDualPreview(cameraId) { switched ->
+                if (!switched) reopenCamera(preserveVideoRecording = true)
+            }
+        } else {
             reopenCamera(preserveVideoRecording = true)
         }
     }
@@ -3865,7 +3878,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         syncVendorCaptureSettingsToController()
         cameraController.switchToCameraId(cameraId)
         setZoomRatioForCamera(ratio, cameraId)
-        if (!sharesOpenCameraDevice) {
+        if (sharesOpenCameraDevice) {
+            cameraController.selectLogicalDualPreview(cameraId) { switched ->
+                if (!switched) reopenCamera(preserveVideoRecording = true)
+            }
+        } else {
             reopenCamera(preserveVideoRecording = true)
         }
     }

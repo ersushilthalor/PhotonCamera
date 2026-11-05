@@ -66,6 +66,7 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         }
 
     var onSurfaceReady: ((Surface) -> Unit)? = null
+    var onStandbySurfaceTextureReady: ((SurfaceTexture?) -> Unit)? = null
     var onSurfaceDestroyed: (() -> Unit)? = null
     var onFirstPreviewFrame: (() -> Unit)? = null
     private var currentSurface: Surface? = null
@@ -90,6 +91,9 @@ class CameraGLSurfaceView @JvmOverloads constructor(
                 val surface = currentSurface ?: return@post
                 onSurfaceReady?.invoke(surface)
             }
+        }
+        renderer.onStandbySurfaceTextureAvailable = { surfaceTexture ->
+            post { onStandbySurfaceTextureReady?.invoke(surfaceTexture) }
         }
 
         // 设置渲染请求回调（当有新帧可用时由 LutRenderer 调用）
@@ -318,6 +322,15 @@ class CameraGLSurfaceView @JvmOverloads constructor(
      */
     fun getSurfaceTexture(): SurfaceTexture? = renderer.getSurfaceTexture()
 
+    fun getStandbySurfaceTexture(): SurfaceTexture? = renderer.getStandbySurfaceTexture()
+
+    fun setActivePreviewSource(useStandby: Boolean) {
+        queueEvent {
+            renderer.setActivePreviewSource(useStandby)
+            requestRender()
+        }
+    }
+
     fun getRenderSurface(): Surface? = currentSurface
 
     fun setSourceCrop(crop: PhantomPipCrop) {
@@ -481,6 +494,8 @@ class CameraGLSurfaceView @JvmOverloads constructor(
 
         // 通知 Surface 销毁
         onSurfaceDestroyed?.invoke()
+        onStandbySurfaceTextureReady?.invoke(null)
+        onStandbySurfaceTextureReady = null
         onEyeFocusInputAvailable = null
 
         // 释放 Surface
