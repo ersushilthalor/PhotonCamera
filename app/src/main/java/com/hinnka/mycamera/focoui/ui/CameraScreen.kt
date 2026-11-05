@@ -974,7 +974,9 @@ private fun FocoZoomSliderTrack(
     val bubbleColor = Color(0xFFF0DDF0)
 
     BoxWithConstraints(modifier) {
-        val trackWidth = (maxWidth - trackInset * 2).coerceAtLeast(0.dp)
+        // Capture before the nested stop-label lambda to avoid losing the layout receiver.
+        val sliderWidth = maxWidth
+        val trackWidth = (sliderWidth - trackInset * 2).coerceAtLeast(0.dp)
         val handleOffset = (
             trackInset + trackWidth * progress - 2.dp
         ).coerceIn(0.dp, (maxWidth - 4.dp).coerceAtLeast(0.dp))
@@ -1026,7 +1028,7 @@ private fun FocoZoomSliderTrack(
                 ).toFloat().coerceIn(0f, 1f)
                 val labelOffset = (
                     trackInset + trackWidth * stopProgress - 11.dp
-                ).coerceIn(0.dp, (maxWidth - 22.dp).coerceAtLeast(0.dp))
+                ).coerceIn(0.dp, (sliderWidth - 22.dp).coerceAtLeast(0.dp))
                 Text(
                     text = ZoomMath.formatZoom(stop).removeSuffix("×"),
                     modifier = Modifier
