@@ -33,6 +33,8 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.GridStyle
 import com.hinnka.mycamera.data.VolumeKeyAction as PhotonVolumeKeyAction
+import com.hinnka.mycamera.model.ColorRecipeParams
+import com.hinnka.mycamera.ui.components.LutSelector
 import com.hinnka.mycamera.focoui.camera.LensKind
 import com.hinnka.mycamera.focoui.device.MicStatus
 import com.hinnka.mycamera.focoui.settings.AppSettings as FocoSettings
@@ -84,7 +86,12 @@ fun FocoCameraIntegrationScreen(
     val videoRecipe by viewModel.currentVideoRecipeParams.collectAsState()
     val levelIndicator by viewModel.showLevelIndicator.collectAsState(initial = false)
     val videoHdrEnabled by viewModel.videoHdrEnabled.collectAsState()
+    val currentLutId by viewModel.currentLutId.collectAsState()
     val focoState = remember { FocoAppState().apply { permissionGranted = true } }
+    var showLutEditSheet by remember { mutableStateOf(false) }
+    var previewRecipeParamsOverride by remember(currentLutId, photon.captureMode) {
+        mutableStateOf<ColorRecipeParams?>(null)
+    }
     val focoSettings = remember(context) { FocoSettings(context) }
     var previewSurfaceTexture by remember { mutableStateOf<SurfaceTexture?>(null) }
     var preparedCaptureMode by remember { mutableStateOf<CaptureMode?>(null) }
@@ -447,6 +454,7 @@ fun FocoCameraIntegrationScreen(
         if (photon.captureMode == CaptureMode.VIDEO) videoRecipe ?: photoRecipe else photoRecipe,
         forVideo = photon.captureMode == CaptureMode.VIDEO
     )
+    val displayedColorRecipe = previewRecipeParamsOverride ?: colorRecipe
 
     FocoTheme {
         com.hinnka.mycamera.focoui.ui.CameraScreen(
@@ -468,7 +476,7 @@ fun FocoCameraIntegrationScreen(
                             currentLut = viewModel.currentLutConfig,
                             enginePreviewPlan = viewModel.currentEnginePreviewPlan,
                             baselineColorRecipeParams = baselineRecipe,
-                            colorRecipeParams = colorRecipe,
+                            colorRecipeParams = displayedColorRecipe,
                             focusPoint = photon.focusPoint,
                             meteringPoint = photon.meteringPoint,
                             canMoveMeteringPoint = photon.supportsPointMetering && !photon.isCapturing,
@@ -512,7 +520,38 @@ fun FocoCameraIntegrationScreen(
                     }
                     LensSwitchTransitionOverlay(lensSwitchTransition, Modifier.fillMaxSize())
                     }
+                },
+                lutSelector = {
+                    LutSelector(
+                        availableLuts = viewModel.selectableLutList,
+                        currentLutId = currentLutId,
+                        thumbnail = viewModel.previewThumbnail,
+                        onLutSelected = viewModel::setLut,
+                        onEditClick = {
+                            focoState.lutPanelOpen = false
+                            showLutEditSheet = true
+                        },
+                        showEditButtonWhenNoLut = true,
+                        showManagementButton = false,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             )
+        if (showLutEditSheet) {
+            LutEditBottomSheet(
+                lutId = currentLutId,
+                initialParams = colorRecipe,
+                onParamsPreviewChange = { previewRecipeParamsOverride = it },
+                showEffects = true,
+                replaceVignetteWithWashedOutRecovery = photon.captureMode == CaptureMode.VIDEO,
+                videoOnly = photon.captureMode == CaptureMode.VIDEO,
+                onDismiss = {
+                    if (photon.captureMode != CaptureMode.VIDEO) {
+                        previewRecipeParamsOverride = null
+                    }
+                    showLutEditSheet = false
+                }
+            )
+        }
     }
 }
