@@ -1218,7 +1218,11 @@ class Camera2Controller(private val context: Context) {
                 realtimeStabilizationCoordinator.submitCaptureResult(
                     result = result,
                     request = request,
-                    outputPhysicalCameraId = activeOutputPhysicalCameraId,
+                    outputPhysicalCameraId = if (logicalDualPreviewRequestedForSession) {
+                        resolveRequestedPhysicalCameraId()
+                    } else {
+                        activeOutputPhysicalCameraId
+                    },
                 )
             }
 
@@ -3537,12 +3541,18 @@ class Camera2Controller(private val context: Context) {
                             add(createOutputConfiguration(surface))
                         }
                         stabilizationReader?.surface?.let { eisSurface ->
-                            add(createOutputConfiguration(eisSurface))
+                            add(createOutputConfiguration(
+                                eisSurface,
+                                physicalCameraIdOverride = null,
+                                overridePhysicalCameraBinding = logicalDualPreviewRequestedForSession,
+                            ))
                         }
                         videoSurface?.let { encoderSurface ->
                             add(createOutputConfiguration(
                                 encoderSurface,
-                                useHlg10 = videoCameraHlg10InputActive
+                                useHlg10 = videoCameraHlg10InputActive,
+                                physicalCameraIdOverride = null,
+                                overridePhysicalCameraBinding = logicalDualPreviewRequestedForSession,
                             ))
                         }
                     },
@@ -3621,10 +3631,18 @@ class Camera2Controller(private val context: Context) {
                     add(createOutputConfiguration(surface))
                 }
                 stabilizationReader?.surface?.let { eisSurface ->
-                    add(createOutputConfiguration(eisSurface))
+                    add(createOutputConfiguration(
+                        eisSurface,
+                        physicalCameraIdOverride = null,
+                        overridePhysicalCameraBinding = logicalDualPreviewRequestedForSession,
+                    ))
                 }
                 reader?.surface?.let { captureSurface ->
-                    add(createOutputConfiguration(captureSurface))
+                    add(createOutputConfiguration(
+                        captureSurface,
+                        physicalCameraIdOverride = null,
+                        overridePhysicalCameraBinding = logicalDualPreviewRequestedForSession,
+                    ))
                 }
             }
             val sessionConfig = SessionConfiguration(
