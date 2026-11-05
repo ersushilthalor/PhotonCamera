@@ -139,8 +139,14 @@ fun CameraScreen(
     settings: AppSettings,
     actions: CameraActions,
     preview: @Composable (Modifier) -> Unit,
+    lutSelector: (@Composable () -> Unit)? = null,
 ) {
     val iconRotation = rememberIconRotation(state.deviceRotation)
+    LaunchedEffect(state.kind, state.recording, state.proBarOpen, state.settingsOpen, state.fullSettingsOpen) {
+        if (state.recording || state.proBarOpen || state.settingsOpen || state.fullSettingsOpen) {
+            state.lutPanelOpen = false
+        }
+    }
     // Status bar is hidden (like Pixel Camera); keep clear of the camera cut-out.
     val statusTop = WindowInsets.safeDrawing.asPaddingValues().calculateTopPadding()
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -190,15 +196,54 @@ fun CameraScreen(
         ) {
             preview(Modifier.fillMaxSize())
             ViewfinderOverlays(state, settings, actions)
-            if (!state.proBarOpen && !state.burstActive && state.zoomChips.size > 1) {
-                ZoomChips(
-                    state,
-                    actions,
-                    iconRotation,
-                    Modifier.align(Alignment.BottomCenter).padding(
-                        bottom = 8.dp + if (isVideo) videoPreviewExtension else 0.dp
-                    ),
-                )
+            if (!state.proBarOpen && !state.burstActive) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp + if (isVideo) videoPreviewExtension else 0.dp)
+                        .height(44.dp)
+                ) {
+                    if (state.zoomChips.size > 1) {
+                        ZoomChips(
+                            state,
+                            actions,
+                            iconRotation,
+                            Modifier.align(Alignment.Center),
+                        )
+                    }
+                    if (!state.recording && state.intentMode == IntentMode.NORMAL && lutSelector != null) {
+                        Box(
+                            Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(end = 16.dp)
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(if (state.lutPanelOpen) Color(0xCC4A4B4F) else Color(0xB31E1F22))
+                                .clickable {
+                                    actions.haptic()
+                                    state.lutPanelOpen = !state.lutPanelOpen
+                                }
+                                .semantics { contentDescription = if (state.lutPanelOpen) "Close LUT selector" else "Open LUT selector" },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Outlined.Palette, null, tint = Color.White, modifier = Modifier.size(25.dp))
+                        }
+                    }
+                }
+            }
+            if (state.lutPanelOpen && !state.recording && !state.burstActive && !state.proBarOpen && lutSelector != null) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(bottom = 58.dp + if (isVideo) videoPreviewExtension else 0.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color(0xD9111215))
+                        .padding(vertical = 8.dp),
+                ) {
+                    lutSelector()
+                }
             }
         }
 
@@ -523,14 +568,6 @@ private fun TopBar(state: AppState, settings: AppSettings, actions: CameraAction
                 settings.quickAccess && !state.burstActive ->
                     QuickAccess(state, settings, actions, iconRotation, Modifier.align(Alignment.CenterStart))
                 else -> StatusIcons(state, settings, iconRotation, Modifier.align(Alignment.CenterStart).padding(start = 4.dp))
-            }
-            if (state.kind == CaptureKind.VIDEO && !state.recording) {
-                IconButton(
-                    onClick = actions::openVideoLutEditor,
-                    modifier = Modifier.align(Alignment.CenterEnd)
-                ) {
-                    Icon(Icons.Outlined.Palette, "Edit video LUT", tint = Color.White)
-                }
             }
         }
         if (state.proBarOpen && !state.recording) ReadoutRow(state)

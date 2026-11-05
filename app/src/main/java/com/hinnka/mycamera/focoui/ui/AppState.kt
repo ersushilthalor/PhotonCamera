@@ -141,6 +141,7 @@ class AppState {
     var manualLensId by mutableStateOf<String?>(null)
 
     var settingsOpen by mutableStateOf(false)
+    var lutPanelOpen by mutableStateOf(false)
     var settingsTab by mutableStateOf(SettingsTab.GENERAL)
     var fullSettingsOpen by mutableStateOf(false)
     var proBarOpen by mutableStateOf(false)

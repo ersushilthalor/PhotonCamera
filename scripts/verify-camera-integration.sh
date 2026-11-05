@@ -20,6 +20,8 @@ require "app/src/main/java/com/hinnka/mycamera/ui/camera/FocoCameraIntegrationSc
 require "app/src/main/java/com/hinnka/mycamera/focoui/ui/SettingsSheet.kt" "actions.openPhotonSettings()"
 require "app/src/main/java/com/hinnka/mycamera/ui/settings/SettingsScreen.kt" "MergedSettingsCategoryTitle"
 # Photon video LUT shortcut remains visible in Foco video UI.
-require "app/src/main/java/com/hinnka/mycamera/focoui/ui/CameraScreen.kt" "Edit video LUT"
+require "app/src/main/java/com/hinnka/mycamera/focoui/ui/CameraScreen.kt" "Open LUT selector"
+require "app/src/main/java/com/hinnka/mycamera/focoui/ui/CameraScreen.kt" "state.lutPanelOpen = !state.lutPanelOpen"
+require "app/src/main/java/com/hinnka/mycamera/ui/camera/FocoCameraIntegrationScreen.kt" "onEditClick = {"
 require "app/src/main/java/com/hinnka/mycamera/focoui/ui/AppState.kt" "fun openVideoLutEditor()"
 echo "Camera integration protection checks passed."
