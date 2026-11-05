@@ -2419,6 +2419,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         previewWidth = width
         previewHeight = height
         surfaceTexture?.setDefaultBufferSize(width, height)
+        ultraWideSurfaceTexture?.setDefaultBufferSize(width, height)
         if (sizeChanged && previewStabilizationUseCase != null) {
             mgcEisHardwareBufferRenderer.release()
             mgcEisYuvRenderer.release()
