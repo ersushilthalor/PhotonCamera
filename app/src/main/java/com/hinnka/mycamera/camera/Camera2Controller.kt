@@ -2198,6 +2198,8 @@ class Camera2Controller(private val context: Context) {
     ) {
         _logicalDualPreviewReady.value = false
         logicalDualMatchedCaptureFrames = 0
+        activeLogicalDualPreviewPlan = null
+        logicalDualPreviewRequestedForSession = false
         if (preserveStandbyCamera) {
             PLog.d(TAG, "Preserving ready standby camera for lens handoff: $reason")
         } else {
@@ -2552,7 +2554,11 @@ class Camera2Controller(private val context: Context) {
                     runCatching { texture.setDefaultBufferSize(targetSize.width, targetSize.height) }
                     ultraWidePreviewSurface = runCatching { Surface(texture) }.getOrNull()
                     PLog.i(TAG, "Ultra-wide GL input attached: " + targetSize.width + "x" + targetSize.height)
-                    if (cameraDevice != null && cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN) {
+                    if (cameraDevice != null &&
+                        cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN &&
+                        !_state.value.videoRecordingState.isRecording &&
+                        !_state.value.videoRecordingState.isProcessing
+                    ) {
                         createPreviewSession()
                     }
                 } else {
@@ -3665,6 +3671,7 @@ class Camera2Controller(private val context: Context) {
             device.createCaptureSession(sessionConfig)
         } catch (e: IllegalStateException) {
             PLog.w(TAG, "Failed to create preview session", e)
+            if (retryPreviewSessionWithoutLogicalDualOutput("create session illegal state: ${e.message}", openGeneration)) return
             if (retryVideoSessionWithoutCameraHlg(openGeneration)) return
             if (vendorSessionParametersApplied &&
                 retryPreviewSessionWithoutVendorSessionParameters(
@@ -3684,6 +3691,7 @@ class Camera2Controller(private val context: Context) {
             handlePreviewSessionFailure("create session illegal state", openGeneration, e)
         } catch (e: Exception) {
             PLog.w(TAG, "Failed to create preview session", e)
+            if (retryPreviewSessionWithoutLogicalDualOutput("create session exception: ${e.message}", openGeneration)) return
             if (retryVideoSessionWithoutCameraHlg(openGeneration)) return
             if (vendorSessionParametersApplied &&
                 retryPreviewSessionWithoutVendorSessionParameters(
