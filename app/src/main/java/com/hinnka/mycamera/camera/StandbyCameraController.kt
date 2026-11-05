@@ -208,7 +208,12 @@ class StandbyCameraController(context: Context) {
             standbyCameraInfo = outgoingActive.cameraInfo
             standbyOpenedByController = outgoingActive.openedByStandbyController
             activePlan = StandbyPlan(
-                key = "instant-swap|" + incoming.openCameraId + "|" + outgoingActive.openCameraId,
+                key = listOf(
+                    incoming.openCameraId,
+                    outgoingActive.openCameraId,
+                    outgoingActive.physicalCameraId.orEmpty(),
+                    outgoingActive.cameraId,
+                ).joinToString("|"),
                 activeOpenCameraId = incoming.openCameraId,
                 standbyOpenCameraId = outgoingActive.openCameraId,
                 standbyPhysicalCameraId = outgoingActive.physicalCameraId,
