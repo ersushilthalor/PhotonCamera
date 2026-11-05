@@ -37,6 +37,36 @@ internal class StabilizationImageReader(
         AcquiredImage(this, image)
     }
 
+    /**
+     * Discard camera buffers that have not yet been acquired. This is used after a physical
+     * sensor handoff so old-lens images cannot become boundaries in the new EIS timeline.
+     * Call on the ImageReader listener's handler to serialize with its availability callback.
+     */
+    fun discardPendingImages(): Int = synchronized(lock) {
+        if (isClosed) return@synchronized 0
+        var discarded = 0
+        while (true) {
+            val image = try {
+                reader.acquireNextImage()
+            } catch (error: IllegalStateException) {
+                PLog.w(
+                    "StabilizationImageReader",
+                    "Could not drain all pending buffers: ${error.message}",
+                )
+                null
+            } ?: break
+            image.close()
+            discarded += 1
+        }
+        if (discarded > 0) {
+            PLog.d(
+                "StabilizationImageReader",
+                "Discarded $discarded queued frame(s) from ${width}x$height reader",
+            )
+        }
+        discarded
+    }
+
     override fun close() {
         synchronized(lock) {
             if (isClosed) return
