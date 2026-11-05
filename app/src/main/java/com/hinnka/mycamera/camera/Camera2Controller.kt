@@ -2511,25 +2511,25 @@ class Camera2Controller(private val context: Context) {
     fun setUltraWidePreviewSurfaceTexture(texture: SurfaceTexture?) {
         val handler = cameraHandler
         val update = {
-            if (ultraWidePreviewSurfaceTexture === texture) {
-                return@let
-            }
-            val previousSurface = ultraWidePreviewSurface
-            ultraWidePreviewSurface = null
-            ultraWidePreviewSurfaceTexture = texture
-            _logicalDualPreviewReady.value = false
-            forceSinglePreviewAfterDualFailure = false
-            runCatching { previousSurface?.release() }
-            if (texture != null) {
-                val targetSize = _state.value.currentPreviewSize
-                runCatching { texture.setDefaultBufferSize(targetSize.width, targetSize.height) }
-                ultraWidePreviewSurface = runCatching { Surface(texture) }.getOrNull()
-                PLog.i(TAG, "Ultra-wide GL input attached: " + targetSize.width + "x" + targetSize.height)
-                if (cameraDevice != null && cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN) {
-                    createPreviewSession()
+            if (ultraWidePreviewSurfaceTexture !== texture) {
+                val previousSurface = ultraWidePreviewSurface
+                ultraWidePreviewSurface = null
+                ultraWidePreviewSurfaceTexture = texture
+                _logicalDualPreviewReady.value = false
+                forceSinglePreviewAfterDualFailure = false
+                logicalDualPreviewRequestedForSession = false
+                runCatching { previousSurface?.release() }
+                if (texture != null) {
+                    val targetSize = _state.value.currentPreviewSize
+                    runCatching { texture.setDefaultBufferSize(targetSize.width, targetSize.height) }
+                    ultraWidePreviewSurface = runCatching { Surface(texture) }.getOrNull()
+                    PLog.i(TAG, "Ultra-wide GL input attached: " + targetSize.width + "x" + targetSize.height)
+                    if (cameraDevice != null && cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN) {
+                        createPreviewSession()
+                    }
+                } else {
+                    PLog.i(TAG, "Ultra-wide GL input detached")
                 }
-            } else {
-                PLog.i(TAG, "Ultra-wide GL input detached")
             }
         }
         if (handler != null && Looper.myLooper() != handler.looper) {
@@ -3383,6 +3383,23 @@ class Camera2Controller(private val context: Context) {
         }
         val device = cameraDevice ?: return
         val surface = previewSurface ?: return
+        val logicalDualPlan = resolveLogicalDualPreviewPlan()
+        val ultraWideSurface = if (logicalDualPlan != null) {
+            ultraWidePreviewSurface?.takeIf { it.isValid }
+        } else {
+            null
+        }
+        logicalDualPreviewRequestedForSession = ultraWideSurface != null && logicalDualPlan != null
+        _logicalDualPreviewReady.value = false
+        if (logicalDualPreviewRequestedForSession) {
+            PLog.i(
+                TAG,
+                "Starting persistent logical dual preview: mainPhysical=" +
+                    logicalDualPlan?.mainPhysicalCameraId + ", ultraWidePhysical=" +
+                    logicalDualPlan?.ultraWidePhysicalCameraId + ", size=" +
+                    logicalDualPlan?.ultraWidePreviewSize
+            )
+        }
         // createCaptureSession closes the previous session before onConfigured runs.
         // Stop exposing it while the replacement is being configured.
         invalidateCaptureSession(captureSession, "preview session replacement")
@@ -3420,6 +3437,7 @@ class Camera2Controller(private val context: Context) {
         try {
             previewRequestBuilder = device.createCaptureRequest(templateType).apply {
                 addTarget(surface)
+                ultraWideSurface?.let(::addTarget)
                 stabilizationReader?.surface?.let(::addTarget)
                 videoSurface?.let(::addTarget)
 
@@ -3428,6 +3446,7 @@ class Camera2Controller(private val context: Context) {
             }
 
             val surfaces = mutableListOf(surface)
+            ultraWideSurface?.let(surfaces::add)
             stabilizationReader?.surface?.let(surfaces::add)
             videoSurface?.let(surfaces::add)
             if (captureMode == CaptureMode.PHOTO) {
@@ -3446,7 +3465,22 @@ class Camera2Controller(private val context: Context) {
                 val sessionConfig = SessionConfiguration(
                     sessionOperatingMode,
                     buildList {
-                        add(createOutputConfiguration(surface))
+                        if (logicalDualPreviewRequestedForSession && logicalDualPlan != null) {
+                            add(createOutputConfiguration(
+                                surface,
+                                physicalCameraIdOverride = logicalDualPlan.mainPhysicalCameraId,
+                                overridePhysicalCameraBinding = true,
+                            ))
+                            ultraWideSurface?.let { ultraWideOutput ->
+                                add(createOutputConfiguration(
+                                    ultraWideOutput,
+                                    physicalCameraIdOverride = logicalDualPlan.ultraWidePhysicalCameraId,
+                                    overridePhysicalCameraBinding = true,
+                                ))
+                            }
+                        } else {
+                            add(createOutputConfiguration(surface))
+                        }
                         stabilizationReader?.surface?.let { eisSurface ->
                             add(createOutputConfiguration(eisSurface))
                         }
@@ -3480,6 +3514,7 @@ class Camera2Controller(private val context: Context) {
                             }
                             PLog.e(TAG, "Video session configuration failed")
                             safeCloseCaptureSession(session, "video configure failure")
+                            if (retryPreviewSessionWithoutLogicalDualOutput("video configure failed", openGeneration)) return
                             if (retryVideoSessionWithoutCameraHlg(openGeneration)) return
                             if (vendorSessionParametersApplied &&
                                 retryPreviewSessionWithoutVendorSessionParameters(
@@ -3514,7 +3549,22 @@ class Camera2Controller(private val context: Context) {
                         "isP010Supported=$isP010Supported"
             )
             val outputConfigs = buildList {
-                add(createOutputConfiguration(surface))
+                if (logicalDualPreviewRequestedForSession && logicalDualPlan != null) {
+                    add(createOutputConfiguration(
+                        surface,
+                        physicalCameraIdOverride = logicalDualPlan.mainPhysicalCameraId,
+                        overridePhysicalCameraBinding = true,
+                    ))
+                    ultraWideSurface?.let { ultraWideOutput ->
+                        add(createOutputConfiguration(
+                            ultraWideOutput,
+                            physicalCameraIdOverride = logicalDualPlan.ultraWidePhysicalCameraId,
+                            overridePhysicalCameraBinding = true,
+                        ))
+                    }
+                } else {
+                    add(createOutputConfiguration(surface))
+                }
                 stabilizationReader?.surface?.let { eisSurface ->
                     add(createOutputConfiguration(eisSurface))
                 }
@@ -3552,6 +3602,7 @@ class Camera2Controller(private val context: Context) {
                                     "sessionColorSpace=${if (shouldUseP3ColorSpace()) "DISPLAY_P3" else "DEFAULT"}"
                         )
                         safeCloseCaptureSession(session, "photo configure failure")
+                        if (retryPreviewSessionWithoutLogicalDualOutput("photo configure failed", openGeneration)) return
                         if (vendorSessionParametersApplied &&
                             retryPreviewSessionWithoutVendorSessionParameters(
                                 reason = "photo configure failed",
@@ -3886,14 +3937,21 @@ class Camera2Controller(private val context: Context) {
 
     private fun createOutputConfiguration(
         surface: Surface,
-        useHlg10: Boolean = false
+        useHlg10: Boolean = false,
+        physicalCameraIdOverride: String? = null,
+        overridePhysicalCameraBinding: Boolean = false,
     ): OutputConfiguration {
         return OutputConfiguration(surface).apply {
             if (useHlg10) {
                 check(Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
                 setDynamicRangeProfile(DynamicRangeProfiles.HLG10)
             }
-            activeOutputPhysicalCameraId?.let { physicalCameraId ->
+            val boundPhysicalCameraId = if (overridePhysicalCameraBinding) {
+                physicalCameraIdOverride
+            } else {
+                activeOutputPhysicalCameraId
+            }
+            boundPhysicalCameraId?.let { physicalCameraId ->
                 setPhysicalCameraId(physicalCameraId)
                 PLog.i(
                     TAG,
@@ -4093,6 +4151,10 @@ class Camera2Controller(private val context: Context) {
             return
         }
         captureSession = session
+        _logicalDualPreviewReady.value = logicalDualPreviewRequestedForSession
+        if (_logicalDualPreviewReady.value) {
+            PLog.i(TAG, "Persistent logical ultra-wide preview is streaming alongside main")
+        }
         _state.update { it.copy(previewFirstFrameTimestampNs = null) }
 
         try {
