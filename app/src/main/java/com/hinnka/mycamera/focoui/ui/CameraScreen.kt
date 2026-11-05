@@ -1030,31 +1030,76 @@ private fun ShutterRow(
     iconRotation: Float,
     previewSize: IntSize,
 ) {
-    Row(
-        Modifier.fillMaxWidth().height(80.dp).padding(horizontal = 68.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        when {
-            state.recording -> RoundButton(
-                icon = { Icon(if (state.recordingPaused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause, "Pause", tint = Color.White) },
+    if (state.recording) {
+        // Keep the shutter centred while showing snapshot and camera-flip controls together.
+        // The two right-side actions use compact buttons so they fit on narrow displays.
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(80.dp)
+                .padding(horizontal = 16.dp)
+        ) {
+            RoundButton(
+                icon = {
+                    Icon(
+                        if (state.recordingPaused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause,
+                        "Pause",
+                        tint = Color.White
+                    )
+                },
                 onClick = actions::pauseResume,
+                modifier = Modifier.align(Alignment.CenterStart)
             )
-            state.intentMode != IntentMode.NORMAL -> Spacer(Modifier.size(48.dp))
-            else -> FocusLockButton(state, actions, previewSize)
+
+            Shutter(
+                state,
+                settings,
+                actions,
+                modifier = Modifier.align(Alignment.Center)
+            )
+
+            Row(
+                Modifier.align(Alignment.CenterEnd),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (state.snapshotAvailable) {
+                    RoundButton(
+                        icon = {
+                            Icon(
+                                Icons.Outlined.PhotoCamera,
+                                "Take photo",
+                                tint = Color.White,
+                                modifier = Modifier.rotate(iconRotation)
+                            )
+                        },
+                        onClick = actions::snapshot,
+                        buttonSize = 40.dp
+                    )
+                }
+                if (state.caps.hasFront && !state.burstActive) {
+                    FlipButton(actions, iconRotation, buttonSize = 40.dp)
+                } else if (!state.snapshotAvailable) {
+                    Spacer(Modifier.size(40.dp))
+                }
+            }
         }
-        Shutter(state, settings, actions)
-        when {
-            state.recording -> if (state.snapshotAvailable) {
-                RoundButton(
-                    icon = { Icon(Icons.Outlined.PhotoCamera, "Take photo", tint = Color.White, modifier = Modifier.rotate(iconRotation)) },
-                    onClick = actions::snapshot,
-                )
+    } else {
+        Row(
+            Modifier.fillMaxWidth().height(80.dp).padding(horizontal = 68.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            when {
+                state.intentMode != IntentMode.NORMAL -> Spacer(Modifier.size(48.dp))
+                else -> FocusLockButton(state, actions, previewSize)
+            }
+            Shutter(state, settings, actions)
+            if (state.caps.hasFront && !state.burstActive) {
+                FlipButton(actions, iconRotation)
             } else {
                 Spacer(Modifier.size(48.dp))
             }
-            state.caps.hasFront && !state.burstActive -> FlipButton(actions, iconRotation)
-            else -> Spacer(Modifier.size(48.dp))
         }
     }
 }
@@ -1091,9 +1136,18 @@ private fun FocusLockButton(state: AppState, actions: CameraActions, previewSize
 }
 
 @Composable
-private fun RoundButton(icon: @Composable () -> Unit, onClick: () -> Unit) {
+private fun RoundButton(
+    icon: @Composable () -> Unit,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    buttonSize: androidx.compose.ui.unit.Dp = 48.dp,
+) {
     Box(
-        Modifier.size(48.dp).clip(RoundedCornerShape(14.dp)).background(FocoColors.Button).clickable(onClick = onClick),
+        modifier
+            .size(buttonSize)
+            .clip(RoundedCornerShape(14.dp))
+            .background(FocoColors.Button)
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { icon() }
 }
@@ -1131,7 +1185,12 @@ private fun Thumbnail(state: AppState, actions: CameraActions, iconRotation: Flo
 }
 
 @Composable
-private fun Shutter(state: AppState, settings: AppSettings, actions: CameraActions) {
+private fun Shutter(
+    state: AppState,
+    settings: AppSettings,
+    actions: CameraActions,
+    modifier: Modifier = Modifier,
+) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val inner by animateFloatAsState(if (pressed) 0.86f else 1f, tween(90), label = "shutter")
@@ -1140,7 +1199,10 @@ private fun Shutter(state: AppState, settings: AppSettings, actions: CameraActio
     val ringProgress = state.burstActive && state.burstNight
     val progress by animateFloatAsState(if (state.burstActive) state.burstProgress else 0f, tween(250), label = "progress")
     val primary = MaterialTheme.colorScheme.primary
-    Box(contentAlignment = Alignment.Center) {
+    Box(
+        modifier,
+        contentAlignment = Alignment.Center
+    ) {
         Canvas(
             Modifier
                 .size(72.dp)
@@ -1198,10 +1260,15 @@ private fun Shutter(state: AppState, settings: AppSettings, actions: CameraActio
 }
 
 @Composable
-private fun FlipButton(actions: CameraActions, iconRotation: Float) {
+private fun FlipButton(
+    actions: CameraActions,
+    iconRotation: Float,
+    buttonSize: androidx.compose.ui.unit.Dp = 48.dp,
+) {
     var spins by remember { mutableFloatStateOf(0f) }
     val spin by animateFloatAsState(spins, tween(350), label = "flip")
     RoundButton(
+        buttonSize = buttonSize,
         icon = {
             Icon(
                 Icons.Outlined.Sync,
