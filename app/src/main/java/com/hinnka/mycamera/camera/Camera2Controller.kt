@@ -2330,11 +2330,19 @@ class Camera2Controller(private val context: Context) {
     }
 
     private fun handleCameraDeviceClosed(camera: CameraDevice) {
-        if (cameraDevice === camera) {
-            cameraDevice = null
+        if (cameraDevice !== camera) {
+            if (standbyCameraController.isStandbyCamera(camera)) {
+                standbyCameraController.handleExternalStandbyDisconnected(
+                    camera,
+                    "standby camera delivered onClosed",
+                )
+            }
+            return
         }
+        cameraDevice = null
         cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
-        PLog.d(TAG, "Camera device closed: ${camera.id}")
+        activeCameraInfo = null
+        PLog.d(TAG, "Active camera device closed: ${camera.id}")
         openPendingCameraRequest()
         if (cameraDeviceLifecycle == CameraDeviceLifecycle.CLOSED) {
             releaseCloseLatch?.countDown()
@@ -2857,9 +2865,19 @@ class Camera2Controller(private val context: Context) {
             }
 
             override fun onDisconnected(camera: CameraDevice) {
-                if (openGeneration != cameraOpenGeneration) {
-                    closeCameraDeviceAndAwait(camera, "stale camera disconnect")
+                if (camera !== cameraDevice) {
+                    if (standbyCameraController.isStandbyCamera(camera)) {
+                        standbyCameraController.handleExternalStandbyDisconnected(
+                            camera,
+                            "outgoing active camera disconnected while retained as standby",
+                        )
+                    } else {
+                        closeCameraDeviceSafely(camera, "inactive camera disconnected")
+                    }
                     return
+                }
+                if (openGeneration != cameraOpenGeneration) {
+                    PLog.w(TAG, "Ignoring stale generation callback for active camera " + camera.id)
                 }
                 PLog.w(TAG, "Camera disconnected: ${camera.id} - 相机被其他应用或系统接管")
                 handleCameraDeviceUnavailable(
@@ -2876,9 +2894,19 @@ class Camera2Controller(private val context: Context) {
             }
 
             override fun onError(camera: CameraDevice, error: Int) {
-                if (openGeneration != cameraOpenGeneration) {
-                    closeCameraDeviceAndAwait(camera, "stale camera error")
+                if (camera !== cameraDevice) {
+                    if (standbyCameraController.isStandbyCamera(camera)) {
+                        standbyCameraController.handleExternalStandbyDisconnected(
+                            camera,
+                            "outgoing active camera error while retained as standby: " + error,
+                        )
+                    } else {
+                        closeCameraDeviceSafely(camera, "inactive camera error")
+                    }
                     return
+                }
+                if (openGeneration != cameraOpenGeneration) {
+                    PLog.w(TAG, "Ignoring stale generation error callback for active camera " + camera.id)
                 }
                 val errorMessage = when (error) {
                     ERROR_CAMERA_IN_USE ->
