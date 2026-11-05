@@ -334,8 +334,10 @@ class CameraGLSurfaceView @JvmOverloads constructor(
     fun getUltraWideRenderSurface(): Surface? = currentUltraWideSurface
 
     fun setPreviewSource(useUltraWide: Boolean) {
-        renderer.setPreviewSource(useUltraWide)
-        requestRender()
+        queueEvent {
+            renderer.setPreviewSource(useUltraWide)
+            requestRender()
+        }
     }
 
     fun setSourceCrop(crop: PhantomPipCrop) {
