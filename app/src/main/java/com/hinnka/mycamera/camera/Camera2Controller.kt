@@ -2617,7 +2617,7 @@ class Camera2Controller(private val context: Context) {
         val targetArea = target.width.toLong() * target.height
         fun choosePhysicalPreviewSize(physicalId: String): Size? {
             val characteristics = runCatching {
-                cameraDevice?.getPhysicalCameraCharacteristics(physicalId)
+                cameraManager.getCameraCharacteristics(physicalId)
             }.getOrNull() ?: return null
             val sizes = characteristics
                 .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
