@@ -1,6 +1,8 @@
 package com.hinnka.mycamera.focoui.ui
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -125,6 +127,7 @@ import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.exp
+import kotlin.math.ln
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlinx.coroutines.delay
@@ -821,42 +824,252 @@ private fun ZoomChips(state: AppState, actions: CameraActions, iconRotation: Flo
     val selected = ZoomMath.selectedIndex(chips, state.zoom)
     val primary = MaterialTheme.colorScheme.primary
     val onPrimary = MaterialTheme.colorScheme.onPrimary
-    Row(
-        modifier
-            .clip(CircleShape)
-            .background(Color(0xB31E1F22))
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures { change, dragAmount ->
-                    change.consume()
-                    actions.setZoom((state.zoom * exp(dragAmount / 260f)).coerceIn(state.minZoom, state.maxZoom))
+    val collapsedWidth = (chips.size * 36 + (chips.size - 1).coerceAtLeast(0) * 3 + 6).dp
+    var sliderExpanded by remember { mutableStateOf(false) }
+    var zoomDragging by remember { mutableStateOf(false) }
+    var lastZoomInteraction by remember { mutableStateOf(0L) }
+
+    val currentMinZoom = state.minZoom.coerceAtLeast(0.001f)
+    val currentMaxZoom = state.maxZoom.coerceAtLeast(currentMinZoom + 0.001f)
+
+    // Return to the compact lens chips after the user has finished adjusting zoom.
+    LaunchedEffect(sliderExpanded, zoomDragging, lastZoomInteraction) {
+        if (sliderExpanded && !zoomDragging) {
+            delay(2200)
+            if (sliderExpanded && !zoomDragging) sliderExpanded = false
+        }
+    }
+
+    BoxWithConstraints(modifier.height(42.dp), contentAlignment = Alignment.Center) {
+        val expandedWidth = minOf(
+            maxWidth,
+            (maxWidth * 0.78f).coerceAtMost(360.dp)
+        ).coerceAtLeast(minOf(collapsedWidth, maxWidth))
+        val targetWidth = if (sliderExpanded) expandedWidth else minOf(collapsedWidth, maxWidth)
+        val animatedWidth by animateDpAsState(targetWidth, tween(220))
+
+        Box(
+            Modifier
+                .width(animatedWidth)
+                .height(42.dp)
+                .pointerInput(currentMinZoom, currentMaxZoom) {
+                    var dragDistance = 0f
+                    var gestureStartZoom = state.zoom
+                    detectHorizontalDragGestures(
+                        onDragStart = {
+                            dragDistance = 0f
+                            gestureStartZoom = state.zoom.coerceIn(currentMinZoom, currentMaxZoom)
+                            zoomDragging = true
+                        },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            lastZoomInteraction = System.currentTimeMillis()
+
+                            if (!sliderExpanded) {
+                                dragDistance += dragAmount
+                                if (dragDistance > 10.dp.toPx()) {
+                                    // A right swipe morphs the existing chip bar into the slider.
+                                    sliderExpanded = true
+                                    dragDistance = 0f
+                                    gestureStartZoom = state.zoom.coerceIn(currentMinZoom, currentMaxZoom)
+                                } else if (dragDistance < 0f) {
+                                    // Preserve the compact bar's original left-swipe zoom behaviour.
+                                    actions.setZoom(
+                                        (state.zoom * exp(dragAmount / 260f))
+                                            .coerceIn(currentMinZoom, currentMaxZoom)
+                                    )
+                                }
+                            } else {
+                                // The expanded control is a directly draggable slider, not a scrollable row.
+                                val logRange = ln((currentMaxZoom / currentMinZoom).toDouble())
+                                val fraction = dragDistance / size.width.coerceAtLeast(1).toFloat()
+                                val nextZoom = (
+                                    gestureStartZoom * exp(fraction.toDouble() * logRange).toFloat()
+                                ).coerceIn(currentMinZoom, currentMaxZoom)
+                                actions.setZoom(nextZoom)
+                            }
+                        },
+                        onDragEnd = {
+                            zoomDragging = false
+                            lastZoomInteraction = System.currentTimeMillis()
+                        },
+                        onDragCancel = {
+                            zoomDragging = false
+                            lastZoomInteraction = System.currentTimeMillis()
+                        }
+                    )
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            AnimatedContent(
+                targetState = sliderExpanded,
+                modifier = Modifier.fillMaxSize()
+            ) { showSlider ->
+                if (showSlider) {
+                    FocoZoomSliderTrack(
+                        zoom = state.zoom,
+                        minZoom = currentMinZoom,
+                        maxZoom = currentMaxZoom,
+                        stops = chips,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Row(
+                        Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
+                            .background(Color(0xB31E1F22))
+                            .padding(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        chips.forEachIndexed { i, chip ->
+                            val isSelected = i == selected
+                            Box(
+                                Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isSelected) primary else Color.Transparent)
+                                    .clickable {
+                                        actions.haptic()
+                                        actions.setZoom(chip, fromChip = true)
+                                    }
+                                    .semantics { contentDescription = "Zoom ${ZoomMath.formatZoom(chip)}" },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    ZoomMath.chipLabel(chip, state.zoom, isSelected),
+                                    color = if (isSelected) onPrimary else Color.White,
+                                    fontSize = if (isSelected) 15.sp else 14.sp,
+                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                    modifier = Modifier.rotate(iconRotation),
+                                )
+                            }
+                        }
+                    }
                 }
             }
-            .padding(3.dp),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        chips.forEachIndexed { i, chip ->
-            val isSelected = i == selected
-            Box(
-                Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(if (isSelected) primary else Color.Transparent)
-                    .clickable {
-                        actions.haptic()
-                        actions.setZoom(chip, fromChip = true)
+        }
+    }
+}
+
+@Composable
+private fun FocoZoomSliderTrack(
+    zoom: Float,
+    minZoom: Float,
+    maxZoom: Float,
+    stops: List<Float>,
+    modifier: Modifier = Modifier
+) {
+    val safeMin = minZoom.coerceAtLeast(0.001f)
+    val safeMax = maxZoom.coerceAtLeast(safeMin + 0.001f)
+    val logMin = ln(safeMin.toDouble())
+    val logRange = (ln(safeMax.toDouble()) - logMin).coerceAtLeast(0.0001)
+    val progress = (
+        (ln(zoom.coerceIn(safeMin, safeMax).toDouble()) - logMin) / logRange
+    ).toFloat().coerceIn(0f, 1f)
+    val trackInset = 12.dp
+    val handleColor = Color(0xFFE9BDEB)
+    val bubbleColor = Color(0xFFF0DDF0)
+
+    BoxWithConstraints(modifier) {
+        val trackWidth = (maxWidth - trackInset * 2).coerceAtLeast(0.dp)
+        val handleOffset = (
+            trackInset + trackWidth * progress - 2.dp
+        ).coerceIn(0.dp, (maxWidth - 4.dp).coerceAtLeast(0.dp))
+        val bubbleOffset = (
+            trackInset + trackWidth * progress - 28.dp
+        ).coerceIn(0.dp, (maxWidth - 56.dp).coerceAtLeast(0.dp))
+
+        Box(
+            Modifier
+                .fillMaxSize()
+                .clip(CircleShape)
+                .background(Color(0xD91D1D1D))
+        ) {
+            Canvas(Modifier.fillMaxSize()) {
+                val insetPx = trackInset.toPx()
+                val innerWidth = (size.width - insetPx * 2).coerceAtLeast(0f)
+                val tickCount = (innerWidth / 6.dp.toPx()).roundToInt().coerceIn(12, 90)
+                val centerY = 17.dp.toPx()
+                for (index in 0..tickCount) {
+                    val x = insetPx + innerWidth * index / tickCount
+                    val major = index % 5 == 0
+                    val tickHeight = if (major) 14.dp.toPx() else 7.dp.toPx()
+                    drawLine(
+                        color = Color.White.copy(alpha = if (major) 0.78f else 0.4f),
+                        start = Offset(x, centerY - tickHeight / 2f),
+                        end = Offset(x, centerY + tickHeight / 2f),
+                        strokeWidth = if (major) 1.25.dp.toPx() else 0.9.dp.toPx()
+                    )
+                }
+                stops.forEach { stop ->
+                    if (stop in safeMin..safeMax) {
+                        val stopProgress = (
+                            (ln(stop.toDouble()) - logMin) / logRange
+                        ).toFloat().coerceIn(0f, 1f)
+                        val x = insetPx + innerWidth * stopProgress
+                        drawLine(
+                            color = Color.White.copy(alpha = 0.92f),
+                            start = Offset(x, 5.dp.toPx()),
+                            end = Offset(x, 29.dp.toPx()),
+                            strokeWidth = 1.35.dp.toPx()
+                        )
                     }
-                    .semantics { contentDescription = "Zoom ${ZoomMath.formatZoom(chip)}" },
-                contentAlignment = Alignment.Center,
-            ) {
+                }
+            }
+
+            stops.filter { it in safeMin..safeMax }.forEach { stop ->
+                val stopProgress = (
+                    (ln(stop.toDouble()) - logMin) / logRange
+                ).toFloat().coerceIn(0f, 1f)
+                val labelOffset = (
+                    trackInset + trackWidth * stopProgress - 11.dp
+                ).coerceIn(0.dp, (maxWidth - 22.dp).coerceAtLeast(0.dp))
                 Text(
-                    ZoomMath.chipLabel(chip, state.zoom, isSelected),
-                    color = if (isSelected) onPrimary else Color.White,
-                    fontSize = if (isSelected) 15.sp else 14.sp,
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                    modifier = Modifier.rotate(iconRotation),
+                    text = ZoomMath.formatZoom(stop).removeSuffix("×"),
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .offset(x = labelOffset, y = (-1).dp)
+                        .width(22.dp),
+                    color = Color.White.copy(alpha = 0.9f),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
+
+            Box(
+                Modifier
+                    .align(Alignment.TopStart)
+                    .offset(x = handleOffset, y = 5.dp)
+                    .width(4.dp)
+                    .height(25.dp)
+                    .clip(CircleShape)
+                    .background(handleColor)
+            )
+        }
+
+        Box(
+            Modifier
+                .align(Alignment.TopStart)
+                .offset(x = bubbleOffset, y = (-21).dp)
+                .width(56.dp)
+                .clip(CircleShape)
+                .background(bubbleColor)
+                .padding(vertical = 3.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                ZoomMath.formatZoom(zoom),
+                color = Color(0xFF28202B),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false
+            )
         }
     }
 }
