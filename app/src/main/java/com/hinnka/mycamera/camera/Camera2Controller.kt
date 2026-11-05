@@ -152,8 +152,9 @@ class Camera2Controller(private val context: Context) {
     )
 
     private data class LogicalDualPreviewPlan(
-        val mainPhysicalCameraId: String?,
+        val mainPhysicalCameraId: String,
         val ultraWidePhysicalCameraId: String,
+        val mainPreviewSize: Size,
         val ultraWidePreviewSize: Size,
     )
 
@@ -2609,21 +2610,36 @@ class Camera2Controller(private val context: Context) {
 
         val target = state.currentPreviewSize
         val targetRatio = target.width.toFloat() / target.height.coerceAtLeast(1)
-        val physicalCharacteristics = runCatching {
-            logicalCharacteristics.getPhysicalCameraCharacteristics(ultraWidePhysicalId)
-        }.getOrNull() ?: logicalCharacteristics
-        val streamMap = physicalCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-        val supportedSizes = streamMap?.getOutputSizes(SurfaceTexture::class.java).orEmpty()
-        val selectedSize = supportedSizes.minByOrNull { size ->
-            val ratio = size.width.toFloat() / size.height.coerceAtLeast(1)
-            val ratioError = kotlin.math.abs(ratio - targetRatio)
-            val targetArea = target.width.toLong() * target.height
-            val areaError = kotlin.math.abs(size.width.toLong() * size.height - targetArea).toDouble() /
-                targetArea.coerceAtLeast(1L).toDouble()
-            ratioError.toDouble() * 4.0 + areaError * 0.2
-        } ?: target
-        runCatching { texture.setDefaultBufferSize(selectedSize.width, selectedSize.height) }
-        return LogicalDualPreviewPlan(mainPhysicalId, ultraWidePhysicalId, selectedSize)
+        val targetArea = target.width.toLong() * target.height
+        fun choosePhysicalPreviewSize(physicalId: String): Size? {
+            val characteristics = runCatching {
+                logicalCharacteristics.getPhysicalCameraCharacteristics(physicalId)
+            }.getOrNull() ?: return null
+            val sizes = characteristics
+                .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                ?.getOutputSizes(SurfaceTexture::class.java)
+                ?.toList()
+                .orEmpty()
+            return sizes.minByOrNull { size ->
+                val ratio = size.width.toFloat() / size.height.coerceAtLeast(1)
+                val ratioError = kotlin.math.abs(ratio - targetRatio)
+                val areaError = kotlin.math.abs(size.width.toLong() * size.height - targetArea).toDouble() /
+                    targetArea.coerceAtLeast(1L).toDouble()
+                ratioError.toDouble() * 4.0 + areaError * 0.2
+            }
+        }
+        val mainSize = choosePhysicalPreviewSize(mainPhysicalId) ?: return null
+        val ultraWideSize = choosePhysicalPreviewSize(ultraWidePhysicalId) ?: return null
+        previewSurfaceTexture?.let { mainTexture ->
+            runCatching { mainTexture.setDefaultBufferSize(mainSize.width, mainSize.height) }
+        }
+        runCatching { texture.setDefaultBufferSize(ultraWideSize.width, ultraWideSize.height) }
+        return LogicalDualPreviewPlan(
+            mainPhysicalCameraId = mainPhysicalId,
+            ultraWidePhysicalCameraId = ultraWidePhysicalId,
+            mainPreviewSize = mainSize,
+            ultraWidePreviewSize = ultraWideSize,
+        )
     }
 
     private fun retryPreviewSessionWithoutLogicalDualOutput(
@@ -3434,9 +3450,9 @@ class Camera2Controller(private val context: Context) {
             PLog.i(
                 TAG,
                 "Starting persistent logical dual preview: mainPhysical=" +
-                    logicalDualPlan?.mainPhysicalCameraId + ", ultraWidePhysical=" +
-                    logicalDualPlan?.ultraWidePhysicalCameraId + ", size=" +
-                    logicalDualPlan?.ultraWidePreviewSize
+                    logicalDualPlan?.mainPhysicalCameraId + "@" + logicalDualPlan?.mainPreviewSize +
+                    ", ultraWidePhysical=" + logicalDualPlan?.ultraWidePhysicalCameraId +
+                    "@" + logicalDualPlan?.ultraWidePreviewSize
             )
         }
         // createCaptureSession closes the previous session before onConfigured runs.
