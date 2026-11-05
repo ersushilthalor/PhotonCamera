@@ -589,9 +589,28 @@ class StandbyCameraController(context: Context) {
             return
         }
 
+        val resolvedPreviewSize = if (previewSurfaceTexture != null) {
+            resolvePreviewSurfaceSize(
+                cameraId = plan.standbyOpenCameraId,
+                desiredAspectRatio = plan.aspectRatio,
+                preferredSize = previewSize,
+            ) ?: run {
+                reader.close()
+                publishUnavailable(
+                    phase = StandbyCameraPhase.FAILED,
+                    message = "Target camera has no supported SurfaceTexture preview size",
+                    activeCameraId = plan.activeOpenCameraId,
+                    standbyCameraId = plan.standbyCameraId,
+                    lensType = plan.lensType,
+                )
+                return
+            }
+        } else {
+            previewSize
+        }
         val previewSurface = previewSurfaceTexture?.let { texture ->
             runCatching {
-                texture.setDefaultBufferSize(previewSize.width, previewSize.height)
+                texture.setDefaultBufferSize(resolvedPreviewSize.width, resolvedPreviewSize.height)
                 Surface(texture)
             }.getOrNull()
         }
@@ -602,7 +621,7 @@ class StandbyCameraController(context: Context) {
         standbyPreviewSurfaceTexture = previewSurfaceTexture
         standbyPreviewSurface = previewSurface
         standbyCaptureSize = output.size
-        standbyPreviewSize = previewSize
+        standbyPreviewSize = resolvedPreviewSize
         standbyPreviewRequestBuilder = null
         standbyOpenedByController = true
         standbyImageReader = reader
@@ -714,6 +733,29 @@ class StandbyCameraController(context: Context) {
             setDeviceTransitioning(false)
             failCurrentPlan("Standby camera open request failed: " + error.message, error)
         }
+    }
+
+    private fun resolvePreviewSurfaceSize(
+        cameraId: String,
+        desiredAspectRatio: Float,
+        preferredSize: Size,
+    ): Size? {
+        val characteristics = runCatching {
+            cameraManager.getCameraCharacteristics(cameraId)
+        }.getOrNull() ?: return null
+        val sizes = characteristics
+            .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            ?.getOutputSizes(SurfaceTexture::class.java)
+            ?.toList()
+            .orEmpty()
+        if (sizes.isEmpty()) return null
+        val preferredArea = preferredSize.width.toLong() * preferredSize.height
+        return sizes.minWithOrNull(
+            compareBy<Size>(
+                { abs(it.width.toFloat() / it.height.toFloat() - desiredAspectRatio) },
+                { abs(it.width.toLong() * it.height.toLong() - preferredArea) },
+            ),
+        )
     }
 
     private fun resolvePreviewOutput(
