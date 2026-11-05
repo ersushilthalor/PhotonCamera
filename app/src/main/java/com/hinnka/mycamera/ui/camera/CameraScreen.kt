@@ -327,6 +327,7 @@ fun CameraScreen(
     // Surface may become ready while persisted camera settings are still being restored.
     // Retain the exact instance and open only after initialization has completed.
     var previewSurfaceTexture by remember { mutableStateOf<SurfaceTexture?>(null) }
+    var ultraWidePreviewSurfaceTexture by remember { mutableStateOf<SurfaceTexture?>(null) }
     var isCameraPrepared by remember { mutableStateOf(false) }
 
     LaunchedEffect(isCameraInitialized) {
@@ -1294,9 +1295,13 @@ fun CameraScreen(
                                 }
                                 viewModel.closeCamera(surfaceTexture)
                             },
-                            onUltraWideSurfaceTextureReady = viewModel::setUltraWidePreviewSurfaceTexture,
-                            useUltraWidePreviewSource = logicalDualPreviewReady &&
-                                state.currentLensType == LensType.BACK_ULTRA_WIDE,
+                            onUltraWideSurfaceTextureReady = { surfaceTexture ->
+                                ultraWidePreviewSurfaceTexture = surfaceTexture
+                                viewModel.setUltraWidePreviewSurfaceTexture(surfaceTexture)
+                            },
+                            useUltraWidePreviewSource =
+                                ultraWidePreviewSurfaceTexture != null &&
+                                    state.currentLensType == LensType.BACK_ULTRA_WIDE,
                             onTap = { x, y, w, h ->
                                 if (state.isFocusLocked) {
                                     viewModel.unlockFocus()
