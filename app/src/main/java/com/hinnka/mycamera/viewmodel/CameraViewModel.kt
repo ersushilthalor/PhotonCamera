@@ -3853,11 +3853,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         targetCamera?.let { camera ->
             setZoomRatioForCamera(camera.defaultVisibleZoomRatio(), camera.cameraId)
         }
-        val logicalDualPreviewSwitched = sharesOpenCameraDevice &&
-            cameraController.selectLogicalDualPreview(cameraId)
-        // A same-logical-device switch is instant only when both physical outputs are
-        // already part of the configured session. Otherwise keep the supported rebuild path.
-        if (!sharesOpenCameraDevice || !logicalDualPreviewSwitched) {
+        if (sharesOpenCameraDevice) {
+            // setZoomRatioForCamera() queues its request on cameraHandler first. Queue the
+            // physical-output selection after it so session-reuse checks and request updates
+            // run in order on the Camera2 thread rather than racing the UI thread.
+            cameraController.selectLogicalDualPreview(cameraId) { switched ->
+                if (!switched) reopenCamera(preserveVideoRecording = true)
+            }
+        } else {
             reopenCamera(preserveVideoRecording = true)
         }
     }
@@ -3875,9 +3878,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         syncVendorCaptureSettingsToController()
         cameraController.switchToCameraId(cameraId)
         setZoomRatioForCamera(ratio, cameraId)
-        val logicalDualPreviewSwitched = sharesOpenCameraDevice &&
-            cameraController.selectLogicalDualPreview(cameraId)
-        if (!sharesOpenCameraDevice || !logicalDualPreviewSwitched) {
+        if (sharesOpenCameraDevice) {
+            cameraController.selectLogicalDualPreview(cameraId) { switched ->
+                if (!switched) reopenCamera(preserveVideoRecording = true)
+            }
+        } else {
             reopenCamera(preserveVideoRecording = true)
         }
     }
