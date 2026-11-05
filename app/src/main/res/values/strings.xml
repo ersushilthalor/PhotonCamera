@@ -1424,4 +1424,24 @@
     <string name="oppo_refocus_plane_count">Plane %1$d of %2$d</string>
     <string name="oppo_refocus_near">Near</string>
     <string name="oppo_refocus_far">Far</string>
+
+    <!-- Foco settings category hub -->
+    <string name="foco_settings_search">Search settings</string>
+    <string name="foco_settings_no_results">No settings found</string>
+    <string name="foco_settings_photo_capture">Photo capture</string>
+    <string name="foco_settings_photo_capture_summary">Capture options · location tags · shutter sound</string>
+    <string name="foco_settings_photo_processing">Photo processing</string>
+    <string name="foco_settings_photo_processing_summary">Foco processing · sharper zoom · Ultra HDR</string>
+    <string name="foco_settings_video">Video</string>
+    <string name="foco_settings_video_summary">Resolution · frame rate · recording format</string>
+    <string name="foco_settings_storage">Storage</string>
+    <string name="foco_settings_storage_summary">Save paths · export formats · backups</string>
+    <string name="foco_settings_controls">Controls</string>
+    <string name="foco_settings_controls_summary">Quick controls · volume keys · haptics</string>
+    <string name="foco_settings_viewfinder">Viewfinder</string>
+    <string name="foco_settings_viewfinder_summary">Grid · level · QR scanning</string>
+    <string name="foco_settings_diagnostics">Diagnostics</string>
+    <string name="foco_settings_diagnostics_summary">Reports and logs</string>
+    <string name="foco_settings_advanced">Advanced</string>
+    <string name="foco_settings_advanced_summary">Expert options · LUTs · presets · tools</string>
 </resources>
