@@ -3857,7 +3857,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // Keep the same CameraDevice and its already-repeating dual-physical session only
         // when both preview sources are confirmed live. Otherwise use the normal cold
         // Camera2 path instead of displaying a stale/black secondary texture.
-        if (!canSwapLivePhysicalSources) {
+        if (canSwapLivePhysicalSources) {
+            glSurfaceView?.setPreviewSource(targetCamera?.lensType == LensType.BACK_ULTRA_WIDE)
+        } else {
             reopenCamera(preserveVideoRecording = true)
         }
     }
@@ -3881,7 +3883,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val canSwapLivePhysicalSources = sharesOpenCameraDevice &&
             isMainUltraWidePair &&
             cameraController.logicalDualPreviewReady.value
-        if (!canSwapLivePhysicalSources) {
+        if (canSwapLivePhysicalSources) {
+            glSurfaceView?.setPreviewSource(targetCamera?.lensType == LensType.BACK_ULTRA_WIDE)
+        } else {
             reopenCamera(preserveVideoRecording = true)
         }
     }
