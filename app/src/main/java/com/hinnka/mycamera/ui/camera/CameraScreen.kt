@@ -576,7 +576,12 @@ fun CameraScreen(
             return
         }
         cancelZoomStopAnimation()
-        lensSwitchTransition.switchLens(cameraId, targetZoom) { viewModel.switchToLens(cameraId) }
+        if (viewModel.isInstantLogicalLensSwitchReady(cameraId)) {
+            lensSwitchTransition.cancel()
+            viewModel.switchToLens(cameraId)
+        } else {
+            lensSwitchTransition.switchLens(cameraId, targetZoom) { viewModel.switchToLens(cameraId) }
+        }
     }
 
     fun setZoomWithPreviewTransition(targetZoom: Float) {
@@ -598,8 +603,13 @@ fun CameraScreen(
             currentCameraId
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
+            if (viewModel.isInstantLogicalLensSwitchReady(camera.cameraId)) {
+                lensSwitchTransition.cancel()
                 viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
+            } else {
+                lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
+                    viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
+                }
             }
         } else {
             animateCurrentLensToZoomStop(targetZoom)
@@ -623,8 +633,13 @@ fun CameraScreen(
             currentCameraId
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
+            if (viewModel.isInstantLogicalLensSwitchReady(camera.cameraId)) {
+                lensSwitchTransition.cancel()
                 viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
+            } else {
+                lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
+                    viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
+                }
             }
         } else {
             animateCurrentLensToZoomStop(targetZoom)
