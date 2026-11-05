@@ -67,8 +67,11 @@ class CameraGLSurfaceView @JvmOverloads constructor(
 
     var onSurfaceReady: ((Surface) -> Unit)? = null
     var onSurfaceDestroyed: (() -> Unit)? = null
+    var onUltraWideSurfaceReady: ((Surface) -> Unit)? = null
+    var onUltraWideSurfaceDestroyed: (() -> Unit)? = null
     var onFirstPreviewFrame: (() -> Unit)? = null
     private var currentSurface: Surface? = null
+    private var currentUltraWideSurface: Surface? = null
 
     init {
         // 设置 OpenGL ES 3.0
@@ -93,6 +96,14 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         }
 
         // 设置渲染请求回调（当有新帧可用时由 LutRenderer 调用）
+        renderer.onUltraWideSurfaceTextureAvailable = { surfaceTexture ->
+            currentUltraWideSurface?.release()
+            currentUltraWideSurface = Surface(surfaceTexture)
+            post {
+                currentUltraWideSurface?.let { onUltraWideSurfaceReady?.invoke(it) }
+            }
+        }
+
         renderer.onRequestRender = {
             requestRender()
         }
@@ -317,8 +328,15 @@ class CameraGLSurfaceView @JvmOverloads constructor(
      * 获取 SurfaceTexture
      */
     fun getSurfaceTexture(): SurfaceTexture? = renderer.getSurfaceTexture()
+    fun getUltraWideSurfaceTexture(): SurfaceTexture? = renderer.getUltraWideSurfaceTexture()
 
     fun getRenderSurface(): Surface? = currentSurface
+    fun getUltraWideRenderSurface(): Surface? = currentUltraWideSurface
+
+    fun setPreviewSource(useUltraWide: Boolean) {
+        renderer.setPreviewSource(useUltraWide)
+        requestRender()
+    }
 
     fun setSourceCrop(crop: PhantomPipCrop) {
         queueEvent {
@@ -479,13 +497,15 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         super.onDetachedFromWindow()
         PLog.d(TAG, "onDetachedFromWindow")
 
-        // 通知 Surface 销毁
+        // Notify both camera inputs before releasing their producer Surfaces.
         onSurfaceDestroyed?.invoke()
+        onUltraWideSurfaceDestroyed?.invoke()
         onEyeFocusInputAvailable = null
 
-        // 释放 Surface
         currentSurface?.release()
         currentSurface = null
+        currentUltraWideSurface?.release()
+        currentUltraWideSurface = null
 
         // 在 GL 线程中释放资源
         queueEvent {
