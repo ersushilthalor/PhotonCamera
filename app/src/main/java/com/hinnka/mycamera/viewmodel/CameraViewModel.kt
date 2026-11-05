@@ -592,6 +592,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private val cameraController = Camera2Controller(application)
     val logicalDualPreviewReady: StateFlow<Boolean> = cameraController.logicalDualPreviewReady
+    val standbyCameraStatus: StateFlow<StandbyCameraStatus> = cameraController.standbyCameraStatus
 
     // 内容仓库（单例，与 GalleryViewModel 共享）
     private val contentRepository = ContentRepository.getInstance(application)
@@ -3844,7 +3845,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val sharesOpenCameraDevice = runCatching {
             currentCamera.getOpenCameraId() == targetCamera.getOpenCameraId()
         }.getOrDefault(false)
-        return isMainUltraWidePair && sharesOpenCameraDevice && logicalDualPreviewReady.value
+        val logicalReady = isMainUltraWidePair && sharesOpenCameraDevice &&
+            logicalDualPreviewReady.value
+        return logicalReady || cameraController.canSwitchToReadyStandby(cameraId)
     }
 
     fun switchToLens(cameraId: String) {
@@ -3862,16 +3865,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val isMainUltraWidePair = currentCamera != null && targetCamera != null &&
             setOf(currentCamera.lensType, targetCamera.lensType) ==
                 setOf(LensType.BACK_MAIN, LensType.BACK_ULTRA_WIDE)
-        val canSwapLivePhysicalSources = sharesOpenCameraDevice &&
+        val canSwapLogicalPhysicalSources = sharesOpenCameraDevice &&
             isMainUltraWidePair &&
             cameraController.logicalDualPreviewReady.value
-        // Keep the same CameraDevice and its already-repeating dual-physical session only
-        // when both preview sources are confirmed live. Otherwise use the normal cold
-        // Camera2 path instead of displaying a stale/black secondary texture.
-        if (canSwapLivePhysicalSources) {
+        if (canSwapLogicalPhysicalSources) {
             glSurfaceView?.setPreviewSource(targetCamera?.lensType == LensType.BACK_ULTRA_WIDE)
         } else {
-            reopenCamera(preserveVideoRecording = true)
+            val queued = cameraController.switchToReadyStandbyCamera(cameraId) { switched ->
+                if (switched) {
+                    glSurfaceView?.setPreviewSource(targetCamera?.lensType == LensType.BACK_ULTRA_WIDE)
+                } else {
+                    PLog.w(TAG, "Warm standby lens swap failed; falling back to normal camera reopen")
+                    reopenCamera(preserveVideoRecording = true)
+                }
+            }
+            if (!queued) {
+                reopenCamera(preserveVideoRecording = true)
+            }
         }
     }
 
@@ -3891,13 +3901,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val isMainUltraWidePair = currentCamera != null && targetCamera != null &&
             setOf(currentCamera.lensType, targetCamera.lensType) ==
                 setOf(LensType.BACK_MAIN, LensType.BACK_ULTRA_WIDE)
-        val canSwapLivePhysicalSources = sharesOpenCameraDevice &&
+        val canSwapLogicalPhysicalSources = sharesOpenCameraDevice &&
             isMainUltraWidePair &&
             cameraController.logicalDualPreviewReady.value
-        if (canSwapLivePhysicalSources) {
+        if (canSwapLogicalPhysicalSources) {
             glSurfaceView?.setPreviewSource(targetCamera?.lensType == LensType.BACK_ULTRA_WIDE)
         } else {
-            reopenCamera(preserveVideoRecording = true)
+            val queued = cameraController.switchToReadyStandbyCamera(cameraId) { switched ->
+                if (switched) {
+                    glSurfaceView?.setPreviewSource(targetCamera?.lensType == LensType.BACK_ULTRA_WIDE)
+                } else {
+                    PLog.w(TAG, "Warm standby lens swap failed; falling back to normal camera reopen")
+                    reopenCamera(preserveVideoRecording = true)
+                }
+            }
+            if (!queued) {
+                reopenCamera(preserveVideoRecording = true)
+            }
         }
     }
 
