@@ -608,14 +608,18 @@ class StandbyCameraController(context: Context) {
         }
 
         if (!concurrentPairSupported) {
-            publishUnavailable(
-                phase = StandbyCameraPhase.CONCURRENT_COMBINATION_UNSUPPORTED,
-                message = "Android does not advertise this camera pair as a concurrent combination",
-                activeCameraId = activeOpenCameraId,
-                standbyCameraId = targetCamera.cameraId,
-                lensType = targetCamera.lensType,
+            // The ZIP reference keeps separate CameraDevices in persistent dual sessions
+            // even on vendor HALs that omit the pair from concurrentCameraIds. Treat the
+            // Android list as a guarantee, not as an exhaustive capability list: attempt
+            // the secondary stream, but let Camera2 reject it safely when the hardware
+            // really cannot run both cameras. open/configure errors are handled by
+            // failCurrentPlan(), which closes only the standby resources and leaves the
+            // active camera untouched.
+            PLog.w(
+                TAG,
+                "Camera pair is not advertised as concurrent; attempting guarded persistent " +
+                    "standby stream active=$activeOpenCameraId standby=$standbyOpenCameraId",
             )
-            return null
         }
 
         val targetCharacteristics = try { cameraManager.getCameraCharacteristics(standbyOpenCameraId) }
