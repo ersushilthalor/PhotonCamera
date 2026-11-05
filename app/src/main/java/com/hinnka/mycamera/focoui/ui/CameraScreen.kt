@@ -881,6 +881,7 @@ private fun ZoomChips(state: AppState, actions: CameraActions, iconRotation: Flo
                                 }
                             } else {
                                 // The expanded control is a directly draggable slider, not a scrollable row.
+                                dragDistance += dragAmount
                                 val logRange = ln((currentMaxZoom / currentMinZoom).toDouble())
                                 val fraction = dragDistance / size.width.coerceAtLeast(1).toFloat()
                                 val nextZoom = (
