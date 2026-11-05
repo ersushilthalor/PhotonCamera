@@ -130,7 +130,126 @@ class StandbyCameraController(context: Context) {
             plan.standbyOpenCameraId == runCatching { targetCamera.getOpenCameraId() }.getOrNull() &&
             standbyCameraDevice != null &&
             standbyCaptureSession != null &&
+            standbyImageReader != null &&
+            standbyPreviewSurface?.isValid == true &&
+            standbyPreviewSurfaceTexture != null &&
+            standbyPreviewRequestBuilder != null &&
             matchedFrameCount >= REQUIRED_MATCHED_FRAMES
+    }
+
+    fun isStandbyCamera(camera: CameraDevice): Boolean = standbyCameraDevice === camera
+    fun isAdoptedCamera(camera: CameraDevice): Boolean = adoptedCameraDevice === camera
+
+    /**
+     * Swap two already-running Camera2 sessions. Neither CameraDevice nor CaptureSession
+     * is closed/recreated; the old active pair becomes the next background standby.
+     */
+    fun swapForInstant(
+        targetCamera: CameraInfo,
+        outgoingActive: StandbyCameraHandoff,
+        onSwapped: (StandbyCameraHandoff?) -> Unit,
+    ) {
+        dispatch {
+            val plan = activePlan
+            val camera = standbyCameraDevice
+            val session = standbyCaptureSession
+            val reader = standbyImageReader
+            val surface = standbyPreviewSurface
+            val texture = standbyPreviewSurfaceTexture
+            val builder = standbyPreviewRequestBuilder
+            val info = standbyCameraInfo
+            val ready = plan != null &&
+                camera != null && session != null && reader != null &&
+                surface != null && surface.isValid && texture != null && builder != null &&
+                info != null &&
+                plan.standbyCameraId == targetCamera.cameraId &&
+                plan.standbyOpenCameraId == runCatching { targetCamera.getOpenCameraId() }.getOrNull() &&
+                _status.value.phase == StandbyCameraPhase.READY &&
+                matchedFrameCount >= REQUIRED_MATCHED_FRAMES
+            if (!ready || plan == null || camera == null || session == null ||
+                reader == null || surface == null || texture == null || builder == null || info == null
+            ) {
+                onSwapped(null)
+                return@dispatch
+            }
+
+            frameReadyTimeout?.let { handler?.removeCallbacks(it) }
+            frameReadyTimeout = null
+            val incoming = StandbyCameraHandoff(
+                camera = camera,
+                session = session,
+                imageReader = reader,
+                previewSurface = surface,
+                previewSurfaceTexture = texture,
+                requestBuilder = builder,
+                cameraId = plan.standbyCameraId,
+                openCameraId = plan.standbyOpenCameraId,
+                physicalCameraId = plan.standbyPhysicalCameraId,
+                lensType = plan.lensType,
+                cameraInfo = info,
+                captureSize = standbyCaptureSize ?: Size(reader.width, reader.height),
+                openedByStandbyController = standbyOpenedByController,
+            )
+
+            standbyCameraDevice = outgoingActive.camera
+            standbyCaptureSession = outgoingActive.session
+            standbyImageReader = outgoingActive.imageReader
+            standbyPreviewSurface = outgoingActive.previewSurface
+            standbyPreviewSurfaceTexture = outgoingActive.previewSurfaceTexture
+            standbyPreviewRequestBuilder = outgoingActive.requestBuilder
+            standbyCaptureSize = outgoingActive.captureSize
+            standbyCameraInfo = outgoingActive.cameraInfo
+            standbyOpenedByController = outgoingActive.openedByStandbyController
+            activePlan = StandbyPlan(
+                key = "instant-swap|" + incoming.openCameraId + "|" + outgoingActive.openCameraId,
+                activeOpenCameraId = incoming.openCameraId,
+                standbyOpenCameraId = outgoingActive.openCameraId,
+                standbyPhysicalCameraId = outgoingActive.physicalCameraId,
+                standbyCameraId = outgoingActive.cameraId,
+                lensType = outgoingActive.lensType,
+                aspectRatio = 4f / 3f,
+            )
+            pendingPlan = null
+            imageTimestamps.clear()
+            captureResultTimestamps.clear()
+            receivedFrameCount = 0L
+            matchedFrameCount = REQUIRED_MATCHED_FRAMES
+            if (adoptedCameraDevice === outgoingActive.camera) {
+                adoptedCameraDevice = null
+                adoptedDeviceCallbacks = null
+            }
+            if (incoming.openedByStandbyController) {
+                adoptedCameraDevice = incoming.camera
+                adoptedDeviceCallbacks = null
+            }
+            attachStandbyReaderListener(outgoingActive.imageReader, generation)
+            runCatching {
+                outgoingActive.session.setRepeatingRequest(
+                    outgoingActive.requestBuilder.build(),
+                    standbyCaptureCallback,
+                    handler,
+                )
+            }.onFailure { PLog.w(TAG, "Could not keep old active session in standby: " + it.message) }
+            _status.value = StandbyCameraStatus(
+                phase = StandbyCameraPhase.READY,
+                activeCameraId = incoming.openCameraId,
+                standbyCameraId = outgoingActive.cameraId,
+                lensType = outgoingActive.lensType,
+                frameCount = receivedFrameCount,
+                matchedFrameCount = matchedFrameCount,
+                message = "Both camera devices remain open with repeating preview sessions",
+            )
+            PLog.i(TAG, "Instant dual-device swap: active=" + incoming.camera.id + ", standby=" + outgoingActive.camera.id)
+            onSwapped(incoming)
+        }
+    }
+
+    /** Called by the active Camera2Controller callback when an external standby disconnects. */
+    fun handleExternalStandbyDisconnected(camera: CameraDevice, reason: String) {
+        if (standbyCameraDevice !== camera) return
+        PLog.w(TAG, "External standby camera disconnected: " + reason)
+        releaseResources("standby device disconnected", resetStatus = true)
+        runCatching { camera.close() }
     }
 
     /**
@@ -486,29 +605,7 @@ class StandbyCameraController(context: Context) {
             message = "Opening real standby camera stream",
         )
 
-        reader.setOnImageAvailableListener({ source ->
-            if (openGeneration != generation || source !== standbyImageReader) {
-                runCatching { source.acquireLatestImage()?.close() }
-                return@setOnImageAvailableListener
-            }
-            val image = try {
-                source.acquireLatestImage()
-            } catch (error: IllegalStateException) {
-                PLog.w(TAG, "Standby frame acquisition failed", error)
-                null
-            } ?: return@setOnImageAvailableListener
-
-            try {
-                val timestamp = image.timestamp
-                if (timestamp > 0L) {
-                    receivedFrameCount += 1L
-                    rememberTimestamp(imageTimestamps, timestamp)
-                    updateReadinessFromMatchedFrames(openGeneration)
-                }
-            } finally {
-                image.close()
-            }
-        }, callbackHandler)
+        attachStandbyReaderListener(reader, openGeneration)
 
         isDeviceTransitioning = true
         openRequestGeneration = openGeneration
@@ -637,6 +734,32 @@ class StandbyCameraController(context: Context) {
             return PreviewOutput(selectedSize, format)
         }
         return null
+    }
+
+    private fun attachStandbyReaderListener(reader: ImageReader, listenerGeneration: Long) {
+        val callbackHandler = handler ?: return
+        reader.setOnImageAvailableListener({ source ->
+            if (listenerGeneration != generation || source !== standbyImageReader) {
+                runCatching { source.acquireLatestImage()?.close() }
+                return@setOnImageAvailableListener
+            }
+            val image = try {
+                source.acquireLatestImage()
+            } catch (error: IllegalStateException) {
+                PLog.w(TAG, "Standby frame acquisition failed", error)
+                null
+            } ?: return@setOnImageAvailableListener
+            try {
+                val timestamp = image.timestamp
+                if (timestamp > 0L) {
+                    receivedFrameCount += 1L
+                    rememberTimestamp(imageTimestamps, timestamp)
+                    updateReadinessFromMatchedFrames(listenerGeneration)
+                }
+            } finally {
+                image.close()
+            }
+        }, callbackHandler)
     }
 
     private fun configureStandbySession(
@@ -868,6 +991,11 @@ class StandbyCameraController(context: Context) {
     private fun closeSessionAndReader() {
         val session = standbyCaptureSession
         standbyCaptureSession = null
+        standbyPreviewRequestBuilder = null
+        standbyPreviewSurface = null
+        standbyPreviewSurfaceTexture = null
+        standbyCaptureSize = null
+        standbyCameraInfo = null
         if (session != null) {
             runCatching { session.stopRepeating() }
             runCatching { session.abortCaptures() }
