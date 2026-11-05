@@ -162,7 +162,11 @@ fun CameraPreviewGL(
                 }
         ) {
             // GLSurfaceView 用于相机预览
-            key(previewSize.width, previewSize.height, captureMode) {
+            // Preserve both OES SurfaceTextures across lens-to-lens preview-size changes.
+            // Camera2 can update each SurfaceTexture buffer size in place; recreating the
+            // GLSurfaceView here destroys the already-streaming standby lens input and makes
+            // a zero-reopen handoff impossible.
+            key(captureMode) {
                 AndroidView(
                     factory = { ctx ->
                         CameraGLSurfaceView(ctx).apply {
