@@ -69,6 +69,7 @@ import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.CameraState
 import com.hinnka.mycamera.camera.FocusPointSource
+import com.hinnka.mycamera.camera.LensType
 import com.hinnka.mycamera.camera.PhotoCaptureProgress
 import com.hinnka.mycamera.data.CaptureButtonStyle
 import com.hinnka.mycamera.data.DevelopAnimationStyle
@@ -228,6 +229,7 @@ fun CameraScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
+    val logicalDualPreviewReady by viewModel.logicalDualPreviewReady.collectAsState()
     val uiStyle by viewModel.uiStyle.collectAsState()
     val isCameraInitialized by viewModel.isInitialized.collectAsState()
     val latestPhoto by galleryViewModel.latestPhoto.collectAsState()
@@ -325,6 +327,7 @@ fun CameraScreen(
     // Surface may become ready while persisted camera settings are still being restored.
     // Retain the exact instance and open only after initialization has completed.
     var previewSurfaceTexture by remember { mutableStateOf<SurfaceTexture?>(null) }
+    var ultraWidePreviewSurfaceTexture by remember { mutableStateOf<SurfaceTexture?>(null) }
     var isCameraPrepared by remember { mutableStateOf(false) }
 
     LaunchedEffect(isCameraInitialized) {
@@ -574,7 +577,12 @@ fun CameraScreen(
             return
         }
         cancelZoomStopAnimation()
-        lensSwitchTransition.switchLens(cameraId, targetZoom) { viewModel.switchToLens(cameraId) }
+        if (viewModel.isInstantLogicalLensSwitchReady(cameraId)) {
+            lensSwitchTransition.cancel()
+            viewModel.switchToLens(cameraId)
+        } else {
+            lensSwitchTransition.switchLens(cameraId, targetZoom) { viewModel.switchToLens(cameraId) }
+        }
     }
 
     fun setZoomWithPreviewTransition(targetZoom: Float) {
@@ -596,8 +604,13 @@ fun CameraScreen(
             currentCameraId
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
+            if (viewModel.isInstantLogicalLensSwitchReady(camera.cameraId)) {
+                lensSwitchTransition.cancel()
                 viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
+            } else {
+                lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
+                    viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
+                }
             }
         } else {
             animateCurrentLensToZoomStop(targetZoom)
@@ -621,8 +634,13 @@ fun CameraScreen(
             currentCameraId
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
+            if (viewModel.isInstantLogicalLensSwitchReady(camera.cameraId)) {
+                lensSwitchTransition.cancel()
                 viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
+            } else {
+                lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
+                    viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
+                }
             }
         } else {
             animateCurrentLensToZoomStop(targetZoom)
@@ -1277,6 +1295,13 @@ fun CameraScreen(
                                 }
                                 viewModel.closeCamera(surfaceTexture)
                             },
+                            onUltraWideSurfaceTextureReady = { surfaceTexture ->
+                                ultraWidePreviewSurfaceTexture = surfaceTexture
+                                viewModel.setUltraWidePreviewSurfaceTexture(surfaceTexture)
+                            },
+                            useUltraWidePreviewSource =
+                                ultraWidePreviewSurfaceTexture != null &&
+                                    state.currentLensType == LensType.BACK_ULTRA_WIDE,
                             onTap = { x, y, w, h ->
                                 if (state.isFocusLocked) {
                                     viewModel.unlockFocus()

@@ -151,6 +151,13 @@ class Camera2Controller(private val context: Context) {
         val standbyCameraId: String? = null,
     )
 
+    private data class LogicalDualPreviewPlan(
+        val mainPhysicalCameraId: String,
+        val ultraWidePhysicalCameraId: String,
+        val mainPreviewSize: Size,
+        val ultraWidePreviewSize: Size,
+    )
+
     private enum class CameraDeviceLifecycle {
         CLOSED,
         OPENING,
@@ -269,6 +276,7 @@ class Camera2Controller(private val context: Context) {
     // ---------------------
 
     private var cameraDevice: CameraDevice? = null
+    private var activeCameraInfo: CameraInfo? = null
     private var cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
     private var pendingCameraOpenRequest: CameraOpenRequest? = null
     @Volatile
@@ -282,6 +290,17 @@ class Camera2Controller(private val context: Context) {
 
     private var previewSurface: Surface? = null
     private var previewSurfaceTexture: SurfaceTexture? = null
+    // The UI's main GL input is retained separately from the currently active lens input.
+    private var mainPreviewSurfaceTexture: SurfaceTexture? = null
+    // Dedicated GL input for the always-running physical ultra-wide stream.
+    private var ultraWidePreviewSurfaceTexture: SurfaceTexture? = null
+    private var ultraWidePreviewSurface: Surface? = null
+    private var logicalDualPreviewRequestedForSession = false
+    private var forceSinglePreviewAfterDualFailure = false
+    private var activeLogicalDualPreviewPlan: LogicalDualPreviewPlan? = null
+    private var logicalDualMatchedCaptureFrames = 0
+    private val _logicalDualPreviewReady = MutableStateFlow(false)
+    val logicalDualPreviewReady: StateFlow<Boolean> = _logicalDualPreviewReady.asStateFlow()
     private var imageReader: ImageReader? = null
     private var stabilizationImageReader: StabilizationImageReader? = null
 
@@ -898,6 +917,21 @@ class Camera2Controller(private val context: Context) {
         shot.submitted = true
     }
 
+    private fun attachImageReaderListener(reader: ImageReader) {
+        reader.setOnImageAvailableListener({ source ->
+            try {
+                while (canAcquireImage("Too many open images")) {
+                    val image = trackImage(source.acquireNextImage()) ?: break
+                    processOrBufferImageForCaptureResult(image)
+                }
+            } catch (error: Exception) {
+                PLog.e(TAG, "Error in onImageAvailable", error)
+                photoCaptures.values.filter { it.reader === source }.toList()
+                    .forEach { failPhotoCapture(it, "image acquisition failed") }
+            }
+        }, cameraHandler)
+    }
+
     private fun trackImage(image: Image?): SafeImage? {
         if (image != null) {
             openImagesCount.getAndIncrement()
@@ -1171,6 +1205,30 @@ class Camera2Controller(private val context: Context) {
                 }
             }
 
+            // "Session configured" is not proof that both physical outputs are delivering
+            // frames. Arm zero-reopen lens switching only after metadata from BOTH sensors
+            // has actually reached the active repeating request.
+            if (session === captureSession && logicalDualPreviewRequestedForSession) {
+                val dualPlan = activeLogicalDualPreviewPlan
+                val physicalResultIds = result.physicalCameraResults.keys
+                val bothPhysicalSensorsReported = dualPlan != null &&
+                    physicalResultIds.contains(dualPlan.mainPhysicalCameraId) &&
+                    physicalResultIds.contains(dualPlan.ultraWidePhysicalCameraId)
+                if (bothPhysicalSensorsReported) {
+                    logicalDualMatchedCaptureFrames++
+                    if (logicalDualMatchedCaptureFrames >= 2 && !_logicalDualPreviewReady.value) {
+                        _logicalDualPreviewReady.value = true
+                        PLog.i(
+                            TAG,
+                            "Live dual preview READY after $logicalDualMatchedCaptureFrames physical result frames: " +
+                                "main=" + dualPlan.mainPhysicalCameraId + ", ultraWide=" + dualPlan.ultraWidePhysicalCameraId
+                        )
+                    }
+                } else {
+                    logicalDualMatchedCaptureFrames = 0
+                }
+            }
+
             // Only the currently active CameraCaptureSession may feed the EIS timeline.
             // Results from a retired session can arrive after a physical-output handoff; using
             // the new global physical-camera ID for those old frames mixes two sensors' metadata.
@@ -1178,7 +1236,11 @@ class Camera2Controller(private val context: Context) {
                 realtimeStabilizationCoordinator.submitCaptureResult(
                     result = result,
                     request = request,
-                    outputPhysicalCameraId = activeOutputPhysicalCameraId,
+                    outputPhysicalCameraId = if (logicalDualPreviewRequestedForSession) {
+                        resolveRequestedPhysicalCameraId()
+                    } else {
+                        activeOutputPhysicalCameraId
+                    },
                 )
             }
 
@@ -2157,6 +2219,11 @@ class Camera2Controller(private val context: Context) {
         closeImageReader: Boolean = true,
         preserveStandbyCamera: Boolean = false,
     ) {
+        activeCameraInfo = null
+        _logicalDualPreviewReady.value = false
+        logicalDualMatchedCaptureFrames = 0
+        activeLogicalDualPreviewPlan = null
+        logicalDualPreviewRequestedForSession = false
         if (preserveStandbyCamera) {
             PLog.d(TAG, "Preserving ready standby camera for lens handoff: $reason")
         } else {
@@ -2263,11 +2330,19 @@ class Camera2Controller(private val context: Context) {
     }
 
     private fun handleCameraDeviceClosed(camera: CameraDevice) {
-        if (cameraDevice === camera) {
-            cameraDevice = null
+        if (cameraDevice !== camera) {
+            if (standbyCameraController.isStandbyCamera(camera)) {
+                standbyCameraController.handleExternalStandbyDisconnected(
+                    camera,
+                    "standby camera delivered onClosed",
+                )
+            }
+            return
         }
+        cameraDevice = null
         cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
-        PLog.d(TAG, "Camera device closed: ${camera.id}")
+        activeCameraInfo = null
+        PLog.d(TAG, "Active camera device closed: ${camera.id}")
         openPendingCameraRequest()
         if (cameraDeviceLifecycle == CameraDeviceLifecycle.CLOSED) {
             releaseCloseLatch?.countDown()
@@ -2495,6 +2570,137 @@ class Camera2Controller(private val context: Context) {
 
     // ==================== 相机控制 ====================
 
+    fun setUltraWidePreviewSurfaceTexture(texture: SurfaceTexture?) {
+        val handler = cameraHandler
+        val update = {
+            if (ultraWidePreviewSurfaceTexture !== texture) {
+                val previousSurface = ultraWidePreviewSurface
+                ultraWidePreviewSurface = null
+                ultraWidePreviewSurfaceTexture = texture
+                _logicalDualPreviewReady.value = false
+                forceSinglePreviewAfterDualFailure = false
+                logicalDualPreviewRequestedForSession = false
+                runCatching { previousSurface?.release() }
+                if (texture != null) {
+                    val targetSize = _state.value.currentPreviewSize
+                    runCatching { texture.setDefaultBufferSize(targetSize.width, targetSize.height) }
+                    ultraWidePreviewSurface = runCatching { Surface(texture) }.getOrNull()
+                    PLog.i(TAG, "Ultra-wide GL input attached: " + targetSize.width + "x" + targetSize.height)
+                    if (cameraDevice != null &&
+                        cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN &&
+                        !_state.value.videoRecordingState.isRecording &&
+                        !_state.value.videoRecordingState.isProcessing
+                    ) {
+                        val activeInfo = activeCameraInfo ?: _state.value.getCurrentCameraInfo()
+                        if (activeInfo?.lensType == LensType.BACK_ULTRA_WIDE &&
+                            previewSurfaceTexture !== texture
+                        ) {
+                            val oldSurface = previewSurface
+                            previewSurface = runCatching { Surface(texture) }.getOrNull()
+                            previewSurfaceTexture = texture
+                            if (previewSurface != null) {
+                                runCatching { oldSurface?.release() }
+                            } else {
+                                previewSurface = oldSurface
+                            }
+                        }
+                        createPreviewSession()
+                    }
+                } else {
+                    PLog.i(TAG, "Ultra-wide GL input detached")
+                }
+            }
+        }
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { update() }
+        } else {
+            update()
+        }
+    }
+
+    private fun resolveLogicalDualPreviewPlan(): LogicalDualPreviewPlan? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P ||
+            activeOpenCameraId.isBlank() ||
+            forceSinglePreviewAfterDualFailure
+        ) return null
+        val state = _state.value
+        if (state.getCurrentCameraInfo()?.lensFacing != CameraCharacteristics.LENS_FACING_BACK) return null
+        val main = state.availableCameras.firstOrNull {
+            it.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+                it.lensType == LensType.BACK_MAIN &&
+                runCatching { it.getOpenCameraId() == activeOpenCameraId }.getOrDefault(false)
+        } ?: return null
+        val ultraWide = state.availableCameras.firstOrNull {
+            it.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+                it.lensType == LensType.BACK_ULTRA_WIDE &&
+                runCatching { it.getOpenCameraId() == activeOpenCameraId }.getOrDefault(false)
+        } ?: return null
+        val texture = ultraWidePreviewSurfaceTexture ?: return null
+        val surface = ultraWidePreviewSurface?.takeIf { it.isValid } ?: return null
+        val logicalCharacteristics = runCatching {
+            cameraManager.getCameraCharacteristics(activeOpenCameraId)
+        }.getOrNull() ?: return null
+        val physicalIds = logicalCharacteristics.physicalCameraIds
+        if (physicalIds.isEmpty()) return null
+        val ultraWidePhysicalId = ultraWide.getBoundPhysicalCameraId()
+            ?.takeIf { physicalIds.contains(it) }
+            ?: ultraWide.cameraId.takeIf { physicalIds.contains(it) }
+            ?: return null
+        val mainPhysicalId = main.getBoundPhysicalCameraId(1f)
+            ?.takeIf { physicalIds.contains(it) && it != ultraWidePhysicalId }
+            ?: main.cameraId.takeIf { physicalIds.contains(it) && it != ultraWidePhysicalId }
+            ?: return null
+        if (mainPhysicalId == ultraWidePhysicalId) return null
+
+        val target = state.currentPreviewSize
+        val targetRatio = target.width.toFloat() / target.height.coerceAtLeast(1)
+        val targetArea = target.width.toLong() * target.height
+        fun choosePhysicalPreviewSize(physicalId: String): Size? {
+            val characteristics = runCatching {
+                cameraManager.getCameraCharacteristics(physicalId)
+            }.getOrNull() ?: return null
+            val sizes = characteristics
+                .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                ?.getOutputSizes(SurfaceTexture::class.java)
+                ?.toList()
+                .orEmpty()
+            return sizes.minByOrNull { size ->
+                val ratio = size.width.toFloat() / size.height.coerceAtLeast(1)
+                val ratioError = kotlin.math.abs(ratio - targetRatio)
+                val areaError = kotlin.math.abs(size.width.toLong() * size.height - targetArea).toDouble() /
+                    targetArea.coerceAtLeast(1L).toDouble()
+                ratioError.toDouble() * 4.0 + areaError * 0.2
+            }
+        }
+        val mainSize = choosePhysicalPreviewSize(mainPhysicalId) ?: return null
+        val ultraWideSize = choosePhysicalPreviewSize(ultraWidePhysicalId) ?: return null
+        previewSurfaceTexture?.let { mainTexture ->
+            runCatching { mainTexture.setDefaultBufferSize(mainSize.width, mainSize.height) }
+        }
+        runCatching { texture.setDefaultBufferSize(ultraWideSize.width, ultraWideSize.height) }
+        return LogicalDualPreviewPlan(
+            mainPhysicalCameraId = mainPhysicalId,
+            ultraWidePhysicalCameraId = ultraWidePhysicalId,
+            mainPreviewSize = mainSize,
+            ultraWidePreviewSize = ultraWideSize,
+        )
+    }
+
+    private fun retryPreviewSessionWithoutLogicalDualOutput(
+        reason: String,
+        openGeneration: Long,
+    ): Boolean {
+        if (!logicalDualPreviewRequestedForSession) return false
+        PLog.w(TAG, "Logical dual preview rejected; retrying a single output: " + reason)
+        logicalDualPreviewRequestedForSession = false
+        activeLogicalDualPreviewPlan = null
+        logicalDualMatchedCaptureFrames = 0
+        forceSinglePreviewAfterDualFailure = true
+        _logicalDualPreviewReady.value = false
+        createPreviewSession(openGeneration = openGeneration)
+        return true
+    }
+
     /**
      * 打开相机并开始预览
      *
@@ -2509,6 +2715,7 @@ class Camera2Controller(private val context: Context) {
             }
             return
         }
+        mainPreviewSurfaceTexture = surfaceTexture
         val targetCamera = _state.value.getCurrentCameraInfo()
         val standbyCameraId = targetCamera
             ?.takeIf(standbyCameraController::canHandoffTo)
@@ -2591,7 +2798,7 @@ class Camera2Controller(private val context: Context) {
         request: CameraOpenRequest,
         preopenedCamera: CameraDevice? = null,
     ) {
-        val surfaceTexture = request.surfaceTexture
+        var surfaceTexture = request.surfaceTexture
         val preserveVideoRecording = request.preserveVideoRecording
         clearPointFocusState()
         val openGeneration = ++cameraOpenGeneration
@@ -2615,6 +2822,12 @@ class Camera2Controller(private val context: Context) {
         val cameraId = _state.value.currentCameraId
         val selectedCamera = _state.value.getCurrentCameraInfo()
         val openCameraId = selectedCamera?.getOpenCameraId() ?: cameraId
+        activeCameraInfo = selectedCamera
+        if (selectedCamera?.lensType == LensType.BACK_ULTRA_WIDE) {
+            surfaceTexture = ultraWidePreviewSurfaceTexture ?: surfaceTexture
+        } else {
+            surfaceTexture = mainPreviewSurfaceTexture ?: surfaceTexture
+        }
         val targetZoomRatioByMain = getTargetZoomRatioByMain(_state.value, selectedCamera)
         val captureMode = _state.value.captureMode
         if (cameraId.isEmpty()) {
@@ -2652,9 +2865,19 @@ class Camera2Controller(private val context: Context) {
             }
 
             override fun onDisconnected(camera: CameraDevice) {
-                if (openGeneration != cameraOpenGeneration) {
-                    closeCameraDeviceAndAwait(camera, "stale camera disconnect")
+                if (camera !== cameraDevice) {
+                    if (standbyCameraController.isStandbyCamera(camera)) {
+                        standbyCameraController.handleExternalStandbyDisconnected(
+                            camera,
+                            "outgoing active camera disconnected while retained as standby",
+                        )
+                    } else {
+                        closeCameraDeviceSafely(camera, "inactive camera disconnected")
+                    }
                     return
+                }
+                if (openGeneration != cameraOpenGeneration) {
+                    PLog.w(TAG, "Ignoring stale generation callback for active camera " + camera.id)
                 }
                 PLog.w(TAG, "Camera disconnected: ${camera.id} - 相机被其他应用或系统接管")
                 handleCameraDeviceUnavailable(
@@ -2671,9 +2894,19 @@ class Camera2Controller(private val context: Context) {
             }
 
             override fun onError(camera: CameraDevice, error: Int) {
-                if (openGeneration != cameraOpenGeneration) {
-                    closeCameraDeviceAndAwait(camera, "stale camera error")
+                if (camera !== cameraDevice) {
+                    if (standbyCameraController.isStandbyCamera(camera)) {
+                        standbyCameraController.handleExternalStandbyDisconnected(
+                            camera,
+                            "outgoing active camera error while retained as standby: " + error,
+                        )
+                    } else {
+                        closeCameraDeviceSafely(camera, "inactive camera error")
+                    }
                     return
+                }
+                if (openGeneration != cameraOpenGeneration) {
+                    PLog.w(TAG, "Ignoring stale generation error callback for active camera " + camera.id)
                 }
                 val errorMessage = when (error) {
                     ERROR_CAMERA_IN_USE ->
@@ -3084,20 +3317,8 @@ class Camera2Controller(private val context: Context) {
                     captureSize.height,
                     captureFormat,
                     readerMaxImages
-                ).apply {
-                    setOnImageAvailableListener({ reader ->
-                        try {
-                            while (canAcquireImage("Too many open images")) {
-                                val image = trackImage(reader.acquireNextImage()) ?: break
-                                processOrBufferImageForCaptureResult(image)
-                            }
-                        } catch (e: Exception) {
-                            PLog.e(TAG, "Error in onImageAvailable", e)
-                            photoCaptures.values.filter { it.reader === reader }.toList()
-                                .forEach { failPhotoCapture(it, "image acquisition failed") }
-                        }
-                    }, cameraHandler)
-                }
+                )
+                imageReader?.let(::attachImageReaderListener)
 
             } else {
                 safeCloseImageReader(imageReader)
@@ -3274,6 +3495,25 @@ class Camera2Controller(private val context: Context) {
         }
         val device = cameraDevice ?: return
         val surface = previewSurface ?: return
+        val logicalDualPlan = resolveLogicalDualPreviewPlan()
+        val ultraWideSurface = if (logicalDualPlan != null) {
+            ultraWidePreviewSurface?.takeIf { it.isValid }
+        } else {
+            null
+        }
+        logicalDualPreviewRequestedForSession = ultraWideSurface != null && logicalDualPlan != null
+        activeLogicalDualPreviewPlan = logicalDualPlan.takeIf { logicalDualPreviewRequestedForSession }
+        logicalDualMatchedCaptureFrames = 0
+        _logicalDualPreviewReady.value = false
+        if (logicalDualPreviewRequestedForSession) {
+            PLog.i(
+                TAG,
+                "Starting persistent logical dual preview: mainPhysical=" +
+                    logicalDualPlan?.mainPhysicalCameraId + "@" + logicalDualPlan?.mainPreviewSize +
+                    ", ultraWidePhysical=" + logicalDualPlan?.ultraWidePhysicalCameraId +
+                    "@" + logicalDualPlan?.ultraWidePreviewSize
+            )
+        }
         // createCaptureSession closes the previous session before onConfigured runs.
         // Stop exposing it while the replacement is being configured.
         invalidateCaptureSession(captureSession, "preview session replacement")
@@ -3311,6 +3551,7 @@ class Camera2Controller(private val context: Context) {
         try {
             previewRequestBuilder = device.createCaptureRequest(templateType).apply {
                 addTarget(surface)
+                ultraWideSurface?.let(::addTarget)
                 stabilizationReader?.surface?.let(::addTarget)
                 videoSurface?.let(::addTarget)
 
@@ -3319,6 +3560,7 @@ class Camera2Controller(private val context: Context) {
             }
 
             val surfaces = mutableListOf(surface)
+            ultraWideSurface?.let(surfaces::add)
             stabilizationReader?.surface?.let(surfaces::add)
             videoSurface?.let(surfaces::add)
             if (captureMode == CaptureMode.PHOTO) {
@@ -3337,14 +3579,35 @@ class Camera2Controller(private val context: Context) {
                 val sessionConfig = SessionConfiguration(
                     sessionOperatingMode,
                     buildList {
-                        add(createOutputConfiguration(surface))
+                        if (logicalDualPreviewRequestedForSession && logicalDualPlan != null) {
+                            add(createOutputConfiguration(
+                                surface,
+                                physicalCameraIdOverride = logicalDualPlan.mainPhysicalCameraId,
+                                overridePhysicalCameraBinding = true,
+                            ))
+                            ultraWideSurface?.let { ultraWideOutput ->
+                                add(createOutputConfiguration(
+                                    ultraWideOutput,
+                                    physicalCameraIdOverride = logicalDualPlan.ultraWidePhysicalCameraId,
+                                    overridePhysicalCameraBinding = true,
+                                ))
+                            }
+                        } else {
+                            add(createOutputConfiguration(surface))
+                        }
                         stabilizationReader?.surface?.let { eisSurface ->
-                            add(createOutputConfiguration(eisSurface))
+                            add(createOutputConfiguration(
+                                eisSurface,
+                                physicalCameraIdOverride = null,
+                                overridePhysicalCameraBinding = logicalDualPreviewRequestedForSession,
+                            ))
                         }
                         videoSurface?.let { encoderSurface ->
                             add(createOutputConfiguration(
                                 encoderSurface,
-                                useHlg10 = videoCameraHlg10InputActive
+                                useHlg10 = videoCameraHlg10InputActive,
+                                physicalCameraIdOverride = null,
+                                overridePhysicalCameraBinding = logicalDualPreviewRequestedForSession,
                             ))
                         }
                     },
@@ -3371,6 +3634,7 @@ class Camera2Controller(private val context: Context) {
                             }
                             PLog.e(TAG, "Video session configuration failed")
                             safeCloseCaptureSession(session, "video configure failure")
+                            if (retryPreviewSessionWithoutLogicalDualOutput("video configure failed", openGeneration)) return
                             if (retryVideoSessionWithoutCameraHlg(openGeneration)) return
                             if (vendorSessionParametersApplied &&
                                 retryPreviewSessionWithoutVendorSessionParameters(
@@ -3405,12 +3669,35 @@ class Camera2Controller(private val context: Context) {
                         "isP010Supported=$isP010Supported"
             )
             val outputConfigs = buildList {
-                add(createOutputConfiguration(surface))
+                if (logicalDualPreviewRequestedForSession && logicalDualPlan != null) {
+                    add(createOutputConfiguration(
+                        surface,
+                        physicalCameraIdOverride = logicalDualPlan.mainPhysicalCameraId,
+                        overridePhysicalCameraBinding = true,
+                    ))
+                    ultraWideSurface?.let { ultraWideOutput ->
+                        add(createOutputConfiguration(
+                            ultraWideOutput,
+                            physicalCameraIdOverride = logicalDualPlan.ultraWidePhysicalCameraId,
+                            overridePhysicalCameraBinding = true,
+                        ))
+                    }
+                } else {
+                    add(createOutputConfiguration(surface))
+                }
                 stabilizationReader?.surface?.let { eisSurface ->
-                    add(createOutputConfiguration(eisSurface))
+                    add(createOutputConfiguration(
+                        eisSurface,
+                        physicalCameraIdOverride = null,
+                        overridePhysicalCameraBinding = logicalDualPreviewRequestedForSession,
+                    ))
                 }
                 reader?.surface?.let { captureSurface ->
-                    add(createOutputConfiguration(captureSurface))
+                    add(createOutputConfiguration(
+                        captureSurface,
+                        physicalCameraIdOverride = null,
+                        overridePhysicalCameraBinding = logicalDualPreviewRequestedForSession,
+                    ))
                 }
             }
             val sessionConfig = SessionConfiguration(
@@ -3443,6 +3730,7 @@ class Camera2Controller(private val context: Context) {
                                     "sessionColorSpace=${if (shouldUseP3ColorSpace()) "DISPLAY_P3" else "DEFAULT"}"
                         )
                         safeCloseCaptureSession(session, "photo configure failure")
+                        if (retryPreviewSessionWithoutLogicalDualOutput("photo configure failed", openGeneration)) return
                         if (vendorSessionParametersApplied &&
                             retryPreviewSessionWithoutVendorSessionParameters(
                                 reason = "photo configure failed",
@@ -3472,6 +3760,7 @@ class Camera2Controller(private val context: Context) {
             device.createCaptureSession(sessionConfig)
         } catch (e: IllegalStateException) {
             PLog.w(TAG, "Failed to create preview session", e)
+            if (retryPreviewSessionWithoutLogicalDualOutput("create session illegal state: ${e.message}", openGeneration)) return
             if (retryVideoSessionWithoutCameraHlg(openGeneration)) return
             if (vendorSessionParametersApplied &&
                 retryPreviewSessionWithoutVendorSessionParameters(
@@ -3491,6 +3780,7 @@ class Camera2Controller(private val context: Context) {
             handlePreviewSessionFailure("create session illegal state", openGeneration, e)
         } catch (e: Exception) {
             PLog.w(TAG, "Failed to create preview session", e)
+            if (retryPreviewSessionWithoutLogicalDualOutput("create session exception: ${e.message}", openGeneration)) return
             if (retryVideoSessionWithoutCameraHlg(openGeneration)) return
             if (vendorSessionParametersApplied &&
                 retryPreviewSessionWithoutVendorSessionParameters(
@@ -3777,14 +4067,21 @@ class Camera2Controller(private val context: Context) {
 
     private fun createOutputConfiguration(
         surface: Surface,
-        useHlg10: Boolean = false
+        useHlg10: Boolean = false,
+        physicalCameraIdOverride: String? = null,
+        overridePhysicalCameraBinding: Boolean = false,
     ): OutputConfiguration {
         return OutputConfiguration(surface).apply {
             if (useHlg10) {
                 check(Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
                 setDynamicRangeProfile(DynamicRangeProfiles.HLG10)
             }
-            activeOutputPhysicalCameraId?.let { physicalCameraId ->
+            val boundPhysicalCameraId = if (overridePhysicalCameraBinding) {
+                physicalCameraIdOverride
+            } else {
+                activeOutputPhysicalCameraId
+            }
+            boundPhysicalCameraId?.let { physicalCameraId ->
                 setPhysicalCameraId(physicalCameraId)
                 PLog.i(
                     TAG,
@@ -3984,6 +4281,10 @@ class Camera2Controller(private val context: Context) {
             return
         }
         captureSession = session
+        _logicalDualPreviewReady.value = false
+        if (logicalDualPreviewRequestedForSession) {
+            PLog.i(TAG, "Logical dual outputs configured; waiting for physical frames before declaring ready")
+        }
         _state.update { it.copy(previewFirstFrameTimestampNs = null) }
 
         try {
@@ -4011,20 +4312,40 @@ class Camera2Controller(private val context: Context) {
             PLog.d(TAG, "Preview started")
 
             val standbyState = _state.value
+            val activeInfo = activeCameraInfo ?: standbyState.getCurrentCameraInfo()
             val standbyHandler = cameraHandler
-            if (standbyHandler != null &&
-                !standbyState.videoRecordingState.isRecording &&
-                !standbyState.videoRecordingState.isProcessing
-            ) {
+            val standbyTexture = when (activeInfo?.lensType) {
+                LensType.BACK_ULTRA_WIDE -> mainPreviewSurfaceTexture
+                else -> ultraWidePreviewSurfaceTexture
+            }
+            val standbyModeSupported =
+                standbyState.captureMode == CaptureMode.PHOTO &&
+                    !standbyState.useRaw &&
+                    !standbyState.useP010 &&
+                    !standbyState.photoPreviewStabilizationEnabled &&
+                    !shouldUseAlgorithmicStabilization() &&
+                    !standbyState.videoRecordingState.isRecording &&
+                    !standbyState.videoRecordingState.isProcessing
+            if (standbyHandler != null && standbyModeSupported && standbyTexture != null) {
                 standbyCameraController.prepare(
-                    activeCamera = standbyState.getCurrentCameraInfo(),
+                    activeCamera = activeInfo,
                     availableCameras = standbyState.availableCameras,
                     activeOpenCameraId = activeOpenCameraId,
                     previewSize = standbyState.currentPreviewSize,
                     callbackHandler = standbyHandler,
+                    previewSurfaceTexture = standbyTexture,
+                    preferredCaptureSize = standbyState.currentCaptureSize,
+                )
+                PLog.i(
+                    TAG,
+                    "Persistent standby preview requested: active=" + activeInfo?.cameraId +
+                        ", standbyTexture=" + System.identityHashCode(standbyTexture) +
+                        ", size=" + standbyState.currentPreviewSize + ", capture=" + standbyState.currentCaptureSize
                 )
             } else {
-                standbyCameraController.release("standby disabled while video recording is active")
+                standbyCameraController.release(
+                    "instant standby unavailable for this capture mode, stabilization, or missing GL surface"
+                )
             }
 
         } catch (e: CameraAccessException) {
@@ -5923,6 +6244,212 @@ class Camera2Controller(private val context: Context) {
                 zoomRatio = 1f
             )
         } ?: PLog.w(TAG, "Camera with lens type $lensType not found")
+    }
+
+    /**
+     * Whether a second, independently opened rear CameraDevice is already streaming
+     * to its own GL input and can be adopted without a camera/session restart.
+     */
+    fun canSwitchToReadyStandby(cameraId: String): Boolean {
+        val current = activeCameraInfo ?: return false
+        val target = _state.value.availableCameras.firstOrNull { it.cameraId == cameraId } ?: return false
+        val isRearPair = setOf(current.lensType, target.lensType) ==
+            setOf(LensType.BACK_MAIN, LensType.BACK_ULTRA_WIDE)
+        val currentOpen = runCatching { current.getOpenCameraId() }.getOrNull() ?: return false
+        val targetOpen = runCatching { target.getOpenCameraId() }.getOrNull() ?: return false
+        val modeSupported = _state.value.captureMode == CaptureMode.PHOTO &&
+            !_state.value.useRaw &&
+            !_state.value.useP010 &&
+            !requestedRawCaptureEnabled &&
+            imageReader?.imageFormat == ImageFormat.YUV_420_888 &&
+            !_state.value.photoPreviewStabilizationEnabled &&
+            !shouldUseAlgorithmicStabilization() &&
+            !_state.value.videoRecordingState.isRecording &&
+            !_state.value.videoRecordingState.isProcessing
+        return isRearPair && currentOpen != targetOpen && modeSupported &&
+            cameraDevice != null &&
+            cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN &&
+            captureSession != null &&
+            imageReader != null &&
+            previewSurface?.isValid == true &&
+            previewSurfaceTexture != null &&
+            previewRequestBuilder != null &&
+            standbyCameraController.canHandoffTo(target)
+    }
+
+    /**
+     * Swap the active CameraDevice/CaptureSession/ImageReader pointers with the
+     * already-repeating standby pair. No CameraDevice.close(), Session.close(), openCamera()
+     * or createCaptureSession() is performed on the successful path.
+     *
+     * Returns true when the swap has been queued. Completion reports whether the active
+     * preview and image pipeline were successfully adopted.
+     */
+    fun switchToReadyStandbyCamera(
+        cameraId: String,
+        onComplete: (Boolean) -> Unit,
+    ): Boolean {
+        val handler = cameraHandler ?: return false
+        val target = _state.value.availableCameras.firstOrNull { it.cameraId == cameraId } ?: return false
+        if (!canSwitchToReadyStandby(cameraId)) return false
+
+        handler.post {
+            if (!canSwitchToReadyStandby(cameraId)) {
+                onComplete(false)
+                return@post
+            }
+            val outgoingCamera = cameraDevice
+            val outgoingSession = captureSession
+            val outgoingReader = imageReader
+            val outgoingSurface = previewSurface
+            val outgoingTexture = previewSurfaceTexture
+            val outgoingBuilder = previewRequestBuilder
+            val outgoingInfo = activeCameraInfo
+            if (outgoingCamera == null || outgoingSession == null || outgoingReader == null ||
+                outgoingSurface == null || outgoingTexture == null || outgoingBuilder == null ||
+                outgoingInfo == null
+            ) {
+                onComplete(false)
+                return@post
+            }
+
+            val outgoing = StandbyCameraHandoff(
+                camera = outgoingCamera,
+                session = outgoingSession,
+                imageReader = outgoingReader,
+                previewSurface = outgoingSurface,
+                previewSurfaceTexture = outgoingTexture,
+                requestBuilder = outgoingBuilder,
+                cameraId = outgoingInfo.cameraId,
+                openCameraId = activeOpenCameraId,
+                physicalCameraId = activeOutputPhysicalCameraId,
+                lensType = outgoingInfo.lensType,
+                cameraInfo = outgoingInfo,
+                previewSize = _state.value.currentPreviewSize,
+                captureSize = _state.value.currentCaptureSize,
+                aspectRatio = _state.value.currentPreviewSize.let {
+                    it.width.toFloat() / it.height.coerceAtLeast(1)
+                },
+                openedByStandbyController = standbyCameraController.isAdoptedCamera(outgoingCamera),
+            )
+
+            standbyCameraController.swapForInstant(target, outgoing) { incoming ->
+                if (incoming == null) {
+                    PLog.w(TAG, "Instant standby swap rejected for cameraId=$cameraId; caller must use safe reopen")
+                    onComplete(false)
+                    return@swapForInstant
+                }
+
+                try {
+                    // Adopt the preconfigured session and all of its producer/reader surfaces.
+                    // The outgoing active session remains running in StandbyCameraController.
+                    cameraDevice = incoming.camera
+                    cameraDeviceLifecycle = CameraDeviceLifecycle.OPEN
+                    captureSession = incoming.session
+                    imageReader = incoming.imageReader
+                    previewSurface = incoming.previewSurface
+                    previewSurfaceTexture = incoming.previewSurfaceTexture
+                    previewRequestBuilder = incoming.requestBuilder
+                    activeCameraInfo = incoming.cameraInfo
+                    activeOpenCameraId = incoming.openCameraId
+                    activeOutputPhysicalCameraId = incoming.physicalCameraId
+                    cachedCharacteristics = getCameraCharacteristicsCached(incoming.openCameraId)
+                    cachedCharacteristicsCameraId = incoming.openCameraId
+                    cachedSensorOrientation = cachedCharacteristics?.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+                    cachedLensFacing = cachedCharacteristics?.get(CameraCharacteristics.LENS_FACING)
+                        ?: CameraCharacteristics.LENS_FACING_BACK
+                    cachedHardwareLevel = cachedCharacteristics?.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)
+                        ?: CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED
+                    availableCaptureRequestKeyNames = cachedCharacteristics?.let(::loadAvailableCaptureRequestKeyNames)
+
+                    // The standby builder has both valid output targets. Refresh controls against
+                    // the newly selected CameraInfo, then replace only the repeating request.
+                    val template = CameraDevice.TEMPLATE_PREVIEW
+                    val builder = incoming.camera.createCaptureRequest(template).apply {
+                        addTarget(incoming.previewSurface)
+                        addTarget(incoming.imageReader.surface)
+                        applyBaseCameraSettings(this, isCapture = false)
+                    }
+                    previewRequestBuilder = builder
+                    attachImageReaderListener(incoming.imageReader)
+                    applyMeteringRegions()
+                    incoming.session.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
+
+                    _logicalDualPreviewReady.value = false
+                    activeLogicalDualPreviewPlan = null
+                    logicalDualPreviewRequestedForSession = false
+                    logicalDualMatchedCaptureFrames = 0
+                    lastCaptureResult = null
+                    _state.update {
+                        it.copy(
+                            isPreviewActive = true,
+                            previewFirstFrameTimestampNs = null,
+                            currentPreviewSize = incoming.previewSize,
+                            currentCaptureSize = incoming.captureSize,
+                            isRawSupported = incoming.cameraInfo.supportsRaw,
+                            isP010Supported = false,
+                        )
+                    }
+
+                    if (incoming.openedByStandbyController) {
+                        standbyCameraController.setAdoptedCameraCallbacks(
+                            incoming.camera,
+                            AdoptedCameraDeviceCallbacks(
+                                onDisconnected = { device ->
+                                    if (cameraDevice === device) {
+                                        handleCameraDeviceUnavailable(
+                                            device,
+                                            "adopted standby camera disconnected: " + device.id,
+                                        )
+                                        onCameraError?.invoke(
+                                            ERROR_CAMERA_DISCONNECTED,
+                                            "相机已断开连接",
+                                            true,
+                                        )
+                                    } else {
+                                        standbyCameraController.handleExternalStandbyDisconnected(
+                                            device,
+                                            "adopted camera disconnected while in standby",
+                                        )
+                                    }
+                                },
+                                onError = { device, error ->
+                                    if (cameraDevice === device) {
+                                        handleCameraDeviceUnavailable(
+                                            device,
+                                            "adopted standby camera error: " + error,
+                                        )
+                                        onCameraError?.invoke(
+                                            error,
+                                            "相机设备错误 ($error)",
+                                            true,
+                                        )
+                                    } else {
+                                        standbyCameraController.handleExternalStandbyDisconnected(
+                                            device,
+                                            "adopted camera error while in standby: " + error,
+                                        )
+                                    }
+                                },
+                                onClosed = { device -> handleCameraDeviceClosed(device) },
+                            ),
+                        )
+                    }
+
+                    PLog.i(
+                        TAG,
+                        "ZERO-REOPEN standby session swap completed: active=" + incoming.openCameraId +
+                            ", standby=" + outgoing.openCameraId +
+                            ", captureSessionReused=true",
+                    )
+                    onComplete(true)
+                } catch (error: Exception) {
+                    PLog.e(TAG, "Failed adopting already-running standby session", error)
+                    onComplete(false)
+                }
+            }
+        }
+        return true
     }
 
     /**
@@ -9499,7 +10026,9 @@ class Camera2Controller(private val context: Context) {
             }
             return
         }
-        val expectedSurfaceIsCurrent = previewSurfaceTexture === expectedSurfaceTexture
+        val expectedSurfaceIsCurrent =
+            previewSurfaceTexture === expectedSurfaceTexture ||
+                mainPreviewSurfaceTexture === expectedSurfaceTexture
         val expectedSurfaceIsPending = pendingCameraOpenRequest?.surfaceTexture === expectedSurfaceTexture
         if (
             expectedSurfaceTexture != null &&

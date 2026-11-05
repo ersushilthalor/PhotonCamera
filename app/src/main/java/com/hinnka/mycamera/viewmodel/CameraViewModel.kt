@@ -591,7 +591,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     )
 
     private val cameraController = Camera2Controller(application)
-
+    val logicalDualPreviewReady: StateFlow<Boolean> = cameraController.logicalDualPreviewReady
+    val standbyCameraStatus: StateFlow<StandbyCameraStatus> = cameraController.standbyCameraStatus
 
     // 内容仓库（单例，与 GalleryViewModel 共享）
     private val contentRepository = ContentRepository.getInstance(application)
@@ -2917,6 +2918,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /**
      * 打开相机（Camera2 接口）
      */
+    fun setUltraWidePreviewSurfaceTexture(surfaceTexture: SurfaceTexture?) {
+        cameraController.setUltraWidePreviewSurfaceTexture(surfaceTexture)
+    }
+
     fun openCamera(surfaceTexture: SurfaceTexture) {
         PLog.d(TAG, "openCamera")
         if (currentSurfaceTexture === surfaceTexture && (state.value.isPreviewActive || cameraOpenInFlight)) {
@@ -3832,6 +3837,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /**
      * 切换到指定的镜头类型
      */
+    fun isInstantLogicalLensSwitchReady(cameraId: String): Boolean {
+        val currentCamera = state.value.getCurrentCameraInfo() ?: return false
+        val targetCamera = state.value.availableCameras.firstOrNull { it.cameraId == cameraId } ?: return false
+        val isMainUltraWidePair = setOf(currentCamera.lensType, targetCamera.lensType) ==
+            setOf(LensType.BACK_MAIN, LensType.BACK_ULTRA_WIDE)
+        val sharesOpenCameraDevice = runCatching {
+            currentCamera.getOpenCameraId() == targetCamera.getOpenCameraId()
+        }.getOrDefault(false)
+        val logicalReady = isMainUltraWidePair && sharesOpenCameraDevice &&
+            logicalDualPreviewReady.value
+        return logicalReady || cameraController.canSwitchToReadyStandby(cameraId)
+    }
+
     fun switchToLens(cameraId: String) {
         if (isVideoLensLocked()) return
         val currentCamera = state.value.getCurrentCameraInfo()
@@ -3844,11 +3862,26 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         targetCamera?.let { camera ->
             setZoomRatioForCamera(camera.defaultVisibleZoomRatio(), camera.cameraId)
         }
-        // Physical lenses exposed by one logical Camera2 device can be switched by
-        // rebuilding only its capture session. Closing the CameraDevice here adds an
-        // avoidable black-frame/cold-open gap and defeats seamless physical handoff.
-        if (!sharesOpenCameraDevice) {
-            reopenCamera(preserveVideoRecording = true)
+        val isMainUltraWidePair = currentCamera != null && targetCamera != null &&
+            setOf(currentCamera.lensType, targetCamera.lensType) ==
+                setOf(LensType.BACK_MAIN, LensType.BACK_ULTRA_WIDE)
+        val canSwapLogicalPhysicalSources = sharesOpenCameraDevice &&
+            isMainUltraWidePair &&
+            cameraController.logicalDualPreviewReady.value
+        if (canSwapLogicalPhysicalSources) {
+            glSurfaceView?.setPreviewSource(targetCamera?.lensType == LensType.BACK_ULTRA_WIDE)
+        } else {
+            val queued = cameraController.switchToReadyStandbyCamera(cameraId) { switched ->
+                if (switched) {
+                    glSurfaceView?.setPreviewSource(targetCamera?.lensType == LensType.BACK_ULTRA_WIDE)
+                } else {
+                    PLog.w(TAG, "Warm standby lens swap failed; falling back to normal camera reopen")
+                    reopenCamera(preserveVideoRecording = true)
+                }
+            }
+            if (!queued) {
+                reopenCamera(preserveVideoRecording = true)
+            }
         }
     }
 
@@ -3865,8 +3898,26 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         syncVendorCaptureSettingsToController()
         cameraController.switchToCameraId(cameraId)
         setZoomRatioForCamera(ratio, cameraId)
-        if (!sharesOpenCameraDevice) {
-            reopenCamera(preserveVideoRecording = true)
+        val isMainUltraWidePair = currentCamera != null && targetCamera != null &&
+            setOf(currentCamera.lensType, targetCamera.lensType) ==
+                setOf(LensType.BACK_MAIN, LensType.BACK_ULTRA_WIDE)
+        val canSwapLogicalPhysicalSources = sharesOpenCameraDevice &&
+            isMainUltraWidePair &&
+            cameraController.logicalDualPreviewReady.value
+        if (canSwapLogicalPhysicalSources) {
+            glSurfaceView?.setPreviewSource(targetCamera?.lensType == LensType.BACK_ULTRA_WIDE)
+        } else {
+            val queued = cameraController.switchToReadyStandbyCamera(cameraId) { switched ->
+                if (switched) {
+                    glSurfaceView?.setPreviewSource(targetCamera?.lensType == LensType.BACK_ULTRA_WIDE)
+                } else {
+                    PLog.w(TAG, "Warm standby lens swap failed; falling back to normal camera reopen")
+                    reopenCamera(preserveVideoRecording = true)
+                }
+            }
+            if (!queued) {
+                reopenCamera(preserveVideoRecording = true)
+            }
         }
     }
 
