@@ -449,7 +449,30 @@ class Camera2Controller(private val context: Context) {
         return true
     }
 
-    fun selectLogicalDualPreview(cameraId: String): Boolean {
+    /**
+     * Select one of the two already-streaming physical lens outputs.
+     *
+     * All Camera2 session/request access is serialized on cameraHandler. The callback is
+     * invoked only after the preview request has been accepted; callers must keep the
+     * normal camera-reopen fallback when this returns false.
+     */
+    fun selectLogicalDualPreview(cameraId: String, onComplete: (Boolean) -> Unit) {
+        val handler = cameraHandler
+        if (handler == null) {
+            onComplete(false)
+            return
+        }
+        val select = {
+            onComplete(selectLogicalDualPreviewOnCameraThread(cameraId))
+        }
+        if (Looper.myLooper() == handler.looper) {
+            select()
+        } else {
+            handler.post { select() }
+        }
+    }
+
+    private fun selectLogicalDualPreviewOnCameraThread(cameraId: String): Boolean {
         if (!logicalDualPreviewEnabled || !logicalDualPreviewReady) return false
         val selectedPhysicalId = when (cameraId) {
             logicalPrimaryLensCameraId -> logicalPrimaryPhysicalCameraId
@@ -457,20 +480,19 @@ class Camera2Controller(private val context: Context) {
             else -> return false
         }
         if (selectedPhysicalId.isNullOrBlank()) return false
-        activeOutputPhysicalCameraId = selectedPhysicalId
+        val session = captureSession ?: return false
+        val builder = previewRequestBuilder ?: return false
         val selectedTexture = if (cameraId == logicalPrimaryLensCameraId) {
             previewSurfaceTexture
         } else {
             logicalDualPreviewSurfaceTexture
         }
-        publishPreviewSource(selectedTexture === standbyPreviewSurfaceTexture)
 
-        // Keep both outputs configured and only replace the repeating request controls.
-        val session = captureSession ?: return false
-        val builder = previewRequestBuilder ?: return false
         return try {
+            activeOutputPhysicalCameraId = selectedPhysicalId
             applyBaseCameraSettings(builder, isCapture = false)
             session.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
+            publishPreviewSource(selectedTexture === standbyPreviewSurfaceTexture)
             PLog.i(TAG, "Selected logical physical lens: cameraId=" + cameraId +
                 ", physicalId=" + selectedPhysicalId)
             true
@@ -7167,6 +7189,28 @@ class Camera2Controller(private val context: Context) {
     private fun recreateSessionForPhysicalZoomIfNeeded(state: CameraState): Boolean {
         val desiredPhysicalCameraId = resolveOutputPhysicalCameraId(state)
         if (desiredPhysicalCameraId == activeOutputPhysicalCameraId) return false
+
+        // During a prepared logical dual-preview session, both physical sensors already
+        // have dedicated OutputConfigurations and continuously produce frames. Changing
+        // the active physical lens must not tear down that session just to rebind one
+        // output: the main/standby OES inputs are switched independently below.
+        val dualPhysicalOutputReady =
+            logicalDualPreviewEnabled &&
+                logicalDualPreviewReady &&
+                logicalDualPreviewSurface?.isValid == true &&
+                state.captureMode == CaptureMode.PHOTO &&
+                stabilizationImageReader == null &&
+                desiredPhysicalCameraId != null &&
+                (desiredPhysicalCameraId == logicalPrimaryPhysicalCameraId ||
+                    desiredPhysicalCameraId == logicalSecondaryPhysicalCameraId)
+        if (dualPhysicalOutputReady) {
+            activeOutputPhysicalCameraId = desiredPhysicalCameraId
+            refreshActiveFocusLimit()
+            refreshHyperfocalFocusDistanceIfEnabled(updatePreview = false)
+            PLog.d(TAG, "Physical lens changed inside persistent dual-preview session: $desiredPhysicalCameraId")
+            return false
+        }
+
         if (cameraDevice == null || previewSurface == null) return false
 
         PLog.i(
