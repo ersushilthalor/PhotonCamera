@@ -102,16 +102,35 @@ class StandbyCameraController(context: Context) {
     private var matchedFrameCount = 0
     private var lastLoggedTimestampMismatch: Pair<Long, Long>? = null
 
-    /** True only when the already-streaming standby device exactly matches this lens. */
-    fun canHandoffTo(targetCamera: CameraInfo): Boolean {
-        val plan = activePlan ?: return false
-        return _status.value.phase == StandbyCameraPhase.READY &&
-            plan.standbyCameraId == targetCamera.cameraId &&
-            plan.standbyOpenCameraId == runCatching { targetCamera.getOpenCameraId() }.getOrNull() &&
-            standbyCameraDevice != null &&
-            standbyCaptureSession != null &&
-            matchedFrameCount >= REQUIRED_MATCHED_FRAMES
+    /** Returns the exact readiness blockers without changing standby state. */
+    fun handoffBlockers(targetCamera: CameraInfo): List<String> {
+        val plan = activePlan
+        val targetOpenCameraId = runCatching { targetCamera.getOpenCameraId() }.getOrNull()
+        return buildList {
+            if (_status.value.phase != StandbyCameraPhase.READY) {
+                add("standby_phase=${_status.value.phase}")
+            }
+            if (plan == null) {
+                add("standby_plan_missing")
+            } else {
+                if (plan.standbyCameraId != targetCamera.cameraId) {
+                    add("standby_camera_id_mismatch(expected=${plan.standbyCameraId},actual=${targetCamera.cameraId})")
+                }
+                if (plan.standbyOpenCameraId != targetOpenCameraId) {
+                    add("standby_open_camera_id_mismatch(expected=${plan.standbyOpenCameraId},actual=$targetOpenCameraId)")
+                }
+            }
+            if (standbyCameraDevice == null) add("standby_device_missing")
+            if (standbyCaptureSession == null) add("standby_session_missing")
+            if (matchedFrameCount < REQUIRED_MATCHED_FRAMES) {
+                add("matched_frames_insufficient(actual=$matchedFrameCount,required=$REQUIRED_MATCHED_FRAMES)")
+            }
+        }
     }
+
+    /** True only when the already-streaming standby device exactly matches this lens. */
+    fun canHandoffTo(targetCamera: CameraInfo): Boolean =
+        handoffBlockers(targetCamera).isEmpty()
 
     /**
      * Log the active/target camera topology for each user lens-switch request.
