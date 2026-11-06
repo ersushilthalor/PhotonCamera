@@ -299,6 +299,9 @@ class Camera2Controller(private val context: Context) {
     private val detachedCameraDevices = java.util.Collections.newSetFromMap(
         java.util.IdentityHashMap<CameraDevice, Boolean>()
     )
+    private val standbyFallbackDevices = java.util.Collections.newSetFromMap(
+        java.util.IdentityHashMap<CameraDevice, Boolean>()
+    )
     private var closingActiveCameraDevice: CameraDevice? = null
     private var handoffGapStartElapsedMs: Long? = null
     private var cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
@@ -2976,6 +2979,14 @@ class Camera2Controller(private val context: Context) {
                 if (standbyCameraController.handleAdoptedStandbyDeviceClosed(camera)) {
                     return
                 }
+                if (standbyFallbackDevices.remove(camera)) {
+                    InstantLensDiagnostics.log(
+                        "ACTIVE_DEVICE_DEMOTION",
+                        "result=standby_reopen_after_failed_adoption deviceId=${camera.id}",
+                    )
+                    prepareStandbyForCurrentActiveSession()
+                    return
+                }
                 if (detachedCameraDevices.remove(camera)) {
                     if (pendingDemotedCameraForStandby?.device === camera) {
                         pendingDemotedCameraForStandby = null
@@ -4616,9 +4627,8 @@ class Camera2Controller(private val context: Context) {
                     "ACTIVE_DEVICE_DEMOTION",
                     "result=adoption_failed deviceId=${failedDevice.id} reason=$reason",
                 )
+                standbyFallbackDevices += failedDevice
                 closeCameraDeviceSafely(failedDevice, "standby adoption failed: $reason")
-                standbyPreparationDeferredForHandoff = true
-                prepareStandbyForCurrentActiveSession()
             },
         )
     }
