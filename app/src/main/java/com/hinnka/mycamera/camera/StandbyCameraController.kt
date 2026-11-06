@@ -45,6 +45,8 @@ class StandbyCameraController(context: Context) {
     companion object {
         private const val TAG = "StandbyCamera"
         private const val MAX_PREVIEW_DIMENSION = 1280
+        private const val MAX_STANDBY_GL_LONG_EDGE = 1920
+        private const val MAX_STANDBY_GL_SHORT_EDGE = 1440
         private const val TARGET_PREVIEW_AREA = 640L * 480L
         private const val MAX_REMEMBERED_TIMESTAMPS = 12
         private const val REQUIRED_MATCHED_FRAMES = 2
@@ -70,6 +72,7 @@ class StandbyCameraController(context: Context) {
         val aspectRatio: Float,
         val previewSize: Size,
         val previewSurface: Surface?,
+        val standbyFrameBaselineTimestampNs: Long,
     )
 
     private data class PreviewOutput(
@@ -142,6 +145,19 @@ class StandbyCameraController(context: Context) {
             }
             if (standbyCameraDevice == null) add("standby_device_missing")
             if (standbyCaptureSession == null) add("standby_session_missing")
+            if (plan?.previewSurface == null) {
+                add("standby_gl_preview_unavailable_reader_only_fallback")
+            } else {
+                val currentGlTimestamp = runCatching {
+                    alternatePreviewSurfaceTexture?.timestamp ?: 0L
+                }.getOrDefault(0L)
+                if (currentGlTimestamp <= plan.standbyFrameBaselineTimestampNs) {
+                    add(
+                        "standby_gl_frame_not_advanced(" +
+                            "current=$currentGlTimestamp,baseline=${plan.standbyFrameBaselineTimestampNs})"
+                    )
+                }
+            }
             if (matchedFrameCount < REQUIRED_MATCHED_FRAMES) {
                 add("matched_frames_insufficient(actual=$matchedFrameCount,required=$REQUIRED_MATCHED_FRAMES)")
             }
@@ -214,7 +230,13 @@ class StandbyCameraController(context: Context) {
         dispatch {
             val plan = activePlan
             val camera = standbyCameraDevice
+            val currentGlTimestamp = runCatching {
+                alternatePreviewSurfaceTexture?.timestamp ?: 0L
+            }.getOrDefault(0L)
+            val liveGlPreviewReady = plan?.previewSurface != null &&
+                currentGlTimestamp > (plan?.standbyFrameBaselineTimestampNs ?: Long.MAX_VALUE)
             val ready = plan != null &&
+                liveGlPreviewReady &&
                 plan.standbyCameraId == cameraId &&
                 plan.standbyOpenCameraId == expectedOpenCameraId &&
                 camera != null &&
@@ -228,7 +250,8 @@ class StandbyCameraController(context: Context) {
                     "result=failed cameraId=$cameraId expectedOpenCameraId=$expectedOpenCameraId " +
                         "reason=standby_not_ready phase=${_status.value.phase} " +
                         "device=${camera?.id ?: "null"} sessionReady=${standbyCaptureSession != null} " +
-                        "matchedFrames=$matchedFrameCount",
+                        "matchedFrames=$matchedFrameCount liveGlPreviewReady=$liveGlPreviewReady " +
+                        "glTimestamp=$currentGlTimestamp glBaseline=${plan?.standbyFrameBaselineTimestampNs}",
                 )
                 PLog.w(TAG, "Standby handoff unavailable for camera=$cameraId open=$expectedOpenCameraId")
                 onReady(null)
@@ -613,6 +636,11 @@ class StandbyCameraController(context: Context) {
         )
 
         if (activeOpenCameraId == standbyOpenCameraId) {
+            InstantLensDiagnostics.log(
+                "STANDBY_PLAN",
+                "result=logical_camera_shared_session_required activeCameraId=${activeCamera.cameraId} " +
+                    "targetCameraId=${targetCamera.cameraId} logicalOpenCameraId=$activeOpenCameraId",
+            )
             publishUnavailable(
                 phase = StandbyCameraPhase.LOGICAL_CAMERA_SHARED_SESSION_REQUIRED,
                 message = "Both lenses belong to one logical CameraDevice; they must be added to its shared session",
@@ -645,6 +673,15 @@ class StandbyCameraController(context: Context) {
         } else {
             "reader-only"
         }
+        val standbyFrameBaselineTimestampNs = runCatching {
+            alternatePreviewSurfaceTexture?.timestamp ?: 0L
+        }.getOrDefault(0L)
+        InstantLensDiagnostics.log(
+            "STANDBY_PLAN",
+            "result=created activeOpenCameraId=$activeOpenCameraId standbyOpenCameraId=$standbyOpenCameraId " +
+                "targetCameraId=${targetCamera.cameraId} glPreviewAvailable=${livePreviewSurface != null} " +
+                "glFrameBaselineNs=$standbyFrameBaselineTimestampNs previewSize=${previewSize.width}x${previewSize.height}",
+        )
         return StandbyPlan(
             key = listOf(
                 activeOpenCameraId,
@@ -662,6 +699,7 @@ class StandbyCameraController(context: Context) {
             aspectRatio = ratio,
             previewSize = previewSize,
             previewSurface = livePreviewSurface,
+            standbyFrameBaselineTimestampNs = standbyFrameBaselineTimestampNs,
         )
     }
 
@@ -669,32 +707,61 @@ class StandbyCameraController(context: Context) {
         cameraId: String,
         requestedSize: Size,
     ): Surface? {
+        fun readerOnly(reason: String, detail: String? = null): Surface? {
+            InstantLensDiagnostics.log(
+                "STANDBY_GL_OUTPUT",
+                "result=reader_only cameraId=$cameraId reason=$reason detail=${detail ?: "none"} " +
+                    "maxSize=${MAX_STANDBY_GL_LONG_EDGE}x${MAX_STANDBY_GL_SHORT_EDGE}",
+            )
+            return null
+        }
         val surface = alternatePreviewSurface?.takeIf {
             runCatching { it.isValid }.getOrDefault(false)
-        } ?: return null
-        val texture = alternatePreviewSurfaceTexture ?: return null
+        } ?: return readerOnly("alternate_surface_missing_or_invalid")
+        val texture = alternatePreviewSurfaceTexture ?: return readerOnly("alternate_surface_texture_missing")
         val characteristics = runCatching {
             cameraManager.getCameraCharacteristics(cameraId)
-        }.getOrNull() ?: return null
+        }.getOrElse { error ->
+            return readerOnly("camera_characteristics_unavailable", error.javaClass.simpleName + ":" + error.message)
+        }
         val sizes = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
             ?.getOutputSizes(SurfaceTexture::class.java)
             ?.toList()
             .orEmpty()
-        if (sizes.isEmpty()) return null
+        if (sizes.isEmpty()) return readerOnly("no_surface_texture_output_sizes")
+
+        val boundedSizes = sizes.filter { size ->
+            val longEdge = maxOf(size.width, size.height)
+            val shortEdge = minOf(size.width, size.height)
+            longEdge <= MAX_STANDBY_GL_LONG_EDGE && shortEdge <= MAX_STANDBY_GL_SHORT_EDGE
+        }
+        if (boundedSizes.isEmpty()) {
+            val largest = sizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+            return readerOnly(
+                "no_supported_size_within_limit",
+                "supported=${sizes.joinToString { "${it.width}x${it.height}" }} largest=${largest?.width}x${largest?.height}",
+            )
+        }
 
         val requestedAspect = requestedSize.width.toFloat() /
             requestedSize.height.coerceAtLeast(1).toFloat()
         val requestedArea = requestedSize.width.toLong() * requestedSize.height.toLong()
-        val selected = sizes.minWithOrNull(
+        val selected = boundedSizes.minWithOrNull(
             compareBy<Size>(
                 { abs(it.width.toFloat() / it.height.toFloat() - requestedAspect) },
                 { abs(it.width.toLong() * it.height.toLong() - requestedArea) },
             )
-        ) ?: return null
+        ) ?: return readerOnly("bounded_size_selection_failed")
 
         return try {
             texture.setDefaultBufferSize(selected.width, selected.height)
             onPreviewSizeChanged?.invoke(selected.width, selected.height)
+            InstantLensDiagnostics.log(
+                "STANDBY_GL_OUTPUT",
+                "result=selected cameraId=$cameraId size=${selected.width}x${selected.height} " +
+                    "requested=${requestedSize.width}x${requestedSize.height} availableCount=${sizes.size} " +
+                    "boundedCount=${boundedSizes.size}",
+            )
             PLog.i(
                 TAG,
                 "Standby GL preview output selected: camera=$cameraId, size=${selected.width}x${selected.height}",
@@ -702,7 +769,7 @@ class StandbyCameraController(context: Context) {
             surface
         } catch (error: Exception) {
             PLog.w(TAG, "Could not configure alternate GL preview SurfaceTexture", error)
-            null
+            readerOnly("surface_texture_buffer_size_failed", error.javaClass.simpleName + ":" + error.message)
         }
     }
 
@@ -1022,6 +1089,10 @@ class StandbyCameraController(context: Context) {
                                     TAG,
                                     "Standby GL output rejected while starting repeating request; retrying without it: ${error.message}",
                                 )
+                                markStandbyGlPreviewUnavailable(
+                                    plan,
+                                    "set_repeating_request_rejected: ${error.javaClass.simpleName}:${error.message}",
+                                )
                                 runCatching { session.stopRepeating() }
                                 runCatching { session.close() }
                                 if (standbyCaptureSession === session) standbyCaptureSession = null
@@ -1043,6 +1114,7 @@ class StandbyCameraController(context: Context) {
                         if (openGeneration == generation) {
                             if (livePreviewSurface != null) {
                                 PLog.w(TAG, "Standby GL output combination rejected; retrying reader-only standby")
+                                markStandbyGlPreviewUnavailable(plan, "session_configure_failed")
                                 configureStandbySession(
                                     camera,
                                     reader,
@@ -1070,6 +1142,10 @@ class StandbyCameraController(context: Context) {
                     TAG,
                     "Standby GL output could not be configured; retrying reader-only standby: ${error.message}",
                 )
+                markStandbyGlPreviewUnavailable(
+                    plan,
+                    "create_session_failed: ${error.javaClass.simpleName}:${error.message}",
+                )
                 configureStandbySession(
                     camera,
                     reader,
@@ -1081,6 +1157,17 @@ class StandbyCameraController(context: Context) {
                 failCurrentPlan("Standby capture session could not be created: " + error.message, error)
             }
         }
+    }
+
+    private fun markStandbyGlPreviewUnavailable(plan: StandbyPlan, reason: String) {
+        if (activePlan?.key == plan.key && activePlan?.previewSurface != null) {
+            activePlan = activePlan?.copy(previewSurface = null)
+        }
+        InstantLensDiagnostics.log(
+            "STANDBY_GL_OUTPUT",
+            "result=reader_only cameraId=${plan.standbyCameraId} openCameraId=${plan.standbyOpenCameraId} " +
+                "reason=$reason handoffEligible=false",
+        )
     }
 
     private fun scheduleFrameReadyTimeout(openGeneration: Long, callbackHandler: Handler) {
@@ -1430,6 +1517,11 @@ class StandbyCameraController(context: Context) {
         standbyCameraId: String? = null,
         lensType: LensType? = null,
     ) {
+        InstantLensDiagnostics.log(
+            "STANDBY_UNAVAILABLE",
+            "phase=$phase reason=$message activeCameraId=${activeCameraId ?: "unknown"} " +
+                "standbyCameraId=${standbyCameraId ?: "unknown"}",
+        )
         publishStatus(
             StandbyCameraStatus(
                 phase = phase,
