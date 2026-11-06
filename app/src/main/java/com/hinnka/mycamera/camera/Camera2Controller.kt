@@ -295,6 +295,7 @@ class Camera2Controller(private val context: Context) {
     private var cameraDevice: CameraDevice? = null
     private var activeCameraInfo: CameraInfo? = null
     private var pendingDemotedCameraForStandby: DemotedCameraForStandby? = null
+    private var standbyPreparationDeferredForHandoff = false
     private val detachedCameraDevices = java.util.Collections.newSetFromMap(
         java.util.IdentityHashMap<CameraDevice, Boolean>()
     )
@@ -1208,6 +1209,9 @@ class Camera2Controller(private val context: Context) {
                     _state.update { it.copy(previewFirstFrameTimestampNs = timestamp) }
                     if (pendingDemotedCameraForStandby != null) {
                         handleHandoffFirstActiveFrame(session)
+                    } else if (standbyPreparationDeferredForHandoff) {
+                        standbyPreparationDeferredForHandoff = false
+                        prepareStandbyForCurrentActiveSession()
                     }
                 }
             }
@@ -2312,6 +2316,7 @@ class Camera2Controller(private val context: Context) {
     private fun closePendingDemotedCamera(reason: String) {
         val pending = pendingDemotedCameraForStandby ?: pendingCameraOpenRequest?.demotedCamera
         pendingDemotedCameraForStandby = null
+        standbyPreparationDeferredForHandoff = false
         if (pendingCameraOpenRequest?.demotedCamera === pending) {
             pendingCameraOpenRequest = pendingCameraOpenRequest?.copy(demotedCamera = null)
         }
@@ -2337,10 +2342,14 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
-    private fun closeCameraDeviceAndAwait(camera: CameraDevice, reason: String) {
+    private fun closeCameraDeviceAndAwait(
+        camera: CameraDevice,
+        reason: String,
+        completesPendingOpen: Boolean = false,
+    ) {
         if (cameraDevice === camera ||
-            (cameraDevice == null && cameraDeviceLifecycle == CameraDeviceLifecycle.OPENING &&
-                reason == "stale camera open")
+            (completesPendingOpen && cameraDevice == null &&
+                cameraDeviceLifecycle == CameraDeviceLifecycle.OPENING)
         ) {
             if (cameraDevice === camera) cameraDevice = null
             closingActiveCameraDevice = camera
@@ -2356,6 +2365,7 @@ class Camera2Controller(private val context: Context) {
             PLog.d(TAG, "Ignoring close callback for non-active camera: ${camera.id}")
             return
         }
+        if (cameraDevice === camera || closingActiveCameraDevice === camera) activeCameraInfo = null
         if (cameraDevice === camera) cameraDevice = null
         if (closingActiveCameraDevice === camera) closingActiveCameraDevice = null
         cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
@@ -2371,6 +2381,7 @@ class Camera2Controller(private val context: Context) {
         reason: String,
         resetVideoState: Boolean = true
     ) {
+        closePendingDemotedCamera("active camera became unavailable: $reason")
         cameraOpenGeneration++
         videoRecorder.forceStop()
         stopVideoRecordingTicker()
@@ -2387,6 +2398,7 @@ class Camera2Controller(private val context: Context) {
         message: String,
         error: Exception
     ) {
+        closePendingDemotedCamera("new active camera open failed: $message")
         cameraOpenGeneration++
         PLog.e(TAG, "Camera open failed for $cameraId: $message", error)
         val device = cameraDevice
@@ -2410,6 +2422,7 @@ class Camera2Controller(private val context: Context) {
             PLog.w(TAG, "Ignoring stale preview session failure: $reason")
             return
         }
+        closePendingDemotedCamera("new active preview session failed: $reason")
         cameraOpenGeneration++
         if (error != null) {
             PLog.e(TAG, "Preview session failed: $reason", error)
@@ -2694,6 +2707,9 @@ class Camera2Controller(private val context: Context) {
         val demotedCamera = if (
             standbyCameraId != null &&
             previousDevice != null &&
+            !preserveVideoRecording &&
+            !_state.value.videoRecordingState.isRecording &&
+            !_state.value.videoRecordingState.isProcessing &&
             previousCameraInfo?.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
             targetCamera?.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
             previousDevice.id == activeOpenCameraId &&
@@ -2703,6 +2719,7 @@ class Camera2Controller(private val context: Context) {
         } else {
             null
         }
+        standbyPreparationDeferredForHandoff = demotedCamera != null
         pendingCameraOpenRequest = CameraOpenRequest(
             surfaceTexture = surfaceTexture,
             preserveVideoRecording = preserveVideoRecording,
@@ -2816,6 +2833,7 @@ class Camera2Controller(private val context: Context) {
         val surfaceTexture = request.surfaceTexture
         val preserveVideoRecording = request.preserveVideoRecording
         pendingDemotedCameraForStandby = request.demotedCamera
+        standbyPreparationDeferredForHandoff = request.demotedCamera != null
         InstantLensDiagnostics.log(
             "OPEN_CAMERA_NOW",
             "cameraId=${_state.value.currentCameraId} preopened=${preopenedCamera != null} " +
@@ -2868,7 +2886,7 @@ class Camera2Controller(private val context: Context) {
                     cameraDeviceLifecycle != CameraDeviceLifecycle.OPENING
                 ) {
                     PLog.w(TAG, "Ignoring stale camera open callback: camera=${camera.id}")
-                    closeCameraDeviceAndAwait(camera, "stale camera open")
+                    closeCameraDeviceAndAwait(camera, "stale camera open", completesPendingOpen = true)
                     return
                 }
                 PLog.d(TAG, "Camera opened: ${camera.id}")
@@ -4537,10 +4555,31 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    private fun prepareStandbyForCurrentActiveSession() {
+        val current = _state.value
+        val callbackHandler = cameraHandler ?: return
+        if (!current.isPreviewActive || current.videoRecordingState.isRecording ||
+            current.videoRecordingState.isProcessing
+        ) {
+            return
+        }
+        standbyCameraController.prepare(
+            activeCamera = current.getCurrentCameraInfo(),
+            availableCameras = current.availableCameras,
+            activeOpenCameraId = activeOpenCameraId,
+            previewSize = current.currentPreviewSize,
+            callbackHandler = callbackHandler,
+            previewSurface = alternatePreviewSurface,
+            previewSurfaceTexture = alternatePreviewSurfaceTexture,
+            onPreviewSizeChanged = onAlternatePreviewSizeChanged,
+        )
+    }
+
     private fun handleHandoffFirstActiveFrame(session: CameraCaptureSession) {
         if (session !== captureSession) return
         val demoted = pendingDemotedCameraForStandby ?: return
         pendingDemotedCameraForStandby = null
+        standbyPreparationDeferredForHandoff = false
         val gapMs = handoffGapStartElapsedMs?.let { SystemClock.elapsedRealtime() - it }
         handoffGapStartElapsedMs = null
         InstantLensDiagnostics.log(
@@ -4576,6 +4615,8 @@ class Camera2Controller(private val context: Context) {
                     "result=adoption_failed deviceId=${failedDevice.id} reason=$reason",
                 )
                 closeCameraDeviceSafely(failedDevice, "standby adoption failed: $reason")
+                standbyPreparationDeferredForHandoff = true
+                prepareStandbyForCurrentActiveSession()
             },
         )
     }
