@@ -1188,7 +1188,7 @@ class StandbyCameraController(context: Context) {
             return
         }
         val retryState = retryStates.getOrPut(plan.key) { RetryState() }
-        if (cameraErrorCode == CameraDevice.ERROR_MAX_CAMERAS_IN_USE) {
+        if (cameraErrorCode == CameraDevice.StateCallback.ERROR_MAX_CAMERAS_IN_USE) {
             retryState.maxCameraLimitFailures += 1
             InstantLensDiagnostics.log(
                 "STANDBY_RETRY",
