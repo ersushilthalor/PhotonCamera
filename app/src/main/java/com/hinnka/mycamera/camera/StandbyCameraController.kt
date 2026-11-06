@@ -48,9 +48,11 @@ data class AdoptedCameraDeviceCallbacks(
  * Owns the secondary rear-camera stream used to keep the next lens warm.
  *
  * The controller deliberately does not alter PhotonCamera's active capture session.
- * It only opens camera pairs explicitly advertised by CameraManager as concurrent.
- * Readiness is reported after real ImageReader frames have matching Camera2 sensor
- * timestamps; opening a device or configuring a session alone is not sufficient.
+ * It attempts a second rear-camera session while leaving the active camera untouched.
+ * CameraManager's concurrent-pair list is treated as a capability guarantee rather than
+ * an exhaustive device list; Camera2 configuration errors safely retire the standby stream.
+ * Readiness is reported only after the standby repeating request produces real capture
+ * results; opening a device or configuring a session alone is not sufficient.
  */
 class StandbyCameraController(context: Context) {
 
