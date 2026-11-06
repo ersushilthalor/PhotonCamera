@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 import kotlin.math.roundToInt
@@ -114,10 +115,22 @@ internal class LensSwitchTransitionState(
                     val animation = launch {
                         animateSnapshotTo(request?.targetZoom ?: viewModel.zoomRatioByMain)
                     }
-                    val readyState = viewModel.state.first {
-                        it.currentCameraId == awaitedCameraId && it.isPreviewActive &&
-                            it.previewFirstFrameTimestampNs != null &&
-                            it.previewFirstFrameTimestampNs != previousTimestamp
+                    val readyState = withTimeoutOrNull(8_000L) {
+                        viewModel.state.first {
+                            it.currentCameraId == awaitedCameraId && it.isPreviewActive &&
+                                it.previewFirstFrameTimestampNs != null &&
+                                it.previewFirstFrameTimestampNs != previousTimestamp
+                        }
+                    }
+                    if (readyState == null) {
+                        // Do not leave a frozen viewfinder over a camera request that failed or
+                        // never produced a fresh preview session.
+                        PLog.w(
+                            "LensSwitchTransition",
+                            "Timed out waiting for a fresh preview from camera $awaitedCameraId",
+                        )
+                        animation.join()
+                        return@coroutineScope
                     }
                     // Follow the current SurfaceView if preview dimensions change.
                     val rendered = CompletableDeferred<Unit>()
@@ -130,7 +143,18 @@ internal class LensSwitchTransitionState(
                         }
                     }
                     try {
-                        rendered.await()
+                        val frameRendered = withTimeoutOrNull(1_200L) {
+                            rendered.await()
+                            true
+                        } == true
+                        if (!frameRendered) {
+                            // Camera2 may be ready before the GL/EIS renderer reports a frame.
+                            // Release the transition overlay instead of freezing the old image.
+                            PLog.w(
+                                "LensSwitchTransition",
+                                "Timed out waiting for the rendered preview frame from camera $awaitedCameraId",
+                            )
+                        }
                     } finally {
                         waiter.cancel()
                     }

@@ -2725,9 +2725,36 @@ class Camera2Controller(private val context: Context) {
             standbyCameraController.setAdoptedCameraCallbacks(
                 preopenedCamera,
                 AdoptedCameraDeviceCallbacks(
-                    onDisconnected = { camera -> cameraStateCallback.onDisconnected(camera) },
-                    onError = { camera, error -> cameraStateCallback.onError(camera, error) },
-                    onClosed = { camera -> cameraStateCallback.onClosed(camera) },
+                    // A standby device can be superseded while its callbacks are still in flight.
+                    // Never let a stale handoff disconnect/error callback retire the newer active camera.
+                    onDisconnected = { camera ->
+                        if (openGeneration == cameraOpenGeneration) {
+                            cameraStateCallback.onDisconnected(camera)
+                        } else {
+                            PLog.d(TAG, "Ignoring stale handed-off camera disconnect: ${camera.id}")
+                            closeCameraDeviceSafely(camera, "stale handed-off camera disconnect")
+                        }
+                    },
+                    onError = { camera, error ->
+                        if (openGeneration == cameraOpenGeneration) {
+                            cameraStateCallback.onError(camera, error)
+                        } else {
+                            PLog.d(TAG, "Ignoring stale handed-off camera error: ${camera.id}, error=$error")
+                            closeCameraDeviceSafely(camera, "stale handed-off camera error")
+                        }
+                    },
+                    onClosed = { camera ->
+                        // A delayed close from a superseded warm device must not mark the
+                        // replacement camera CLOSED or drain its pending-open request.
+                        if (openGeneration == cameraOpenGeneration ||
+                            camera === cameraDevice ||
+                            cameraDeviceLifecycle == CameraDeviceLifecycle.CLOSING
+                        ) {
+                            cameraStateCallback.onClosed(camera)
+                        } else {
+                            PLog.d(TAG, "Ignoring stale handed-off camera close: ${camera.id}")
+                        }
+                    },
                 ),
             )
         }
