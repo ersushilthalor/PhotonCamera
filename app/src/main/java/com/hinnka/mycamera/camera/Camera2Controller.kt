@@ -2623,6 +2623,10 @@ class Camera2Controller(private val context: Context) {
         cameraDeviceLifecycle = CameraDeviceLifecycle.OPENING
         val standbyCameraId = request.standbyCameraId
         if (standbyCameraId == null) {
+            InstantLensDiagnostics.log(
+                "PATH_OUTCOME",
+                "path=cold_open reason=no_ready_standby_target cameraId=${_state.value.currentCameraId}",
+            )
             openCameraNow(request)
             return
         }
@@ -2634,6 +2638,10 @@ class Camera2Controller(private val context: Context) {
             runCatching { it.getOpenCameraId() }.getOrNull()
         }
         if (targetOpenCameraId.isNullOrBlank()) {
+            InstantLensDiagnostics.log(
+                "PATH_OUTCOME",
+                "path=cold_open reason=standby_target_disappeared targetCameraId=$standbyCameraId",
+            )
             PLog.w(TAG, "Standby handoff target disappeared; releasing standby before cold open")
             standbyCameraController.release("standby handoff target unavailable")
             standbyCameraController.whenDeviceIdle {
@@ -2644,10 +2652,22 @@ class Camera2Controller(private val context: Context) {
             return
         }
 
+        InstantLensDiagnostics.log(
+            "PATH_OUTCOME",
+            "path=warm_device_handoff_attempt targetCameraId=$standbyCameraId targetOpenCameraId=$targetOpenCameraId",
+        )
         standbyCameraController.takeOver(standbyCameraId, targetOpenCameraId) { warmCamera ->
             if (warmCamera != null) {
+                InstantLensDiagnostics.log(
+                    "PATH_OUTCOME",
+                    "path=warm_device_handoff result=success targetCameraId=$standbyCameraId deviceId=${warmCamera.id}",
+                )
                 openCameraNow(request, preopenedCamera = warmCamera)
             } else {
+                InstantLensDiagnostics.log(
+                    "PATH_OUTCOME",
+                    "path=cold_open reason=takeOver_failed targetCameraId=$standbyCameraId",
+                )
                 PLog.w(TAG, "Ready standby camera became unavailable; waiting for its release before cold open")
                 standbyCameraController.release("standby handoff unavailable")
                 standbyCameraController.whenDeviceIdle {
@@ -2666,6 +2686,11 @@ class Camera2Controller(private val context: Context) {
     ) {
         val surfaceTexture = request.surfaceTexture
         val preserveVideoRecording = request.preserveVideoRecording
+        InstantLensDiagnostics.log(
+            "OPEN_CAMERA_NOW",
+            "cameraId=${_state.value.currentCameraId} preopened=${preopenedCamera != null} " +
+                "deviceId=${preopenedCamera?.id ?: "none"}",
+        )
         clearPointFocusState()
         val openGeneration = ++cameraOpenGeneration
 
@@ -4276,6 +4301,13 @@ class Camera2Controller(private val context: Context) {
             safeCloseCaptureSession(session, "stale configured session")
             return
         }
+        InstantLensDiagnostics.log(
+            "NEW_SESSION_ON_CONFIGURED",
+            "sessionId=${System.identityHashCode(session)} deviceId=${cameraDevice?.id ?: "none"} " +
+                "selectedCameraId=${_state.value.currentCameraId} openCameraId=$activeOpenCameraId " +
+                "openGeneration=$openGeneration sessionGeneration=$sessionGeneration " +
+                "logicalDualPreview=${logicalDualPreviewPlan != null}",
+        )
         captureSession = session
         _state.update { it.copy(previewFirstFrameTimestampNs = null) }
 
@@ -6235,30 +6267,72 @@ class Camera2Controller(private val context: Context) {
      */
     fun switchToCameraId(cameraId: String) {
         val cameras = _state.value.availableCameras
+        val activeCamera = _state.value.getCurrentCameraInfo()
         val targetCamera = cameras.find { it.cameraId == cameraId }
+        standbyCameraController.logCameraPairForLensSwitch(activeCamera, targetCamera)
+        val activeOpenCameraId = activeCamera?.let {
+            runCatching { it.getOpenCameraId() }.getOrNull()
+        }
+        val targetOpenCameraId = targetCamera?.let {
+            runCatching { it.getOpenCameraId() }.getOrNull()
+        }
+        val logicalSharedDevice = activeOpenCameraId != null &&
+            activeOpenCameraId == targetOpenCameraId
 
         val livePlan = activeLogicalDualPreviewPlan
         val alternateFrameAvailable = alternatePreviewSurfaceTexture?.let { texture ->
             runCatching { texture.timestamp > 0L }.getOrDefault(false)
         } == true
+        val alternateSurfaceValid = alternatePreviewSurface
+            ?.let { runCatching { it.isValid }.getOrDefault(false) } == true
         val canUsePrewarmedStandby = livePlan == null &&
             targetCamera != null &&
             alternateFrameAvailable &&
-            alternatePreviewSurface?.let { runCatching { it.isValid }.getOrDefault(false) } == true &&
+            alternateSurfaceValid &&
             standbyCameraController.canHandoffTo(targetCamera)
+        val instantLogicalSwap = (
+            livePlan?.alternateCameraId == cameraId && alternateFrameAvailable
+        ) || livePlan?.activeCameraId == cameraId
+        val path = when {
+            instantLogicalSwap -> "instant_swap"
+            canUsePrewarmedStandby -> "warm_device_handoff_candidate"
+            logicalSharedDevice -> "logical_shared_session_reconfigure"
+            else -> "cold_open"
+        }
+        InstantLensDiagnostics.log(
+            "PATH_DECISION",
+            "path=$path fromCameraId=${activeCamera?.cameraId ?: "none"} targetCameraId=$cameraId " +
+                "logicalSharedDevice=$logicalSharedDevice liveLogicalDualPreview=${livePlan != null} " +
+                "alternateFrameAvailable=$alternateFrameAvailable alternateSurfaceValid=$alternateSurfaceValid " +
+                "standbyReady=$canUsePrewarmedStandby",
+        )
+
         when {
             livePlan?.alternateCameraId == cameraId && alternateFrameAvailable -> {
                 pendingLogicalPreviewSourceReset = true
+                InstantLensDiagnostics.log(
+                    "SOURCE_SWAP_REQUESTED",
+                    "source=standby fromCameraId=${activeCamera?.cameraId ?: "none"} targetCameraId=$cameraId",
+                )
                 onAlternatePreviewSourceChanged?.invoke(true)
                 PLog.i(TAG, "Instant preview source swap to alternate physical lens: $cameraId")
             }
             livePlan?.activeCameraId == cameraId -> {
                 pendingLogicalPreviewSourceReset = true
+                InstantLensDiagnostics.log(
+                    "SOURCE_SWAP_REQUESTED",
+                    "source=primary fromCameraId=${activeCamera?.cameraId ?: "none"} targetCameraId=$cameraId",
+                )
                 onAlternatePreviewSourceChanged?.invoke(false)
                 PLog.i(TAG, "Instant preview source swap back to primary physical lens: $cameraId")
             }
             canUsePrewarmedStandby -> {
                 pendingLogicalPreviewSourceReset = true
+                InstantLensDiagnostics.log(
+                    "SOURCE_SWAP_REQUESTED",
+                    "source=standby fromCameraId=${activeCamera?.cameraId ?: "none"} targetCameraId=$cameraId " +
+                        "path=warm_device_handoff_candidate",
+                )
                 onAlternatePreviewSourceChanged?.invoke(true)
                 PLog.i(TAG, "Instant preview source swap to warmed standby CameraDevice: $cameraId")
             }
@@ -9953,6 +10027,13 @@ class Camera2Controller(private val context: Context) {
 
     private fun safeCloseCaptureSession(session: CameraCaptureSession?, reason: String) {
         invalidateCaptureSession(session, reason)
+        if (session != null) {
+            InstantLensDiagnostics.log(
+                "OLD_SESSION_CLOSE",
+                "sessionId=${System.identityHashCode(session)} reason=$reason deviceId=${cameraDevice?.id ?: "none"} " +
+                    "selectedCameraId=${_state.value.currentCameraId}",
+            )
+        }
         try {
             session?.close()
         } catch (e: SecurityException) {
