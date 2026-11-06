@@ -574,7 +574,7 @@ fun CameraScreen(
             return
         }
         cancelZoomStopAnimation()
-        if (viewModel.canInstantlySwitchLens(cameraId)) {
+        if (viewModel.canInstantlySwitchLens(cameraId, source = "lens_tap")) {
             lensSwitchTransition.cancel()
             viewModel.switchToLens(cameraId)
             return
@@ -601,7 +601,7 @@ fun CameraScreen(
             currentCameraId
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            if (viewModel.canInstantlySwitchLens(camera.cameraId)) {
+            if (viewModel.canInstantlySwitchLens(camera.cameraId, source = "zoom_handoff")) {
                 lensSwitchTransition.cancel()
                 viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
                 return
@@ -631,7 +631,7 @@ fun CameraScreen(
             currentCameraId
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            if (viewModel.canInstantlySwitchLens(camera.cameraId)) {
+            if (viewModel.canInstantlySwitchLens(camera.cameraId, source = "zoom_handoff")) {
                 lensSwitchTransition.cancel()
                 viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
                 return

@@ -57,7 +57,12 @@ jobs:
       - name: Protect Foco UI and Photon camera integration
         run: bash ./scripts/verify-camera-integration.sh
 
-      - name: Run video transform regression tests
+      - name: Compile default debug Kotlin
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon compileDefaultDebugKotlin --stacktrace
+
+      - name: Run camera preview regression tests
         run: |
           chmod +x ./gradlew
           ./gradlew --no-daemon :app:testDefaultDebugUnitTest \

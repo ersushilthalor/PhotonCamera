@@ -352,6 +352,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        cameraViewModel.onAppResumed()
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
