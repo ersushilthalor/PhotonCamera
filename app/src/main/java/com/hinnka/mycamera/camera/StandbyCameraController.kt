@@ -22,6 +22,7 @@ import com.hinnka.mycamera.utils.PLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.IdentityHashMap
 import java.util.concurrent.Executor
 import kotlin.math.abs
 
@@ -90,6 +91,8 @@ class StandbyCameraController(context: Context) {
     private var openRequestGeneration: Long? = null
     private var generation = 0L
     private var frameReadyTimeout: Runnable? = null
+    // CameraCaptureSession.close() is asynchronous. Keep resources alive until onClosed().
+    private val pendingSessionCloseActions = IdentityHashMap<CameraCaptureSession, () -> Unit>()
 
     @Volatile
     var isDeviceTransitioning: Boolean = false
@@ -132,18 +135,15 @@ class StandbyCameraController(context: Context) {
                 standbyCaptureSession != null &&
                 _status.value.phase == StandbyCameraPhase.READY &&
                 matchedFrameCount >= REQUIRED_MATCHED_FRAMES
-            if (!ready || camera == null) {
+            if (!ready || camera == null || plan == null) {
                 PLog.w(TAG, "Standby handoff unavailable for camera=$cameraId open=$expectedOpenCameraId")
                 onReady(null)
                 return@dispatch
             }
 
+            val handoffGeneration = generation
             frameReadyTimeout?.let { handler?.removeCallbacks(it) }
             frameReadyTimeout = null
-            closeSessionAndReader()
-            standbyCameraDevice = null
-            adoptedCameraDevice = camera
-            adoptedDeviceCallbacks = null
             activePlan = null
             pendingPlan = null
             imageTimestamps.clear()
@@ -151,14 +151,35 @@ class StandbyCameraController(context: Context) {
             receivedFrameCount = 0L
             matchedFrameCount = 0
             _status.value = StandbyCameraStatus(
-                phase = StandbyCameraPhase.IDLE,
-                activeCameraId = camera.id,
+                phase = StandbyCameraPhase.CONFIGURING,
+                activeCameraId = plan.activeOpenCameraId,
                 standbyCameraId = cameraId,
                 lensType = plan.lensType,
-                message = "Warm camera handed to active capture pipeline",
+                message = "Waiting for the standby capture session to close before camera handoff",
             )
-            PLog.i(TAG, "Handing off warm CameraDevice ${camera.id} for lens=$cameraId")
-            onReady(camera)
+
+            // Do not close the ImageReader or configure another session on this device until
+            // Camera2 confirms that the old standby session has finished closing.
+            closeSessionAndReader {
+                if (handoffGeneration != generation || standbyCameraDevice !== camera) {
+                    PLog.w(TAG, "Standby camera changed while its capture session was closing")
+                    onReady(null)
+                    return@closeSessionAndReader
+                }
+
+                standbyCameraDevice = null
+                adoptedCameraDevice = camera
+                adoptedDeviceCallbacks = null
+                _status.value = StandbyCameraStatus(
+                    phase = StandbyCameraPhase.IDLE,
+                    activeCameraId = camera.id,
+                    standbyCameraId = cameraId,
+                    lensType = plan.lensType,
+                    message = "Warm camera handed to active capture pipeline after session close",
+                )
+                PLog.i(TAG, "Handing off warm CameraDevice ${camera.id} for lens=$cameraId after standby session closed")
+                onReady(camera)
+            }
         }
     }
 
@@ -792,6 +813,7 @@ class StandbyCameraController(context: Context) {
                         if (standbyCaptureSession === session) {
                             standbyCaptureSession = null
                         }
+                        pendingSessionCloseActions.remove(session)?.invoke()
                     }
                 },
             )
@@ -913,20 +935,34 @@ class StandbyCameraController(context: Context) {
         }
     }
 
-    private fun closeSessionAndReader() {
+    private fun closeSessionAndReader(afterSessionClosed: (() -> Unit)? = null) {
         val session = standbyCaptureSession
         standbyCaptureSession = null
-        if (session != null) {
-            runCatching { session.stopRepeating() }
-            runCatching { session.abortCaptures() }
-            runCatching { session.close() }
-        }
-
         val reader = standbyImageReader
         standbyImageReader = null
-        if (reader != null) {
-            runCatching { reader.setOnImageAvailableListener(null, null) }
-            runCatching { reader.close() }
+
+        val finishClose = {
+            if (reader != null) {
+                runCatching { reader.setOnImageAvailableListener(null, null) }
+                runCatching { reader.close() }
+            }
+            afterSessionClosed?.invoke()
+        }
+
+        if (session == null) {
+            finishClose()
+            return
+        }
+
+        // Register before close(): onClosed() is dispatched asynchronously on the camera handler.
+        pendingSessionCloseActions[session] = finishClose
+        runCatching { session.stopRepeating() }
+        runCatching { session.abortCaptures() }
+        try {
+            session.close()
+        } catch (error: Exception) {
+            PLog.w(TAG, "Failed to close standby capture session", error)
+            pendingSessionCloseActions.remove(session)?.invoke()
         }
     }
 
