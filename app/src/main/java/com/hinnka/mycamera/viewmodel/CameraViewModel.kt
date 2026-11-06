@@ -3846,18 +3846,53 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         zoomRatioByMain = 1f
     }
 
-    fun canInstantlySwitchLens(cameraId: String): Boolean {
-        val previewView = glSurfaceView ?: return false
-        return cameraController.canSwitchToInstantPreview(cameraId) &&
-            previewView.hasStandbyPreviewFrame
+    fun canInstantlySwitchLens(
+        cameraId: String,
+        source: String = "lens_switch_probe",
+    ): Boolean {
+        val currentCameraId = state.value.currentCameraId
+        val previewView = glSurfaceView
+        val controllerReady = previewView != null &&
+            cameraController.canSwitchToInstantPreview(cameraId)
+        val hasStandbyPreviewFrame = previewView?.hasStandbyPreviewFrame == true
+        val result = previewView != null && controllerReady && hasStandbyPreviewFrame
+        val failedConditions = buildList {
+            if (previewView == null) add("gl_surface_view_missing")
+            if (previewView != null && !controllerReady) {
+                add("camera_controller_not_ready_check_CONTROLLER_ELIGIBILITY")
+            }
+            if (!hasStandbyPreviewFrame) add("standby_preview_frame_missing")
+        }
+        InstantLensDiagnostics.log(
+            "LENS_TAP",
+            "source=$source fromCameraId=$currentCameraId targetCameraId=$cameraId",
+        )
+        InstantLensDiagnostics.log(
+            "CAN_INSTANT_RESULT",
+            "source=$source targetCameraId=$cameraId result=$result " +
+                "glSurfaceViewPresent=${previewView != null} controllerReady=$controllerReady " +
+                "standbyPreviewFrame=$hasStandbyPreviewFrame " +
+                "failedConditions=${failedConditions.ifEmpty { listOf("none") }.joinToString("|")}",
+        )
+        return result
     }
 
     /**
      * 切换到指定的镜头类型
      */
     fun switchToLens(cameraId: String) {
-        if (isVideoLensLocked()) return
         val currentCamera = state.value.getCurrentCameraInfo()
+        if (isVideoLensLocked()) {
+            InstantLensDiagnostics.log(
+                "SWITCH_BLOCKED",
+                "reason=video_lens_locked fromCameraId=${currentCamera?.cameraId ?: "none"} targetCameraId=$cameraId",
+            )
+            return
+        }
+        InstantLensDiagnostics.log(
+            "SWITCH_REQUEST",
+            "fromCameraId=${currentCamera?.cameraId ?: "none"} targetCameraId=$cameraId",
+        )
         val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId }
         val sharesOpenCameraDevice = currentCamera != null && targetCamera != null &&
             runCatching { currentCamera.getOpenCameraId() == targetCamera.getOpenCameraId() }
