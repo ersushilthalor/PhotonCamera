@@ -2,6 +2,7 @@ package com.hinnka.mycamera.camera
 
 import android.content.Context
 import android.graphics.ImageFormat
+import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraAccessException
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
@@ -16,6 +17,7 @@ import android.media.ImageReader
 import android.os.Handler
 import android.os.Looper
 import android.util.Size
+import android.view.Surface
 import com.hinnka.mycamera.utils.PLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -56,6 +58,8 @@ class StandbyCameraController(context: Context) {
         val standbyCameraId: String,
         val lensType: LensType,
         val aspectRatio: Float,
+        val previewSize: Size,
+        val previewSurface: Surface?,
     )
 
     private data class PreviewOutput(
@@ -78,6 +82,9 @@ class StandbyCameraController(context: Context) {
     private var closingCameraDevice: CameraDevice? = null
     private var standbyCaptureSession: CameraCaptureSession? = null
     private var standbyImageReader: ImageReader? = null
+    private var alternatePreviewSurface: Surface? = null
+    private var alternatePreviewSurfaceTexture: SurfaceTexture? = null
+    private var onPreviewSizeChanged: ((Int, Int) -> Unit)? = null
     private var activePlan: StandbyPlan? = null
     private var pendingPlan: StandbyPlan? = null
     private var openRequestGeneration: Long? = null
@@ -171,9 +178,17 @@ class StandbyCameraController(context: Context) {
         activeOpenCameraId: String,
         previewSize: Size,
         callbackHandler: Handler,
+        previewSurface: Surface? = null,
+        previewSurfaceTexture: SurfaceTexture? = null,
+        onPreviewSizeChanged: ((Int, Int) -> Unit)? = null,
     ) {
         handler = callbackHandler
         dispatch {
+            alternatePreviewSurface = previewSurface?.takeIf {
+                runCatching { it.isValid }.getOrDefault(false)
+            }
+            alternatePreviewSurfaceTexture = previewSurfaceTexture
+            this.onPreviewSizeChanged = onPreviewSizeChanged
             prepareOnCameraThread(
                 activeCamera = activeCamera,
                 availableCameras = availableCameras,
@@ -340,12 +355,23 @@ class StandbyCameraController(context: Context) {
         } else {
             4f / 3f
         }
+        val livePreviewSurface = resolveStandbyPreviewSurface(
+            cameraId = standbyPhysicalId ?: standbyOpenCameraId,
+            requestedSize = previewSize,
+        )
+        val livePreviewSizeKey = if (livePreviewSurface != null) {
+            "${previewSize.width}x${previewSize.height}"
+        } else {
+            "reader-only"
+        }
         return StandbyPlan(
             key = listOf(
                 activeOpenCameraId,
                 standbyOpenCameraId,
                 standbyPhysicalId.orEmpty(),
                 targetCamera.cameraId,
+                livePreviewSurface?.let { System.identityHashCode(it) } ?: 0,
+                livePreviewSizeKey,
             ).joinToString("|"),
             activeOpenCameraId = activeOpenCameraId,
             standbyOpenCameraId = standbyOpenCameraId,
@@ -353,7 +379,50 @@ class StandbyCameraController(context: Context) {
             standbyCameraId = targetCamera.cameraId,
             lensType = targetCamera.lensType,
             aspectRatio = ratio,
+            previewSize = previewSize,
+            previewSurface = livePreviewSurface,
         )
+    }
+
+    private fun resolveStandbyPreviewSurface(
+        cameraId: String,
+        requestedSize: Size,
+    ): Surface? {
+        val surface = alternatePreviewSurface?.takeIf {
+            runCatching { it.isValid }.getOrDefault(false)
+        } ?: return null
+        val texture = alternatePreviewSurfaceTexture ?: return null
+        val characteristics = runCatching {
+            cameraManager.getCameraCharacteristics(cameraId)
+        }.getOrNull() ?: return null
+        val sizes = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            ?.getOutputSizes(SurfaceTexture::class.java)
+            ?.toList()
+            .orEmpty()
+        if (sizes.isEmpty()) return null
+
+        val requestedAspect = requestedSize.width.toFloat() /
+            requestedSize.height.coerceAtLeast(1).toFloat()
+        val requestedArea = requestedSize.width.toLong() * requestedSize.height.toLong()
+        val selected = sizes.minWithOrNull(
+            compareBy<Size>(
+                { abs(it.width.toFloat() / it.height.toFloat() - requestedAspect) },
+                { abs(it.width.toLong() * it.height.toLong() - requestedArea) },
+            )
+        ) ?: return null
+
+        return try {
+            texture.setDefaultBufferSize(selected.width, selected.height)
+            onPreviewSizeChanged?.invoke(selected.width, selected.height)
+            PLog.i(
+                TAG,
+                "Standby GL preview output selected: camera=$cameraId, size=${selected.width}x${selected.height}",
+            )
+            surface
+        } catch (error: Exception) {
+            PLog.w(TAG, "Could not configure alternate GL preview SurfaceTexture", error)
+            null
+        }
     }
 
     private fun resolvePhysicalCameraId(camera: CameraInfo): String? {
@@ -574,6 +643,7 @@ class StandbyCameraController(context: Context) {
         reader: ImageReader,
         plan: StandbyPlan,
         openGeneration: Long,
+        includeAlternatePreviewSurface: Boolean = true,
     ) {
         if (openGeneration != generation || camera !== standbyCameraDevice) {
             closeOpenedCamera(camera)
@@ -589,9 +659,11 @@ class StandbyCameraController(context: Context) {
             message = "Configuring secondary preview capture session",
         )
 
+        val livePreviewSurface = plan.previewSurface.takeIf { includeAlternatePreviewSurface }
         try {
             val builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(reader.surface)
+                livePreviewSurface?.let(::addTarget)
                 set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
                 set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
                 set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
@@ -612,9 +684,17 @@ class StandbyCameraController(context: Context) {
                     setPhysicalCameraId(physicalId)
                 }
             }
+            val outputConfigurations = buildList {
+                add(outputConfiguration)
+                livePreviewSurface?.let { liveSurface ->
+                    add(OutputConfiguration(liveSurface).apply {
+                        plan.standbyPhysicalCameraId?.let { physicalId -> setPhysicalCameraId(physicalId) }
+                    })
+                }
+            }
             val sessionConfiguration = SessionConfiguration(
                 SessionConfiguration.SESSION_REGULAR,
-                listOf(outputConfiguration),
+                outputConfigurations,
                 Executor { command -> callbackHandler.post(command) },
                 object : CameraCaptureSession.StateCallback() {
                     override fun onConfigured(session: CameraCaptureSession) {
@@ -628,7 +708,11 @@ class StandbyCameraController(context: Context) {
                         standbyCaptureSession = session
                         _status.value = _status.value.copy(
                             phase = StandbyCameraPhase.WAITING_FOR_FRAMES,
-                            message = "Standby session active; waiting for matching camera frames",
+                            message = if (livePreviewSurface != null) {
+                                "Standby camera and live GL preview are streaming"
+                            } else {
+                                "Standby session active; waiting for matching camera frames"
+                            },
                         )
                         try {
                             session.setRepeatingRequest(
@@ -665,14 +749,42 @@ class StandbyCameraController(context: Context) {
                             )
                             scheduleFrameReadyTimeout(openGeneration, callbackHandler)
                         } catch (error: Exception) {
-                            failCurrentPlan("Could not start standby repeating request: " + error.message, error)
+                            if (livePreviewSurface != null) {
+                                PLog.w(
+                                    TAG,
+                                    "Standby GL output rejected while starting repeating request; retrying without it: ${error.message}",
+                                )
+                                runCatching { session.stopRepeating() }
+                                runCatching { session.close() }
+                                if (standbyCaptureSession === session) standbyCaptureSession = null
+                                configureStandbySession(
+                                    camera,
+                                    reader,
+                                    plan,
+                                    openGeneration,
+                                    includeAlternatePreviewSurface = false,
+                                )
+                            } else {
+                                failCurrentPlan("Could not start standby repeating request: " + error.message, error)
+                            }
                         }
                     }
 
                     override fun onConfigureFailed(session: CameraCaptureSession) {
                         runCatching { session.close() }
                         if (openGeneration == generation) {
-                            failCurrentPlan("Standby capture session configuration failed", null)
+                            if (livePreviewSurface != null) {
+                                PLog.w(TAG, "Standby GL output combination rejected; retrying reader-only standby")
+                                configureStandbySession(
+                                    camera,
+                                    reader,
+                                    plan,
+                                    openGeneration,
+                                    includeAlternatePreviewSurface = false,
+                                )
+                            } else {
+                                failCurrentPlan("Standby capture session configuration failed", null)
+                            }
                         }
                     }
 
@@ -685,7 +797,21 @@ class StandbyCameraController(context: Context) {
             )
             camera.createCaptureSession(sessionConfiguration)
         } catch (error: Exception) {
-            failCurrentPlan("Standby capture session could not be created: " + error.message, error)
+            if (livePreviewSurface != null) {
+                PLog.w(
+                    TAG,
+                    "Standby GL output could not be configured; retrying reader-only standby: ${error.message}",
+                )
+                configureStandbySession(
+                    camera,
+                    reader,
+                    plan,
+                    openGeneration,
+                    includeAlternatePreviewSurface = false,
+                )
+            } else {
+                failCurrentPlan("Standby capture session could not be created: " + error.message, error)
+            }
         }
     }
 

@@ -70,6 +70,28 @@ class CameraGLSurfaceView @JvmOverloads constructor(
     var onFirstPreviewFrame: (() -> Unit)? = null
     private var currentSurface: Surface? = null
 
+    val standbyCameraInputSurface: Surface?
+        get() = renderer.standbyCameraInputSurface
+
+    val hasStandbyPreviewFrame: Boolean
+        get() = renderer.hasStandbyPreviewFrame
+
+    fun getStandbyCameraSurfaceTexture(): SurfaceTexture? = renderer.getStandbyCameraSurfaceTexture()
+
+    fun setActivePreviewSource(useStandby: Boolean) {
+        queueEvent {
+            renderer.setActivePreviewSource(useStandby)
+            requestRender()
+        }
+    }
+
+    fun setStandbyPreviewSize(width: Int, height: Int) {
+        queueEvent {
+            renderer.setStandbyPreviewSize(width, height)
+            requestRender()
+        }
+    }
+
     init {
         // 设置 OpenGL ES 3.0
         setEGLContextClientVersion(3)

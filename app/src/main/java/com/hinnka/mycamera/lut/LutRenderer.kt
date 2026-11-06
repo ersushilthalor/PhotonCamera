@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.PointF
 import android.graphics.SurfaceTexture
+import android.view.Surface
 import android.opengl.*
 import android.os.SystemClock
 import com.hinnka.mycamera.livephoto.LivePhotoRecorder
@@ -220,12 +221,23 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
 
     // MVP 变换矩阵（用于 center crop）；EIS 输出可能使用不同于 OES 预览的输入尺寸。
     private val mvpMatrix = FloatArray(16)
+    private val standbyMvpMatrix = FloatArray(16)
     private val stabilizationMvpMatrix = FloatArray(16)
     private val eisFallbackMvpMatrix = FloatArray(16)
 
-    // 相机 SurfaceTexture
+    // Primary and alternate physical-lens Camera2 inputs.
     private var surfaceTexture: SurfaceTexture? = null
     private val frameAvailable = AtomicBoolean(false)
+    private var standbyCameraTextureId: Int = 0
+    private var standbySurfaceTexture: SurfaceTexture? = null
+    private var standbyCameraSurface: Surface? = null
+    private val standbyFrameAvailable = AtomicBoolean(false)
+    @Volatile private var standbyHasFrame: Boolean = false
+    private val standbyStMatrix = FloatArray(16).apply { Matrix.setIdentityM(this, 0) }
+    private var standbyPreviewWidth: Int = 1920
+    private var standbyPreviewHeight: Int = 1080
+    @Volatile private var useStandbyPreviewSource: Boolean = false
+    private var switchToPrimaryWhenFrameReady: Boolean = false
     private var stabilizationCoordinator: RealtimeStabilizationCoordinator? = null
     @Volatile
     private var stabilizationSession: RealtimeStabilizationCoordinator.Session? = null
@@ -538,7 +550,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         // 创建相机纹理
         cameraTextureId = GlUtils.createOESTexture()
 
-        // 创建 SurfaceTexture
+        // Create the primary camera SurfaceTexture.
         frameAvailable.set(false)
         surfaceTexture = SurfaceTexture(cameraTextureId).apply {
             setDefaultBufferSize(previewWidth, previewHeight)
@@ -552,6 +564,25 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 }
             }
         }
+
+        // A second OES input stays attached to the alternate physical rear camera.
+        runCatching { standbyCameraSurface?.release() }
+        runCatching { standbySurfaceTexture?.release() }
+        standbyCameraTextureId = GlUtils.createOESTexture()
+        standbyFrameAvailable.set(false)
+        standbyHasFrame = false
+        useStandbyPreviewSource = false
+        switchToPrimaryWhenFrameReady = false
+        standbyPreviewWidth = previewWidth
+        standbyPreviewHeight = previewHeight
+        standbySurfaceTexture = SurfaceTexture(standbyCameraTextureId).apply {
+            setDefaultBufferSize(standbyPreviewWidth, standbyPreviewHeight)
+            setOnFrameAvailableListener {
+                standbyFrameAvailable.set(true)
+                onRequestRender?.invoke()
+            }
+        }
+        standbyCameraSurface = standbySurfaceTexture?.let(::Surface)
 
         // 初始化测光 FBO
         initMeteringFbo()
@@ -586,6 +617,11 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         mgcEisHardwareBufferRenderer.resetAfterContextLoss()
         mgcEisYuvRenderer.resetAfterContextLoss()
         cameraTextureId = 0
+        standbyCameraTextureId = 0
+        standbyFrameAvailable.set(false)
+        standbyHasFrame = false
+        useStandbyPreviewSource = false
+        switchToPrimaryWhenFrameReady = false
         currentCameraTextureId = 0
         currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
         currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
@@ -1014,7 +1050,21 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         if (delayedStabilizationEnabled && !stabilizationSessionStarted) {
             stabilizationSessionStarted = stabilizationSession?.start() == true
         }
-        val oesFrameUpdated = frameAvailable.getAndSet(false) && acquireLatestCameraFrame()
+        // Consume both live streams even when only one is displayed. This keeps the standby
+        // OES texture current so selecting it does not wait for a new camera frame.
+        val primaryFrameUpdated = frameAvailable.getAndSet(false) && acquireLatestCameraFrame()
+        val standbyFrameUpdated =
+            standbyFrameAvailable.getAndSet(false) && acquireLatestStandbyCameraFrame()
+        if (switchToPrimaryWhenFrameReady && primaryFrameUpdated) {
+            switchToPrimaryWhenFrameReady = false
+            useStandbyPreviewSource = false
+            useCurrentOesFrame()
+        }
+        val oesFrameUpdated = if (useStandbyPreviewSource) {
+            standbyFrameUpdated
+        } else {
+            primaryFrameUpdated
+        }
         var cameraFrameUpdated = oesFrameUpdated
 
         if (delayedStabilizationEnabled) {
@@ -1059,10 +1109,12 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             if (currentCameraTextureSource != PreviewColorTextureSource.TEXTURE_2D) {
                 // Keep showing the real Camera2 preview while EIS+ waits for its first
                 // timestamp-matched result. EIS+ remains enabled and keeps processing frames.
-                if (oesFrameUpdated) useCurrentOesFrame()
+                if (oesFrameUpdated) {
+                    if (useStandbyPreviewSource) useCurrentStandbyOesFrame() else useCurrentOesFrame()
+                }
             }
         } else if (cameraFrameUpdated) {
-            useCurrentOesFrame()
+            if (useStandbyPreviewSource) useCurrentStandbyOesFrame() else useCurrentOesFrame()
         }
 
         val liveRecorder = livePhotoRecorder
@@ -1303,13 +1355,16 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         targetHeight: Int = viewportHeight,
     ): FloatArray {
         val stabilized = currentCameraTextureSource == PreviewColorTextureSource.TEXTURE_2D
+        val sourceWidth = if (useStandbyPreviewSource) standbyPreviewWidth else previewWidth
+        val sourceHeight = if (useStandbyPreviewSource) standbyPreviewHeight else previewHeight
         val needsEisSafetyCrop = !stabilized &&
             previewStabilizationUseCase != null &&
             stabilizationCoordinator?.isCurrentCameraSupported == true
         if (targetWidth == viewportWidth && targetHeight == viewportHeight) {
             if (stabilized) return stabilizationMvpMatrix
-            if (!needsEisSafetyCrop) return mvpMatrix
-            System.arraycopy(mvpMatrix, 0, eisFallbackMvpMatrix, 0, eisFallbackMvpMatrix.size)
+            val baseMatrix = if (useStandbyPreviewSource) standbyMvpMatrix else mvpMatrix
+            if (!needsEisSafetyCrop) return baseMatrix
+            System.arraycopy(baseMatrix, 0, eisFallbackMvpMatrix, 0, eisFallbackMvpMatrix.size)
             Matrix.scaleM(
                 eisFallbackMvpMatrix,
                 0,
@@ -1322,8 +1377,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         return buildMvpMatrix(
             targetWidth = targetWidth,
             targetHeight = targetHeight,
-            sourceWidth = if (stabilized) stabilizationInputWidth else previewWidth,
-            sourceHeight = if (stabilized) stabilizationInputHeight else previewHeight,
+            sourceWidth = if (stabilized) stabilizationInputWidth else sourceWidth,
+            sourceHeight = if (stabilized) stabilizationInputHeight else sourceHeight,
         ).also { matrix ->
             if (needsEisSafetyCrop) {
                 Matrix.scaleM(matrix, 0, EIS_OUTPUT_CROP_ZOOM, EIS_OUTPUT_CROP_ZOOM, 1f)
@@ -1358,6 +1413,61 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             false
         }
     }
+
+    private fun acquireLatestStandbyCameraFrame(): Boolean {
+        return try {
+            val standby = standbySurfaceTexture ?: return false
+            standby.updateTexImage()
+            standby.getTransformMatrix(standbyStMatrix)
+            standbyHasFrame = standby.timestamp > 0L
+            standbyHasFrame
+        } catch (error: RuntimeException) {
+            PLog.e(TAG, "Standby updateTexImage failed, textureId=$standbyCameraTextureId", error)
+            false
+        }
+    }
+
+    private fun useCurrentStandbyOesFrame() {
+        currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
+        currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
+        currentCameraTextureId = standbyCameraTextureId
+        currentCameraTextureMatrix = standbyStMatrix
+        currentFrameTimestampNs = standbySurfaceTexture?.timestamp ?: 0L
+    }
+
+    fun setActivePreviewSource(useStandby: Boolean) {
+        if (useStandby) {
+            switchToPrimaryWhenFrameReady = false
+            useStandbyPreviewSource = true
+            if ((standbySurfaceTexture?.timestamp ?: 0L) > 0L) {
+                useCurrentStandbyOesFrame()
+            }
+        } else if (useStandbyPreviewSource) {
+            // Keep displaying the current lens until the newly configured primary stream
+            // has delivered a frame. Never flash an old main-camera buffer during handoff.
+            switchToPrimaryWhenFrameReady = true
+        } else {
+            switchToPrimaryWhenFrameReady = false
+        }
+        onRequestRender?.invoke()
+    }
+
+    fun setStandbyPreviewSize(width: Int, height: Int) {
+        if (width <= 0 || height <= 0) return
+        standbyPreviewWidth = width
+        standbyPreviewHeight = height
+        standbySurfaceTexture?.setDefaultBufferSize(width, height)
+        updateMVPMatrix()
+        onRequestRender?.invoke()
+    }
+
+    fun getStandbyCameraSurfaceTexture(): SurfaceTexture? = standbySurfaceTexture
+
+    val standbyCameraInputSurface: Surface?
+        get() = standbyCameraSurface?.takeIf { it.isValid }
+
+    val hasStandbyPreviewFrame: Boolean
+        get() = standbyHasFrame
 
     /**
      * 将 FBO 纹理绘制到屏幕 (Copy Shader)
@@ -2598,6 +2708,14 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         )
         System.arraycopy(computedMatrix, 0, mvpMatrix, 0, mvpMatrix.size)
 
+        val standbyMatrix = buildMvpMatrix(
+            viewportWidth,
+            viewportHeight,
+            standbyPreviewWidth,
+            standbyPreviewHeight,
+        )
+        System.arraycopy(standbyMatrix, 0, standbyMvpMatrix, 0, standbyMvpMatrix.size)
+
         val stabilizedMatrix = buildMvpMatrix(
             viewportWidth,
             viewportHeight,
@@ -3333,10 +3451,22 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         GlUtils.deleteProgram(copyProgramId)
         copyProgramId = 0
 
-        // 释放 SurfaceTexture
+        // Release both Camera2 input SurfaceTextures and the alternate OES texture.
         surfaceTexture?.release()
         surfaceTexture = null
         frameAvailable.set(false)
+        standbyCameraSurface?.release()
+        standbyCameraSurface = null
+        standbySurfaceTexture?.release()
+        standbySurfaceTexture = null
+        standbyFrameAvailable.set(false)
+        standbyHasFrame = false
+        if (standbyCameraTextureId != 0) {
+            GlUtils.deleteTexture(standbyCameraTextureId)
+            standbyCameraTextureId = 0
+        }
+        useStandbyPreviewSource = false
+        switchToPrimaryWhenFrameReady = false
 
         // 重置状态
         surfaceReady = false
