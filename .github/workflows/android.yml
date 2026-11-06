@@ -62,14 +62,10 @@ jobs:
           chmod +x ./gradlew
           ./gradlew --no-daemon compileDefaultDebugKotlin --stacktrace
 
-      - name: Run video transform regression tests
+      - name: Run all default debug unit tests
         run: |
           chmod +x ./gradlew
-          ./gradlew --no-daemon :app:testDefaultDebugUnitTest \
-            --tests com.hinnka.mycamera.lut.RealtimeVideoRendererTransformTest \
-            --tests com.hinnka.mycamera.stabilization.RealtimeStabilizationMathTest \
-            --tests com.hinnka.mycamera.video.VideoLogProfileTest \
-            --stacktrace
+          ./gradlew --no-daemon :app:testDefaultDebugUnitTest --stacktrace
 
       - name: Build default debug APK
         run: |
