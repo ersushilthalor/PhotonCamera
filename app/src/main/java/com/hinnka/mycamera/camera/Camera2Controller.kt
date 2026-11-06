@@ -2566,9 +2566,14 @@ class Camera2Controller(private val context: Context) {
         }
         val hasLiveSurface = alternatePreviewSurface
             ?.let { runCatching { it.isValid }.getOrDefault(false) } == true
-        val standbyBlockers = targetCamera?.let(standbyCameraController::handoffBlockers)
-            ?: listOf("target_camera_not_found")
-        val standbyReady = targetCamera != null && standbyBlockers.isEmpty()
+        val standbyBlockers = if (logicalPreviewReady) {
+            emptyList()
+        } else {
+            targetCamera?.let(standbyCameraController::handoffBlockers)
+                ?: listOf("target_camera_not_found")
+        }
+        val standbyReady = !logicalPreviewReady &&
+            targetCamera != null && standbyBlockers.isEmpty()
         val result = logicalPreviewReady || (hasLiveSurface && standbyReady)
         val failedConditions = buildList {
             if (!logicalPreviewReady) {
