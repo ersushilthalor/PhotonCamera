@@ -961,8 +961,16 @@ class StandbyCameraController(context: Context) {
         try {
             session.close()
         } catch (error: Exception) {
-            PLog.w(TAG, "Failed to close standby capture session", error)
-            pendingSessionCloseActions.remove(session)?.invoke()
+            PLog.w(TAG, "Failed to close standby capture session; closing its device before releasing outputs", error)
+            val device = standbyCameraDevice
+            if (device != null) {
+                closeOpenedCamera(device)
+                whenDeviceIdle {
+                    pendingSessionCloseActions.remove(session)?.invoke()
+                }
+            } else {
+                pendingSessionCloseActions.remove(session)?.invoke()
+            }
         }
     }
 
