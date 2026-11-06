@@ -291,6 +291,7 @@ class Camera2Controller(private val context: Context) {
 
     private var previewSurface: Surface? = null
     private var previewSurfaceTexture: SurfaceTexture? = null
+    @Volatile private var primaryPreviewSurfaceTexture: SurfaceTexture? = null
     private var imageReader: ImageReader? = null
     @Volatile private var alternatePreviewSurface: Surface? = null
     private var alternatePreviewSurfaceTexture: SurfaceTexture? = null
@@ -2558,7 +2559,23 @@ class Camera2Controller(private val context: Context) {
             alternatePreviewSurface?.let { runCatching { it.isValid }.getOrDefault(false) } == true
     }
 
+    private fun isPersistentStandbyHandoffEligible(state: CameraState = _state.value): Boolean {
+        return state.captureMode == CaptureMode.PHOTO &&
+            state.getCurrentCameraInfo()?.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+            !requestedRawCaptureEnabled &&
+            !state.useRaw &&
+            !state.useP010 &&
+            !state.useLivePhoto &&
+            !state.isCapturing &&
+            imageReader?.imageFormat == ImageFormat.YUV_420_888 &&
+            stabilizationImageReader == null &&
+            !state.photoPreviewStabilizationEnabled &&
+            !state.videoRecordingState.isRecording &&
+            !state.videoRecordingState.isProcessing
+    }
+
     fun canSwitchToInstantPreview(cameraId: String): Boolean {
+        if (!isPersistentStandbyHandoffEligible()) return false
         if (canSwitchToLogicalDualPreview(cameraId)) return true
         val targetCamera = _state.value.availableCameras.firstOrNull {
             it.cameraId == cameraId
@@ -2582,9 +2599,12 @@ class Camera2Controller(private val context: Context) {
             }
             return
         }
-        val targetCamera = _state.value.getCurrentCameraInfo()
+        primaryPreviewSurfaceTexture = surfaceTexture
+        val currentState = _state.value
+        val handoffEligible = isPersistentStandbyHandoffEligible(currentState)
+        val targetCamera = currentState.getCurrentCameraInfo()
         val standbyCameraId = targetCamera
-            ?.takeIf(standbyCameraController::canHandoffTo)
+            ?.takeIf { handoffEligible && standbyCameraController.canHandoffTo(it) }
             ?.cameraId
         pendingCameraOpenRequest = CameraOpenRequest(
             surfaceTexture = surfaceTexture,
@@ -2644,14 +2664,26 @@ class Camera2Controller(private val context: Context) {
             return
         }
 
-        standbyCameraController.takeOver(standbyCameraId, targetOpenCameraId) { warmCamera ->
-            if (warmCamera != null) {
-                openCameraNow(request, preopenedCamera = warmCamera)
+        standbyCameraController.takeOver(standbyCameraId, targetOpenCameraId) { handoff ->
+            if (handoff != null) {
+                val useAlternateInput = handoff.previewSurfaceTexture === alternatePreviewSurfaceTexture
+                onAlternatePreviewSourceChanged?.invoke(useAlternateInput)
+                PLog.i(
+                    TAG,
+                    "Instant lens handoff: camera=" + handoff.camera.id +
+                        ", session=" + System.identityHashCode(handoff.session) +
+                        ", input=" + (if (useAlternateInput) "alternate" else "primary"),
+                )
+                openCameraNow(
+                    request.copy(surfaceTexture = handoff.previewSurfaceTexture),
+                    preopenedHandoff = handoff,
+                )
             } else {
-                PLog.w(TAG, "Ready standby camera became unavailable; waiting for its release before cold open")
+                PLog.w(TAG, "Ready standby stream became unavailable; waiting for its release before cold open")
                 standbyCameraController.release("standby handoff unavailable")
                 standbyCameraController.whenDeviceIdle {
                     if (cameraDeviceLifecycle == CameraDeviceLifecycle.OPENING) {
+                        onAlternatePreviewSourceChanged?.invoke(false)
                         openCameraNow(request.copy(standbyCameraId = null))
                     }
                 }
@@ -2662,8 +2694,9 @@ class Camera2Controller(private val context: Context) {
     @SuppressLint("MissingPermission")
     private fun openCameraNow(
         request: CameraOpenRequest,
-        preopenedCamera: CameraDevice? = null,
+        preopenedHandoff: StandbyCameraHandoff? = null,
     ) {
+        val preopenedCamera = preopenedHandoff?.camera
         val surfaceTexture = request.surfaceTexture
         val preserveVideoRecording = request.preserveVideoRecording
         clearPointFocusState()
@@ -2721,7 +2754,14 @@ class Camera2Controller(private val context: Context) {
                 if (restartCameraForRawCaptureOutputMismatch("camera opened")) {
                     return
                 }
-                createPreviewSession(openGeneration = openGeneration)
+                if (preopenedHandoff != null) {
+                    attachPrewarmedCaptureSession(preopenedHandoff, openGeneration)
+                } else {
+                    onAlternatePreviewSourceChanged?.invoke(
+                        surfaceTexture === alternatePreviewSurfaceTexture
+                    )
+                    createPreviewSession(openGeneration = openGeneration)
+                }
             }
 
             override fun onDisconnected(camera: CameraDevice) {
@@ -3002,7 +3042,7 @@ class Camera2Controller(private val context: Context) {
                             !isPhysicalOutputProfileFailed(it, ImageFormat.YCBCR_P010)
                         } ?: true)
                 val resolvedVideoPreviewSize = refreshVideoCapabilities(openCharacteristics)
-                previewSize = when (captureMode) {
+                previewSize = preopenedHandoff?.previewSize ?: when (captureMode) {
                     CaptureMode.VIDEO -> resolvedVideoPreviewSize
                     CaptureMode.PHOTO -> CameraUtils.getFixedPreviewSize(openCharacteristics, _state.value.aspectRatio)
                 }
@@ -3101,9 +3141,10 @@ class Camera2Controller(private val context: Context) {
                 return
             }
 
-            // 配置 SurfaceTexture
-            previewSurfaceTexture = surfaceTexture
-            previewSurface = Surface(surfaceTexture)
+            // A handed-off session already owns this Surface; keep the exact SurfaceTexture
+            // and Surface pair alive rather than creating a replacement BufferQueue.
+            previewSurfaceTexture = preopenedHandoff?.previewSurfaceTexture ?: surfaceTexture
+            previewSurface = preopenedHandoff?.previewSurface ?: Surface(surfaceTexture)
 
             if (captureMode == CaptureMode.PHOTO) {
                 val aspectRatio = state.value.aspectRatio
@@ -3146,9 +3187,12 @@ class Camera2Controller(private val context: Context) {
                     rawOutput = null
                     captureFormat = ImageFormat.YUV_420_888
                 }
-                previewSize = CameraUtils.getFixedPreviewSize(outputCharacteristicsForStreams, aspectRatio)
+                previewSize = preopenedHandoff?.previewSize
+                    ?: CameraUtils.getFixedPreviewSize(outputCharacteristicsForStreams, aspectRatio)
                 surfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height)
-                val captureSize = if (rawOutput != null) {
+                val captureSize = preopenedHandoff?.let {
+                    Size(it.imageReader.width, it.imageReader.height)
+                } ?: if (rawOutput != null) {
                     rawOutput.size
                 } else {
                     CameraUtils.getBestCaptureSize(outputCharacteristicsForStreams, aspectRatio, captureFormat)
@@ -3165,7 +3209,17 @@ class Camera2Controller(private val context: Context) {
                     currentCaptureSize = captureSize
                 )
 
-                val readerMaxImages = resolveImageReaderMaxImages()
+                if (preopenedHandoff != null &&
+                    (preopenedHandoff.imageReader.imageFormat != captureFormat ||
+                        preopenedHandoff.imageReader.width != captureSize.width ||
+                        preopenedHandoff.imageReader.height != captureSize.height)
+                ) {
+                    throw IllegalStateException(
+                        "Prewarmed still-output profile does not match the selected lens capture configuration"
+                    )
+                }
+                val readerMaxImages = preopenedHandoff?.imageReader?.maxImages
+                    ?: resolveImageReaderMaxImages()
                 imageReaderMaxImages = readerMaxImages
 
                 PLog.d(
@@ -3179,25 +3233,14 @@ class Camera2Controller(private val context: Context) {
                         }
                     }, stream=$outputCameraIdForStreams, isP3Supported: $isP3Supported, imageReaderMaxImages: $readerMaxImages"
                 )
-                imageReader = ImageReader.newInstance(
-                    captureSize.width,
-                    captureSize.height,
-                    captureFormat,
-                    readerMaxImages
-                ).apply {
-                    setOnImageAvailableListener({ reader ->
-                        try {
-                            while (canAcquireImage("Too many open images")) {
-                                val image = trackImage(reader.acquireNextImage()) ?: break
-                                processOrBufferImageForCaptureResult(image)
-                            }
-                        } catch (e: Exception) {
-                            PLog.e(TAG, "Error in onImageAvailable", e)
-                            photoCaptures.values.filter { it.reader === reader }.toList()
-                                .forEach { failPhotoCapture(it, "image acquisition failed") }
-                        }
-                    }, cameraHandler)
-                }
+                imageReader = preopenedHandoff?.imageReader
+                    ?: ImageReader.newInstance(
+                        captureSize.width,
+                        captureSize.height,
+                        captureFormat,
+                        readerMaxImages,
+                    )
+                imageReader?.let(::configureImageReaderCaptureListener)
 
             } else {
                 safeCloseImageReader(imageReader)
@@ -4312,25 +4355,7 @@ class Camera2Controller(private val context: Context) {
             }
             PLog.d(TAG, "Preview started")
 
-            val standbyState = _state.value
-            val standbyHandler = cameraHandler
-            if (standbyHandler != null &&
-                !standbyState.videoRecordingState.isRecording &&
-                !standbyState.videoRecordingState.isProcessing
-            ) {
-                standbyCameraController.prepare(
-                    activeCamera = standbyState.getCurrentCameraInfo(),
-                    availableCameras = standbyState.availableCameras,
-                    activeOpenCameraId = activeOpenCameraId,
-                    previewSize = standbyState.currentPreviewSize,
-                    callbackHandler = standbyHandler,
-                    previewSurface = alternatePreviewSurface,
-                    previewSurfaceTexture = alternatePreviewSurfaceTexture,
-                    onPreviewSizeChanged = onAlternatePreviewSizeChanged,
-                )
-            } else {
-                standbyCameraController.release("standby disabled while video recording is active")
-            }
+            prepareStandbyCameraIfEligible()
 
         } catch (e: CameraAccessException) {
             PLog.e(TAG, "Failed to start preview")
@@ -4355,6 +4380,118 @@ class Camera2Controller(private val context: Context) {
             ImageFormat.JPEG -> "JPEG"
             else -> format.toString()
         }
+    }
+
+    private fun configureImageReaderCaptureListener(reader: ImageReader) {
+        reader.setOnImageAvailableListener({ source ->
+            try {
+                while (canAcquireImage("Too many open images")) {
+                    val image = trackImage(source.acquireNextImage()) ?: break
+                    processOrBufferImageForCaptureResult(image)
+                }
+            } catch (error: Exception) {
+                PLog.e(TAG, "Error in onImageAvailable", error)
+                photoCaptures.values.filter { it.reader === source }.toList()
+                    .forEach { failPhotoCapture(it, "image acquisition failed") }
+            }
+        }, cameraHandler)
+    }
+
+    /**
+     * Reuses the already configured Camera2 session from the standby owner. Only the
+     * repeating request and callback are replaced; no CameraDevice or session reopen.
+     */
+    private fun attachPrewarmedCaptureSession(
+        handoff: StandbyCameraHandoff,
+        openGeneration: Long,
+    ) {
+        if (openGeneration != cameraOpenGeneration ||
+            cameraDevice !== handoff.camera ||
+            previewSurface !== handoff.previewSurface ||
+            previewSurfaceTexture !== handoff.previewSurfaceTexture ||
+            imageReader !== handoff.imageReader
+        ) {
+            PLog.w(TAG, "Rejecting stale or mismatched prewarmed-session handoff")
+            standbyCameraController.discardHandoff(handoff, "active controller validation failed")
+            handlePreviewSessionFailure(
+                "prewarmed session identity mismatch",
+                openGeneration,
+                IllegalStateException("Prewarmed Camera2 resources do not match the active camera state"),
+            )
+            return
+        }
+        try {
+            val builder = handoff.camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                addTarget(handoff.previewSurface)
+                applyBaseCameraSettings(this, isCapture = false)
+            }
+            previewRequestBuilder = builder
+            onAlternatePreviewSourceChanged?.invoke(
+                handoff.previewSurfaceTexture === alternatePreviewSurfaceTexture
+            )
+            PLog.i(
+                TAG,
+                "Attaching live standby Camera2 session: camera=" + handoff.camera.id +
+                    ", preview=" + handoff.previewSize.width + "x" + handoff.previewSize.height +
+                    ", capture=" + handoff.imageReader.width + "x" + handoff.imageReader.height,
+            )
+            onSessionConfigured(
+                handoff.session,
+                openGeneration = openGeneration,
+                sessionGeneration = previewSessionGeneration,
+            )
+        } catch (error: Exception) {
+            PLog.e(TAG, "Could not attach live standby session", error)
+            standbyCameraController.discardHandoff(handoff, "active repeating request failed")
+            handlePreviewSessionFailure("prewarmed session attach failed", openGeneration, error)
+        }
+    }
+
+    private fun prepareStandbyCameraIfEligible() {
+        val current = _state.value
+        val reader = imageReader
+        val callbackHandler = cameraHandler
+        val primaryTexture = primaryPreviewSurfaceTexture
+        val alternateTexture = alternatePreviewSurfaceTexture
+        val activeTexture = previewSurfaceTexture
+        val eligible = isPersistentStandbyHandoffEligible(current)
+
+        if (!eligible || reader == null || callbackHandler == null ||
+            primaryTexture == null || alternateTexture == null
+        ) {
+            standbyCameraController.release("active preview is not eligible for persistent dual-camera handoff")
+            return
+        }
+        if (activeLogicalDualPreviewPlan != null) {
+            standbyCameraController.release("both lenses are already streaming in one logical Camera2 session")
+            return
+        }
+
+        val standbyTexture = when (activeTexture) {
+            primaryTexture -> alternateTexture
+            alternateTexture -> primaryTexture
+            else -> {
+                standbyCameraController.release("active preview is not attached to either persistent GL input")
+                PLog.w(TAG, "Cannot prewarm alternate lens: active preview SurfaceTexture is not one of the GL inputs")
+                return
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && standbyTexture.isReleased) {
+            standbyCameraController.release("inactive GL SurfaceTexture has been released")
+            return
+        }
+
+        standbyCameraController.prepare(
+            activeCamera = current.getCurrentCameraInfo(),
+            availableCameras = current.availableCameras,
+            activeOpenCameraId = activeOpenCameraId,
+            previewSize = current.currentPreviewSize,
+            captureSize = Size(reader.width, reader.height),
+            captureFormat = reader.imageFormat,
+            maxImages = reader.maxImages,
+            standbyPreviewSurfaceTexture = standbyTexture,
+            callbackHandler = callbackHandler,
+        )
     }
 
     private fun isRawCaptureReader(reader: ImageReader?): Boolean {
@@ -6242,9 +6379,8 @@ class Camera2Controller(private val context: Context) {
             runCatching { texture.timestamp > 0L }.getOrDefault(false)
         } == true
         val canUsePrewarmedStandby = livePlan == null &&
+            isPersistentStandbyHandoffEligible() &&
             targetCamera != null &&
-            alternateFrameAvailable &&
-            alternatePreviewSurface?.let { runCatching { it.isValid }.getOrDefault(false) } == true &&
             standbyCameraController.canHandoffTo(targetCamera)
         when {
             livePlan?.alternateCameraId == cameraId && alternateFrameAvailable -> {
@@ -6258,9 +6394,19 @@ class Camera2Controller(private val context: Context) {
                 PLog.i(TAG, "Instant preview source swap back to primary physical lens: $cameraId")
             }
             canUsePrewarmedStandby -> {
-                pendingLogicalPreviewSourceReset = true
-                onAlternatePreviewSourceChanged?.invoke(true)
-                PLog.i(TAG, "Instant preview source swap to warmed standby CameraDevice: $cameraId")
+                // The warm CameraDevice may target either GL input; after handoff the
+                // inactive slot can be the primary input instead of the alternate.
+                pendingLogicalPreviewSourceReset = false
+                val useAlternateInput = standbyCameraController.isReadyOnPreviewTexture(
+                    cameraId,
+                    alternatePreviewSurfaceTexture,
+                )
+                onAlternatePreviewSourceChanged?.invoke(useAlternateInput)
+                PLog.i(
+                    TAG,
+                    "Instant preview source swap to warmed CameraDevice: camera=" + cameraId +
+                        ", input=" + (if (useAlternateInput) "alternate" else "primary"),
+                )
             }
         }
 
@@ -9852,8 +9998,10 @@ class Camera2Controller(private val context: Context) {
             }
             return
         }
-        val expectedSurfaceIsCurrent = previewSurfaceTexture === expectedSurfaceTexture
-        val expectedSurfaceIsPending = pendingCameraOpenRequest?.surfaceTexture === expectedSurfaceTexture
+        val expectedSurfaceIsCurrent = previewSurfaceTexture === expectedSurfaceTexture ||
+            primaryPreviewSurfaceTexture === expectedSurfaceTexture
+        val expectedSurfaceIsPending = pendingCameraOpenRequest?.surfaceTexture === expectedSurfaceTexture ||
+            primaryPreviewSurfaceTexture === expectedSurfaceTexture
         if (
             expectedSurfaceTexture != null &&
             !expectedSurfaceIsCurrent &&
