@@ -100,6 +100,7 @@ class StandbyCameraController(context: Context) {
     private val captureResultTimestamps = linkedSetOf<Long>()
     private var receivedFrameCount = 0L
     private var matchedFrameCount = 0
+    private var lastLoggedTimestampMismatch: Pair<Long, Long>? = null
 
     /** True only when the already-streaming standby device exactly matches this lens. */
     fun canHandoffTo(targetCamera: CameraInfo): Boolean {
@@ -113,6 +114,46 @@ class StandbyCameraController(context: Context) {
     }
 
     /**
+     * Log the active/target camera topology for each user lens-switch request.
+     * This is diagnostic-only and deliberately does not influence the standby plan.
+     */
+    fun logCameraPairForLensSwitch(activeCamera: CameraInfo?, targetCamera: CameraInfo?) {
+        val activeOpenCameraId = activeCamera?.let {
+            runCatching { it.getOpenCameraId() }.getOrNull()
+        }
+        val targetOpenCameraId = targetCamera?.let {
+            runCatching { it.getOpenCameraId() }.getOrNull()
+        }
+        val concurrentIdsResult = runCatching { cameraManager.concurrentCameraIds }
+        val pairAdvertised = if (activeOpenCameraId != null && targetOpenCameraId != null) {
+            concurrentIdsResult.getOrNull()?.any { ids ->
+                ids.contains(activeOpenCameraId) && ids.contains(targetOpenCameraId)
+            }
+        } else {
+            null
+        }
+        val concurrentPairs = concurrentIdsResult.getOrNull()
+            ?.map { ids -> ids.sorted().joinToString("+") }
+            ?.sorted()
+            ?.joinToString(";")
+            ?: concurrentIdsResult.exceptionOrNull()?.let {
+                "unavailable:${it.javaClass.simpleName}:${it.message}"
+            }
+            ?: "unavailable"
+
+        InstantLensDiagnostics.log(
+            "CAMERA_PAIR",
+            "activeCameraId=${activeCamera?.cameraId ?: "null"} " +
+                "targetCameraId=${targetCamera?.cameraId ?: "null"} " +
+                "activeOpenCameraId=${activeOpenCameraId ?: "null"} " +
+                "targetOpenCameraId=${targetOpenCameraId ?: "null"} " +
+                "logicalSharedDevice=${activeOpenCameraId != null && activeOpenCameraId == targetOpenCameraId} " +
+                "pairInConcurrentCameraIds=${pairAdvertised?.toString() ?: "unknown"} " +
+                "concurrentPairs=[$concurrentPairs]",
+        )
+    }
+
+    /**
      * Detach the ready standby device without closing it. The active controller will
      * configure its normal preview/capture session on this same CameraDevice.
      */
@@ -121,6 +162,10 @@ class StandbyCameraController(context: Context) {
         expectedOpenCameraId: String,
         onReady: (CameraDevice?) -> Unit,
     ) {
+        InstantLensDiagnostics.log(
+            "TAKE_OVER",
+            "result=request cameraId=$cameraId expectedOpenCameraId=$expectedOpenCameraId",
+        )
         dispatch {
             val plan = activePlan
             val camera = standbyCameraDevice
@@ -133,6 +178,13 @@ class StandbyCameraController(context: Context) {
                 _status.value.phase == StandbyCameraPhase.READY &&
                 matchedFrameCount >= REQUIRED_MATCHED_FRAMES
             if (!ready || camera == null) {
+                InstantLensDiagnostics.log(
+                    "TAKE_OVER",
+                    "result=failed cameraId=$cameraId expectedOpenCameraId=$expectedOpenCameraId " +
+                        "reason=standby_not_ready phase=${_status.value.phase} " +
+                        "device=${camera?.id ?: "null"} sessionReady=${standbyCaptureSession != null} " +
+                        "matchedFrames=$matchedFrameCount",
+                )
                 PLog.w(TAG, "Standby handoff unavailable for camera=$cameraId open=$expectedOpenCameraId")
                 onReady(null)
                 return@dispatch
@@ -156,6 +208,10 @@ class StandbyCameraController(context: Context) {
                 standbyCameraId = cameraId,
                 lensType = plan.lensType,
                 message = "Warm camera handed to active capture pipeline",
+            )
+            InstantLensDiagnostics.log(
+                "TAKE_OVER",
+                "result=success cameraId=$cameraId deviceId=${camera.id} matchedFrames=$matchedFrameCount",
             )
             PLog.i(TAG, "Handing off warm CameraDevice ${camera.id} for lens=$cameraId")
             onReady(camera)
@@ -317,6 +373,32 @@ class StandbyCameraController(context: Context) {
             return null
         }
 
+        // Read and log the topology before the shared-device early return so even
+        // logical Main/UW pairs are visible in the same diagnostic stream.
+        // Do not require concurrentCameraIds to advertise separate camera IDs here:
+        // the guarded standby open remains the existing source of truth for HAL support.
+        val concurrentCameraIds = try {
+            cameraManager.concurrentCameraIds
+        } catch (error: Exception) {
+            PLog.w(TAG, "Unable to read concurrent camera combinations; trying guarded standby open", error)
+            null
+        }
+        val advertisedConcurrentPair = concurrentCameraIds?.any { ids ->
+            ids.contains(activeOpenCameraId) && ids.contains(standbyOpenCameraId)
+        } == true
+        val concurrentPairs = concurrentCameraIds
+            ?.map { ids -> ids.sorted().joinToString("+") }
+            ?.sorted()
+            ?.joinToString(";")
+            ?: "unavailable"
+        InstantLensDiagnostics.log(
+            "CAMERA_PAIR",
+            "activeCameraId=${activeCamera.cameraId} targetCameraId=${targetCamera.cameraId} " +
+                "activeOpenCameraId=$activeOpenCameraId targetOpenCameraId=$standbyOpenCameraId " +
+                "logicalSharedDevice=${activeOpenCameraId == standbyOpenCameraId} " +
+                "pairInConcurrentCameraIds=$advertisedConcurrentPair concurrentPairs=[$concurrentPairs]",
+        )
+
         if (activeOpenCameraId == standbyOpenCameraId) {
             publishUnavailable(
                 phase = StandbyCameraPhase.LOGICAL_CAMERA_SHARED_SESSION_REQUIRED,
@@ -328,20 +410,6 @@ class StandbyCameraController(context: Context) {
             return null
         }
 
-        // Do not require CameraManager.concurrentCameraIds to advertise the pair here.
-        // Some HALs (including devices that support the same persistent dual-session pattern
-        // as VCamera) permit both rear CameraDevices to stay open even when the concurrent-pair
-        // metadata is incomplete. Try opening the standby device and let Camera2's real open /
-        // session callbacks decide. Any rejection is isolated to this standby plan; the active
-        // camera remains untouched and the normal single-camera switch path remains available.
-        val advertisedConcurrentPair = try {
-            cameraManager.concurrentCameraIds.any { ids ->
-                ids.contains(activeOpenCameraId) && ids.contains(standbyOpenCameraId)
-            }
-        } catch (error: Exception) {
-            PLog.w(TAG, "Unable to read concurrent camera combinations; trying guarded standby open", error)
-            false
-        }
         if (!advertisedConcurrentPair) {
             PLog.i(
                 TAG,
@@ -482,12 +550,14 @@ class StandbyCameraController(context: Context) {
         captureResultTimestamps.clear()
         receivedFrameCount = 0L
         matchedFrameCount = 0
-        _status.value = StandbyCameraStatus(
-            phase = StandbyCameraPhase.OPENING,
-            activeCameraId = plan.activeOpenCameraId,
-            standbyCameraId = plan.standbyCameraId,
-            lensType = plan.lensType,
-            message = "Opening real standby camera stream",
+        publishStatus(
+            StandbyCameraStatus(
+                phase = StandbyCameraPhase.OPENING,
+                activeCameraId = plan.activeOpenCameraId,
+                standbyCameraId = plan.standbyCameraId,
+                lensType = plan.lensType,
+                message = "Opening real standby camera stream",
+            )
         )
 
         reader.setOnImageAvailableListener({ source ->
@@ -654,9 +724,11 @@ class StandbyCameraController(context: Context) {
             return
         }
 
-        _status.value = _status.value.copy(
-            phase = StandbyCameraPhase.CONFIGURING,
-            message = "Configuring secondary preview capture session",
+        publishStatus(
+            _status.value.copy(
+                phase = StandbyCameraPhase.CONFIGURING,
+                message = "Configuring secondary preview capture session",
+            )
         )
 
         val livePreviewSurface = plan.previewSurface.takeIf { includeAlternatePreviewSurface }
@@ -706,13 +778,15 @@ class StandbyCameraController(context: Context) {
                             return
                         }
                         standbyCaptureSession = session
-                        _status.value = _status.value.copy(
-                            phase = StandbyCameraPhase.WAITING_FOR_FRAMES,
-                            message = if (livePreviewSurface != null) {
-                                "Standby camera and live GL preview are streaming"
-                            } else {
-                                "Standby session active; waiting for matching camera frames"
-                            },
+                        publishStatus(
+                            _status.value.copy(
+                                phase = StandbyCameraPhase.WAITING_FOR_FRAMES,
+                                message = if (livePreviewSurface != null) {
+                                    "Standby camera and live GL preview are streaming"
+                                } else {
+                                    "Standby session active; waiting for matching camera frames"
+                                },
+                            )
                         )
                         try {
                             session.setRepeatingRequest(
@@ -836,6 +910,30 @@ class StandbyCameraController(context: Context) {
     private fun updateReadinessFromMatchedFrames(openGeneration: Long) {
         if (openGeneration != generation) return
         matchedFrameCount = imageTimestamps.count { captureResultTimestamps.contains(it) }
+        if (matchedFrameCount == 0 && imageTimestamps.isNotEmpty() &&
+            captureResultTimestamps.isNotEmpty()
+        ) {
+            val readerTimestamp = imageTimestamps.lastOrNull {
+                !captureResultTimestamps.contains(it)
+            }
+            val sensorTimestamp = captureResultTimestamps.lastOrNull {
+                !imageTimestamps.contains(it)
+            }
+            if (readerTimestamp != null && sensorTimestamp != null) {
+                val mismatch = readerTimestamp to sensorTimestamp
+                if (mismatch != lastLoggedTimestampMismatch) {
+                    InstantLensDiagnostics.log(
+                        "TIMESTAMP_MISMATCH",
+                        "cameraId=${activePlan?.standbyOpenCameraId ?: "unknown"} " +
+                            "readerTimestampNs=$readerTimestamp sensorTimestampNs=$sensorTimestamp " +
+                            "matchedFrames=$matchedFrameCount",
+                    )
+                    lastLoggedTimestampMismatch = mismatch
+                }
+            }
+        } else if (matchedFrameCount > 0) {
+            lastLoggedTimestampMismatch = null
+        }
         val current = _status.value
         if (current.phase != StandbyCameraPhase.WAITING_FOR_FRAMES &&
             current.phase != StandbyCameraPhase.READY
@@ -845,11 +943,13 @@ class StandbyCameraController(context: Context) {
         if (matchedFrameCount >= REQUIRED_MATCHED_FRAMES) {
             frameReadyTimeout?.let { handler?.removeCallbacks(it) }
             frameReadyTimeout = null
-            _status.value = current.copy(
-                phase = StandbyCameraPhase.READY,
-                frameCount = receivedFrameCount,
-                matchedFrameCount = matchedFrameCount,
-                message = "Standby camera is streaming real preview frames",
+            publishStatus(
+                current.copy(
+                    phase = StandbyCameraPhase.READY,
+                    frameCount = receivedFrameCount,
+                    matchedFrameCount = matchedFrameCount,
+                    message = "Standby camera is streaming real preview frames",
+                )
             )
         } else {
             _status.value = current.copy(
@@ -875,14 +975,16 @@ class StandbyCameraController(context: Context) {
         }
         frameReadyTimeout?.let { handler?.removeCallbacks(it) }
         frameReadyTimeout = null
-        _status.value = StandbyCameraStatus(
-            phase = StandbyCameraPhase.FAILED,
-            activeCameraId = plan?.activeOpenCameraId,
-            standbyCameraId = plan?.standbyCameraId,
-            lensType = plan?.lensType,
-            frameCount = receivedFrameCount,
-            matchedFrameCount = matchedFrameCount,
-            message = message,
+        publishStatus(
+            StandbyCameraStatus(
+                phase = StandbyCameraPhase.FAILED,
+                activeCameraId = plan?.activeOpenCameraId,
+                standbyCameraId = plan?.standbyCameraId,
+                lensType = plan?.lensType,
+                frameCount = receivedFrameCount,
+                matchedFrameCount = matchedFrameCount,
+                message = message,
+            )
         )
         activePlan = null
         closeSessionAndReader()
@@ -908,8 +1010,9 @@ class StandbyCameraController(context: Context) {
             setDeviceTransitioning(false)
         }
 
+        InstantLensDiagnostics.log("STANDBY_RELEASE", "reason=$reason resetStatus=$resetStatus")
         if (resetStatus) {
-            _status.value = StandbyCameraStatus()
+            publishStatus(StandbyCameraStatus())
         }
     }
 
@@ -960,6 +1063,20 @@ class StandbyCameraController(context: Context) {
         }
     }
 
+    private fun publishStatus(status: StandbyCameraStatus) {
+        val previous = _status.value
+        _status.value = status
+        if (previous.phase != status.phase) {
+            InstantLensDiagnostics.log(
+                "STANDBY_PHASE",
+                "from=${previous.phase} to=${status.phase} reason=${status.message ?: "none"} " +
+                    "activeCameraId=${status.activeCameraId ?: "unknown"} " +
+                    "standbyCameraId=${status.standbyCameraId ?: "unknown"} " +
+                    "frames=${status.frameCount} matchedFrames=${status.matchedFrameCount}",
+            )
+        }
+    }
+
     private fun publishUnavailable(
         phase: StandbyCameraPhase,
         message: String,
@@ -967,12 +1084,14 @@ class StandbyCameraController(context: Context) {
         standbyCameraId: String? = null,
         lensType: LensType? = null,
     ) {
-        _status.value = StandbyCameraStatus(
-            phase = phase,
-            activeCameraId = activeCameraId,
-            standbyCameraId = standbyCameraId,
-            lensType = lensType,
-            message = message,
+        publishStatus(
+            StandbyCameraStatus(
+                phase = phase,
+                activeCameraId = activeCameraId,
+                standbyCameraId = standbyCameraId,
+                lensType = lensType,
+                message = message,
+            )
         )
     }
 }
