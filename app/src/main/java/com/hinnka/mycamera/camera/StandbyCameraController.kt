@@ -144,10 +144,16 @@ class StandbyCameraController(context: Context) {
             runCatching { it.getOpenCameraId() }.getOrNull()
         }
         val concurrentIdsResult = runCatching { cameraManager.concurrentCameraIds }
-        val pairAdvertised = if (activeOpenCameraId != null && targetOpenCameraId != null) {
+        val pairAdvertised = if (
+            activeOpenCameraId != null &&
+            targetOpenCameraId != null &&
+            activeOpenCameraId != targetOpenCameraId
+        ) {
             concurrentIdsResult.getOrNull()?.any { ids ->
                 ids.contains(activeOpenCameraId) && ids.contains(targetOpenCameraId)
             }
+        } else if (activeOpenCameraId != null && activeOpenCameraId == targetOpenCameraId) {
+            false
         } else {
             null
         }
@@ -209,6 +215,7 @@ class StandbyCameraController(context: Context) {
                 return@dispatch
             }
 
+            val matchedFramesAtHandoff = matchedFrameCount
             frameReadyTimeout?.let { handler?.removeCallbacks(it) }
             frameReadyTimeout = null
             closeSessionAndReader()
@@ -232,7 +239,7 @@ class StandbyCameraController(context: Context) {
             )
             InstantLensDiagnostics.log(
                 "TAKE_OVER",
-                "result=success cameraId=$cameraId deviceId=${camera.id} matchedFrames=$matchedFrameCount",
+                "result=success cameraId=$cameraId deviceId=${camera.id} matchedFrames=$matchedFramesAtHandoff",
             )
             PLog.i(TAG, "Handing off warm CameraDevice ${camera.id} for lens=$cameraId")
             onReady(camera)
@@ -382,6 +389,7 @@ class StandbyCameraController(context: Context) {
         }
 
         val standbyOpenCameraId = runCatching { targetCamera.getOpenCameraId() }.getOrNull()
+        lastLoggedTimestampMismatch = null
         if (standbyOpenCameraId.isNullOrBlank()) {
             publishUnavailable(StandbyCameraPhase.FAILED, "Target lens has no valid Camera2 open ID")
             return null
@@ -404,9 +412,10 @@ class StandbyCameraController(context: Context) {
             PLog.w(TAG, "Unable to read concurrent camera combinations; trying guarded standby open", error)
             null
         }
-        val advertisedConcurrentPair = concurrentCameraIds?.any { ids ->
-            ids.contains(activeOpenCameraId) && ids.contains(standbyOpenCameraId)
-        } == true
+        val advertisedConcurrentPair = activeOpenCameraId != standbyOpenCameraId &&
+            concurrentCameraIds?.any { ids ->
+                ids.contains(activeOpenCameraId) && ids.contains(standbyOpenCameraId)
+            } == true
         val concurrentPairs = concurrentCameraIds
             ?.map { ids -> ids.sorted().joinToString("+") }
             ?.sorted()
@@ -931,16 +940,14 @@ class StandbyCameraController(context: Context) {
     private fun updateReadinessFromMatchedFrames(openGeneration: Long) {
         if (openGeneration != generation) return
         matchedFrameCount = imageTimestamps.count { captureResultTimestamps.contains(it) }
-        if (matchedFrameCount == 0 && imageTimestamps.isNotEmpty() &&
-            captureResultTimestamps.isNotEmpty()
-        ) {
-            val readerTimestamp = imageTimestamps.lastOrNull {
-                !captureResultTimestamps.contains(it)
-            }
-            val sensorTimestamp = captureResultTimestamps.lastOrNull {
-                !imageTimestamps.contains(it)
-            }
-            if (readerTimestamp != null && sensorTimestamp != null) {
+        val readerTimestamp = imageTimestamps.lastOrNull()
+        val sensorTimestamp = captureResultTimestamps.lastOrNull()
+        if (readerTimestamp != null && sensorTimestamp != null) {
+            if (readerTimestamp == sensorTimestamp) {
+                lastLoggedTimestampMismatch = null
+            } else if (!captureResultTimestamps.contains(readerTimestamp) &&
+                !imageTimestamps.contains(sensorTimestamp)
+            ) {
                 val mismatch = readerTimestamp to sensorTimestamp
                 if (mismatch != lastLoggedTimestampMismatch) {
                     InstantLensDiagnostics.log(
@@ -952,8 +959,6 @@ class StandbyCameraController(context: Context) {
                     lastLoggedTimestampMismatch = mismatch
                 }
             }
-        } else if (matchedFrameCount > 0) {
-            lastLoggedTimestampMismatch = null
         }
         val current = _status.value
         if (current.phase != StandbyCameraPhase.WAITING_FOR_FRAMES &&
@@ -1035,6 +1040,7 @@ class StandbyCameraController(context: Context) {
         if (resetStatus) {
             publishStatus(StandbyCameraStatus(), transitionReason = reason)
         }
+        lastLoggedTimestampMismatch = null
     }
 
     private fun closeSessionAndReader() {
