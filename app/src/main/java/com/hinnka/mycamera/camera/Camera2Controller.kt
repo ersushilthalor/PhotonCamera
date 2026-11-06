@@ -2650,7 +2650,7 @@ class Camera2Controller(private val context: Context) {
     }
 
     fun canSwitchToInstantPreview(cameraId: String): Boolean {
-        val photoCaptureInProgress = _state.value.isCapturing
+        val photoCaptureInProgress = _state.value.isCapturing || _state.value.burstCapturing
         val logicalPlan = activeLogicalDualPreviewPlan
         val logicalAlternateReady = !photoCaptureInProgress && canSwitchToLogicalDualPreview(cameraId)
         val logicalPrimaryReady = !photoCaptureInProgress && logicalPlan?.activeCameraId == cameraId &&
@@ -3571,7 +3571,7 @@ class Camera2Controller(private val context: Context) {
             state.captureMode != CaptureMode.PHOTO -> "capture_mode_not_photo"
             state.useRaw -> "raw_capture_enabled"
             state.useP010 -> "p010_capture_enabled"
-            state.isCapturing -> "photo_capture_in_progress"
+            state.isCapturing || state.burstCapturing -> "photo_or_burst_capture_in_progress"
             state.videoRecordingState.isRecording -> "video_recording_active"
             state.videoRecordingState.isProcessing -> "video_processing_active"
             state.photoPreviewStabilizationEnabled -> "photo_preview_stabilization_active"
@@ -6623,13 +6623,13 @@ class Camera2Controller(private val context: Context) {
         } == true
         val alternateSurfaceValid = alternatePreviewSurface
             ?.let { runCatching { it.isValid }.getOrDefault(false) } == true
-        val canUsePrewarmedStandby = !_state.value.isCapturing &&
+        val canUsePrewarmedStandby = !_state.value.isCapturing && !_state.value.burstCapturing &&
             livePlan == null &&
             targetCamera != null &&
             alternateFrameAvailable &&
             alternateSurfaceValid &&
             standbyCameraController.canHandoffTo(targetCamera)
-        val instantLogicalSwap = !_state.value.isCapturing && ((
+        val instantLogicalSwap = !_state.value.isCapturing && !_state.value.burstCapturing && ((
             livePlan?.alternateCameraId == cameraId && alternateFrameAvailable
         ) || livePlan?.activeCameraId == cameraId)
         val path = when {
