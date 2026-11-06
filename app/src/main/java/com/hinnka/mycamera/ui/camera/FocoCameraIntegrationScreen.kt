@@ -380,7 +380,14 @@ fun FocoCameraIntegrationScreen(
                             val targetZoom = camera.displayIntrinsicZoomRatio.takeIf { it > 0f }
                                 ?: camera.intrinsicZoomRatio.takeIf { it > 0f }
                                 ?: 1f
-                            switchPhotonLensWithPreviewTransition(camera.cameraId, targetZoom)
+                            if (!viewModel.isVideoLensLocked() &&
+                                viewModel.canInstantlySwitchLens(camera.cameraId, source = "foco_macro")
+                            ) {
+                                lensSwitchTransition.cancel()
+                                viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
+                            } else {
+                                viewModel.switchToLens(camera.cameraId)
+                            }
                         }
                     }
                     SettingKey.RATIO -> viewModel.setAspectRatio(
