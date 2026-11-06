@@ -947,6 +947,7 @@ class StandbyCameraController(context: Context) {
                 runCatching { reader.close() }
             }
             afterSessionClosed?.invoke()
+            Unit
         }
 
         if (session == null) {
