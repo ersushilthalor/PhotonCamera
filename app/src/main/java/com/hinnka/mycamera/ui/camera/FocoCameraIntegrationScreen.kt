@@ -296,6 +296,13 @@ fun FocoCameraIntegrationScreen(
             currentCamera?.cameraId ?: "0"
         )
         if (selectedCamera != null && selectedCamera.cameraId != currentCamera?.cameraId) {
+            if (viewModel.canInstantlySwitchLens(selectedCamera.cameraId)) {
+                // A live standby/logical-dual feed is already rendering. Do not take a
+                // PixelCopy snapshot or wait for a new preview session in the UI overlay.
+                lensSwitchTransition.cancel()
+                viewModel.switchToLensAndSetZoomRatio(selectedCamera.cameraId, safeZoom)
+                return
+            }
             lensSwitchTransition.switchLens(selectedCamera.cameraId, safeZoom) {
                 viewModel.switchToLensAndSetZoomRatio(selectedCamera.cameraId, safeZoom)
             }
