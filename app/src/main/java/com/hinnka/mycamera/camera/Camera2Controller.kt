@@ -2559,13 +2559,37 @@ class Camera2Controller(private val context: Context) {
     }
 
     fun canSwitchToInstantPreview(cameraId: String): Boolean {
-        if (canSwitchToLogicalDualPreview(cameraId)) return true
+        val logicalPlan = activeLogicalDualPreviewPlan
+        val logicalPreviewReady = canSwitchToLogicalDualPreview(cameraId)
         val targetCamera = _state.value.availableCameras.firstOrNull {
             it.cameraId == cameraId
-        } ?: return false
+        }
         val hasLiveSurface = alternatePreviewSurface
             ?.let { runCatching { it.isValid }.getOrDefault(false) } == true
-        return hasLiveSurface && standbyCameraController.canHandoffTo(targetCamera)
+        val standbyBlockers = targetCamera?.let(standbyCameraController::handoffBlockers)
+            ?: listOf("target_camera_not_found")
+        val standbyReady = targetCamera != null && standbyBlockers.isEmpty()
+        val result = logicalPreviewReady || (hasLiveSurface && standbyReady)
+        val failedConditions = buildList {
+            if (!logicalPreviewReady) {
+                if (logicalPlan == null) add("logical_dual_preview_plan_missing")
+                else if (logicalPlan.alternateCameraId != cameraId) {
+                    add("logical_alternate_id_mismatch(expected=${logicalPlan.alternateCameraId},actual=$cameraId)")
+                }
+                if (!hasLiveSurface) add("alternate_preview_surface_missing_or_invalid")
+                addAll(standbyBlockers)
+            }
+            if (logicalPlan?.activeCameraId == cameraId && !logicalPreviewReady) {
+                add("target_is_logical_primary_not_alternate")
+            }
+        }.distinct()
+        InstantLensDiagnostics.log(
+            "CONTROLLER_ELIGIBILITY",
+            "targetCameraId=$cameraId result=$result logicalPreviewReady=$logicalPreviewReady " +
+                "alternateSurfaceValid=$hasLiveSurface standbyReady=$standbyReady " +
+                "failedConditions=${failedConditions.ifEmpty { listOf("none") }.joinToString("|")}",
+        )
+        return result
     }
 
     /**
