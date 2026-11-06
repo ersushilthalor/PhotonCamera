@@ -8235,7 +8235,28 @@ class Camera2Controller(private val context: Context) {
             videoRecordingState = VideoRecordingState(isRecording = true, elapsedMs = 0L)
         )
         videoRecordingPausedMs = 0L
-        createPreviewSession(openGeneration = cameraOpenGeneration)
+
+        // The encoder session competes with the secondary warm camera for Camera2 stream
+        // resources. Release the standby device first and wait for its onClosed() callback;
+        // configuring the encoder while it is still open can make the HAL reject the session.
+        val recordingOpenGeneration = cameraOpenGeneration
+        standbyCameraController.release(
+            "video recording start: release secondary camera before configuring encoder session"
+        )
+        standbyCameraController.whenDeviceIdle {
+            if (
+                recordingOpenGeneration != cameraOpenGeneration ||
+                _state.value.captureMode != CaptureMode.VIDEO ||
+                !_state.value.videoRecordingState.shouldAttachCameraInput() ||
+                cameraDevice == null ||
+                previewSurface == null
+            ) {
+                PLog.d(TAG, "Skipping stale video session start after standby camera release")
+                return@whenDeviceIdle
+            }
+            PLog.i(TAG, "Standby camera fully released; configuring dedicated video input session")
+            createPreviewSession(openGeneration = recordingOpenGeneration)
+        }
     }
 
     private fun isCurrentCameraFrontFacing(): Boolean {
