@@ -132,6 +132,17 @@ class StandbyCameraController(context: Context) {
             matchedFrameCount >= REQUIRED_MATCHED_FRAMES
     }
 
+    /** Identifies which GL OES input is receiving this ready standby stream. */
+    fun isReadyOnPreviewTexture(cameraId: String, surfaceTexture: SurfaceTexture?): Boolean {
+        if (surfaceTexture == null) return false
+        val plan = activePlan ?: return false
+        return _status.value.phase == StandbyCameraPhase.READY &&
+            plan.standbyCameraId == cameraId &&
+            plan.previewSurfaceTexture === surfaceTexture &&
+            standbyCameraDevice != null &&
+            standbyCaptureSession != null
+    }
+
     /**
      * Detach the ready standby device without closing it. The active controller will
      * configure its normal preview/capture session on this same CameraDevice.
