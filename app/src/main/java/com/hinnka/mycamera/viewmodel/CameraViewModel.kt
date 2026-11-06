@@ -3851,6 +3851,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         source: String = "lens_switch_probe",
     ): Boolean {
         val currentCameraId = state.value.currentCameraId
+        InstantLensDiagnostics.log(
+            "LENS_TAP",
+            "source=$source fromCameraId=$currentCameraId targetCameraId=$cameraId",
+        )
         val previewView = glSurfaceView
         val controllerReady = previewView != null &&
             cameraController.canSwitchToInstantPreview(cameraId)
@@ -3863,10 +3867,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
             if (!hasStandbyPreviewFrame) add("standby_preview_frame_missing")
         }
-        InstantLensDiagnostics.log(
-            "LENS_TAP",
-            "source=$source fromCameraId=$currentCameraId targetCameraId=$cameraId",
-        )
         InstantLensDiagnostics.log(
             "CAN_INSTANT_RESULT",
             "source=$source targetCameraId=$cameraId result=$result " +
