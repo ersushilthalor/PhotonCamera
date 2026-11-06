@@ -22,6 +22,7 @@ import com.hinnka.mycamera.utils.PLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.IdentityHashMap
 import java.util.concurrent.Executor
 import kotlin.math.abs
 
@@ -48,7 +49,16 @@ class StandbyCameraController(context: Context) {
         private const val MAX_REMEMBERED_TIMESTAMPS = 12
         private const val REQUIRED_MATCHED_FRAMES = 2
         private const val FRAME_READY_TIMEOUT_MS = 5_000L
+        private const val MAX_AUTOMATIC_RETRIES = 3
+        private const val MAX_CAMERA_LIMIT_FAILURES = 3
+        private val RETRY_BACKOFF_MS = longArrayOf(500L, 1_500L, 3_500L)
     }
+
+    private data class RetryState(
+        var attempts: Int = 0,
+        var maxCameraLimitFailures: Int = 0,
+        var permanentlyUnsupportedReason: String? = null,
+    )
 
     private data class StandbyPlan(
         val key: String,
@@ -75,10 +85,14 @@ class StandbyCameraController(context: Context) {
 
     private var handler: Handler? = null
     private var standbyCameraDevice: CameraDevice? = null
-    // Once handed to Camera2Controller, this device is no longer owned by the prewarm path.
-    // Its StateCallback still belongs to this controller, so lifecycle events are forwarded.
-    private var adoptedCameraDevice: CameraDevice? = null
-    private var adoptedDeviceCallbacks: AdoptedCameraDeviceCallbacks? = null
+    // CameraDevices opened by this controller keep their original StateCallback for life.
+    // Keep identity-keyed routing so ownership can move active -> standby -> active repeatedly.
+    private val adoptedDeviceCallbacks = IdentityHashMap<CameraDevice, AdoptedCameraDeviceCallbacks?>()
+    // Devices originally opened by Camera2Controller have callbacks there; route those events
+    // back here only while the device is owned by the standby pipeline.
+    private val adoptedStandbyDevices = java.util.Collections.newSetFromMap(
+        IdentityHashMap<CameraDevice, Boolean>()
+    )
     private var closingCameraDevice: CameraDevice? = null
     private var standbyCaptureSession: CameraCaptureSession? = null
     private var standbyImageReader: ImageReader? = null
@@ -90,6 +104,9 @@ class StandbyCameraController(context: Context) {
     private var openRequestGeneration: Long? = null
     private var generation = 0L
     private var frameReadyTimeout: Runnable? = null
+    private val retryStates = mutableMapOf<String, RetryState>()
+    private var retryRunnable: Runnable? = null
+    private var retryScheduledPlanKey: String? = null
 
     @Volatile
     var isDeviceTransitioning: Boolean = false
@@ -220,8 +237,8 @@ class StandbyCameraController(context: Context) {
             frameReadyTimeout = null
             closeSessionAndReader()
             standbyCameraDevice = null
-            adoptedCameraDevice = camera
-            adoptedDeviceCallbacks = null
+            adoptedDeviceCallbacks[camera] = null
+            adoptedStandbyDevices.remove(camera)
             activePlan = null
             pendingPlan = null
             imageTimestamps.clear()
@@ -251,10 +268,161 @@ class StandbyCameraController(context: Context) {
         camera: CameraDevice,
         callbacks: AdoptedCameraDeviceCallbacks,
     ) {
-        if (adoptedCameraDevice === camera) {
-            adoptedDeviceCallbacks = callbacks
+        if (adoptedDeviceCallbacks.containsKey(camera)) {
+            adoptedDeviceCallbacks[camera] = callbacks
         }
     }
+
+    /**
+     * Adopt the previous active CameraDevice as the next standby device without reopening it.
+     * Its old active session has already been retired; the new standby session feeds the
+     * alternate GL surface so the next lens switch can hand the same device straight back.
+     */
+    fun adoptCurrentCameraDevice(
+        camera: CameraDevice,
+        activeCamera: CameraInfo?,
+        availableCameras: List<CameraInfo>,
+        activeOpenCameraId: String,
+        previewSize: Size,
+        callbackHandler: Handler,
+        previewSurface: Surface? = null,
+        previewSurfaceTexture: SurfaceTexture? = null,
+        onPreviewSizeChanged: ((Int, Int) -> Unit)? = null,
+        onAdoptionFailed: (CameraDevice, String) -> Unit,
+    ) {
+        handler = callbackHandler
+        dispatch {
+            alternatePreviewSurface = previewSurface?.takeIf {
+                runCatching { it.isValid }.getOrDefault(false)
+            }
+            alternatePreviewSurfaceTexture = previewSurfaceTexture
+            this.onPreviewSizeChanged = onPreviewSizeChanged
+
+            val plan = resolvePlan(activeCamera, availableCameras, activeOpenCameraId, previewSize)
+            if (plan == null || plan.standbyOpenCameraId != camera.id) {
+                val reason = if (plan == null) {
+                    "No valid reverse standby plan after handoff"
+                } else {
+                    "Retained device mismatch: expected=${plan.standbyOpenCameraId}, actual=${camera.id}"
+                }
+                InstantLensDiagnostics.log(
+                    "STANDBY_ADOPT",
+                    "result=failed deviceId=${camera.id} reason=$reason",
+                )
+                onAdoptionFailed(camera, reason)
+                return@dispatch
+            }
+
+            val output = resolvePreviewOutput(plan.standbyOpenCameraId, plan.aspectRatio)
+            if (output == null) {
+                val reason = "Retained standby camera has no usable YUV or PRIVATE preview output size"
+                markPlanUnsupported(plan, reason)
+                onAdoptionFailed(camera, reason)
+                return@dispatch
+            }
+            val reader = try {
+                ImageReader.newInstance(output.size.width, output.size.height, output.format, 3)
+            } catch (error: Exception) {
+                val reason = "Could not allocate adopted standby ImageReader: " +
+                    (error.message ?: error.javaClass.simpleName)
+                InstantLensDiagnostics.log(
+                    "STANDBY_ADOPT",
+                    "result=failed deviceId=${camera.id} reason=$reason",
+                )
+                onAdoptionFailed(camera, reason)
+                return@dispatch
+            }
+
+            cancelScheduledRetry("adopting retained active device")
+            generation += 1L
+            val openGeneration = generation
+            activePlan = plan
+            pendingPlan = null
+            standbyCameraDevice = camera
+            adoptedStandbyDevices += camera
+            if (adoptedDeviceCallbacks.containsKey(camera)) {
+                adoptedDeviceCallbacks[camera] = standbyLifecycleCallbacks(camera)
+            }
+            standbyImageReader = reader
+            imageTimestamps.clear()
+            captureResultTimestamps.clear()
+            receivedFrameCount = 0L
+            matchedFrameCount = 0
+            isDeviceTransitioning = true
+            publishStatus(
+                StandbyCameraStatus(
+                    phase = StandbyCameraPhase.CONFIGURING,
+                    activeCameraId = plan.activeOpenCameraId,
+                    standbyCameraId = plan.standbyCameraId,
+                    lensType = plan.lensType,
+                    message = "Reconfiguring previous active device as standby",
+                )
+            )
+            attachReaderListener(reader, openGeneration, callbackHandler)
+            InstantLensDiagnostics.log(
+                "STANDBY_ADOPT",
+                "result=accepted deviceId=${camera.id} cameraId=${plan.standbyCameraId} " +
+                    "openGeneration=$openGeneration preview=${output.size.width}x${output.size.height}",
+            )
+            configureStandbySession(camera, reader, plan, openGeneration)
+        }
+    }
+
+    /** Route callbacks from a CameraDevice originally opened by Camera2Controller. */
+    fun handleAdoptedStandbyDeviceDisconnected(camera: CameraDevice): Boolean {
+        if (!adoptedStandbyDevices.contains(camera)) return false
+        if (standbyCameraDevice === camera) {
+            failCurrentPlan("Adopted standby camera disconnected", null)
+        } else {
+            InstantLensDiagnostics.log("STANDBY_ADOPT", "result=disconnected_before_session deviceId=${camera.id}")
+            adoptedStandbyDevices.remove(camera)
+        }
+        return true
+    }
+
+    fun handleAdoptedStandbyDeviceError(camera: CameraDevice, errorCode: Int): Boolean {
+        if (!adoptedStandbyDevices.contains(camera)) return false
+        if (standbyCameraDevice === camera) {
+            failCurrentPlan("Adopted standby camera error: $errorCode", null, errorCode)
+        } else {
+            InstantLensDiagnostics.log(
+                "STANDBY_ADOPT",
+                "result=error_before_session deviceId=${camera.id} error=$errorCode",
+            )
+            adoptedStandbyDevices.remove(camera)
+        }
+        return true
+    }
+
+    fun handleAdoptedStandbyDeviceClosed(camera: CameraDevice): Boolean {
+        if (!adoptedStandbyDevices.remove(camera)) return false
+        if (closingCameraDevice === camera) {
+            closingCameraDevice = null
+        } else if (standbyCameraDevice === camera) {
+            standbyCameraDevice = null
+            closeSessionAndReader()
+            failCurrentPlan("Adopted standby camera closed unexpectedly", null, closeDevice = false)
+        }
+        if (openRequestGeneration == null && closingCameraDevice == null) {
+            setDeviceTransitioning(false)
+        }
+        return true
+    }
+
+    fun retryAfterAppResume() {
+        dispatch {
+            val plan = activePlan ?: return@dispatch
+            if (_status.value.phase == StandbyCameraPhase.FAILED) {
+                scheduleRetry(plan, "app_resume", resetBudget = true)
+            }
+        }
+    }
+
+    private fun standbyLifecycleCallbacks(camera: CameraDevice) = AdoptedCameraDeviceCallbacks(
+        onDisconnected = { handleAdoptedStandbyDeviceDisconnected(it) },
+        onError = { device, error -> handleAdoptedStandbyDeviceError(device, error) },
+        onClosed = { handleAdoptedStandbyDeviceClosed(it) },
+    )
 
     fun prepare(
         activeCamera: CameraInfo?,
@@ -346,10 +514,20 @@ class StandbyCameraController(context: Context) {
         ) {
             return
         }
+        if (activePlan?.key == plan.key && _status.value.phase == StandbyCameraPhase.FAILED) {
+            scheduleRetry(plan, "preview_session_start", resetBudget = true)
+            return
+        }
         if (pendingPlan?.key == plan.key) return
+        retryStates[plan.key]?.permanentlyUnsupportedReason?.let { reason ->
+            logUnsupportedPlan(plan, reason, "preview_session_start")
+            return
+        }
 
+        cancelScheduledRetry("standby target changed")
         pendingPlan = plan
         releaseResources("standby target changed", resetStatus = false)
+        activePlan = plan
         openPendingPlanWhenIdle()
     }
 
@@ -548,27 +726,23 @@ class StandbyCameraController(context: Context) {
 
     @Suppress("MissingPermission")
     private fun openPlan(plan: StandbyPlan, callbackHandler: Handler) {
+        activePlan = plan
+        retryStates[plan.key]?.permanentlyUnsupportedReason?.let { reason ->
+            logUnsupportedPlan(plan, reason, "open_plan")
+            return
+        }
         val output = resolvePreviewOutput(plan.standbyOpenCameraId, plan.aspectRatio)
         if (output == null) {
-            publishUnavailable(
-                phase = StandbyCameraPhase.FAILED,
-                message = "Target camera has no usable YUV or PRIVATE preview output size",
-                activeCameraId = plan.activeOpenCameraId,
-                standbyCameraId = plan.standbyCameraId,
-                lensType = plan.lensType,
-            )
+            markPlanUnsupported(plan, "Target camera has no usable YUV or PRIVATE preview output size")
             return
         }
 
         val reader = try {
             ImageReader.newInstance(output.size.width, output.size.height, output.format, 3)
         } catch (error: Exception) {
-            publishUnavailable(
-                phase = StandbyCameraPhase.FAILED,
-                message = "Could not allocate standby ImageReader: " + (error.message ?: error.javaClass.simpleName),
-                activeCameraId = plan.activeOpenCameraId,
-                standbyCameraId = plan.standbyCameraId,
-                lensType = plan.lensType,
+            failCurrentPlan(
+                "Could not allocate standby ImageReader: " + (error.message ?: error.javaClass.simpleName),
+                error,
             )
             return
         }
@@ -590,29 +764,7 @@ class StandbyCameraController(context: Context) {
             )
         )
 
-        reader.setOnImageAvailableListener({ source ->
-            if (openGeneration != generation || source !== standbyImageReader) {
-                runCatching { source.acquireLatestImage()?.close() }
-                return@setOnImageAvailableListener
-            }
-            val image = try {
-                source.acquireLatestImage()
-            } catch (error: IllegalStateException) {
-                PLog.w(TAG, "Standby frame acquisition failed", error)
-                null
-            } ?: return@setOnImageAvailableListener
-
-            try {
-                val timestamp = image.timestamp
-                if (timestamp > 0L) {
-                    receivedFrameCount += 1L
-                    rememberTimestamp(imageTimestamps, timestamp)
-                    updateReadinessFromMatchedFrames(openGeneration)
-                }
-            } finally {
-                image.close()
-            }
-        }, callbackHandler)
+        attachReaderListener(reader, openGeneration, callbackHandler)
 
         isDeviceTransitioning = true
         openRequestGeneration = openGeneration
@@ -634,8 +786,8 @@ class StandbyCameraController(context: Context) {
                     }
 
                     override fun onDisconnected(camera: CameraDevice) {
-                        if (camera === adoptedCameraDevice) {
-                            val callbacks = adoptedDeviceCallbacks
+                        if (adoptedDeviceCallbacks.containsKey(camera)) {
+                            val callbacks = adoptedDeviceCallbacks[camera]
                             if (callbacks != null) callbacks.onDisconnected(camera)
                             else closeOpenedCamera(camera)
                             return
@@ -652,8 +804,8 @@ class StandbyCameraController(context: Context) {
                     }
 
                     override fun onError(camera: CameraDevice, error: Int) {
-                        if (camera === adoptedCameraDevice) {
-                            val callbacks = adoptedDeviceCallbacks
+                        if (adoptedDeviceCallbacks.containsKey(camera)) {
+                            val callbacks = adoptedDeviceCallbacks[camera]
                             if (callbacks != null) callbacks.onError(camera, error)
                             else closeOpenedCamera(camera)
                             return
@@ -663,24 +815,19 @@ class StandbyCameraController(context: Context) {
                         }
                         if (openGeneration == generation) {
                             standbyCameraDevice = camera
-                            failCurrentPlan("Standby camera open error: " + error, null)
+                            failCurrentPlan("Standby camera open error: " + error, null, error)
                         } else {
                             closeOpenedCamera(camera)
                         }
                     }
 
                     override fun onClosed(camera: CameraDevice) {
-                        if (camera === adoptedCameraDevice) {
-                            val callbacks = adoptedDeviceCallbacks
-                            adoptedCameraDevice = null
-                            adoptedDeviceCallbacks = null
+                        if (adoptedDeviceCallbacks.containsKey(camera)) {
+                            val callbacks = adoptedDeviceCallbacks.remove(camera)
                             if (callbacks != null) {
                                 callbacks.onClosed(camera)
                                 return
                             }
-                            // A handoff can fail before the active controller installs its
-                            // callbacks. Fall through so a forced close still releases the
-                            // standby transition latch instead of leaving opens blocked.
                         }
                         if (closingCameraDevice === camera) {
                             closingCameraDevice = null
@@ -808,6 +955,7 @@ class StandbyCameraController(context: Context) {
                             return
                         }
                         standbyCaptureSession = session
+                        setDeviceTransitioning(false)
                         publishStatus(
                             _status.value.copy(
                                 phase = StandbyCameraPhase.WAITING_FOR_FRAMES,
@@ -969,6 +1117,8 @@ class StandbyCameraController(context: Context) {
         if (matchedFrameCount >= REQUIRED_MATCHED_FRAMES) {
             frameReadyTimeout?.let { handler?.removeCallbacks(it) }
             frameReadyTimeout = null
+            activePlan?.let { retryStates.remove(it.key) }
+            cancelScheduledRetry("standby became ready")
             publishStatus(
                 current.copy(
                     phase = StandbyCameraPhase.READY,
@@ -992,7 +1142,12 @@ class StandbyCameraController(context: Context) {
         }
     }
 
-    private fun failCurrentPlan(message: String, error: Throwable?) {
+    private fun failCurrentPlan(
+        message: String,
+        error: Throwable?,
+        cameraErrorCode: Int? = null,
+        closeDevice: Boolean = true,
+    ) {
         val plan = activePlan
         if (error != null) {
             PLog.w(TAG, message, error)
@@ -1001,6 +1156,7 @@ class StandbyCameraController(context: Context) {
         }
         frameReadyTimeout?.let { handler?.removeCallbacks(it) }
         frameReadyTimeout = null
+        pendingPlan = null
         publishStatus(
             StandbyCameraStatus(
                 phase = StandbyCameraPhase.FAILED,
@@ -1012,14 +1168,157 @@ class StandbyCameraController(context: Context) {
                 message = message,
             )
         )
-        activePlan = null
         closeSessionAndReader()
-        standbyCameraDevice?.let(::closeOpenedCamera)
+        val device = standbyCameraDevice
+        if (closeDevice && device != null) {
+            closeOpenedCamera(device)
+        } else if (device != null) {
+            standbyCameraDevice = null
+        }
+
+        if (plan == null) {
+            InstantLensDiagnostics.log("STANDBY_RETRY", "result=not_scheduled reason=no_active_plan failure=$message")
+            return
+        }
+        val retryState = retryStates.getOrPut(plan.key) { RetryState() }
+        if (cameraErrorCode == CameraDevice.ERROR_MAX_CAMERAS_IN_USE) {
+            retryState.maxCameraLimitFailures += 1
+            InstantLensDiagnostics.log(
+                "STANDBY_RETRY",
+                "event=max_cameras_in_use planKey=${plan.key} " +
+                    "count=${retryState.maxCameraLimitFailures}/$MAX_CAMERA_LIMIT_FAILURES",
+            )
+            if (retryState.maxCameraLimitFailures >= MAX_CAMERA_LIMIT_FAILURES) {
+                retryState.permanentlyUnsupportedReason =
+                    "Camera HAL repeatedly returned ERROR_MAX_CAMERAS_IN_USE " +
+                        "(${retryState.maxCameraLimitFailures} failures)"
+                cancelScheduledRetry("plan became unsupported")
+                logUnsupportedPlan(plan, retryState.permanentlyUnsupportedReason!!, "camera_error")
+                return
+            }
+        }
+        scheduleRetry(plan, message, resetBudget = false)
+    }
+
+    private fun scheduleRetry(plan: StandbyPlan, reason: String, resetBudget: Boolean) {
+        val retryState = retryStates.getOrPut(plan.key) { RetryState() }
+        val unsupportedReason = retryState.permanentlyUnsupportedReason
+        if (unsupportedReason != null) {
+            logUnsupportedPlan(plan, unsupportedReason, "retry_request")
+            return
+        }
+        if (resetBudget) {
+            cancelScheduledRetry("explicit retry trigger")
+            retryState.attempts = 0
+            InstantLensDiagnostics.log(
+                "STANDBY_RETRY",
+                "event=budget_reset trigger=$reason planKey=${plan.key}",
+            )
+        } else if (retryScheduledPlanKey == plan.key) {
+            return
+        }
+        if (retryState.attempts >= MAX_AUTOMATIC_RETRIES) {
+            InstantLensDiagnostics.log(
+                "STANDBY_RETRY",
+                "result=exhausted planKey=${plan.key} attempts=${retryState.attempts} " +
+                    "trigger=$reason; waiting_for_preview_session_or_app_resume",
+            )
+            return
+        }
+        val retryIndex = retryState.attempts
+        val delayMs = RETRY_BACKOFF_MS[retryIndex]
+        retryState.attempts += 1
+        val callbackHandler = handler ?: return
+        val retry = Runnable {
+            if (retryScheduledPlanKey != plan.key || activePlan?.key != plan.key ||
+                _status.value.phase != StandbyCameraPhase.FAILED
+            ) {
+                return@Runnable
+            }
+            retryRunnable = null
+            retryScheduledPlanKey = null
+            InstantLensDiagnostics.log(
+                "STANDBY_RETRY",
+                "event=retry_started planKey=${plan.key} attempt=${retryState.attempts}/$MAX_AUTOMATIC_RETRIES " +
+                    "afterMs=$delayMs reason=$reason",
+            )
+            pendingPlan = plan
+            openPendingPlanWhenIdle()
+        }
+        retryRunnable = retry
+        retryScheduledPlanKey = plan.key
+        InstantLensDiagnostics.log(
+            "STANDBY_RETRY",
+            "event=retry_scheduled planKey=${plan.key} attempt=${retryState.attempts}/$MAX_AUTOMATIC_RETRIES " +
+                "delayMs=$delayMs reason=$reason",
+        )
+        callbackHandler.postDelayed(retry, delayMs)
+    }
+
+    private fun cancelScheduledRetry(reason: String) {
+        val retry = retryRunnable ?: return
+        handler?.removeCallbacks(retry)
+        InstantLensDiagnostics.log(
+            "STANDBY_RETRY",
+            "event=retry_cancelled planKey=${retryScheduledPlanKey ?: "unknown"} reason=$reason",
+        )
+        retryRunnable = null
+        retryScheduledPlanKey = null
+    }
+
+    private fun markPlanUnsupported(plan: StandbyPlan, reason: String) {
+        val retryState = retryStates.getOrPut(plan.key) { RetryState() }
+        retryState.permanentlyUnsupportedReason = reason
+        activePlan = plan
+        pendingPlan = null
+        publishUnavailable(
+            phase = StandbyCameraPhase.FAILED,
+            message = reason,
+            activeCameraId = plan.activeOpenCameraId,
+            standbyCameraId = plan.standbyCameraId,
+            lensType = plan.lensType,
+        )
+        cancelScheduledRetry("plan definitively unsupported")
+        logUnsupportedPlan(plan, reason, "capability_check")
+    }
+
+    private fun logUnsupportedPlan(plan: StandbyPlan, reason: String, trigger: String) {
+        InstantLensDiagnostics.log(
+            "STANDBY_RETRY",
+            "result=permanently_unsupported planKey=${plan.key} reason=$reason trigger=$trigger",
+        )
+    }
+
+    private fun attachReaderListener(reader: ImageReader, openGeneration: Long, callbackHandler: Handler) {
+        reader.setOnImageAvailableListener({ source ->
+            if (openGeneration != generation || source !== standbyImageReader) {
+                runCatching { source.acquireLatestImage()?.close() }
+                return@setOnImageAvailableListener
+            }
+            val image = try {
+                source.acquireLatestImage()
+            } catch (error: IllegalStateException) {
+                PLog.w(TAG, "Standby frame acquisition failed", error)
+                null
+            } ?: return@setOnImageAvailableListener
+
+            try {
+                val timestamp = image.timestamp
+                if (timestamp > 0L) {
+                    receivedFrameCount += 1L
+                    rememberTimestamp(imageTimestamps, timestamp)
+                    updateReadinessFromMatchedFrames(openGeneration)
+                }
+            } finally {
+                image.close()
+            }
+        }, callbackHandler)
     }
 
     private fun releaseResources(reason: String, resetStatus: Boolean) {
         generation += 1L
         activePlan = null
+        cancelScheduledRetry(reason)
         frameReadyTimeout?.let { handler?.removeCallbacks(it) }
         frameReadyTimeout = null
         imageTimestamps.clear()
@@ -1064,6 +1363,7 @@ class StandbyCameraController(context: Context) {
         if (standbyCameraDevice === camera) {
             standbyCameraDevice = null
         }
+        adoptedStandbyDevices += camera
         closingCameraDevice = camera
         isDeviceTransitioning = true
         try {
