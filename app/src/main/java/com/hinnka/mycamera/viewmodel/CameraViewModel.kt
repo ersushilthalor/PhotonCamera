@@ -3848,7 +3848,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         actionName: String,
         action: () -> Unit,
     ): Boolean {
-        if (!state.value.isCapturing) return false
+        if (!state.value.isCapturing && !state.value.burstCapturing) {
+            deferredLensSwitchJob?.cancel()
+            deferredLensSwitchJob = null
+            deferredLensSwitchGeneration += 1L
+            return false
+        }
         val requestGeneration = ++deferredLensSwitchGeneration
         deferredLensSwitchJob?.cancel()
         InstantLensDiagnostics.log(
@@ -3856,7 +3861,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             "reason=photo_capture_in_progress action=$actionName generation=$requestGeneration",
         )
         deferredLensSwitchJob = viewModelScope.launch {
-            state.first { !it.isCapturing }
+            state.first { !it.isCapturing && !it.burstCapturing }
             if (requestGeneration != deferredLensSwitchGeneration) return@launch
             deferredLensSwitchJob = null
             InstantLensDiagnostics.log(
@@ -3887,7 +3892,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             "source=$source fromCameraId=$currentCameraId targetCameraId=$cameraId",
         )
         val previewView = glSurfaceView
-        val photoCaptureInProgress = state.value.isCapturing
+        val photoCaptureInProgress = state.value.isCapturing || state.value.burstCapturing
         val controllerReady = previewView != null && !photoCaptureInProgress &&
             cameraController.canSwitchToInstantPreview(cameraId)
         val hasStandbyPreviewFrame = previewView?.hasStandbyPreviewFrame == true
