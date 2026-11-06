@@ -313,24 +313,26 @@ class StandbyCameraController(context: Context) {
             return null
         }
 
-        val concurrentPairSupported = try {
+        // Do not require CameraManager.concurrentCameraIds to advertise the pair here.
+        // Some HALs (including devices that support the same persistent dual-session pattern
+        // as VCamera) permit both rear CameraDevices to stay open even when the concurrent-pair
+        // metadata is incomplete. Try opening the standby device and let Camera2's real open /
+        // session callbacks decide. Any rejection is isolated to this standby plan; the active
+        // camera remains untouched and the normal single-camera switch path remains available.
+        val advertisedConcurrentPair = try {
             cameraManager.concurrentCameraIds.any { ids ->
                 ids.contains(activeOpenCameraId) && ids.contains(standbyOpenCameraId)
             }
         } catch (error: Exception) {
-            PLog.w(TAG, "Unable to read concurrent camera combinations", error)
+            PLog.w(TAG, "Unable to read concurrent camera combinations; trying guarded standby open", error)
             false
         }
-
-        if (!concurrentPairSupported) {
-            publishUnavailable(
-                phase = StandbyCameraPhase.CONCURRENT_COMBINATION_UNSUPPORTED,
-                message = "Android does not advertise this camera pair as a concurrent combination",
-                activeCameraId = activeOpenCameraId,
-                standbyCameraId = targetCamera.cameraId,
-                lensType = targetCamera.lensType,
+        if (!advertisedConcurrentPair) {
+            PLog.i(
+                TAG,
+                "Camera pair is not advertised as concurrent; attempting guarded persistent standby open: " +
+                    "active=$activeOpenCameraId, standby=$standbyOpenCameraId",
             )
-            return null
         }
 
         val ratio = if (previewSize.width > 0 && previewSize.height > 0) {
