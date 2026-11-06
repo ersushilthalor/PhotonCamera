@@ -3662,6 +3662,11 @@ class Camera2Controller(private val context: Context) {
                     Executor { handler.post(it) },
                     object : CameraCaptureSession.StateCallback() {
                         override fun onClosed(session: CameraCaptureSession) {
+                            InstantLensDiagnostics.log(
+                                "OLD_SESSION_CLOSED",
+                                "sessionId=${System.identityHashCode(session)} reason=video_session_closed " +
+                                    "deviceId=${cameraDevice?.id ?: "none"}",
+                            )
                             invalidateCaptureSession(session, "video session closed")
                         }
 
@@ -3740,6 +3745,11 @@ class Camera2Controller(private val context: Context) {
                 Executor { handler.post(it) },
                 object : CameraCaptureSession.StateCallback() {
                     override fun onClosed(session: CameraCaptureSession) {
+                        InstantLensDiagnostics.log(
+                            "OLD_SESSION_CLOSED",
+                            "sessionId=${System.identityHashCode(session)} reason=photo_session_closed " +
+                                "deviceId=${cameraDevice?.id ?: "none"}",
+                        )
                         invalidateCaptureSession(session, "photo session closed")
                     }
 
