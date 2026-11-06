@@ -3553,52 +3553,63 @@ class Camera2Controller(private val context: Context) {
     }
 
     private fun resolveLogicalDualPreviewPlan(): LogicalDualPreviewPlan? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
         val state = _state.value
-        if (
-            state.captureMode != CaptureMode.PHOTO ||
-            state.useRaw ||
-            state.useP010 ||
-            state.isCapturing ||
-            state.videoRecordingState.isRecording ||
-            state.videoRecordingState.isProcessing ||
-            state.photoPreviewStabilizationEnabled ||
-            shouldUseAlgorithmicStabilization()
-        ) {
+        fun unavailable(reason: String): LogicalDualPreviewPlan? {
+            InstantLensDiagnostics.log(
+                "LOGICAL_DUAL_PREVIEW",
+                "result=unavailable reason=$reason selectedCameraId=${state.currentCameraId} " +
+                    "captureMode=${state.captureMode} openCameraId=$activeOpenCameraId",
+            )
             return null
         }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            return unavailable("logical_multi_camera_api_requires_android_9")
+        }
+        val blockedReason = when {
+            state.captureMode != CaptureMode.PHOTO -> "capture_mode_not_photo"
+            state.useRaw -> "raw_capture_enabled"
+            state.useP010 -> "p010_capture_enabled"
+            state.isCapturing -> "photo_capture_in_progress"
+            state.videoRecordingState.isRecording -> "video_recording_active"
+            state.videoRecordingState.isProcessing -> "video_processing_active"
+            state.photoPreviewStabilizationEnabled -> "photo_preview_stabilization_active"
+            shouldUseAlgorithmicStabilization() -> "algorithmic_stabilization_active"
+            else -> null
+        }
+        if (blockedReason != null) return unavailable(blockedReason)
 
-        val activeCamera = state.getCurrentCameraInfo() ?: return null
+        val activeCamera = state.getCurrentCameraInfo() ?: return unavailable("active_camera_unavailable")
         val alternateLensType = when (activeCamera.lensType) {
             LensType.BACK_MAIN -> LensType.BACK_ULTRA_WIDE
             LensType.BACK_ULTRA_WIDE -> LensType.BACK_MAIN
-            else -> return null
+            else -> return unavailable("active_lens_not_main_or_ultra_wide")
         }
         val openCameraId = runCatching { activeCamera.getOpenCameraId() }.getOrNull()
             ?.takeIf { it.isNotBlank() && it == activeOpenCameraId }
-            ?: return null
+            ?: return unavailable("active_logical_open_camera_id_mismatch")
         val alternateSurface = alternatePreviewSurface
             ?.takeIf { runCatching { it.isValid }.getOrDefault(false) }
-            ?: return null
-        val alternateTexture = alternatePreviewSurfaceTexture ?: return null
+            ?: return unavailable("alternate_gl_surface_missing_or_invalid")
+        val alternateTexture = alternatePreviewSurfaceTexture
+            ?: return unavailable("alternate_gl_surface_texture_missing")
         val alternateCamera = state.availableCameras.firstOrNull { candidate ->
             candidate.cameraId != activeCamera.cameraId &&
                 candidate.lensType == alternateLensType &&
                 !candidate.isVirtualIszLens &&
                 runCatching { candidate.getOpenCameraId() == openCameraId }.getOrDefault(false)
-        } ?: return null
+        } ?: return unavailable("same_logical_alternate_lens_not_discovered")
 
         val logicalCharacteristics = getCameraCharacteristicsOrNull(
             openCameraId,
             "same-logical-camera instant lens handoff",
-        ) ?: return null
+        ) ?: return unavailable("logical_camera_characteristics_unavailable")
         val capabilities = logicalCharacteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
-            ?: return null
+            ?: return unavailable("logical_camera_capabilities_unavailable")
         if (!capabilities.contains(
                 CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA
             )
         ) {
-            return null
+            return unavailable("logical_multi_camera_capability_missing")
         }
 
         val alternatePhysicalCameraId = alternateCamera.outputPhysicalCameraId
@@ -3610,7 +3621,7 @@ class Camera2Controller(private val context: Context) {
                 "Instant physical lens handoff unavailable: alternate $alternatePhysicalCameraId " +
                     "is not exposed by logical camera $openCameraId",
             )
-            return null
+            return unavailable("alternate_physical_camera_not_exposed_by_logical_camera")
         }
         val activePhysicalCameraId = activeOutputPhysicalCameraId
             ?: resolveRequestedPhysicalCameraId(state, activeCamera)
@@ -3618,25 +3629,26 @@ class Camera2Controller(private val context: Context) {
                 getTargetZoomRatioByMain(state, activeCamera)
             )
             ?: activeCamera.cameraId.takeIf { it != openCameraId }
-            ?: return null
-        if (activePhysicalCameraId == alternatePhysicalCameraId) return null
+            ?: return unavailable("active_physical_camera_id_unresolved")
+        if (activePhysicalCameraId == alternatePhysicalCameraId) {
+            return unavailable("active_and_alternate_resolve_to_same_physical_camera")
+        }
 
         val alternateCharacteristics = getCameraCharacteristicsOrNull(
             alternatePhysicalCameraId,
             "alternate physical preview output",
-        ) ?: return null
+        ) ?: return unavailable("alternate_physical_characteristics_unavailable")
         val streamMap = alternateCharacteristics.get(
             CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
-        ) ?: return null
+        ) ?: return unavailable("alternate_physical_stream_map_missing")
         val supportedSizes = streamMap.getOutputSizes(SurfaceTexture::class.java)
             ?.toList()
             .orEmpty()
-        if (supportedSizes.isEmpty()) return null
+        if (supportedSizes.isEmpty()) return unavailable("alternate_physical_surface_texture_sizes_empty")
 
         val requestedSize = state.currentPreviewSize
         if (requestedSize.width <= 0 || requestedSize.height <= 0) {
-            InstantLensDiagnostics.log("LOGICAL_DUAL_PREVIEW", "result=unavailable reason=requested_preview_size_invalid")
-            return null
+            return unavailable("requested_preview_size_invalid")
         }
         val boundedSizes = supportedSizes.filter { size ->
             val longEdge = maxOf(size.width, size.height)
@@ -3644,13 +3656,11 @@ class Camera2Controller(private val context: Context) {
             longEdge <= MAX_INSTANT_PREVIEW_LONG_EDGE && shortEdge <= MAX_INSTANT_PREVIEW_SHORT_EDGE
         }
         if (boundedSizes.isEmpty()) {
-            InstantLensDiagnostics.log(
-                "LOGICAL_DUAL_PREVIEW",
-                "result=unavailable reason=no_supported_size_within_limit logicalCameraId=$openCameraId " +
-                    "alternatePhysicalCameraId=$alternatePhysicalCameraId supported=${supportedSizes.joinToString { "${it.width}x${it.height}" }} " +
-                    "maxSize=${MAX_INSTANT_PREVIEW_LONG_EDGE}x${MAX_INSTANT_PREVIEW_SHORT_EDGE}",
+            return unavailable(
+                "no_supported_size_within_limit: alternatePhysicalCameraId=$alternatePhysicalCameraId " +
+                    "supported=${supportedSizes.joinToString { "${it.width}x${it.height}" }} " +
+                    "maxSize=${MAX_INSTANT_PREVIEW_LONG_EDGE}x${MAX_INSTANT_PREVIEW_SHORT_EDGE}"
             )
-            return null
         }
         val requestedAspect = requestedSize.width.toFloat() / requestedSize.height.toFloat()
         val requestedArea = requestedSize.width.toLong() * requestedSize.height.toLong()
@@ -3659,7 +3669,7 @@ class Camera2Controller(private val context: Context) {
                 { abs(it.width.toFloat() / it.height.toFloat() - requestedAspect) },
                 { kotlin.math.abs(it.width.toLong() * it.height.toLong() - requestedArea) },
             )
-        ) ?: return null
+        ) ?: return unavailable("bounded_alternate_preview_size_selection_failed")
         InstantLensDiagnostics.log(
             "LOGICAL_DUAL_PREVIEW",
             "event=output_size_selected logicalCameraId=$openCameraId alternatePhysicalCameraId=$alternatePhysicalCameraId " +
@@ -3676,11 +3686,7 @@ class Camera2Controller(private val context: Context) {
             "${alternateSize.width}x${alternateSize.height}",
         ).joinToString("|")
         if (failedLogicalDualPreviewPlanKeys.contains(key)) {
-            InstantLensDiagnostics.log(
-                "LOGICAL_DUAL_PREVIEW",
-                "result=unavailable reason=previous_session_rejection planKey=$key",
-            )
-            return null
+            return unavailable("previous_session_rejection: planKey=$key")
         }
 
         try {
@@ -3688,11 +3694,7 @@ class Camera2Controller(private val context: Context) {
             onAlternatePreviewSizeChanged?.invoke(alternateSize.width, alternateSize.height)
         } catch (error: Exception) {
             PLog.w(TAG, "Could not size alternate physical preview SurfaceTexture", error)
-            InstantLensDiagnostics.log(
-                "LOGICAL_DUAL_PREVIEW",
-                "result=unavailable reason=alternate_surface_buffer_size_failed error=${error.javaClass.simpleName}:${error.message}",
-            )
-            return null
+            return unavailable("alternate_surface_buffer_size_failed: ${error.javaClass.simpleName}:${error.message}")
         }
 
         InstantLensDiagnostics.log(
