@@ -88,6 +88,9 @@ class StandbyCameraController(context: Context) {
     // CameraDevices opened by this controller keep their original StateCallback for life.
     // Keep identity-keyed routing so ownership can move active -> standby -> active repeatedly.
     private val adoptedDeviceCallbacks = IdentityHashMap<CameraDevice, AdoptedCameraDeviceCallbacks?>()
+    private val standbyOpenedDevices = java.util.Collections.newSetFromMap(
+        IdentityHashMap<CameraDevice, Boolean>()
+    )
     // Devices originally opened by Camera2Controller have callbacks there; route those events
     // back here only while the device is owned by the standby pipeline.
     private val adoptedStandbyDevices = java.util.Collections.newSetFromMap(
@@ -237,7 +240,9 @@ class StandbyCameraController(context: Context) {
             frameReadyTimeout = null
             closeSessionAndReader()
             standbyCameraDevice = null
-            adoptedDeviceCallbacks[camera] = null
+            if (standbyOpenedDevices.remove(camera)) {
+                adoptedDeviceCallbacks[camera] = null
+            }
             adoptedStandbyDevices.remove(camera)
             activePlan = null
             pendingPlan = null
@@ -781,6 +786,7 @@ class StandbyCameraController(context: Context) {
                         }
                         openRequestGeneration = null
                         standbyCameraDevice = camera
+                        standbyOpenedDevices += camera
                         setDeviceTransitioning(false)
                         configureStandbySession(camera, reader, plan, openGeneration)
                     }
@@ -829,6 +835,7 @@ class StandbyCameraController(context: Context) {
                                 return
                             }
                         }
+                        standbyOpenedDevices.remove(camera)
                         if (closingCameraDevice === camera) {
                             closingCameraDevice = null
                         }
