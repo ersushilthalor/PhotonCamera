@@ -162,10 +162,17 @@ class Camera2Controller(private val context: Context) {
         val previewSize: Size,
     )
 
+    private data class DemotedCameraForStandby(
+        val device: CameraDevice,
+        val cameraInfo: CameraInfo,
+        val openCameraId: String,
+    )
+
     private data class CameraOpenRequest(
         val surfaceTexture: SurfaceTexture,
         val preserveVideoRecording: Boolean,
         val standbyCameraId: String? = null,
+        val demotedCamera: DemotedCameraForStandby? = null,
     )
 
     private enum class CameraDeviceLifecycle {
@@ -286,6 +293,13 @@ class Camera2Controller(private val context: Context) {
     // ---------------------
 
     private var cameraDevice: CameraDevice? = null
+    private var activeCameraInfo: CameraInfo? = null
+    private var pendingDemotedCameraForStandby: DemotedCameraForStandby? = null
+    private val detachedCameraDevices = java.util.Collections.newSetFromMap(
+        java.util.IdentityHashMap<CameraDevice, Boolean>()
+    )
+    private var closingActiveCameraDevice: CameraDevice? = null
+    private var handoffGapStartElapsedMs: Long? = null
     private var cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
     private var pendingCameraOpenRequest: CameraOpenRequest? = null
     @Volatile
@@ -1192,6 +1206,9 @@ class Camera2Controller(private val context: Context) {
             if (session === captureSession && _state.value.previewFirstFrameTimestampNs == null) {
                 result.get(CaptureResult.SENSOR_TIMESTAMP)?.let { timestamp ->
                     _state.update { it.copy(previewFirstFrameTimestampNs = timestamp) }
+                    if (pendingDemotedCameraForStandby != null) {
+                        handleHandoffFirstActiveFrame(session)
+                    }
                 }
             }
             val pendingSourceReset = pendingLogicalPreviewSourceReset
@@ -2292,6 +2309,26 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    private fun closePendingDemotedCamera(reason: String) {
+        val pending = pendingDemotedCameraForStandby ?: pendingCameraOpenRequest?.demotedCamera
+        pendingDemotedCameraForStandby = null
+        if (pendingCameraOpenRequest?.demotedCamera === pending) {
+            pendingCameraOpenRequest = pendingCameraOpenRequest?.copy(demotedCamera = null)
+        }
+        discardDemotedCamera(pending, reason)
+    }
+
+    private fun discardDemotedCamera(demoted: DemotedCameraForStandby?, reason: String) {
+        val device = demoted?.device ?: return
+        if (detachedCameraDevices.add(device)) {
+            InstantLensDiagnostics.log(
+                "ACTIVE_DEVICE_DEMOTION",
+                "result=discarded deviceId=${device.id} reason=$reason",
+            )
+        }
+        closeCameraDeviceSafely(device, reason)
+    }
+
     private fun closeCameraDeviceSafely(camera: CameraDevice?, reason: String) {
         try {
             camera?.close()
@@ -2301,17 +2338,26 @@ class Camera2Controller(private val context: Context) {
     }
 
     private fun closeCameraDeviceAndAwait(camera: CameraDevice, reason: String) {
-        if (cameraDevice === camera) {
-            cameraDevice = null
+        if (cameraDevice === camera ||
+            (cameraDevice == null && cameraDeviceLifecycle == CameraDeviceLifecycle.OPENING &&
+                reason == "stale camera open")
+        ) {
+            if (cameraDevice === camera) cameraDevice = null
+            closingActiveCameraDevice = camera
+            cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSING
+        } else {
+            detachedCameraDevices += camera
         }
-        cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSING
         closeCameraDeviceSafely(camera, reason)
     }
 
     private fun handleCameraDeviceClosed(camera: CameraDevice) {
-        if (cameraDevice === camera) {
-            cameraDevice = null
+        if (cameraDevice !== camera && closingActiveCameraDevice !== camera) {
+            PLog.d(TAG, "Ignoring close callback for non-active camera: ${camera.id}")
+            return
         }
+        if (cameraDevice === camera) cameraDevice = null
+        if (closingActiveCameraDevice === camera) closingActiveCameraDevice = null
         cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
         PLog.d(TAG, "Camera device closed: ${camera.id}")
         openPendingCameraRequest()
@@ -2344,7 +2390,6 @@ class Camera2Controller(private val context: Context) {
         cameraOpenGeneration++
         PLog.e(TAG, "Camera open failed for $cameraId: $message", error)
         val device = cameraDevice
-        cameraDevice = null
         if (device != null) {
             closeCameraDeviceAndAwait(device, "open failure")
         } else {
@@ -2640,11 +2685,39 @@ class Camera2Controller(private val context: Context) {
         val standbyCameraId = targetCamera
             ?.takeIf(standbyCameraController::canHandoffTo)
             ?.cameraId
+        closePendingDemotedCamera("superseded by a newer camera open request")
+        val previousDevice = cameraDevice
+        val previousCameraInfo = activeCameraInfo
+        val targetOpenCameraId = targetCamera?.let {
+            runCatching { it.getOpenCameraId() }.getOrNull()
+        }
+        val demotedCamera = if (
+            standbyCameraId != null &&
+            previousDevice != null &&
+            previousCameraInfo?.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+            targetCamera?.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+            previousDevice.id == activeOpenCameraId &&
+            previousDevice.id != targetOpenCameraId
+        ) {
+            DemotedCameraForStandby(previousDevice, previousCameraInfo, activeOpenCameraId)
+        } else {
+            null
+        }
         pendingCameraOpenRequest = CameraOpenRequest(
             surfaceTexture = surfaceTexture,
             preserveVideoRecording = preserveVideoRecording,
             standbyCameraId = standbyCameraId,
+            demotedCamera = demotedCamera,
         )
+        if (demotedCamera != null) {
+            detachedCameraDevices += demotedCamera.device
+            handoffGapStartElapsedMs = SystemClock.elapsedRealtime()
+            InstantLensDiagnostics.log(
+                "ACTIVE_DEVICE_DEMOTION_REQUESTED",
+                "previousDeviceId=${demotedCamera.device.id} previousCameraId=${demotedCamera.cameraInfo.cameraId} " +
+                    "targetCameraId=${targetCamera?.cameraId ?: "unknown"} targetOpenCameraId=$targetOpenCameraId",
+            )
+        }
         when (cameraDeviceLifecycle) {
             CameraDeviceLifecycle.CLOSED -> openPendingCameraRequest()
             CameraDeviceLifecycle.OPENING,
@@ -2698,9 +2771,10 @@ class Camera2Controller(private val context: Context) {
             )
             PLog.w(TAG, "Standby handoff target disappeared; releasing standby before cold open")
             standbyCameraController.release("standby handoff target unavailable")
+            discardDemotedCamera(request.demotedCamera, "standby handoff target unavailable")
             standbyCameraController.whenDeviceIdle {
                 if (cameraDeviceLifecycle == CameraDeviceLifecycle.OPENING) {
-                    openCameraNow(request.copy(standbyCameraId = null))
+                    openCameraNow(request.copy(standbyCameraId = null, demotedCamera = null))
                 }
             }
             return
@@ -2724,9 +2798,10 @@ class Camera2Controller(private val context: Context) {
                 )
                 PLog.w(TAG, "Ready standby camera became unavailable; waiting for its release before cold open")
                 standbyCameraController.release("standby handoff unavailable")
+                discardDemotedCamera(request.demotedCamera, "standby handoff unavailable")
                 standbyCameraController.whenDeviceIdle {
                     if (cameraDeviceLifecycle == CameraDeviceLifecycle.OPENING) {
-                        openCameraNow(request.copy(standbyCameraId = null))
+                        openCameraNow(request.copy(standbyCameraId = null, demotedCamera = null))
                     }
                 }
             }
@@ -2740,6 +2815,7 @@ class Camera2Controller(private val context: Context) {
     ) {
         val surfaceTexture = request.surfaceTexture
         val preserveVideoRecording = request.preserveVideoRecording
+        pendingDemotedCameraForStandby = request.demotedCamera
         InstantLensDiagnostics.log(
             "OPEN_CAMERA_NOW",
             "cameraId=${_state.value.currentCameraId} preopened=${preopenedCamera != null} " +
@@ -2766,6 +2842,7 @@ class Camera2Controller(private val context: Context) {
 
         val cameraId = _state.value.currentCameraId
         val selectedCamera = _state.value.getCurrentCameraInfo()
+        activeCameraInfo = selectedCamera
         val openCameraId = selectedCamera?.getOpenCameraId() ?: cameraId
         val targetZoomRatioByMain = getTargetZoomRatioByMain(_state.value, selectedCamera)
         val captureMode = _state.value.captureMode
@@ -2804,8 +2881,24 @@ class Camera2Controller(private val context: Context) {
             }
 
             override fun onDisconnected(camera: CameraDevice) {
-                if (openGeneration != cameraOpenGeneration) {
-                    closeCameraDeviceAndAwait(camera, "stale camera disconnect")
+                if (standbyCameraController.handleAdoptedStandbyDeviceDisconnected(camera)) {
+                    return
+                }
+                if (detachedCameraDevices.remove(camera)) {
+                    if (pendingDemotedCameraForStandby?.device === camera) {
+                        pendingDemotedCameraForStandby = null
+                    }
+                    handoffGapStartElapsedMs = null
+                    InstantLensDiagnostics.log(
+                        "ACTIVE_DEVICE_DEMOTION",
+                        "result=disconnected_before_standby_adoption deviceId=${camera.id}",
+                    )
+                    closeCameraDeviceSafely(camera, "retained standby device disconnected")
+                    return
+                }
+                if (camera !== cameraDevice) {
+                    PLog.d(TAG, "Ignoring disconnect from a retired camera device: ${camera.id}")
+                    closeCameraDeviceSafely(camera, "retired camera disconnect")
                     return
                 }
                 PLog.w(TAG, "Camera disconnected: ${camera.id} - 相机被其他应用或系统接管")
@@ -2813,100 +2906,82 @@ class Camera2Controller(private val context: Context) {
                     camera = camera,
                     reason = "camera disconnected: ${camera.id}"
                 )
-
-                // 通知上层：相机断开连接，可以在 onResume 时重试
                 onCameraError?.invoke(
                     ERROR_CAMERA_DISCONNECTED,
                     "相机已被其他应用或系统接管",
-                    true  // canRetry = true
+                    true
                 )
             }
 
             override fun onError(camera: CameraDevice, error: Int) {
-                if (openGeneration != cameraOpenGeneration) {
-                    closeCameraDeviceAndAwait(camera, "stale camera error")
+                if (standbyCameraController.handleAdoptedStandbyDeviceError(camera, error)) {
+                    return
+                }
+                if (detachedCameraDevices.remove(camera)) {
+                    if (pendingDemotedCameraForStandby?.device === camera) {
+                        pendingDemotedCameraForStandby = null
+                    }
+                    handoffGapStartElapsedMs = null
+                    InstantLensDiagnostics.log(
+                        "ACTIVE_DEVICE_DEMOTION",
+                        "result=error_before_standby_adoption deviceId=${camera.id} error=$error",
+                    )
+                    closeCameraDeviceSafely(camera, "retained standby device error: $error")
+                    return
+                }
+                if (camera !== cameraDevice) {
+                    PLog.d(TAG, "Ignoring error from a retired camera device: ${camera.id}, error=$error")
+                    closeCameraDeviceSafely(camera, "retired camera error: $error")
                     return
                 }
                 val errorMessage = when (error) {
-                    ERROR_CAMERA_IN_USE ->
-                        "相机正在被其他应用使用"
-
-                    ERROR_MAX_CAMERAS_IN_USE ->
-                        "已达到相机最大打开数量"
-
-                    ERROR_CAMERA_DISABLED ->
-                        "相机被系统策略禁用"
-
-                    ERROR_CAMERA_DEVICE ->
-                        "相机设备遇到严重错误"
-
-                    ERROR_CAMERA_SERVICE ->
-                        "相机服务遇到严重错误"
-
+                    ERROR_CAMERA_IN_USE -> "相机正在被其他应用使用"
+                    ERROR_MAX_CAMERAS_IN_USE -> "已达到相机最大打开数量"
+                    ERROR_CAMERA_DISABLED -> "相机被系统策略禁用"
+                    ERROR_CAMERA_DEVICE -> "相机设备遇到严重错误"
+                    ERROR_CAMERA_SERVICE -> "相机服务遇到严重错误"
                     else -> "未知相机错误 ($error)"
                 }
-
                 PLog.e(TAG, "Camera error: ${camera.id}, error=$error - $errorMessage")
                 handleCameraDeviceUnavailable(
                     camera = camera,
                     reason = "camera error ${camera.id}: $error"
                 )
-
-                // 判断是否可以重试
-                val canRetry = when (error) {
-                    ERROR_CAMERA_IN_USE,
-                    ERROR_MAX_CAMERAS_IN_USE -> true
-
-                    ERROR_CAMERA_DISABLED,
-                    ERROR_CAMERA_DEVICE,
-                    ERROR_CAMERA_SERVICE -> false
-
-                    else -> false
-                }
-
-                // 通知上层
+                val canRetry = error == ERROR_CAMERA_IN_USE || error == ERROR_MAX_CAMERAS_IN_USE
                 onCameraError?.invoke(error, errorMessage, canRetry)
                 _state.value = _state.value.copy(isCapturing = false)
             }
 
             override fun onClosed(camera: CameraDevice) {
-                handleCameraDeviceClosed(camera)
+                if (standbyCameraController.handleAdoptedStandbyDeviceClosed(camera)) {
+                    return
+                }
+                if (detachedCameraDevices.remove(camera)) {
+                    if (pendingDemotedCameraForStandby?.device === camera) {
+                        pendingDemotedCameraForStandby = null
+                    }
+                    handoffGapStartElapsedMs = null
+                    InstantLensDiagnostics.log(
+                        "ACTIVE_DEVICE_DEMOTION",
+                        "result=closed_before_standby_adoption deviceId=${camera.id}",
+                    )
+                    return
+                }
+                if (closingActiveCameraDevice === camera || camera === cameraDevice) {
+                    if (closingActiveCameraDevice === camera) closingActiveCameraDevice = null
+                    handleCameraDeviceClosed(camera)
+                } else {
+                    PLog.d(TAG, "Ignoring close callback from a retired camera device: ${camera.id}")
+                }
             }
         }
         if (preopenedCamera != null) {
             standbyCameraController.setAdoptedCameraCallbacks(
                 preopenedCamera,
                 AdoptedCameraDeviceCallbacks(
-                    // A standby device can be superseded while its callbacks are still in flight.
-                    // Never let a stale handoff disconnect/error callback retire the newer active camera.
-                    onDisconnected = { camera ->
-                        if (openGeneration == cameraOpenGeneration) {
-                            cameraStateCallback.onDisconnected(camera)
-                        } else {
-                            PLog.d(TAG, "Ignoring stale handed-off camera disconnect: ${camera.id}")
-                            closeCameraDeviceSafely(camera, "stale handed-off camera disconnect")
-                        }
-                    },
-                    onError = { camera, error ->
-                        if (openGeneration == cameraOpenGeneration) {
-                            cameraStateCallback.onError(camera, error)
-                        } else {
-                            PLog.d(TAG, "Ignoring stale handed-off camera error: ${camera.id}, error=$error")
-                            closeCameraDeviceSafely(camera, "stale handed-off camera error")
-                        }
-                    },
-                    onClosed = { camera ->
-                        // A delayed close from a superseded warm device must not mark the
-                        // replacement camera CLOSED or drain its pending-open request.
-                        if (openGeneration == cameraOpenGeneration ||
-                            camera === cameraDevice ||
-                            cameraDeviceLifecycle == CameraDeviceLifecycle.CLOSING
-                        ) {
-                            cameraStateCallback.onClosed(camera)
-                        } else {
-                            PLog.d(TAG, "Ignoring stale handed-off camera close: ${camera.id}")
-                        }
-                    },
+                    onDisconnected = { cameraStateCallback.onDisconnected(it) },
+                    onError = { camera, error -> cameraStateCallback.onError(camera, error) },
+                    onClosed = { cameraStateCallback.onClosed(it) },
                 ),
             )
         }
@@ -4427,7 +4502,12 @@ class Camera2Controller(private val context: Context) {
 
             val standbyState = _state.value
             val standbyHandler = cameraHandler
-            if (standbyHandler != null &&
+            if (pendingDemotedCameraForStandby != null) {
+                InstantLensDiagnostics.log(
+                    "ACTIVE_DEVICE_DEMOTION",
+                    "event=awaiting_first_active_frame deviceId=${pendingDemotedCameraForStandby?.device?.id}",
+                )
+            } else if (standbyHandler != null &&
                 !standbyState.videoRecordingState.isRecording &&
                 !standbyState.videoRecordingState.isProcessing
             ) {
@@ -4455,6 +4535,53 @@ class Camera2Controller(private val context: Context) {
             PLog.e(TAG, "Failed to start preview - unconfigured surface")
             handlePreviewSessionFailure("start preview unconfigured surface", openGeneration, e)
         }
+    }
+
+    private fun handleHandoffFirstActiveFrame(session: CameraCaptureSession) {
+        if (session !== captureSession) return
+        val demoted = pendingDemotedCameraForStandby ?: return
+        pendingDemotedCameraForStandby = null
+        val gapMs = handoffGapStartElapsedMs?.let { SystemClock.elapsedRealtime() - it }
+        handoffGapStartElapsedMs = null
+        InstantLensDiagnostics.log(
+            "HANDOFF_GAP_MEASURED",
+            "deviceId=${demoted.device.id} previousCameraId=${demoted.cameraInfo.cameraId} " +
+                "firstActiveCaptureResultGapMs=${gapMs ?: -1L} " +
+                "newActiveCameraId=${_state.value.currentCameraId} sessionId=${System.identityHashCode(session)}",
+        )
+        val current = _state.value
+        val callbackHandler = cameraHandler
+        if (callbackHandler == null || current.videoRecordingState.isRecording ||
+            current.videoRecordingState.isProcessing ||
+            current.getCurrentCameraInfo()?.lensFacing != CameraCharacteristics.LENS_FACING_BACK
+        ) {
+            detachedCameraDevices.remove(demoted.device)
+            closeCameraDeviceSafely(demoted.device, "standby adoption no longer eligible after handoff")
+            return
+        }
+        detachedCameraDevices.remove(demoted.device)
+        standbyCameraController.adoptCurrentCameraDevice(
+            camera = demoted.device,
+            activeCamera = current.getCurrentCameraInfo(),
+            availableCameras = current.availableCameras,
+            activeOpenCameraId = activeOpenCameraId,
+            previewSize = current.currentPreviewSize,
+            callbackHandler = callbackHandler,
+            previewSurface = alternatePreviewSurface,
+            previewSurfaceTexture = alternatePreviewSurfaceTexture,
+            onPreviewSizeChanged = onAlternatePreviewSizeChanged,
+            onAdoptionFailed = { failedDevice, reason ->
+                InstantLensDiagnostics.log(
+                    "ACTIVE_DEVICE_DEMOTION",
+                    "result=adoption_failed deviceId=${failedDevice.id} reason=$reason",
+                )
+                closeCameraDeviceSafely(failedDevice, "standby adoption failed: $reason")
+            },
+        )
+    }
+
+    fun retryStandbyOnAppResume() {
+        standbyCameraController.retryAfterAppResume()
     }
 
     private fun imageFormatToString(format: Int): String {
@@ -10025,6 +10152,7 @@ class Camera2Controller(private val context: Context) {
         preserveStandbyCamera: Boolean = false,
     ) {
         if (clearPendingOpen) {
+            closePendingDemotedCamera("camera session closed before standby adoption")
             pendingCameraOpenRequest = null
         }
         try {
@@ -10053,7 +10181,6 @@ class Camera2Controller(private val context: Context) {
                 preserveStandbyCamera = preserveStandbyCamera,
             )
             val deviceToClose = cameraDevice
-            cameraDevice = null
             clearCameraCapabilityCache()
 
             _state.value = if (keepVideoRecording) {
@@ -10073,6 +10200,21 @@ class Camera2Controller(private val context: Context) {
             livePhotoRecorder.stopRecording()
 
             when {
+                deviceToClose != null && preserveStandbyCamera &&
+                    pendingCameraOpenRequest?.demotedCamera?.device === deviceToClose -> {
+                    val demoted = pendingCameraOpenRequest?.demotedCamera
+                    detachedCameraDevices += deviceToClose
+                    pendingDemotedCameraForStandby = demoted
+                    cameraDevice = null
+                    activeCameraInfo = null
+                    closingActiveCameraDevice = null
+                    cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
+                    InstantLensDiagnostics.log(
+                        "ACTIVE_DEVICE_DEMOTED_PENDING",
+                        "deviceId=${deviceToClose.id} cameraId=${demoted?.cameraInfo?.cameraId} reason=warm_lens_handoff",
+                    )
+                    openPendingCameraRequest()
+                }
                 deviceToClose != null -> {
                     closeCameraDeviceAndAwait(deviceToClose, "closeCamera")
                 }
