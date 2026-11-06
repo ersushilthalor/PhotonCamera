@@ -642,14 +642,21 @@ class StandbyCameraController(context: Context) {
             return null
         }
         val streamMap = targetCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-        val supportedPreviewSizes = streamMap?.getOutputSizes(SurfaceTexture::class.java).orEmpty()
-        val previewSupported = supportedPreviewSizes.any {
-            it.width == previewSize.width && it.height == previewSize.height
-        }
-        if (!previewSupported) {
+        val supportedPreviewSizes = streamMap?.getOutputSizes(SurfaceTexture::class.java)
+            ?.filter { it.width > 0 && it.height > 0 }
+            .orEmpty()
+        val desiredPreviewAspect = previewSize.width.toFloat() / previewSize.height
+        val desiredPreviewArea = previewSize.width.toLong() * previewSize.height.toLong()
+        val targetPreviewSize = supportedPreviewSizes.minWithOrNull(
+            compareBy<Size>(
+                { abs(it.width.toFloat() / it.height.toFloat() - desiredPreviewAspect) },
+                { abs(it.width.toLong() * it.height.toLong() - desiredPreviewArea) },
+            ),
+        )
+        if (targetPreviewSize == null) {
             publishUnavailable(
                 phase = StandbyCameraPhase.CONCURRENT_COMBINATION_UNSUPPORTED,
-                message = "Target lens does not support the active preview buffer size",
+                message = "Target lens does not expose a SurfaceTexture preview output",
                 activeCameraId = activeOpenCameraId, standbyCameraId = targetCamera.cameraId,
                 lensType = targetCamera.lensType,
             )
@@ -678,15 +685,15 @@ class StandbyCameraController(context: Context) {
             )
             return null
         }
-        val ratio = previewSize.width.toFloat() / previewSize.height.toFloat()
+        val ratio = targetPreviewSize.width.toFloat() / targetPreviewSize.height
         return StandbyPlan(
             key = listOf(activeOpenCameraId, standbyOpenCameraId, standbyPhysicalId.orEmpty(),
-                targetCamera.cameraId, previewSize.width, previewSize.height,
+                targetCamera.cameraId, targetPreviewSize.width, targetPreviewSize.height,
                 captureSize.width, captureSize.height, captureFormat).joinToString("|"),
             activeOpenCameraId = activeOpenCameraId, standbyOpenCameraId = standbyOpenCameraId,
             standbyPhysicalCameraId = standbyPhysicalId, standbyCameraId = targetCamera.cameraId,
             lensType = targetCamera.lensType, aspectRatio = ratio,
-            previewSize = previewSize, captureSize = targetCaptureSize, captureFormat = captureFormat,
+            previewSize = targetPreviewSize, captureSize = targetCaptureSize, captureFormat = captureFormat,
             maxImages = maxImages.coerceAtLeast(2), previewSurfaceTexture = standbyPreviewSurfaceTexture,
         )
     }
