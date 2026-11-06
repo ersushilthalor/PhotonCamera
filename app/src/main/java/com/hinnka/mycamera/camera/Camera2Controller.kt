@@ -112,6 +112,8 @@ class Camera2Controller(private val context: Context) {
         const val ERROR_CAMERA_SESSION_CONFIG_FAILED = 1003
 
         private const val CAPTURE_READER_MAX_IMAGES = 50
+        private const val MAX_INSTANT_PREVIEW_LONG_EDGE = 1920
+        private const val MAX_INSTANT_PREVIEW_SHORT_EDGE = 1440
         private const val CAPTURE_IMAGE_DELIVERY_TIMEOUT_MS = 10_000L
         private const val BURST_CAPTURE_BATCH_SIZE = 8
 
@@ -2641,13 +2643,20 @@ class Camera2Controller(private val context: Context) {
     fun canSwitchToLogicalDualPreview(cameraId: String): Boolean {
         val plan = activeLogicalDualPreviewPlan ?: return false
         return plan.alternateCameraId == cameraId &&
+            captureSession != null &&
+            _state.value.isPreviewActive &&
             alternatePreviewSurface === plan.surface &&
             alternatePreviewSurface?.let { runCatching { it.isValid }.getOrDefault(false) } == true
     }
 
     fun canSwitchToInstantPreview(cameraId: String): Boolean {
         val logicalPlan = activeLogicalDualPreviewPlan
-        val logicalPreviewReady = canSwitchToLogicalDualPreview(cameraId)
+        val logicalAlternateReady = canSwitchToLogicalDualPreview(cameraId)
+        val logicalPrimaryReady = logicalPlan?.activeCameraId == cameraId &&
+            captureSession != null && _state.value.isPreviewActive &&
+            previewSurface?.let { runCatching { it.isValid }.getOrDefault(false) } == true &&
+            (previewSurfaceTexture?.let { runCatching { it.timestamp }.getOrDefault(0L) } ?: 0L) > 0L
+        val logicalPreviewReady = logicalAlternateReady || logicalPrimaryReady
         val targetCamera = _state.value.availableCameras.firstOrNull {
             it.cameraId == cameraId
         }
@@ -2665,20 +2674,19 @@ class Camera2Controller(private val context: Context) {
         val failedConditions = buildList {
             if (!logicalPreviewReady) {
                 if (logicalPlan == null) add("logical_dual_preview_plan_missing")
-                else if (logicalPlan.alternateCameraId != cameraId) {
-                    add("logical_alternate_id_mismatch(expected=${logicalPlan.alternateCameraId},actual=$cameraId)")
+                else if (logicalPlan.alternateCameraId != cameraId && logicalPlan.activeCameraId != cameraId) {
+                    add("logical_camera_id_mismatch(target=$cameraId)")
                 }
+                if (logicalPlan?.activeCameraId == cameraId) add("logical_primary_preview_not_ready")
                 if (!hasLiveSurface) add("alternate_preview_surface_missing_or_invalid")
                 addAll(standbyBlockers)
-            }
-            if (logicalPlan?.activeCameraId == cameraId && !logicalPreviewReady) {
-                add("target_is_logical_primary_not_alternate")
             }
         }.distinct()
         InstantLensDiagnostics.log(
             "CONTROLLER_ELIGIBILITY",
-            "targetCameraId=$cameraId result=$result logicalPreviewReady=$logicalPreviewReady " +
-                "alternateSurfaceValid=$hasLiveSurface standbyReady=$standbyReady " +
+            "targetCameraId=$cameraId result=$result logicalAlternateReady=$logicalAlternateReady " +
+                "logicalPrimaryReady=$logicalPrimaryReady alternateSurfaceValid=$hasLiveSurface " +
+                "standbyReady=$standbyReady " +
                 "failedConditions=${failedConditions.ifEmpty { listOf("none") }.joinToString("|")}",
         )
         return result
@@ -3626,15 +3634,38 @@ class Camera2Controller(private val context: Context) {
         if (supportedSizes.isEmpty()) return null
 
         val requestedSize = state.currentPreviewSize
-        if (requestedSize.width <= 0 || requestedSize.height <= 0) return null
+        if (requestedSize.width <= 0 || requestedSize.height <= 0) {
+            InstantLensDiagnostics.log("LOGICAL_DUAL_PREVIEW", "result=unavailable reason=requested_preview_size_invalid")
+            return null
+        }
+        val boundedSizes = supportedSizes.filter { size ->
+            val longEdge = maxOf(size.width, size.height)
+            val shortEdge = minOf(size.width, size.height)
+            longEdge <= MAX_INSTANT_PREVIEW_LONG_EDGE && shortEdge <= MAX_INSTANT_PREVIEW_SHORT_EDGE
+        }
+        if (boundedSizes.isEmpty()) {
+            InstantLensDiagnostics.log(
+                "LOGICAL_DUAL_PREVIEW",
+                "result=unavailable reason=no_supported_size_within_limit logicalCameraId=$openCameraId " +
+                    "alternatePhysicalCameraId=$alternatePhysicalCameraId supported=${supportedSizes.joinToString { "${it.width}x${it.height}" }} " +
+                    "maxSize=${MAX_INSTANT_PREVIEW_LONG_EDGE}x${MAX_INSTANT_PREVIEW_SHORT_EDGE}",
+            )
+            return null
+        }
         val requestedAspect = requestedSize.width.toFloat() / requestedSize.height.toFloat()
         val requestedArea = requestedSize.width.toLong() * requestedSize.height.toLong()
-        val alternateSize = supportedSizes.minWithOrNull(
+        val alternateSize = boundedSizes.minWithOrNull(
             compareBy<Size>(
                 { abs(it.width.toFloat() / it.height.toFloat() - requestedAspect) },
                 { kotlin.math.abs(it.width.toLong() * it.height.toLong() - requestedArea) },
             )
         ) ?: return null
+        InstantLensDiagnostics.log(
+            "LOGICAL_DUAL_PREVIEW",
+            "event=output_size_selected logicalCameraId=$openCameraId alternatePhysicalCameraId=$alternatePhysicalCameraId " +
+                "size=${alternateSize.width}x${alternateSize.height} requested=${requestedSize.width}x${requestedSize.height} " +
+                "supportedCount=${supportedSizes.size} boundedCount=${boundedSizes.size}",
+        )
 
         val key = listOf(
             openCameraId,
@@ -3644,16 +3675,32 @@ class Camera2Controller(private val context: Context) {
             alternatePhysicalCameraId,
             "${alternateSize.width}x${alternateSize.height}",
         ).joinToString("|")
-        if (failedLogicalDualPreviewPlanKeys.contains(key)) return null
+        if (failedLogicalDualPreviewPlanKeys.contains(key)) {
+            InstantLensDiagnostics.log(
+                "LOGICAL_DUAL_PREVIEW",
+                "result=unavailable reason=previous_session_rejection planKey=$key",
+            )
+            return null
+        }
 
         try {
             alternateTexture.setDefaultBufferSize(alternateSize.width, alternateSize.height)
             onAlternatePreviewSizeChanged?.invoke(alternateSize.width, alternateSize.height)
         } catch (error: Exception) {
             PLog.w(TAG, "Could not size alternate physical preview SurfaceTexture", error)
+            InstantLensDiagnostics.log(
+                "LOGICAL_DUAL_PREVIEW",
+                "result=unavailable reason=alternate_surface_buffer_size_failed error=${error.javaClass.simpleName}:${error.message}",
+            )
             return null
         }
 
+        InstantLensDiagnostics.log(
+            "LOGICAL_DUAL_PREVIEW",
+            "result=plan_created logicalCameraId=$openCameraId activeCameraId=${activeCamera.cameraId} " +
+                "alternateCameraId=${alternateCamera.cameraId} activePhysicalCameraId=$activePhysicalCameraId " +
+                "alternatePhysicalCameraId=$alternatePhysicalCameraId size=${alternateSize.width}x${alternateSize.height}",
+        )
         PLog.i(
             TAG,
             "Prepared same-device dual physical preview: logical=$openCameraId, " +
@@ -3680,6 +3727,10 @@ class Camera2Controller(private val context: Context) {
         PLog.w(
             TAG,
             "Logical dual preview was rejected by Camera2; retrying the normal single-preview session: $reason",
+        )
+        InstantLensDiagnostics.log(
+            "LOGICAL_DUAL_PREVIEW",
+            "result=session_rejected planKey=${plan.key} reason=$reason fallback=normal_single_preview",
         )
         activeLogicalDualPreviewPlan = null
         createPreviewSession(openGeneration = openGeneration)
@@ -4522,6 +4573,16 @@ class Camera2Controller(private val context: Context) {
             _state.value = _state.value.copy(isPreviewActive = true)
             activeLogicalDualPreviewPlan = logicalDualPreviewPlan
             if (logicalDualPreviewPlan != null) {
+                InstantLensDiagnostics.log(
+                    "LOGICAL_DUAL_PREVIEW",
+                    "event=session_active sessionId=${System.identityHashCode(session)} " +
+                        "activeCameraId=${logicalDualPreviewPlan.activeCameraId} " +
+                        "alternateCameraId=${logicalDualPreviewPlan.alternateCameraId} " +
+                        "size=${logicalDualPreviewPlan.previewSize.width}x${logicalDualPreviewPlan.previewSize.height}",
+                )
+                // A rebuilt logical session redefines the primary/alternate physical outputs.
+                // Restore the selected Camera2 physical output only after its new primary frame arrives.
+                onAlternatePreviewSourceChanged?.invoke(false)
                 PLog.i(
                     TAG,
                     "Live dual-lens preview ready: active=${logicalDualPreviewPlan.activeCameraId}, " +
@@ -6582,7 +6643,6 @@ class Camera2Controller(private val context: Context) {
 
         when {
             livePlan?.alternateCameraId == cameraId && alternateFrameAvailable -> {
-                armLogicalPreviewSourceReset(cameraId)
                 InstantLensDiagnostics.log(
                     "SOURCE_SWAP_REQUESTED",
                     "source=standby fromCameraId=${activeCamera?.cameraId ?: "none"} targetCameraId=$cameraId",
@@ -6591,7 +6651,6 @@ class Camera2Controller(private val context: Context) {
                 PLog.i(TAG, "Instant preview source swap to alternate physical lens: $cameraId")
             }
             livePlan?.activeCameraId == cameraId -> {
-                armLogicalPreviewSourceReset(cameraId)
                 InstantLensDiagnostics.log(
                     "SOURCE_SWAP_REQUESTED",
                     "source=primary fromCameraId=${activeCamera?.cameraId ?: "none"} targetCameraId=$cameraId",
