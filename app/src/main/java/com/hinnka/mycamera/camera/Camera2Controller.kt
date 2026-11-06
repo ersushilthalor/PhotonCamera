@@ -2559,7 +2559,23 @@ class Camera2Controller(private val context: Context) {
             alternatePreviewSurface?.let { runCatching { it.isValid }.getOrDefault(false) } == true
     }
 
+    private fun isPersistentStandbyHandoffEligible(state: CameraState = _state.value): Boolean {
+        return state.captureMode == CaptureMode.PHOTO &&
+            state.getCurrentCameraInfo()?.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+            !requestedRawCaptureEnabled &&
+            !state.useRaw &&
+            !state.useP010 &&
+            !state.useLivePhoto &&
+            !state.isCapturing &&
+            imageReader?.imageFormat == ImageFormat.YUV_420_888 &&
+            stabilizationImageReader == null &&
+            !state.photoPreviewStabilizationEnabled &&
+            !state.videoRecordingState.isRecording &&
+            !state.videoRecordingState.isProcessing
+    }
+
     fun canSwitchToInstantPreview(cameraId: String): Boolean {
+        if (!isPersistentStandbyHandoffEligible()) return false
         if (canSwitchToLogicalDualPreview(cameraId)) return true
         val targetCamera = _state.value.availableCameras.firstOrNull {
             it.cameraId == cameraId
@@ -2585,17 +2601,7 @@ class Camera2Controller(private val context: Context) {
         }
         primaryPreviewSurfaceTexture = surfaceTexture
         val currentState = _state.value
-        val handoffEligible = currentState.captureMode == CaptureMode.PHOTO &&
-            currentState.getCurrentCameraInfo()?.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
-            !requestedRawCaptureEnabled &&
-            !currentState.useRaw &&
-            !currentState.useP010 &&
-            !currentState.useLivePhoto &&
-            !currentState.isCapturing &&
-            imageReader?.imageFormat == ImageFormat.YUV_420_888 &&
-            stabilizationImageReader == null &&
-            !currentState.videoRecordingState.isRecording &&
-            !currentState.videoRecordingState.isProcessing
+        val handoffEligible = isPersistentStandbyHandoffEligible(currentState)
         val targetCamera = currentState.getCurrentCameraInfo()
         val standbyCameraId = targetCamera
             ?.takeIf { handoffEligible && standbyCameraController.canHandoffTo(it) }
@@ -4448,18 +4454,7 @@ class Camera2Controller(private val context: Context) {
         val primaryTexture = primaryPreviewSurfaceTexture
         val alternateTexture = alternatePreviewSurfaceTexture
         val activeTexture = previewSurfaceTexture
-        val eligible = current.captureMode == CaptureMode.PHOTO &&
-            current.getCurrentCameraInfo()?.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
-            !requestedRawCaptureEnabled &&
-            !current.useRaw &&
-            !current.useP010 &&
-            !current.useLivePhoto &&
-            !current.isCapturing &&
-            reader?.imageFormat == ImageFormat.YUV_420_888 &&
-            stabilizationImageReader == null &&
-            !current.photoPreviewStabilizationEnabled &&
-            !current.videoRecordingState.isRecording &&
-            !current.videoRecordingState.isProcessing
+        val eligible = isPersistentStandbyHandoffEligible(current)
 
         if (!eligible || reader == null || callbackHandler == null ||
             primaryTexture == null || alternateTexture == null
@@ -6384,6 +6379,7 @@ class Camera2Controller(private val context: Context) {
             runCatching { texture.timestamp > 0L }.getOrDefault(false)
         } == true
         val canUsePrewarmedStandby = livePlan == null &&
+            isPersistentStandbyHandoffEligible() &&
             targetCamera != null &&
             standbyCameraController.canHandoffTo(targetCamera)
         when {
