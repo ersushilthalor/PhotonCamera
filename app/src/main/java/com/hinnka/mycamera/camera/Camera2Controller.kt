@@ -2650,9 +2650,10 @@ class Camera2Controller(private val context: Context) {
     }
 
     fun canSwitchToInstantPreview(cameraId: String): Boolean {
+        val photoCaptureInProgress = _state.value.isCapturing
         val logicalPlan = activeLogicalDualPreviewPlan
-        val logicalAlternateReady = canSwitchToLogicalDualPreview(cameraId)
-        val logicalPrimaryReady = logicalPlan?.activeCameraId == cameraId &&
+        val logicalAlternateReady = !photoCaptureInProgress && canSwitchToLogicalDualPreview(cameraId)
+        val logicalPrimaryReady = !photoCaptureInProgress && logicalPlan?.activeCameraId == cameraId &&
             captureSession != null && _state.value.isPreviewActive &&
             previewSurface?.let { runCatching { it.isValid }.getOrDefault(false) } == true &&
             (previewSurfaceTexture?.let { runCatching { it.timestamp }.getOrDefault(0L) } ?: 0L) > 0L
@@ -2668,10 +2669,11 @@ class Camera2Controller(private val context: Context) {
             targetCamera?.let(standbyCameraController::handoffBlockers)
                 ?: listOf("target_camera_not_found")
         }
-        val standbyReady = !logicalPreviewReady &&
+        val standbyReady = !photoCaptureInProgress && !logicalPreviewReady &&
             targetCamera != null && standbyBlockers.isEmpty()
         val result = logicalPreviewReady || (hasLiveSurface && standbyReady)
         val failedConditions = buildList {
+            if (photoCaptureInProgress) add("photo_capture_in_progress")
             if (!logicalPreviewReady) {
                 if (logicalPlan == null) add("logical_dual_preview_plan_missing")
                 else if (logicalPlan.alternateCameraId != cameraId && logicalPlan.activeCameraId != cameraId) {
@@ -6621,14 +6623,15 @@ class Camera2Controller(private val context: Context) {
         } == true
         val alternateSurfaceValid = alternatePreviewSurface
             ?.let { runCatching { it.isValid }.getOrDefault(false) } == true
-        val canUsePrewarmedStandby = livePlan == null &&
+        val canUsePrewarmedStandby = !_state.value.isCapturing &&
+            livePlan == null &&
             targetCamera != null &&
             alternateFrameAvailable &&
             alternateSurfaceValid &&
             standbyCameraController.canHandoffTo(targetCamera)
-        val instantLogicalSwap = (
+        val instantLogicalSwap = !_state.value.isCapturing && ((
             livePlan?.alternateCameraId == cameraId && alternateFrameAvailable
-        ) || livePlan?.activeCameraId == cameraId
+        ) || livePlan?.activeCameraId == cameraId)
         val path = when {
             instantLogicalSwap -> "instant_swap"
             canUsePrewarmedStandby -> "warm_device_handoff_candidate"
