@@ -1209,6 +1209,7 @@ class Camera2Controller(private val context: Context) {
                         "targetCameraId=${pendingSourceReset.targetCameraId} " +
                             "sessionId=${System.identityHashCode(session)} " +
                             "openGeneration=$cameraOpenGeneration previewSessionGeneration=$previewSessionGeneration " +
+                            "waitMs=${SystemClock.elapsedRealtime() - pendingSourceReset.requestedAtElapsedRealtimeMs} " +
                             "sensorTimestampNs=${result.get(CaptureResult.SENSOR_TIMESTAMP) ?: 0L}",
                     )
                     PLog.i(TAG, "New handoff-session preview frame is ready; returning renderer to primary input")
@@ -4384,7 +4385,8 @@ class Camera2Controller(private val context: Context) {
                     "SOURCE_RESET_BOUND_TO_SESSION",
                     "targetCameraId=${boundReset.targetCameraId} " +
                         "sessionId=${System.identityHashCode(session)} " +
-                        "openGeneration=$openGeneration previewSessionGeneration=$sessionGeneration",
+                        "openGeneration=$openGeneration previewSessionGeneration=$sessionGeneration " +
+                        "waitMs=${SystemClock.elapsedRealtime() - boundReset.requestedAtElapsedRealtimeMs}",
                 )
             }
         }
