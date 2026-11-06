@@ -4455,14 +4455,15 @@ class Camera2Controller(private val context: Context) {
             !current.useP010 &&
             !current.useLivePhoto &&
             !current.isCapturing &&
-            reader != null &&
-            reader.imageFormat == ImageFormat.YUV_420_888 &&
+            reader?.imageFormat == ImageFormat.YUV_420_888 &&
             stabilizationImageReader == null &&
             !current.photoPreviewStabilizationEnabled &&
             !current.videoRecordingState.isRecording &&
             !current.videoRecordingState.isProcessing
 
-        if (!eligible || callbackHandler == null || primaryTexture == null || alternateTexture == null) {
+        if (!eligible || reader == null || callbackHandler == null ||
+            primaryTexture == null || alternateTexture == null
+        ) {
             standbyCameraController.release("active preview is not eligible for persistent dual-camera handoff")
             return
         }
