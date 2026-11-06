@@ -3847,9 +3847,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun canInstantlySwitchLens(cameraId: String): Boolean {
-        val previewView = glSurfaceView ?: return false
-        return cameraController.canSwitchToInstantPreview(cameraId) &&
-            previewView.hasStandbyPreviewFrame
+        // Camera2 readiness is tied to the exact SurfaceTexture that the standby
+        // controller is driving. It may be the primary GL input after a reverse handoff,
+        // so the renderer's old "secondary input has a frame" flag is not authoritative.
+        if (glSurfaceView == null) return false
+        return cameraController.canSwitchToInstantPreview(cameraId)
     }
 
     /**
