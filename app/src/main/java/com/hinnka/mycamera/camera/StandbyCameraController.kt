@@ -145,9 +145,9 @@ class StandbyCameraController(context: Context) {
             }
             if (standbyCameraDevice == null) add("standby_device_missing")
             if (standbyCaptureSession == null) add("standby_session_missing")
-            if (plan?.previewSurface == null) {
+            if (plan != null && plan.previewSurface == null) {
                 add("standby_gl_preview_unavailable_reader_only_fallback")
-            } else {
+            } else if (plan != null) {
                 val currentGlTimestamp = runCatching {
                     alternatePreviewSurfaceTexture?.timestamp ?: 0L
                 }.getOrDefault(0L)
