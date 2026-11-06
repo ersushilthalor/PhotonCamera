@@ -1995,6 +1995,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var currentSurfaceTexture: SurfaceTexture? = null
     private var cameraOpenInFlight = false
     private var cameraReopenJob: Job? = null
+    private var deferredLensSwitchJob: Job? = null
+    private var deferredLensSwitchGeneration = 0L
     private var cameraErrorRecoveryJob: Job? = null
 
     // 用于处理音量键连续按下的时间戳，防止抖动和过快响应
@@ -3842,7 +3844,32 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /**
      * 切换摄像头（前后置切换）
      */
+    private fun deferLensSwitchUntilCaptureCompletes(
+        actionName: String,
+        action: () -> Unit,
+    ): Boolean {
+        if (!state.value.isCapturing) return false
+        val requestGeneration = ++deferredLensSwitchGeneration
+        deferredLensSwitchJob?.cancel()
+        InstantLensDiagnostics.log(
+            "SWITCH_DEFERRED",
+            "reason=photo_capture_in_progress action=$actionName generation=$requestGeneration",
+        )
+        deferredLensSwitchJob = viewModelScope.launch {
+            state.first { !it.isCapturing }
+            if (requestGeneration != deferredLensSwitchGeneration) return@launch
+            deferredLensSwitchJob = null
+            InstantLensDiagnostics.log(
+                "SWITCH_RESUMED",
+                "reason=photo_capture_completed action=$actionName generation=$requestGeneration",
+            )
+            action()
+        }
+        return true
+    }
+
     fun switchCamera() {
+        if (deferLensSwitchUntilCaptureCompletes("front_back_flip") { switchCamera() }) return
         cameraController.switchCamera()
         reopenCamera(
             preserveVideoRecording = true
@@ -3860,13 +3887,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             "source=$source fromCameraId=$currentCameraId targetCameraId=$cameraId",
         )
         val previewView = glSurfaceView
-        val controllerReady = previewView != null &&
+        val photoCaptureInProgress = state.value.isCapturing
+        val controllerReady = previewView != null && !photoCaptureInProgress &&
             cameraController.canSwitchToInstantPreview(cameraId)
         val hasStandbyPreviewFrame = previewView?.hasStandbyPreviewFrame == true
-        val result = previewView != null && controllerReady && hasStandbyPreviewFrame
+        val result = previewView != null && !photoCaptureInProgress && controllerReady && hasStandbyPreviewFrame
         val failedConditions = buildList {
             if (previewView == null) add("gl_surface_view_missing")
-            if (previewView != null && !controllerReady) {
+            if (photoCaptureInProgress) add("photo_capture_in_progress")
+            if (previewView != null && !controllerReady && !photoCaptureInProgress) {
                 add("camera_controller_not_ready_check_CONTROLLER_ELIGIBILITY")
             }
             if (!hasStandbyPreviewFrame) add("standby_preview_frame_missing")
@@ -3885,6 +3914,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 切换到指定的镜头类型
      */
     fun switchToLens(cameraId: String) {
+        if (deferLensSwitchUntilCaptureCompletes("lens_switch:$cameraId") { switchToLens(cameraId) }) return
         val currentCamera = state.value.getCurrentCameraInfo()
         if (isVideoLensLocked()) {
             InstantLensDiagnostics.log(
@@ -3919,6 +3949,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             setZoomRatio(ratio)
             return
         }
+        if (deferLensSwitchUntilCaptureCompletes("lens_switch:$cameraId") {
+                switchToLensAndSetZoomRatio(cameraId, ratio)
+            }
+        ) return
         val currentCamera = state.value.getCurrentCameraInfo()
         val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId }
         val sharesOpenCameraDevice = currentCamera != null && targetCamera != null &&
