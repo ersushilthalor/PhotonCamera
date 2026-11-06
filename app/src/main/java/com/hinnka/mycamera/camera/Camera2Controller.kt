@@ -2317,6 +2317,7 @@ class Camera2Controller(private val context: Context) {
         val pending = pendingDemotedCameraForStandby ?: pendingCameraOpenRequest?.demotedCamera
         pendingDemotedCameraForStandby = null
         standbyPreparationDeferredForHandoff = false
+        handoffGapStartElapsedMs = null
         if (pendingCameraOpenRequest?.demotedCamera === pending) {
             pendingCameraOpenRequest = pendingCameraOpenRequest?.copy(demotedCamera = null)
         }
@@ -2707,6 +2708,7 @@ class Camera2Controller(private val context: Context) {
         val demotedCamera = if (
             standbyCameraId != null &&
             previousDevice != null &&
+            previousCameraInfo != null &&
             !preserveVideoRecording &&
             !_state.value.videoRecordingState.isRecording &&
             !_state.value.videoRecordingState.isProcessing &&
@@ -4520,10 +4522,10 @@ class Camera2Controller(private val context: Context) {
 
             val standbyState = _state.value
             val standbyHandler = cameraHandler
-            if (pendingDemotedCameraForStandby != null) {
+            if (pendingDemotedCameraForStandby != null || standbyPreparationDeferredForHandoff) {
                 InstantLensDiagnostics.log(
                     "ACTIVE_DEVICE_DEMOTION",
-                    "event=awaiting_first_active_frame deviceId=${pendingDemotedCameraForStandby?.device?.id}",
+                    "event=awaiting_first_active_frame deviceId=${pendingDemotedCameraForStandby?.device?.id ?: "unavailable"}",
                 )
             } else if (standbyHandler != null &&
                 !standbyState.videoRecordingState.isRecording &&
