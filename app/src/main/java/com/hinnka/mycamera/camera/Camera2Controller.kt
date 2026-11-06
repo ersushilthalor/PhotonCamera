@@ -4584,9 +4584,6 @@ class Camera2Controller(private val context: Context) {
                         "alternateCameraId=${logicalDualPreviewPlan.alternateCameraId} " +
                         "size=${logicalDualPreviewPlan.previewSize.width}x${logicalDualPreviewPlan.previewSize.height}",
                 )
-                // A rebuilt logical session redefines the primary/alternate physical outputs.
-                // Restore the selected Camera2 physical output only after its new primary frame arrives.
-                onAlternatePreviewSourceChanged?.invoke(false)
                 PLog.i(
                     TAG,
                     "Live dual-lens preview ready: active=${logicalDualPreviewPlan.activeCameraId}, " +
@@ -4595,6 +4592,10 @@ class Camera2Controller(private val context: Context) {
                 )
             }
             PLog.d(TAG, "Preview started")
+            // Every configured CameraCaptureSession makes its primary SurfaceTexture the
+            // active camera stream. If a previous secondary/standby source was selected,
+            // the renderer keeps it visible only until the replacement primary frame arrives.
+            onAlternatePreviewSourceChanged?.invoke(false)
 
             val standbyState = _state.value
             val standbyHandler = cameraHandler
