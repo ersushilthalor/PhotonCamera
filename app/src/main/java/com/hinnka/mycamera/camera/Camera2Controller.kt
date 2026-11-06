@@ -2565,7 +2565,7 @@ class Camera2Controller(private val context: Context) {
         } ?: return false
         val hasLiveSurface = alternatePreviewSurface
             ?.let { runCatching { it.isValid }.getOrDefault(false) } == true
-        return hasLiveSurface && standbyCameraController.canPreviewHandoffTo(targetCamera)
+        return hasLiveSurface && standbyCameraController.canHandoffTo(targetCamera)
     }
 
     /**
@@ -6245,7 +6245,7 @@ class Camera2Controller(private val context: Context) {
             targetCamera != null &&
             alternateFrameAvailable &&
             alternatePreviewSurface?.let { runCatching { it.isValid }.getOrDefault(false) } == true &&
-            standbyCameraController.canPreviewHandoffTo(targetCamera)
+            standbyCameraController.canHandoffTo(targetCamera)
         when {
             livePlan?.alternateCameraId == cameraId && alternateFrameAvailable -> {
                 pendingLogicalPreviewSourceReset = true
