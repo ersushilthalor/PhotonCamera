@@ -636,9 +636,15 @@ class StandbyCameraController(context: Context) {
             )
         }
 
-        val targetCharacteristics = try { cameraManager.getCameraCharacteristics(standbyOpenCameraId) }
+        // When the discovered lens is a physical camera in a logical device, output
+        // sizes must come from that physical sensor, not from the logical device's union.
+        val standbyOutputCameraId = standbyPhysicalId ?: standbyOpenCameraId
+        val targetCharacteristics = try { cameraManager.getCameraCharacteristics(standbyOutputCameraId) }
         catch (error: Exception) {
-            publishUnavailable(StandbyCameraPhase.FAILED, "Could not inspect standby camera outputs")
+            publishUnavailable(
+                StandbyCameraPhase.FAILED,
+                "Could not inspect standby camera outputs for " + standbyOutputCameraId,
+            )
             return null
         }
         val streamMap = targetCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
