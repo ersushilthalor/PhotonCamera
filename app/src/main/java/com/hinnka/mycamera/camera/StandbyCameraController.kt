@@ -852,7 +852,16 @@ class StandbyCameraController(context: Context) {
         } catch (error: CameraAccessException) {
             openRequestGeneration = null
             setDeviceTransitioning(false)
-            failCurrentPlan("Standby camera could not be opened: " + error.message, error)
+            val cameraErrorCode = if (error.reason == CameraAccessException.MAX_CAMERAS_IN_USE) {
+                CameraDevice.StateCallback.ERROR_MAX_CAMERAS_IN_USE
+            } else {
+                null
+            }
+            failCurrentPlan(
+                "Standby camera could not be opened: " + error.message,
+                error,
+                cameraErrorCode,
+            )
         } catch (error: SecurityException) {
             openRequestGeneration = null
             setDeviceTransitioning(false)
