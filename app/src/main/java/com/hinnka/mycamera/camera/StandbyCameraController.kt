@@ -940,25 +940,25 @@ class StandbyCameraController(context: Context) {
     private fun updateReadinessFromMatchedFrames(openGeneration: Long) {
         if (openGeneration != generation) return
         matchedFrameCount = imageTimestamps.count { captureResultTimestamps.contains(it) }
-        val readerTimestamp = imageTimestamps.lastOrNull()
-        val sensorTimestamp = captureResultTimestamps.lastOrNull()
+        val readerTimestamp = imageTimestamps.lastOrNull {
+            !captureResultTimestamps.contains(it)
+        }
+        val sensorTimestamp = captureResultTimestamps.lastOrNull {
+            !imageTimestamps.contains(it)
+        }
         if (readerTimestamp != null && sensorTimestamp != null) {
-            if (readerTimestamp == sensorTimestamp) {
-                lastLoggedTimestampMismatch = null
-            } else if (!captureResultTimestamps.contains(readerTimestamp) &&
-                !imageTimestamps.contains(sensorTimestamp)
-            ) {
-                val mismatch = readerTimestamp to sensorTimestamp
-                if (mismatch != lastLoggedTimestampMismatch) {
-                    InstantLensDiagnostics.log(
-                        "TIMESTAMP_MISMATCH",
-                        "cameraId=${activePlan?.standbyOpenCameraId ?: "unknown"} " +
-                            "readerTimestampNs=$readerTimestamp sensorTimestampNs=$sensorTimestamp " +
-                            "matchedFrames=$matchedFrameCount",
-                    )
-                    lastLoggedTimestampMismatch = mismatch
-                }
+            val mismatch = readerTimestamp to sensorTimestamp
+            if (mismatch != lastLoggedTimestampMismatch) {
+                InstantLensDiagnostics.log(
+                    "TIMESTAMP_MISMATCH",
+                    "cameraId=${activePlan?.standbyOpenCameraId ?: "unknown"} " +
+                        "readerTimestampNs=$readerTimestamp sensorTimestampNs=$sensorTimestamp " +
+                        "matchedFrames=$matchedFrameCount",
+                )
+                lastLoggedTimestampMismatch = mismatch
             }
+        } else {
+            lastLoggedTimestampMismatch = null
         }
         val current = _status.value
         if (current.phase != StandbyCameraPhase.WAITING_FOR_FRAMES &&
