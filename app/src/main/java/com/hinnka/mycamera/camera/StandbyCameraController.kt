@@ -221,12 +221,14 @@ class StandbyCameraController(context: Context) {
             captureResultTimestamps.clear()
             receivedFrameCount = 0L
             matchedFrameCount = 0
-            _status.value = StandbyCameraStatus(
-                phase = StandbyCameraPhase.IDLE,
-                activeCameraId = camera.id,
-                standbyCameraId = cameraId,
-                lensType = plan.lensType,
-                message = "Warm camera handed to active capture pipeline",
+            publishStatus(
+                StandbyCameraStatus(
+                    phase = StandbyCameraPhase.IDLE,
+                    activeCameraId = camera.id,
+                    standbyCameraId = cameraId,
+                    lensType = plan.lensType,
+                    message = "Warm camera handed to active capture pipeline",
+                )
             )
             InstantLensDiagnostics.log(
                 "TAKE_OVER",
@@ -1031,7 +1033,7 @@ class StandbyCameraController(context: Context) {
 
         InstantLensDiagnostics.log("STANDBY_RELEASE", "reason=$reason resetStatus=$resetStatus")
         if (resetStatus) {
-            publishStatus(StandbyCameraStatus())
+            publishStatus(StandbyCameraStatus(), transitionReason = reason)
         }
     }
 
@@ -1082,13 +1084,17 @@ class StandbyCameraController(context: Context) {
         }
     }
 
-    private fun publishStatus(status: StandbyCameraStatus) {
+    private fun publishStatus(
+        status: StandbyCameraStatus,
+        transitionReason: String? = status.message,
+    ) {
         val previous = _status.value
         _status.value = status
         if (previous.phase != status.phase) {
             InstantLensDiagnostics.log(
                 "STANDBY_PHASE",
-                "from=${previous.phase} to=${status.phase} reason=${status.message ?: "none"} " +
+                "from=${previous.phase} to=${status.phase} " +
+                    "reason=${transitionReason ?: "none"} " +
                     "activeCameraId=${status.activeCameraId ?: "unknown"} " +
                     "standbyCameraId=${status.standbyCameraId ?: "unknown"} " +
                     "frames=${status.frameCount} matchedFrames=${status.matchedFrameCount}",
