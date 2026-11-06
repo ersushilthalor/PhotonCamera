@@ -1363,7 +1363,6 @@ class StandbyCameraController(context: Context) {
         if (standbyCameraDevice === camera) {
             standbyCameraDevice = null
         }
-        adoptedStandbyDevices += camera
         closingCameraDevice = camera
         isDeviceTransitioning = true
         try {
