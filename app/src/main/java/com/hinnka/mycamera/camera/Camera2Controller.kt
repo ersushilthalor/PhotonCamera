@@ -84,6 +84,14 @@ sealed interface EnhancedStabilizationFallback {
     data object PhotoPreview : EnhancedStabilizationFallback
 }
 
+private data class PendingLogicalPreviewSourceReset(
+    val targetCameraId: String,
+    val requestedAtElapsedRealtimeMs: Long,
+    val targetSession: CameraCaptureSession? = null,
+    val targetCameraOpenGeneration: Long? = null,
+    val targetPreviewSessionGeneration: Long? = null,
+)
+
 /**
  * Camera2 相机控制器
  *
@@ -297,7 +305,7 @@ class Camera2Controller(private val context: Context) {
     @Volatile private var onAlternatePreviewSourceChanged: ((Boolean) -> Unit)? = null
     private var onAlternatePreviewSizeChanged: ((Int, Int) -> Unit)? = null
     @Volatile private var activeLogicalDualPreviewPlan: LogicalDualPreviewPlan? = null
-    @Volatile private var pendingLogicalPreviewSourceReset = false
+    @Volatile private var pendingLogicalPreviewSourceReset: PendingLogicalPreviewSourceReset? = null
     private val failedLogicalDualPreviewPlanKeys = mutableSetOf<String>()
     private var stabilizationImageReader: StabilizationImageReader? = null
 
@@ -1186,10 +1194,26 @@ class Camera2Controller(private val context: Context) {
                     _state.update { it.copy(previewFirstFrameTimestampNs = timestamp) }
                 }
             }
-            if (session === captureSession && pendingLogicalPreviewSourceReset) {
-                pendingLogicalPreviewSourceReset = false
-                PLog.i(TAG, "New physical-lens preview frame is ready; returning renderer to primary input")
-                onAlternatePreviewSourceChanged?.invoke(false)
+            val pendingSourceReset = pendingLogicalPreviewSourceReset
+            if (
+                session === captureSession &&
+                pendingSourceReset != null &&
+                pendingSourceReset.targetSession === session &&
+                pendingSourceReset.targetCameraOpenGeneration == cameraOpenGeneration &&
+                pendingSourceReset.targetPreviewSessionGeneration == previewSessionGeneration
+            ) {
+                if (pendingLogicalPreviewSourceReset === pendingSourceReset) {
+                    pendingLogicalPreviewSourceReset = null
+                    InstantLensDiagnostics.log(
+                        "SOURCE_RESET_CONSUMED",
+                        "targetCameraId=${pendingSourceReset.targetCameraId} " +
+                            "sessionId=${System.identityHashCode(session)} " +
+                            "openGeneration=$cameraOpenGeneration previewSessionGeneration=$previewSessionGeneration " +
+                            "sensorTimestampNs=${result.get(CaptureResult.SENSOR_TIMESTAMP) ?: 0L}",
+                    )
+                    PLog.i(TAG, "New handoff-session preview frame is ready; returning renderer to primary input")
+                    onAlternatePreviewSourceChanged?.invoke(false)
+                }
             }
 
             // Only the currently active CameraCaptureSession may feed the EIS timeline.
@@ -2532,7 +2556,7 @@ class Camera2Controller(private val context: Context) {
             onAlternatePreviewSizeChanged = onPreviewSizeChanged
             if (changed) {
                 activeLogicalDualPreviewPlan = null
-                pendingLogicalPreviewSourceReset = false
+                pendingLogicalPreviewSourceReset = null
                 onSourceChanged?.invoke(false)
                 if (validSurface != null &&
                     cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN &&
@@ -4348,6 +4372,22 @@ class Camera2Controller(private val context: Context) {
                 "logicalDualPreview=${logicalDualPreviewPlan != null}",
         )
         captureSession = session
+        pendingLogicalPreviewSourceReset?.let { pendingReset ->
+            val boundReset = pendingReset.copy(
+                targetSession = session,
+                targetCameraOpenGeneration = openGeneration,
+                targetPreviewSessionGeneration = sessionGeneration,
+            )
+            if (pendingLogicalPreviewSourceReset === pendingReset) {
+                pendingLogicalPreviewSourceReset = boundReset
+                InstantLensDiagnostics.log(
+                    "SOURCE_RESET_BOUND_TO_SESSION",
+                    "targetCameraId=${boundReset.targetCameraId} " +
+                        "sessionId=${System.identityHashCode(session)} " +
+                        "openGeneration=$openGeneration previewSessionGeneration=$sessionGeneration",
+                )
+            }
+        }
         _state.update { it.copy(previewFirstFrameTimestampNs = null) }
 
         try {
@@ -6304,6 +6344,18 @@ class Camera2Controller(private val context: Context) {
     /**
      * 切换到指定的相机 ID
      */
+    private fun armLogicalPreviewSourceReset(targetCameraId: String) {
+        pendingLogicalPreviewSourceReset = PendingLogicalPreviewSourceReset(
+            targetCameraId = targetCameraId,
+            requestedAtElapsedRealtimeMs = SystemClock.elapsedRealtime(),
+        )
+        InstantLensDiagnostics.log(
+            "SOURCE_RESET_ARMED",
+            "targetCameraId=$targetCameraId openGeneration=$cameraOpenGeneration " +
+                "previewSessionGeneration=$previewSessionGeneration awaiting=next_configured_session",
+        )
+    }
+
     fun switchToCameraId(cameraId: String) {
         val cameras = _state.value.availableCameras
         val activeCamera = _state.value.getCurrentCameraInfo()
@@ -6348,7 +6400,7 @@ class Camera2Controller(private val context: Context) {
 
         when {
             livePlan?.alternateCameraId == cameraId && alternateFrameAvailable -> {
-                pendingLogicalPreviewSourceReset = true
+                armLogicalPreviewSourceReset(cameraId)
                 InstantLensDiagnostics.log(
                     "SOURCE_SWAP_REQUESTED",
                     "source=standby fromCameraId=${activeCamera?.cameraId ?: "none"} targetCameraId=$cameraId",
@@ -6357,7 +6409,7 @@ class Camera2Controller(private val context: Context) {
                 PLog.i(TAG, "Instant preview source swap to alternate physical lens: $cameraId")
             }
             livePlan?.activeCameraId == cameraId -> {
-                pendingLogicalPreviewSourceReset = true
+                armLogicalPreviewSourceReset(cameraId)
                 InstantLensDiagnostics.log(
                     "SOURCE_SWAP_REQUESTED",
                     "source=primary fromCameraId=${activeCamera?.cameraId ?: "none"} targetCameraId=$cameraId",
@@ -6366,7 +6418,7 @@ class Camera2Controller(private val context: Context) {
                 PLog.i(TAG, "Instant preview source swap back to primary physical lens: $cameraId")
             }
             canUsePrewarmedStandby -> {
-                pendingLogicalPreviewSourceReset = true
+                armLogicalPreviewSourceReset(cameraId)
                 InstantLensDiagnostics.log(
                     "SOURCE_SWAP_REQUESTED",
                     "source=standby fromCameraId=${activeCamera?.cameraId ?: "none"} targetCameraId=$cameraId " +
