@@ -277,6 +277,7 @@ fun FocoCameraIntegrationScreen(
     }
 
     fun switchPhotonLensWithPreviewTransition(cameraId: String, targetZoom: Float) {
+        if (viewModel.isVideoLensLocked()) return
         val safeZoom = targetZoom.coerceIn(minZoom, maxZoom)
         lensSwitchTransition.cancelPendingSwitch()
         cancelZoomStopAnimation()
