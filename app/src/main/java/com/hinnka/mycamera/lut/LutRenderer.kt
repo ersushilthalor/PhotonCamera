@@ -13,6 +13,7 @@ import com.hinnka.mycamera.preview.EyeFocusPreviewFrame
 import com.hinnka.mycamera.preview.EyeFocusProcessingTiming
 import com.hinnka.mycamera.raw.ColorSpace
 import com.hinnka.mycamera.screencapture.PhantomPipCrop
+import com.hinnka.mycamera.camera.InstantLensDiagnostics
 import com.hinnka.mycamera.camera.MeteringMode
 import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD
 import com.hinnka.mycamera.stabilization.RealtimeStabilizationCoordinator
@@ -252,6 +253,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private var currentCameraTextureId = 0
     private var currentCameraTextureMatrix: FloatArray = stMatrix
     private var currentFrameTimestampNs = 0L
+    @Volatile private var instantLensPendingRenderSource: String? = null
 
     // 标记 Surface 是否已创建（GL 上下文是否可用）
     private var surfaceReady = false
@@ -1436,17 +1438,27 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     }
 
     fun setActivePreviewSource(useStandby: Boolean) {
+        InstantLensDiagnostics.log(
+            "RENDERER_SOURCE_SWAP_REQUESTED",
+            "source=${if (useStandby) "standby" else "primary"} " +
+                "activeSourceBefore=${if (useStandbyPreviewSource) "standby" else "primary"} " +
+                "standbyTimestampNs=${standbySurfaceTexture?.timestamp ?: 0L} " +
+                "primaryTimestampNs=${surfaceTexture?.timestamp ?: 0L}",
+        )
         if (useStandby) {
+            instantLensPendingRenderSource = "standby"
             switchToPrimaryWhenFrameReady = false
             useStandbyPreviewSource = true
             if ((standbySurfaceTexture?.timestamp ?: 0L) > 0L) {
                 useCurrentStandbyOesFrame()
             }
         } else if (useStandbyPreviewSource) {
+            instantLensPendingRenderSource = "primary"
             // Keep displaying the current lens until the newly configured primary stream
             // has delivered a frame. Never flash an old main-camera buffer during handoff.
             switchToPrimaryWhenFrameReady = true
         } else {
+            instantLensPendingRenderSource = null
             switchToPrimaryWhenFrameReady = false
         }
         onRequestRender?.invoke()
@@ -1602,6 +1614,29 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         }
 
         GlUtils.checkGlError("onDrawFrame")
+
+        val pendingSource = instantLensPendingRenderSource
+        val pendingSourceIsActive = when (pendingSource) {
+            "standby" -> useStandbyPreviewSource &&
+                (standbySurfaceTexture?.timestamp ?: 0L) > 0L
+            "primary" -> !useStandbyPreviewSource &&
+                !switchToPrimaryWhenFrameReady &&
+                (surfaceTexture?.timestamp ?: 0L) > 0L
+            else -> false
+        }
+        if (pendingSource != null && pendingSourceIsActive) {
+            InstantLensDiagnostics.log(
+                "SOURCE_SWAP_APPLIED",
+                "source=$pendingSource frameTimestampNs=$currentFrameTimestampNs " +
+                    "textureId=$currentCameraTextureId",
+            )
+            InstantLensDiagnostics.log(
+                "FIRST_NEW_FRAME_RENDERED",
+                "source=$pendingSource frameTimestampNs=$currentFrameTimestampNs " +
+                    "textureId=$currentCameraTextureId",
+            )
+            instantLensPendingRenderSource = null
+        }
     }
 
     /**
