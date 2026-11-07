@@ -294,10 +294,10 @@ class Camera2Controller(private val context: Context) {
     private var imageReader: ImageReader? = null
     @Volatile private var alternatePreviewSurface: Surface? = null
     private var alternatePreviewSurfaceTexture: SurfaceTexture? = null
-    @Volatile private var onAlternatePreviewSourceChanged: ((Boolean) -> Unit)? = null
+    @Volatile private var onAlternatePreviewSourceChanged: ((Boolean, Boolean) -> Unit)? = null
     private var onAlternatePreviewSizeChanged: ((Int, Int) -> Unit)? = null
     @Volatile private var activeLogicalDualPreviewPlan: LogicalDualPreviewPlan? = null
-    @Volatile private var pendingLogicalPreviewSourceReset = false
+    @Volatile private var pendingStandbyPreviewSourceReset = false
     private val failedLogicalDualPreviewPlanKeys = mutableSetOf<String>()
     private var stabilizationImageReader: StabilizationImageReader? = null
 
@@ -1186,10 +1186,10 @@ class Camera2Controller(private val context: Context) {
                     _state.update { it.copy(previewFirstFrameTimestampNs = timestamp) }
                 }
             }
-            if (session === captureSession && pendingLogicalPreviewSourceReset) {
-                pendingLogicalPreviewSourceReset = false
-                PLog.i(TAG, "New physical-lens preview frame is ready; returning renderer to primary input")
-                onAlternatePreviewSourceChanged?.invoke(false)
+            if (session === captureSession && pendingStandbyPreviewSourceReset) {
+                pendingStandbyPreviewSourceReset = false
+                PLog.i(TAG, "New active-camera preview frame is ready; returning renderer to primary input")
+                onAlternatePreviewSourceChanged?.invoke(false, true)
             }
 
             // Only the currently active CameraCaptureSession may feed the EIS timeline.
@@ -2519,7 +2519,7 @@ class Camera2Controller(private val context: Context) {
     fun setAlternatePreviewSurface(
         surface: Surface?,
         surfaceTexture: SurfaceTexture?,
-        onSourceChanged: ((Boolean) -> Unit)?,
+        onSourceChanged: ((Boolean, Boolean) -> Unit)?,
         onPreviewSizeChanged: ((Int, Int) -> Unit)?,
     ) {
         val action = {
@@ -2532,8 +2532,8 @@ class Camera2Controller(private val context: Context) {
             onAlternatePreviewSizeChanged = onPreviewSizeChanged
             if (changed) {
                 activeLogicalDualPreviewPlan = null
-                pendingLogicalPreviewSourceReset = false
-                onSourceChanged?.invoke(false)
+                pendingStandbyPreviewSourceReset = false
+                onSourceChanged?.invoke(false, true)
                 if (validSurface != null &&
                     cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN &&
                     cameraDevice != null &&
@@ -2553,7 +2553,9 @@ class Camera2Controller(private val context: Context) {
 
     fun canSwitchToLogicalDualPreview(cameraId: String): Boolean {
         val plan = activeLogicalDualPreviewPlan ?: return false
-        return plan.alternateCameraId == cameraId &&
+        val currentCameraId = _state.value.currentCameraId
+        return cameraId != currentCameraId &&
+            (plan.alternateCameraId == cameraId || plan.activeCameraId == cameraId) &&
             alternatePreviewSurface === plan.surface &&
             alternatePreviewSurface?.let { runCatching { it.isValid }.getOrDefault(false) } == true
     }
@@ -6248,18 +6250,23 @@ class Camera2Controller(private val context: Context) {
             standbyCameraController.canHandoffTo(targetCamera)
         when {
             livePlan?.alternateCameraId == cameraId && alternateFrameAvailable -> {
-                pendingLogicalPreviewSourceReset = true
-                onAlternatePreviewSourceChanged?.invoke(true)
-                PLog.i(TAG, "Instant preview source swap to alternate physical lens: $cameraId")
+                // Both physical outputs belong to the same live CameraCaptureSession.
+                // Keep the chosen GL source active; a CaptureResult from the still-running
+                // primary output must not undo this user-requested source selection.
+                pendingStandbyPreviewSourceReset = false
+                onAlternatePreviewSourceChanged?.invoke(true, false)
+                PLog.i(TAG, "Instant same-session preview source swap to alternate physical lens: $cameraId")
             }
             livePlan?.activeCameraId == cameraId -> {
-                pendingLogicalPreviewSourceReset = true
-                onAlternatePreviewSourceChanged?.invoke(false)
-                PLog.i(TAG, "Instant preview source swap back to primary physical lens: $cameraId")
+                pendingStandbyPreviewSourceReset = false
+                onAlternatePreviewSourceChanged?.invoke(false, false)
+                PLog.i(TAG, "Instant same-session preview source swap back to primary physical lens: $cameraId")
             }
             canUsePrewarmedStandby -> {
-                pendingLogicalPreviewSourceReset = true
-                onAlternatePreviewSourceChanged?.invoke(true)
+                // A different CameraDevice is being adopted. Keep the standby frame visible
+                // until the new active preview has produced its first GL-consumable frame.
+                pendingStandbyPreviewSourceReset = true
+                onAlternatePreviewSourceChanged?.invoke(true, true)
                 PLog.i(TAG, "Instant preview source swap to warmed standby CameraDevice: $cameraId")
             }
         }
