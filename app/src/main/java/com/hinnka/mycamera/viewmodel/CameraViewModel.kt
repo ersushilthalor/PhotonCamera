@@ -1131,14 +1131,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         if (captureModeWillChange) {
-            cameraController.setCaptureMode(targetCaptureMode)
+            // Prepare the new mode's outputs, then rebuild only the Camera2 session.
+            // Keep the live GL SurfaceTexture and CameraDevice so mode changes cannot
+            // depend on SurfaceTexture recreation to resume the preview.
+            cameraController.setCaptureMode(targetCaptureMode, reconfigurePreview = false)
             if (targetCaptureMode == CaptureMode.VIDEO) {
                 // Photo mode disables the active Log profile without clearing the saved selection.
                 cameraController.setVideoLogProfile(prefs.videoLogProfile)
             }
             resolveLutIdForMode(prefs, targetCaptureMode)?.let(::applyLut)
-            currentSurfaceTexture = null
-            cameraController.closeCamera()
+            cameraController.reconfigurePreviewSession()
         }
 
         update.frameId?.let {
@@ -3855,10 +3857,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             runCatching { currentCamera.getOpenCameraId() == targetCamera.getOpenCameraId() }
                 .getOrDefault(false)
         syncVendorCaptureSettingsToController()
-        cameraController.switchToCameraId(cameraId)
-        targetCamera?.let { camera ->
-            setZoomRatioForCamera(camera.defaultVisibleZoomRatio(), camera.cameraId)
-        }
+        val targetZoom = targetCamera?.defaultVisibleZoomRatio() ?: 1f
+        zoomRatioByMain = targetZoom
+        cameraController.switchToCameraId(cameraId, targetZoom)
         // Physical lenses exposed by one logical Camera2 device can be switched by
         // rebuilding only its capture session. Closing the CameraDevice here adds an
         // avoidable black-frame/cold-open gap and defeats seamless physical handoff.
@@ -3878,8 +3879,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             runCatching { currentCamera.getOpenCameraId() == targetCamera.getOpenCameraId() }
                 .getOrDefault(false)
         syncVendorCaptureSettingsToController()
-        cameraController.switchToCameraId(cameraId)
-        setZoomRatioForCamera(ratio, cameraId)
+        zoomRatioByMain = ratio
+        cameraController.switchToCameraId(cameraId, ratio)
         if (!sharesOpenCameraDevice) {
             reopenCamera(preserveVideoRecording = true)
         }
