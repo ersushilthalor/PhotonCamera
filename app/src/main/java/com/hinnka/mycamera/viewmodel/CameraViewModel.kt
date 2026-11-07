@@ -2974,14 +2974,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Re-resolve the preview buffer size after a capture-mode change. The camera
-     * surface must not reopen with the previous mode's preview dimensions.
-     */
-    suspend fun preparePreviewSizeForCurrentMode(): Boolean {
-        return cameraController.preparePreviewSize()
-    }
-
-    /**
      * 关闭相机
      */
     fun closeCamera(surfaceTexture: SurfaceTexture? = null) {
