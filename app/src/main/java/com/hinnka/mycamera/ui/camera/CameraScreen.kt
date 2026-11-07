@@ -564,7 +564,8 @@ fun CameraScreen(
     fun switchLensWithPreviewTransition(
         cameraId: String,
         targetZoom: Float,
-        onSwitch: () -> Unit,
+        onZoomStep: ((Float) -> Unit)? = null,
+        onSwitch: (() -> Unit)? = null,
     ) {
         val useLogicalDualPreview = viewModel.canSwitchToLogicalDualPreview(cameraId)
         val useLogicalAlternatePreview = useLogicalDualPreview &&
@@ -581,6 +582,7 @@ fun CameraScreen(
             handoffDurationMs = (transitionPreferences.lensSwitchOverlapDurationSec * 1_000f).toLong(),
             transitionDurationMs = if (state.captureMode == CaptureMode.VIDEO) 300L else 400L,
             onSwitch = onSwitch,
+            onZoomStep = onZoomStep,
         )
     }
 
@@ -618,9 +620,11 @@ fun CameraScreen(
             currentCameraId
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            switchLensWithPreviewTransition(camera.cameraId, targetZoom) {
-                viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
-            }
+            switchLensWithPreviewTransition(
+                cameraId = camera.cameraId,
+                targetZoom = targetZoom,
+                onZoomStep = viewModel::setZoomRatioWithLensSelection,
+            )
         } else {
             animateCurrentLensToZoomStop(targetZoom)
         }
@@ -643,9 +647,11 @@ fun CameraScreen(
             currentCameraId
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            switchLensWithPreviewTransition(camera.cameraId, targetZoom) {
-                viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
-            }
+            switchLensWithPreviewTransition(
+                cameraId = camera.cameraId,
+                targetZoom = targetZoom,
+                onZoomStep = viewModel::setZoomRatioWithLensSelection,
+            )
         } else {
             animateCurrentLensToZoomStop(targetZoom)
         }
