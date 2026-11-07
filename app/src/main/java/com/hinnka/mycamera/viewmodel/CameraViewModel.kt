@@ -1131,14 +1131,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         if (captureModeWillChange) {
-            cameraController.setCaptureMode(targetCaptureMode)
+            // Prepare the new mode's outputs, then rebuild only the Camera2 session.
+            // Keep the live GL SurfaceTexture and CameraDevice so mode changes cannot
+            // depend on SurfaceTexture recreation to resume the preview.
+            cameraController.setCaptureMode(targetCaptureMode, reconfigurePreview = false)
             if (targetCaptureMode == CaptureMode.VIDEO) {
                 // Photo mode disables the active Log profile without clearing the saved selection.
                 cameraController.setVideoLogProfile(prefs.videoLogProfile)
             }
             resolveLutIdForMode(prefs, targetCaptureMode)?.let(::applyLut)
-            currentSurfaceTexture = null
-            cameraController.closeCamera()
+            cameraController.reconfigurePreviewSession()
         }
 
         update.frameId?.let {
