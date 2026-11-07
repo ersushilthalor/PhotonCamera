@@ -1040,8 +1040,12 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         if (viewportWidth <= 0 || viewportHeight <= 0) return
 
         val delayedStabilizationRequested = previewStabilizationUseCase != null
+        // During a standby-camera handoff the stabilization session still belongs to the
+        // outgoing camera. Do not let its delayed frames overwrite or satisfy the incoming
+        // lens preview; resume stabilization after the target stream becomes the primary input.
         val delayedStabilizationEnabled = delayedStabilizationRequested &&
-            stabilizationCoordinator?.isCurrentCameraSupported == true
+            stabilizationCoordinator?.isCurrentCameraSupported == true &&
+            !useStandbyPreviewSource
         if (!delayedStabilizationEnabled && stabilizationSessionStarted) {
             stabilizationSession?.stop()
             stabilizationSessionStarted = false
@@ -1345,7 +1349,9 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             firstFrameRendered = true
             onFirstFrameRendered?.invoke()
         }
-        if (currentFrameTimestampNs > 0L) {
+        // A transition waiter must only advance for a newly consumed frame from the
+        // currently selected camera input. Re-drawing a cached texture is not a hand-off.
+        if (cameraFrameUpdated && currentFrameTimestampNs > 0L) {
             onPreviewFrameRendered?.invoke(currentFrameTimestampNs)
         }
     }

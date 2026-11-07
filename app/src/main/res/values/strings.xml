@@ -194,6 +194,8 @@
     <string name="settings_focus_lens_group_lens_selection">Lens Selection</string>
     <string name="settings_eye_focus">Human Eye AF</string>
     <string name="settings_eye_focus_description">Detect faces and prioritize a stable eye for autofocus</string>
+    <string name="settings_auto_switch_to_ultra_wide">Auto switch to ultra-wide</string>
+    <string name="settings_auto_switch_to_ultra_wide_description">When autofocus repeatedly struggles with a very close subject, switch to the ultra-wide lens for macro shots and return to the main lens when focus recovers at a distance.</string>
     <string name="settings_focus_lens_group_virtual_lens_depth">Virtual Lens &amp; Depth</string>
     <string name="settings_focus_lens_group_lens_discovery">Lens Discovery</string>
     <string name="settings_focus_lens_group_camera2_extensions">Camera2 Extensions</string>

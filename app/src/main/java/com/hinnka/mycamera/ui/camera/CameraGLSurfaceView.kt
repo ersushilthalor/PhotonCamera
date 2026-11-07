@@ -383,23 +383,24 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         }
     }
 
-    /** 等待新会话的画面完成渲染，不能用 session configured 代替画面就绪。 */
-    suspend fun awaitPreviewFrame(minimumTimestampNs: Long) {
+    /** Wait for the next newly rendered frame from the currently selected camera input.
+     * Sensor timestamps are not comparable across different physical camera sensors. */
+    suspend fun awaitPreviewFrame() {
         var listener: ((Long) -> Unit)? = null
         try {
             suspendCancellableCoroutine<Unit> { continuation ->
-                val callback: (Long) -> Unit = { timestamp ->
-                    if (timestamp >= minimumTimestampNs) {
-                        renderer.onPreviewFrameRendered = null
-                        post {
-                            if (continuation.isActive) continuation.resume(Unit)
-                        }
+                val callback: (Long) -> Unit = {
+                    renderer.onPreviewFrameRendered = null
+                    post {
+                        if (continuation.isActive) continuation.resume(Unit)
                     }
                 }
                 listener = callback
                 queueEvent {
                     if (continuation.isActive) {
                         renderer.onPreviewFrameRendered = callback
+                        // The callback is intentionally frame-gated; this request only drains
+                        // already queued GL work and cannot satisfy the waiter with a stale frame.
                         requestRender()
                     }
                 }

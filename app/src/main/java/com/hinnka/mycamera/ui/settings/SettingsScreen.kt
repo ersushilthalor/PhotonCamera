@@ -315,6 +315,7 @@ fun SettingsScreen(
     val showLevelIndicator by viewModel.showLevelIndicator.collectAsState(initial = false)
     val focusPeakingEnabled by viewModel.focusPeakingEnabled.collectAsState(initial = true)
     val eyeFocusEnabled by viewModel.eyeFocusEnabled.collectAsState()
+    val autoSwitchToUltraWideEnabled by viewModel.autoSwitchToUltraWideEnabled.collectAsState()
     val showGrid = state.showGrid
     val shutterSoundEnabled by viewModel.shutterSoundEnabled.collectAsState(initial = true)
     val vibrationEnabled by viewModel.vibrationEnabled.collectAsState(initial = true)
@@ -1139,6 +1140,18 @@ fun SettingsScreen(
                             description = stringResource(R.string.settings_eye_focus_description),
                             checked = eyeFocusEnabled,
                             onCheckedChange = viewModel::setEyeFocusEnabled
+                        )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+
+                        SwitchSettingItem(
+                            title = stringResource(R.string.settings_auto_switch_to_ultra_wide),
+                            description = stringResource(R.string.settings_auto_switch_to_ultra_wide_description),
+                            checked = autoSwitchToUltraWideEnabled,
+                            onCheckedChange = viewModel::setAutoSwitchToUltraWide
                         )
                     }
 
