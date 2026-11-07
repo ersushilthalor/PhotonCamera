@@ -14,7 +14,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import com.hinnka.mycamera.ui.components.ScaledIcon as Icon
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -572,7 +571,7 @@ fun CameraTopSheet(
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
-internal fun OppoPhotoPipelineSheet(
+private fun OppoPhotoPipelineSheet(
     settings: OppoPhotoSettings,
     onSettingsChange: (OppoPhotoSettings) -> Unit,
     onDismiss: () -> Unit,
@@ -781,7 +780,7 @@ private fun VideoOptionChip(
 }
 
 @Composable
-internal fun selectedVideoAudioInputLabel(
+private fun selectedVideoAudioInputLabel(
     selectedAudioInputId: String,
     options: List<VideoAudioInputOption>
 ): String {
@@ -793,7 +792,7 @@ internal fun selectedVideoAudioInputLabel(
 }
 
 @Composable
-internal fun videoAudioInputLabel(option: VideoAudioInputOption): String {
+private fun videoAudioInputLabel(option: VideoAudioInputOption): String {
     val baseLabel = when (option.type) {
         AudioDeviceInfo.TYPE_BUILTIN_MIC -> stringResource(R.string.video_microphone_builtin)
         AudioDeviceInfo.TYPE_WIRED_HEADSET -> stringResource(R.string.video_microphone_wired)
@@ -819,7 +818,7 @@ internal fun videoAudioInputLabel(option: VideoAudioInputOption): String {
 }
 
 @Composable
-internal fun videoAspectRatioLabel(aspectRatio: VideoAspectRatio): String {
+private fun videoAspectRatioLabel(aspectRatio: VideoAspectRatio): String {
     return when (aspectRatio) {
         VideoAspectRatio.RATIO_16_9 -> stringResource(R.string.video_aspect_16_9)
         VideoAspectRatio.RATIO_21_9 -> stringResource(R.string.video_aspect_21_9)
@@ -828,7 +827,7 @@ internal fun videoAspectRatioLabel(aspectRatio: VideoAspectRatio): String {
 }
 
 @Composable
-internal fun videoLogProfileLabel(profile: VideoLogProfile): String {
+private fun videoLogProfileLabel(profile: VideoLogProfile): String {
     return when (profile) {
         VideoLogProfile.OFF -> stringResource(R.string.video_log_off)
         else -> profile.displayName
