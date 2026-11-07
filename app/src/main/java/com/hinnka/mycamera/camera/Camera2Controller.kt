@@ -2637,13 +2637,26 @@ class Camera2Controller(private val context: Context) {
     }
 
     fun canSwitchToInstantPreview(cameraId: String): Boolean {
-        if (canSwitchToLogicalDualPreview(cameraId)) return true
+        val plan = activeLogicalDualPreviewPlan
+        val hasLiveSurface = alternatePreviewSurface
+            ?.let { runCatching { it.isValid }.getOrDefault(false) } == true
+        val alternateHasFrame = alternatePreviewSurfaceTexture
+            ?.let { runCatching { it.timestamp > 0L }.getOrDefault(false) } == true
+
+        // Returning to the primary lens is instant too: that physical input has continued
+        // streaming throughout the alternate-lens preview.
+        if (plan?.activeCameraId == cameraId) {
+            return captureSession != null && _state.value.isPreviewActive
+        }
+        if (plan?.alternateCameraId == cameraId) {
+            return canSwitchToLogicalDualPreview(cameraId) && hasLiveSurface && alternateHasFrame
+        }
+
         val targetCamera = _state.value.availableCameras.firstOrNull {
             it.cameraId == cameraId
         } ?: return false
-        val hasLiveSurface = alternatePreviewSurface
-            ?.let { runCatching { it.isValid }.getOrDefault(false) } == true
-        return hasLiveSurface && standbyCameraController.canHandoffTo(targetCamera)
+        return hasLiveSurface && alternateHasFrame &&
+            standbyCameraController.canHandoffTo(targetCamera)
     }
 
     fun setAutoSwitchToUltraWide(enabled: Boolean) {
@@ -6458,6 +6471,7 @@ class Camera2Controller(private val context: Context) {
 
         // Each new switch supersedes any pending cold-handoff source reset.
         pendingLogicalPreviewSourceResetCameraId = null
+        var usesInstantPreviewSource = false
         val livePlan = activeLogicalDualPreviewPlan
         val alternateFrameAvailable = alternatePreviewSurfaceTexture?.let { texture ->
             runCatching { texture.timestamp > 0L }.getOrDefault(false)
@@ -6473,16 +6487,19 @@ class Camera2Controller(private val context: Context) {
                 // active session continues producing old-lens capture results, so it must
                 // never trigger the cold-handoff reset back to the primary texture.
                 pendingLogicalPreviewSourceResetCameraId = null
+                usesInstantPreviewSource = true
                 onAlternatePreviewSourceChanged?.invoke(true)
                 PLog.i(TAG, "Instant preview source swap to alternate physical lens: $cameraId")
             }
             livePlan?.activeCameraId == cameraId -> {
                 pendingLogicalPreviewSourceResetCameraId = null
+                usesInstantPreviewSource = true
                 onAlternatePreviewSourceChanged?.invoke(false)
                 PLog.i(TAG, "Instant preview source swap back to primary physical lens: $cameraId")
             }
             canUsePrewarmedStandby -> {
                 pendingLogicalPreviewSourceResetCameraId = cameraId
+                usesInstantPreviewSource = true
                 onAlternatePreviewSourceChanged?.invoke(true)
                 PLog.i(TAG, "Instant preview source swap to warmed standby CameraDevice: $cameraId")
             }
@@ -6496,6 +6513,12 @@ class Camera2Controller(private val context: Context) {
                 zoomRatio = 1f
             )
         } ?: PLog.w(TAG, "Camera with ID $cameraId not found")
+
+        if (targetCamera != null && !usesInstantPreviewSource) {
+            // Cold lens/session changes keep the outgoing renderer input until the target
+            // session has produced its first CaptureResult.
+            pendingLogicalPreviewSourceResetCameraId = cameraId
+        }
     }
 
 // ==================== 曝光控制 ====================
