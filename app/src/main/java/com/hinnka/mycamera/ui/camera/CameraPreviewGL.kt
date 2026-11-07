@@ -157,9 +157,9 @@ fun CameraPreviewGL(
                     )
                 }
         ) {
-            // GLSurfaceView 用于相机预览
-            key(previewSize.width, previewSize.height, captureMode) {
-                AndroidView(
+            // Keep the primary and standby GL SurfaceTextures alive across lens and mode changes.
+            // Recreating this view here closes the prewarmed standby stream and breaks instant handoff.
+            AndroidView(
                     factory = { ctx ->
                         CameraGLSurfaceView(ctx).apply {
                             glSurfaceViewRef = this
@@ -251,9 +251,9 @@ fun CameraPreviewGL(
                             },
                         )
 
-                        // 当 SurfaceTexture 准备好且尺寸已就绪时，通知外部打开相机。
-                        // 对 previewSize 变化使用 key 重建 GLSurfaceView，避免旧 SurfaceTexture
-                        // 的残留帧在新尺寸矩阵下继续显示几帧。
+                        // Keep this GLSurfaceView stable when previewSize changes.
+                        // The existing renderer updates its SurfaceTexture buffer size and matrices,
+                        // while retaining the standby SurfaceTexture used for instant lens handoff.
                         
                         // 强制在所有的条件分支之外读取这几个 State，让 Compose 确保能监听到变化！
                         val currentSurfaceNotified = surfaceTextureNotified
@@ -315,7 +315,6 @@ fun CameraPreviewGL(
                     },
                     modifier = Modifier.fillMaxSize()
                 )
-            }
 
             // 对焦指示器
             FocusIndicator(
