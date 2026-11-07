@@ -383,13 +383,13 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         }
     }
 
-    /** 等待新会话的画面完成渲染，不能用 session configured 代替画面就绪。 */
-    suspend fun awaitPreviewFrame(minimumTimestampNs: Long) {
-        var listener: ((Long) -> Unit)? = null
+    /** Wait for a newly acquired and rendered frame from the requested preview input. */
+    suspend fun awaitPreviewFrame(expectedUseStandby: Boolean) {
+        var listener: ((Boolean) -> Unit)? = null
         try {
             suspendCancellableCoroutine<Unit> { continuation ->
-                val callback: (Long) -> Unit = { timestamp ->
-                    if (timestamp >= minimumTimestampNs) {
+                val callback: (Boolean) -> Unit = { useStandby ->
+                    if (useStandby == expectedUseStandby) {
                         renderer.onPreviewFrameRendered = null
                         post {
                             if (continuation.isActive) continuation.resume(Unit)
