@@ -566,14 +566,20 @@ fun CameraScreen(
         targetZoom: Float,
         onSwitch: () -> Unit,
     ) {
-        val canInstantlySwitch = viewModel.canInstantlySwitchLens(cameraId)
-        val useLogicalAlternatePreview = canInstantlySwitch &&
+        val useLogicalDualPreview = viewModel.canSwitchToLogicalDualPreview(cameraId)
+        val useLogicalAlternatePreview = useLogicalDualPreview &&
             viewModel.usesLogicalAlternatePreview(cameraId)
+        // A separate pre-warmed CameraDevice is adopted into the primary GL input;
+        // logical dual-camera switches already have the target stream running.
+        val transitionPreferences = viewModel.userPreferences.value
         lensSwitchTransition.switchLens(
             cameraId = cameraId,
             targetZoom = targetZoom,
             expectedPreviewSourceStandby = useLogicalAlternatePreview,
-            waitForPreviewRestart = !useLogicalAlternatePreview,
+            waitForPreviewRestart = !useLogicalDualPreview,
+            frameBasedHandoffEnabled = transitionPreferences.frameBasedLensHandoffEnabled,
+            handoffDurationMs = (transitionPreferences.lensSwitchOverlapDurationSec * 1_000f).toLong(),
+            transitionDurationMs = if (state.captureMode == CaptureMode.VIDEO) 300L else 400L,
             onSwitch = onSwitch,
         )
     }
