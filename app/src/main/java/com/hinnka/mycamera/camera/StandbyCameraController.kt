@@ -92,6 +92,7 @@ class StandbyCameraController(context: Context) {
     private var standbyReadyStartedElapsedMs = 0L
     private var standbyReaderOnlyFallback = false
     private var closingCameraDevice: CameraDevice? = null
+    private var closingCameraWasStandby = false
     private var standbyCaptureSession: CameraCaptureSession? = null
     private var standbyImageReader: ImageReader? = null
     private var alternatePreviewSurface: Surface? = null
@@ -233,12 +234,16 @@ class StandbyCameraController(context: Context) {
     }
 
     fun handleRetainedDeviceClosed(camera: CameraDevice): Boolean {
-        if (!isRetainedStandbyDevice(camera) && closingCameraDevice !== camera) return false
+        val isClosingRetainedStandby = closingCameraDevice === camera && closingCameraWasStandby
+        if (!isRetainedStandbyDevice(camera) && !isClosingRetainedStandby) return false
         if (standbyCameraDevice === camera) {
             standbyCameraDevice = null
             failCurrentPlan("Retained standby camera closed unexpectedly: ${camera.id}", null)
         }
-        if (closingCameraDevice === camera) closingCameraDevice = null
+        if (closingCameraDevice === camera) {
+            closingCameraDevice = null
+            closingCameraWasStandby = false
+        }
         controllerOpenedCameraDevices.remove(camera)
         if (openRequestGeneration == null && closingCameraDevice == null) {
             setDeviceTransitioning(false)
@@ -787,6 +792,7 @@ class StandbyCameraController(context: Context) {
                         val wasRequestedClose = closingCameraDevice === camera
                         if (wasRequestedClose) {
                             closingCameraDevice = null
+                            closingCameraWasStandby = false
                         }
                         if (standbyCameraDevice === camera) {
                             val wasUnexpectedClose = !wasRequestedClose &&
@@ -1238,10 +1244,13 @@ class StandbyCameraController(context: Context) {
     }
 
     private fun closeOpenedCamera(camera: CameraDevice) {
+        val wasStandby = standbyCameraDevice === camera ||
+            (closingCameraDevice === camera && closingCameraWasStandby)
         if (standbyCameraDevice === camera) {
             standbyCameraDevice = null
         }
         closingCameraDevice = camera
+        closingCameraWasStandby = wasStandby
         isDeviceTransitioning = true
         try {
             camera.close()
@@ -1249,6 +1258,7 @@ class StandbyCameraController(context: Context) {
             PLog.w(TAG, "Ignoring standby camera close error", error)
             if (closingCameraDevice === camera) {
                 closingCameraDevice = null
+                closingCameraWasStandby = false
             }
             if (openRequestGeneration == null) {
                 setDeviceTransitioning(false)
