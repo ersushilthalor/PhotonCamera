@@ -16,6 +16,7 @@ import android.hardware.camera2.params.SessionConfiguration
 import android.media.ImageReader
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Size
 import android.view.Surface
 import com.hinnka.mycamera.utils.PLog
@@ -76,10 +77,20 @@ class StandbyCameraController(context: Context) {
 
     private var handler: Handler? = null
     private var standbyCameraDevice: CameraDevice? = null
+    // Tracks devices whose CameraDevice.StateCallback was created by this controller.
+    // A retained Photon active device has a callback owned by Camera2Controller instead.
+    private val controllerOpenedCameraDevices = java.util.Collections.newSetFromMap(
+        IdentityHashMap<CameraDevice, Boolean>()
+    )
+    private var standbyStateCallbackOwned = false
+    private var handoffCameraDevice: CameraDevice? = null
     // Once handed to Camera2Controller, this device is no longer owned by the prewarm path.
     // Its StateCallback still belongs to this controller, so lifecycle events are forwarded.
     private var adoptedCameraDevice: CameraDevice? = null
     private var adoptedDeviceCallbacks: AdoptedCameraDeviceCallbacks? = null
+    private var retainedReadyCallback: ((Boolean) -> Unit)? = null
+    private var standbyReadyStartedElapsedMs = 0L
+    private var standbyReaderOnlyFallback = false
     private var closingCameraDevice: CameraDevice? = null
     private var standbyCaptureSession: CameraCaptureSession? = null
     private var standbyImageReader: ImageReader? = null
@@ -112,6 +123,8 @@ class StandbyCameraController(context: Context) {
             plan.standbyOpenCameraId == runCatching { targetCamera.getOpenCameraId() }.getOrNull() &&
             standbyCameraDevice != null &&
             standbyCaptureSession != null &&
+            plan.previewSurface != null &&
+            !standbyReaderOnlyFallback &&
             matchedFrameCount >= REQUIRED_MATCHED_FRAMES
     }
 
@@ -168,7 +181,9 @@ class StandbyCameraController(context: Context) {
                 }
 
                 standbyCameraDevice = null
-                adoptedCameraDevice = camera
+                standbyStateCallbackOwned = false
+                handoffCameraDevice = camera
+                adoptedCameraDevice = camera.takeIf { controllerOpenedCameraDevices.contains(it) }
                 adoptedDeviceCallbacks = null
                 _status.value = StandbyCameraStatus(
                     phase = StandbyCameraPhase.IDLE,
@@ -181,6 +196,50 @@ class StandbyCameraController(context: Context) {
                 onReady(camera)
             }
         }
+    }
+
+    /** True while a just-detached device is being installed as the main camera. */
+    fun isHandoffDevice(camera: CameraDevice): Boolean = handoffCameraDevice === camera
+
+    /** Complete the handoff marker once Camera2Controller has installed the device as active. */
+    fun markHandoffDeviceActive(camera: CameraDevice) {
+        if (handoffCameraDevice === camera) handoffCameraDevice = null
+    }
+
+    /** True only for a retained device whose active session is now being used as standby. */
+    fun isRetainedStandbyDevice(camera: CameraDevice): Boolean =
+        standbyCameraDevice === camera && activePlan?.standbyOpenCameraId == camera.id
+
+    /**
+     * Route lifecycle callbacks for a main-controller-opened device after it has been demoted.
+     * Its original StateCallback cannot be replaced, so Camera2Controller forwards these events.
+     */
+    fun handleRetainedDeviceDisconnected(camera: CameraDevice): Boolean {
+        if (!isRetainedStandbyDevice(camera)) return false
+        PLog.w(TAG, "Retained standby CameraDevice disconnected: ${camera.id}")
+        failCurrentPlan("Retained standby camera disconnected: ${camera.id}", null)
+        return true
+    }
+
+    fun handleRetainedDeviceError(camera: CameraDevice, error: Int): Boolean {
+        if (!isRetainedStandbyDevice(camera)) return false
+        PLog.e(TAG, "Retained standby CameraDevice error: camera=${camera.id}, error=$error")
+        failCurrentPlan("Retained standby camera error: ${camera.id}, error=$error", null)
+        return true
+    }
+
+    fun handleRetainedDeviceClosed(camera: CameraDevice): Boolean {
+        if (!isRetainedStandbyDevice(camera) && closingCameraDevice !== camera) return false
+        if (standbyCameraDevice === camera) {
+            standbyCameraDevice = null
+            failCurrentPlan("Retained standby camera closed unexpectedly: ${camera.id}", null)
+        }
+        if (closingCameraDevice === camera) closingCameraDevice = null
+        controllerOpenedCameraDevices.remove(camera)
+        if (openRequestGeneration == null && closingCameraDevice == null) {
+            setDeviceTransitioning(false)
+        }
+        return true
     }
 
     /** Register the main controller's lifecycle handlers after ownership is transferred. */
@@ -216,6 +275,124 @@ class StandbyCameraController(context: Context) {
                 activeOpenCameraId = activeOpenCameraId,
                 previewSize = previewSize,
             )
+        }
+    }
+
+    /**
+     * Reuse the previously active CameraDevice as the next lightweight standby stream.
+     * This is the reverse half of the persistent role swap: the device is never reopened.
+     */
+    fun adoptRetainedDevice(
+        camera: CameraDevice,
+        activeCamera: CameraInfo?,
+        availableCameras: List<CameraInfo>,
+        activeOpenCameraId: String,
+        previewSize: Size,
+        callbackHandler: Handler,
+        previewSurface: Surface?,
+        previewSurfaceTexture: SurfaceTexture?,
+        onPreviewSizeChanged: ((Int, Int) -> Unit)? = null,
+        onReady: (Boolean) -> Unit,
+    ) {
+        handler = callbackHandler
+        dispatch {
+            alternatePreviewSurface = previewSurface?.takeIf {
+                runCatching { it.isValid }.getOrDefault(false)
+            }
+            alternatePreviewSurfaceTexture = previewSurfaceTexture
+            this.onPreviewSizeChanged = onPreviewSizeChanged
+            val plan = resolvePlan(
+                activeCamera = activeCamera,
+                availableCameras = availableCameras,
+                activeOpenCameraId = activeOpenCameraId,
+                previewSize = previewSize,
+            )
+            if (plan == null || plan.standbyOpenCameraId != camera.id || plan.previewSurface == null) {
+                PLog.w(
+                    TAG,
+                    "Role-swap demotion unavailable: camera=${camera.id}, " +
+                        "planOpen=${plan?.standbyOpenCameraId}, hasPreviewSurface=${plan?.previewSurface != null}",
+                )
+                onReady(false)
+                closeOpenedCamera(camera)
+                return@dispatch
+            }
+
+            val output = resolvePreviewOutput(plan.standbyOpenCameraId, plan.aspectRatio)
+            if (output == null) {
+                PLog.w(TAG, "Role-swap demotion has no lightweight reader output: camera=${camera.id}")
+                onReady(false)
+                closeOpenedCamera(camera)
+                return@dispatch
+            }
+            val reader = try {
+                ImageReader.newInstance(output.size.width, output.size.height, output.format, 3)
+            } catch (error: Exception) {
+                PLog.w(TAG, "Role-swap demotion reader allocation failed: camera=${camera.id}", error)
+                onReady(false)
+                closeOpenedCamera(camera)
+                return@dispatch
+            }
+
+            val callbackOwnedByThisController =
+                camera === adoptedCameraDevice || controllerOpenedCameraDevices.contains(camera)
+            if (adoptedCameraDevice === camera) {
+                adoptedCameraDevice = null
+                adoptedDeviceCallbacks = null
+            }
+            frameReadyTimeout?.let { handler?.removeCallbacks(it) }
+            frameReadyTimeout = null
+            generation += 1L
+            val openGeneration = generation
+            activePlan = plan
+            pendingPlan = null
+            standbyCameraDevice = camera
+            standbyStateCallbackOwned = callbackOwnedByThisController
+            standbyImageReader = reader
+            imageTimestamps.clear()
+            captureResultTimestamps.clear()
+            receivedFrameCount = 0L
+            matchedFrameCount = 0
+            standbyReaderOnlyFallback = false
+            standbyReadyStartedElapsedMs = SystemClock.elapsedRealtime()
+            retainedReadyCallback = onReady
+            _status.value = StandbyCameraStatus(
+                phase = StandbyCameraPhase.CONFIGURING,
+                activeCameraId = plan.activeOpenCameraId,
+                standbyCameraId = plan.standbyCameraId,
+                lensType = plan.lensType,
+                message = "Reconfiguring retained CameraDevice as lightweight standby",
+            )
+            reader.setOnImageAvailableListener({ source ->
+                if (openGeneration != generation || source !== standbyImageReader) {
+                    runCatching { source.acquireLatestImage()?.close() }
+                    return@setOnImageAvailableListener
+                }
+                val image = try {
+                    source.acquireLatestImage()
+                } catch (error: IllegalStateException) {
+                    PLog.w(TAG, "Retained standby frame acquisition failed", error)
+                    null
+                } ?: return@setOnImageAvailableListener
+                try {
+                    val timestamp = image.timestamp
+                    if (timestamp > 0L) {
+                        receivedFrameCount += 1L
+                        rememberTimestamp(imageTimestamps, timestamp)
+                        updateReadinessFromMatchedFrames(openGeneration)
+                    }
+                } finally {
+                    image.close()
+                }
+            }, callbackHandler)
+
+            PLog.i(
+                TAG,
+                "Role-swap demotion started: retained=${camera.id}, active=${plan.activeOpenCameraId}, " +
+                    "standby=${plan.standbyCameraId}, reader=${output.size.width}x${output.size.height} " +
+                    "format=${output.format}, callbackOwner=${if (callbackOwnedByThisController) "standby" else "main"}",
+            )
+            configureStandbySession(camera, reader, plan, openGeneration)
         }
     }
 
@@ -550,7 +727,11 @@ class StandbyCameraController(context: Context) {
                         }
                         openRequestGeneration = null
                         standbyCameraDevice = camera
+                        standbyStateCallbackOwned = true
+                        controllerOpenedCameraDevices.add(camera)
                         setDeviceTransitioning(false)
+                        standbyReadyStartedElapsedMs = SystemClock.elapsedRealtime()
+                        standbyReaderOnlyFallback = false
                         configureStandbySession(camera, reader, plan, openGeneration)
                     }
 
@@ -559,6 +740,13 @@ class StandbyCameraController(context: Context) {
                             val callbacks = adoptedDeviceCallbacks
                             if (callbacks != null) callbacks.onDisconnected(camera)
                             else closeOpenedCamera(camera)
+                            return
+                        }
+                        if (camera === standbyCameraDevice &&
+                            activePlan?.standbyOpenCameraId == camera.id
+                        ) {
+                            openRequestGeneration = null
+                            failCurrentPlan("Standby camera disconnected: ${camera.id}", null)
                             return
                         }
                         if (openRequestGeneration == openGeneration) {
@@ -577,6 +765,13 @@ class StandbyCameraController(context: Context) {
                             val callbacks = adoptedDeviceCallbacks
                             if (callbacks != null) callbacks.onError(camera, error)
                             else closeOpenedCamera(camera)
+                            return
+                        }
+                        if (camera === standbyCameraDevice &&
+                            activePlan?.standbyOpenCameraId == camera.id
+                        ) {
+                            openRequestGeneration = null
+                            failCurrentPlan("Standby camera error: ${camera.id}, error=$error", null)
                             return
                         }
                         if (openRequestGeneration == openGeneration) {
@@ -603,11 +798,16 @@ class StandbyCameraController(context: Context) {
                             // callbacks. Fall through so a forced close still releases the
                             // standby transition latch instead of leaving opens blocked.
                         }
+                        controllerOpenedCameraDevices.remove(camera)
+                        if (handoffCameraDevice === camera) {
+                            handoffCameraDevice = null
+                        }
                         if (closingCameraDevice === camera) {
                             closingCameraDevice = null
                         }
                         if (standbyCameraDevice === camera) {
                             standbyCameraDevice = null
+                            standbyStateCallbackOwned = false
                         }
                         if (openRequestGeneration == null && closingCameraDevice == null) {
                             setDeviceTransitioning(false)
@@ -681,6 +881,7 @@ class StandbyCameraController(context: Context) {
         )
 
         val livePreviewSurface = plan.previewSurface.takeIf { includeAlternatePreviewSurface }
+        if (!includeAlternatePreviewSurface) standbyReaderOnlyFallback = true
         try {
             val builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(reader.surface)
@@ -771,9 +972,11 @@ class StandbyCameraController(context: Context) {
                             scheduleFrameReadyTimeout(openGeneration, callbackHandler)
                         } catch (error: Exception) {
                             if (livePreviewSurface != null) {
+                                standbyReaderOnlyFallback = true
                                 PLog.w(
                                     TAG,
-                                    "Standby GL output rejected while starting repeating request; retrying without it: ${error.message}",
+                                    "Standby reader-only fallback activated: camera=${camera.id}, " +
+                                        "stage=repeating-request, reason=${error.message}",
                                 )
                                 pendingSessionCloseActions[session] = {
                                     if (
@@ -808,7 +1011,12 @@ class StandbyCameraController(context: Context) {
 
                     override fun onConfigureFailed(session: CameraCaptureSession) {
                         if (openGeneration == generation && livePreviewSurface != null) {
-                            PLog.w(TAG, "Standby GL output combination rejected; retrying reader-only standby")
+                            standbyReaderOnlyFallback = true
+                            PLog.w(
+                                TAG,
+                                "Standby reader-only fallback activated: camera=${camera.id}, " +
+                                    "stage=session-configure, reason=alternate GL surface rejected",
+                            )
                             pendingSessionCloseActions[session] = {
                                 if (
                                     openGeneration == generation &&
@@ -854,9 +1062,11 @@ class StandbyCameraController(context: Context) {
             camera.createCaptureSession(sessionConfiguration)
         } catch (error: Exception) {
             if (livePreviewSurface != null) {
+                standbyReaderOnlyFallback = true
                 PLog.w(
                     TAG,
-                    "Standby GL output could not be configured; retrying reader-only standby: ${error.message}",
+                    "Standby reader-only fallback activated: camera=${camera.id}, " +
+                        "stage=create-session, reason=${error.message}",
                 )
                 configureStandbySession(
                     camera,
@@ -901,6 +1111,18 @@ class StandbyCameraController(context: Context) {
         if (matchedFrameCount >= REQUIRED_MATCHED_FRAMES) {
             frameReadyTimeout?.let { handler?.removeCallbacks(it) }
             frameReadyTimeout = null
+            val elapsedMs = (SystemClock.elapsedRealtime() - standbyReadyStartedElapsedMs).coerceAtLeast(0L)
+            PLog.i(
+                TAG,
+                "Standby READY: active=${activePlan?.activeOpenCameraId}, " +
+                    "standby=${activePlan?.standbyCameraId}, matched=$matchedFrameCount, " +
+                    "frames=$receivedFrameCount, elapsedMs=$elapsedMs, " +
+                    "readerOnlyFallback=$standbyReaderOnlyFallback",
+            )
+            retainedReadyCallback?.let { callback ->
+                retainedReadyCallback = null
+                callback(true)
+            }
             _status.value = current.copy(
                 phase = StandbyCameraPhase.READY,
                 frameCount = receivedFrameCount,
@@ -924,6 +1146,10 @@ class StandbyCameraController(context: Context) {
 
     private fun failCurrentPlan(message: String, error: Throwable?) {
         val plan = activePlan
+        retainedReadyCallback?.let { callback ->
+            retainedReadyCallback = null
+            callback(false)
+        }
         if (error != null) {
             PLog.w(TAG, message, error)
         } else {
@@ -964,6 +1190,10 @@ class StandbyCameraController(context: Context) {
             setDeviceTransitioning(false)
         }
 
+        retainedReadyCallback?.let { callback ->
+            retainedReadyCallback = null
+            callback(false)
+        }
         if (resetStatus) {
             _status.value = StandbyCameraStatus()
         }
@@ -1046,6 +1276,7 @@ class StandbyCameraController(context: Context) {
         standbyCameraId: String? = null,
         lensType: LensType? = null,
     ) {
+        PLog.i(TAG, "Standby unavailable: phase=$phase, reason=$message")
         _status.value = StandbyCameraStatus(
             phase = phase,
             activeCameraId = activeCameraId,
