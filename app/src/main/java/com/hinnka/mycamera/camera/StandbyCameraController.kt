@@ -803,11 +803,12 @@ class StandbyCameraController(context: Context) {
                         if (handoffCameraDevice === camera) {
                             handoffCameraDevice = null
                         }
-                        if (closingCameraDevice === camera) {
+                        val wasRequestedClose = closingCameraDevice === camera
+                        if (wasRequestedClose) {
                             closingCameraDevice = null
                         }
                         if (standbyCameraDevice === camera) {
-                            val wasUnexpectedClose = closingCameraDevice !== camera &&
+                            val wasUnexpectedClose = !wasRequestedClose &&
                                 activePlan != null &&
                                 _status.value.phase != StandbyCameraPhase.FAILED
                             standbyCameraDevice = null
