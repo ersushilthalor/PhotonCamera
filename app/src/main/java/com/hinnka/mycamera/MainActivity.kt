@@ -90,7 +90,6 @@ import com.hinnka.mycamera.ui.settings.SettingsScreen
 import com.hinnka.mycamera.ui.settings.PresetEditorScreen
 import com.hinnka.mycamera.ui.settings.PresetManagementScreen
 import com.hinnka.mycamera.ui.theme.PhotonCameraTheme
-import com.hinnka.mycamera.ui.theme.AppUiScale
 import com.hinnka.mycamera.update.AppUpdateManager
 import com.hinnka.mycamera.utils.BuglyHelper
 import com.hinnka.mycamera.utils.DeviceUtil
@@ -298,7 +297,6 @@ class MainActivity : AppCompatActivity() {
             )
 
             PhotonCameraTheme {
-                AppUiScale {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = Color.Black
@@ -337,7 +335,6 @@ class MainActivity : AppCompatActivity() {
 
                         AppUpdateInstallPrompt()
                     }
-                }
                 }
             }
         }
@@ -650,32 +647,16 @@ fun NavigationHost(
             navController = navController,
             startDestination = Routes.CAMERA,
             enterTransition = {
-                if (targetState.destination.route == Routes.SETTINGS) {
-                    androidx.compose.animation.EnterTransition.None
-                } else {
-                    slideInHorizontally(initialOffsetX = { it }) + fadeIn()
-                }
+                slideInHorizontally(initialOffsetX = { it }) + fadeIn()
             },
             exitTransition = {
-                if (targetState.destination.route == Routes.SETTINGS) {
-                    androidx.compose.animation.ExitTransition.None
-                } else {
-                    slideOutHorizontally(targetOffsetX = { -it }) + fadeOut()
-                }
+                slideOutHorizontally(targetOffsetX = { -it }) + fadeOut()
             },
             popEnterTransition = {
-                if (initialState.destination.route == Routes.SETTINGS) {
-                    androidx.compose.animation.EnterTransition.None
-                } else {
-                    slideInHorizontally(initialOffsetX = { -it }) + fadeIn()
-                }
+                slideInHorizontally(initialOffsetX = { -it }) + fadeIn()
             },
             popExitTransition = {
-                if (initialState.destination.route == Routes.SETTINGS) {
-                    androidx.compose.animation.ExitTransition.None
-                } else {
-                    slideOutHorizontally(targetOffsetX = { it }) + fadeOut()
-                }
+                slideOutHorizontally(targetOffsetX = { it }) + fadeOut()
             }
         ) {
             composable(Routes.CAMERA) {
@@ -896,9 +877,6 @@ fun NavigationHost(
                     },
                     onPresetManagementClick = {
                         navController.navigate(Routes.PRESET_MANAGEMENT)
-                    },
-                    onToolboxClick = {
-                        navController.navigate(Routes.TOOLBOX)
                     }
                 )
             }
