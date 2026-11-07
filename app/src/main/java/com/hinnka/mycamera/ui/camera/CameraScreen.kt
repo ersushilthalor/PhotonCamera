@@ -343,6 +343,7 @@ fun CameraScreen(
 
     // UI State
     var activePanel by remember { mutableStateOf(ActivePanel.NONE) }
+    var showQuickSettings by remember { mutableStateOf(false) }
     var selectedParameter by remember { mutableStateOf(CameraParameter.EXPOSURE_COMPENSATION) }
     var showParameterRuler by remember(state.captureMode, state.useRaw) { mutableStateOf(false) }
     val isXpan = state.aspectRatio == AspectRatio.XPAN
@@ -997,7 +998,10 @@ fun CameraScreen(
                 onVideoHdrToggle = {
                     viewModel.setVideoHdrEnabled(!videoHdrEnabled)
                 },
-                onSettingsClick = onSettingsClick,
+                onSettingsClick = {
+                    activePanel = ActivePanel.NONE
+                    showQuickSettings = true
+                },
                 modifier = Modifier
                     .padding(top = topSafePadding)
                     .offset(y = topBarOffset)
@@ -1905,6 +1909,136 @@ fun CameraScreen(
                         captureAnimationSnapshot = null
                     }
                 }
+            )
+        }
+
+        if (showQuickSettings) {
+            val flashOffLabel = stringResource(R.string.video_option_off)
+            val flashAutoLabel = stringResource(R.string.video_microphone_auto)
+            val onLabel = stringResource(R.string.quick_settings_on)
+            val offLabel = stringResource(R.string.video_option_off)
+            val timerValue = if (state.timerSeconds == 0) {
+                offLabel
+            } else {
+                stringResource(R.string.quick_settings_timer_seconds, state.timerSeconds)
+            }
+            val flashValue = when (state.flashMode) {
+                1 -> flashAutoLabel
+                2 -> onLabel
+                else -> flashOffLabel
+            }
+            val canChangeQuickSettings = !state.videoRecordingState.isRecording &&
+                !state.videoRecordingState.isProcessing
+            val photoGeneralActions = listOf(
+                QuickSettingAction(
+                    title = stringResource(R.string.flash),
+                    value = flashValue,
+                    active = state.flashMode != 0,
+                    enabled = canChangeQuickSettings,
+                    onClick = viewModel::toggleFlash
+                ),
+                QuickSettingAction(
+                    title = stringResource(R.string.timer),
+                    value = timerValue,
+                    active = state.timerSeconds > 0,
+                    enabled = canChangeQuickSettings,
+                    onClick = viewModel::toggleTimer
+                ),
+                QuickSettingAction(
+                    title = stringResource(R.string.settings_use_live_photo),
+                    value = if (state.useLivePhoto) onLabel else offLabel,
+                    active = state.useLivePhoto,
+                    enabled = canChangeQuickSettings,
+                    onClick = { viewModel.setUseLivePhoto(!state.useLivePhoto) }
+                )
+            )
+            val photoProActions = listOf(
+                QuickSettingAction(
+                    title = stringResource(R.string.settings_use_raw),
+                    value = if (state.useRaw) stringResource(R.string.gallery_raw_badge)
+                    else stringResource(R.string.quick_settings_jpeg),
+                    active = state.useRaw,
+                    enabled = canChangeQuickSettings && state.isRawSupported,
+                    onClick = { viewModel.setUseRaw(!state.useRaw) }
+                )
+            )
+            val availableVideoRatios = state.videoCapabilities.availableAspectRatios
+            val currentVideoRatio = state.videoConfig.aspectRatio
+            val videoGeneralActions = listOf(
+                QuickSettingAction(
+                    title = stringResource(R.string.export_video_select_resolution),
+                    value = state.videoConfig.resolution.displayName,
+                    active = true,
+                    enabled = canChangeQuickSettings &&
+                        state.videoConfig.aspectRatio != VideoAspectRatio.OPEN_GATE,
+                    onClick = { cycleVideoResolution(state)?.let(viewModel::setVideoResolution) }
+                ),
+                QuickSettingAction(
+                    title = stringResource(R.string.video_info_frame_rate),
+                    value = stringResource(R.string.quick_settings_fps, state.videoConfig.fps.fps),
+                    active = true,
+                    enabled = canChangeQuickSettings,
+                    onClick = { cycleVideoFps(state)?.let(viewModel::setVideoFps) }
+                ),
+                QuickSettingAction(
+                    title = stringResource(R.string.video_aspect_chip),
+                    value = currentVideoRatio.getDisplayName(),
+                    active = true,
+                    enabled = canChangeQuickSettings && availableVideoRatios.size > 1,
+                    onClick = {
+                        if (availableVideoRatios.isNotEmpty()) {
+                            val currentIndex = availableVideoRatios.indexOf(currentVideoRatio)
+                            val nextIndex = (currentIndex + 1) % availableVideoRatios.size
+                            viewModel.setVideoAspectRatio(availableVideoRatios[nextIndex])
+                        }
+                    }
+                ),
+                QuickSettingAction(
+                    title = stringResource(R.string.video_torch_chip),
+                    value = if (state.videoConfig.torchEnabled) onLabel else offLabel,
+                    active = state.videoConfig.torchEnabled,
+                    enabled = canChangeQuickSettings && state.videoCapabilities.supportsTorch,
+                    onClick = { viewModel.setVideoTorchEnabled(!state.videoConfig.torchEnabled) }
+                )
+            )
+            val availableStabilizationModes = state.videoCapabilities.availableStabilizationModes
+                .ifEmpty { VideoStabilizationMode.entries }
+            val stabilizationIndex = availableStabilizationModes.indexOf(state.videoConfig.stabilizationMode)
+            val nextStabilizationMode = availableStabilizationModes[
+                (stabilizationIndex + 1) % availableStabilizationModes.size
+            ]
+            val videoProActions = listOf(
+                QuickSettingAction(
+                    title = stringResource(R.string.settings_video_stabilization_default),
+                    value = state.videoConfig.stabilizationMode.displayName,
+                    active = state.videoConfig.stabilizationMode != VideoStabilizationMode.OFF,
+                    enabled = canChangeQuickSettings && availableStabilizationModes.size > 1,
+                    onClick = { viewModel.setVideoStabilizationMode(nextStabilizationMode) }
+                ),
+                QuickSettingAction(
+                    title = stringResource(R.string.quick_settings_hdr),
+                    value = if (videoHdrEnabled) onLabel else offLabel,
+                    active = videoHdrEnabled,
+                    enabled = canChangeQuickSettings,
+                    onClick = { viewModel.setVideoHdrEnabled(!videoHdrEnabled) }
+                )
+            )
+            QuickSettingsSheet(
+                title = stringResource(
+                    if (isVideoMode) R.string.quick_settings_video_title
+                    else R.string.quick_settings_photo_title
+                ),
+                generalTabLabel = stringResource(R.string.quick_settings_general),
+                proTabLabel = stringResource(R.string.quick_settings_pro),
+                moreSettingsLabel = stringResource(R.string.quick_settings_more),
+                closeDescription = stringResource(R.string.close),
+                generalActions = if (isVideoMode) videoGeneralActions else photoGeneralActions,
+                proActions = if (isVideoMode) videoProActions else photoProActions,
+                onMoreSettings = {
+                    showQuickSettings = false
+                    onSettingsClick()
+                },
+                onDismiss = { showQuickSettings = false }
             )
         }
 

@@ -11,7 +11,7 @@ import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.graphicsLayer
 
 /**
- * Draws an icon at 75% of its requested visual size without changing its measured bounds.
+ * Draws an icon at 93.75% of its requested visual size (25% larger than the previous 75% scale) without changing its measured bounds.
  * This keeps surrounding touch targets and alignment unchanged.
  */
 @Composable
@@ -25,8 +25,8 @@ fun ScaledIcon(
         imageVector = imageVector,
         contentDescription = contentDescription,
         modifier = modifier.graphicsLayer {
-            scaleX = 0.75f
-            scaleY = 0.75f
+            scaleX = 0.9375f
+            scaleY = 0.9375f
         },
         tint = tint
     )
@@ -43,8 +43,8 @@ fun ScaledIcon(
         painter = painter,
         contentDescription = contentDescription,
         modifier = modifier.graphicsLayer {
-            scaleX = 0.75f
-            scaleY = 0.75f
+            scaleX = 0.9375f
+            scaleY = 0.9375f
         },
         tint = tint
     )
@@ -61,8 +61,8 @@ fun ScaledIcon(
         bitmap = bitmap,
         contentDescription = contentDescription,
         modifier = modifier.graphicsLayer {
-            scaleX = 0.75f
-            scaleY = 0.75f
+            scaleX = 0.9375f
+            scaleY = 0.9375f
         },
         tint = tint
     )

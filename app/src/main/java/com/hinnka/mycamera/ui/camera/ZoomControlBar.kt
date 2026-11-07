@@ -3,11 +3,13 @@ package com.hinnka.mycamera.ui.camera
 import androidx.compose.animation.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import com.hinnka.mycamera.ui.components.ScaledIcon as Icon
 import androidx.compose.material3.IconButton
@@ -165,7 +167,7 @@ fun ZoomControlBar(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp)
+            .padding(horizontal = 10.dp)
             .height(CameraControlsLayoutDefaults.ZoomBarHeight)
             .pointerInput(isCameraReady, minZoom, maxZoom, zoomStops) {
                 if (!isCameraReady) return@pointerInput
@@ -223,7 +225,7 @@ fun ZoomControlBar(
                 onClick = {
                     viewModel.saveZoomDisplayMode(displayMode.next())
                 },
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier.size(40.dp)
             ) {
                 Icon(
                     imageVector = AppIcons.SwapHoriz,
@@ -246,7 +248,7 @@ fun ZoomControlBar(
             IconButton(
                 onClick = onFilterClick,
                 modifier = Modifier
-                    .size(32.dp)
+                    .size(40.dp)
                     .onGloballyPositioned { coordinates ->
                         onFilterButtonBoundsChanged(coordinates.boundsInRoot())
                     }
@@ -266,13 +268,13 @@ fun ZoomControlBar(
         Box(
             modifier = Modifier
                 .fillMaxHeight()
-                .padding(horizontal = if (isContinuousZooming) 0.dp else 40.dp)
+                .padding(horizontal = if (isContinuousZooming) 0.dp else 50.dp)
                 .fillMaxWidth(),
             contentAlignment = Alignment.Center
         ) {
             if (!isCameraReady) {
                 CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(25.dp),
                     color = AccentColor,
                     strokeWidth = 2.dp
                 )
@@ -398,13 +400,25 @@ private fun ZoomRuler(
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                     color = if (isSelected) activeColor else inactiveColor,
                     textAlign = TextAlign.Center,
-                    textDecoration = if (item.isLensStop) TextDecoration.Underline else TextDecoration.None,
+                    textDecoration = TextDecoration.None,
                     shadow = ViewfinderTextShadow
                 )
 
+                val chipShape = RoundedCornerShape(12.dp)
                 Box(
                     modifier = Modifier
-                        .size(adaptiveMetrics.itemSize)
+                        .size(width = adaptiveMetrics.itemSize, height = 36.dp)
+                        .clip(chipShape)
+                        .background(
+                            if (isSelected) activeColor.copy(alpha = 0.24f)
+                            else Color.Black.copy(alpha = 0.22f)
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = if (isSelected) activeColor.copy(alpha = 0.9f)
+                            else Color.White.copy(alpha = 0.16f),
+                            shape = chipShape
+                        )
                         .autoRotate()
                         .pointerInput(item.cameraIds, stop, currentCameraId) {
                             detectTapGestures {
@@ -456,9 +470,21 @@ private fun ZoomRuler(
 
                 macroCameras.forEach { macroCamera ->
                     val isSelected = macroCamera.cameraId == currentCameraId
+                    val macroShape = RoundedCornerShape(12.dp)
                     Box(
                         modifier = Modifier
-                            .size(adaptiveMetrics.itemSize)
+                            .size(width = adaptiveMetrics.itemSize, height = 36.dp)
+                            .clip(macroShape)
+                            .background(
+                                if (isSelected) activeColor.copy(alpha = 0.24f)
+                                else Color.Black.copy(alpha = 0.22f)
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = if (isSelected) activeColor.copy(alpha = 0.9f)
+                                else Color.White.copy(alpha = 0.16f),
+                                shape = macroShape
+                            )
                             .autoRotate()
                             .pointerInput(macroCamera.cameraId) {
                                 detectTapGestures { onLensSwitch(macroCamera.cameraId) }
@@ -501,12 +527,13 @@ fun ZoomContinuousRuler(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-        // Keep the ruler track at the native 32dp PhotonCamera control height.
+        // The continuous zoom ruler scales with the enlarged 40dp control lane.
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .clip(CircleShape)
-                .background(Color(0xFF292929))
+                .background(Color(0xE61B1B1F))
+                .border(1.dp, Color.White.copy(alpha = 0.18f), CircleShape)
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val safeZoom = zoomRatio.coerceAtLeast(0.001f).toDouble()
@@ -535,12 +562,12 @@ fun ZoomContinuousRuler(
                             if (x < centerX - halfTickRange || x > centerX + halfTickRange) continue
 
                             val majorTick = tickIndex % 5 == 0
-                            val tickHeight = if (majorTick) 17.dp.toPx() else 11.dp.toPx()
+                            val tickHeight = if (majorTick) 21.25.dp.toPx() else 13.75.dp.toPx()
                             drawLine(
                                 color = Color.White.copy(alpha = if (majorTick) 0.86f else 0.58f),
                                 start = Offset(x, centerY - tickHeight / 2f),
                                 end = Offset(x, centerY + tickHeight / 2f),
-                                strokeWidth = if (majorTick) 1.35.dp.toPx() else 1.dp.toPx()
+                                strokeWidth = if (majorTick) 1.7.dp.toPx() else 1.25.dp.toPx()
                             )
                         }
                     }
@@ -552,7 +579,7 @@ fun ZoomContinuousRuler(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .width(2.5.dp)
-                    .height(22.dp)
+                    .height(27.5.dp)
                     .clip(CircleShape)
                     .background(rulerYellow)
             )
@@ -560,15 +587,15 @@ fun ZoomContinuousRuler(
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
-                    .padding(end = 6.dp)
-                    .size(25.dp)
+                    .padding(end = 7.5.dp)
+                    .size(31.25.dp)
                     .clip(CircleShape)
                     .background(Color(0xFF3A3A3A))
                     .clickable(onClick = onClose)
                     .semantics { contentDescription = closeDescription },
                 contentAlignment = Alignment.Center
             ) {
-                Canvas(modifier = Modifier.size(11.dp)) {
+                Canvas(modifier = Modifier.size(14.dp)) {
                     val stroke = 1.7.dp.toPx()
                     val inset = size.width * 0.22f
                     drawLine(
@@ -592,9 +619,9 @@ fun ZoomContinuousRuler(
             text = currentText,
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .offset(y = (-20).dp),
+                .offset(y = (-25).dp),
             style = TextStyle(
-                fontSize = 14.sp,
+                fontSize = 17.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = rulerYellow,
                 shadow = ViewfinderTextShadow

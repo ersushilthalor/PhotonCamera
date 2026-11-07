@@ -1424,4 +1424,14 @@
     <string name="oppo_refocus_plane_count">Plane %1$d of %2$d</string>
     <string name="oppo_refocus_near">Near</string>
     <string name="oppo_refocus_far">Far</string>
+    <string name="quick_settings_photo_title">Photo settings</string>
+    <string name="quick_settings_video_title">Video settings</string>
+    <string name="quick_settings_more">More settings</string>
+    <string name="quick_settings_general">General</string>
+    <string name="quick_settings_pro">Pro</string>
+    <string name="quick_settings_on">On</string>
+    <string name="quick_settings_jpeg">JPEG</string>
+    <string name="quick_settings_timer_seconds">%1$d s</string>
+    <string name="quick_settings_fps">%1$d FPS</string>
+    <string name="quick_settings_hdr">HDR</string>
 </resources>
