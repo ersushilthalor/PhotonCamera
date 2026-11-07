@@ -993,6 +993,7 @@ fun CameraScreen(
                     currentCameraId = state.getCurrentCameraInfo()?.cameraId ?: "0",
                     onZoomChange = { setZoomWithPreviewTransition(it) },
                     onZoomStopClick = { animateZoomStopWithPreviewTransition(it) },
+                    onContinuousZoomChange = viewModel::setZoomRatio,
                     onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
                     onFilterClick = {
                         if (isVideoMode) {
@@ -1545,6 +1546,7 @@ fun CameraScreen(
                             currentCameraId = state.getCurrentCameraInfo()?.cameraId ?: "0",
                             onZoomChange = { setZoomWithPreviewTransition(it) },
                             onZoomStopClick = { animateZoomStopWithPreviewTransition(it) },
+                            onContinuousZoomChange = viewModel::setZoomRatio,
                             onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
                             onFilterClick = {
                                 if (isVideoMode) {
