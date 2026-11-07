@@ -956,9 +956,10 @@ class StandbyCameraController(context: Context) {
         }
 
         // Register before close(): onClosed() is dispatched asynchronously on the camera handler.
+        // This standby session only carries repeating preview outputs. CameraCaptureSession.close()
+        // stops those requests itself; abortCaptures() would discard queued buffers and can pause
+        // the camera pipeline during the handoff without helping this preview-only shutdown.
         pendingSessionCloseActions[session] = finishClose
-        runCatching { session.stopRepeating() }
-        runCatching { session.abortCaptures() }
         try {
             session.close()
         } catch (error: Exception) {
