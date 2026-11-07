@@ -1192,12 +1192,6 @@ class Camera2Controller(private val context: Context) {
                     _state.update { it.copy(previewFirstFrameTimestampNs = timestamp) }
                 }
             }
-            if (session === captureSession && pendingLogicalPreviewSourceReset) {
-                pendingLogicalPreviewSourceReset = false
-                PLog.i(TAG, "New physical-lens preview frame is ready; returning renderer to primary input")
-                onAlternatePreviewSourceChanged?.invoke(false)
-            }
-
             // Only the currently active CameraCaptureSession may feed the EIS timeline.
             // Results from a retired session can arrive after a physical-output handoff; using
             // the new global physical-camera ID for those old frames mixes two sensors' metadata.
@@ -2610,6 +2604,13 @@ class Camera2Controller(private val context: Context) {
     }
 
     fun canSwitchToLogicalDualPreview(cameraId: String): Boolean {
+        val plan = activeLogicalDualPreviewPlan ?: return false
+        return (plan.alternateCameraId == cameraId || plan.activeCameraId == cameraId) &&
+            alternatePreviewSurface === plan.surface &&
+            alternatePreviewSurface?.let { runCatching { it.isValid }.getOrDefault(false) } == true
+    }
+
+    fun usesLogicalAlternatePreview(cameraId: String): Boolean {
         val plan = activeLogicalDualPreviewPlan ?: return false
         return plan.alternateCameraId == cameraId &&
             alternatePreviewSurface === plan.surface &&
@@ -4360,6 +4361,14 @@ class Camera2Controller(private val context: Context) {
 
             _state.value = _state.value.copy(isPreviewActive = true)
             activeLogicalDualPreviewPlan = logicalDualPreviewPlan
+            if (pendingLogicalPreviewSourceReset) {
+                pendingLogicalPreviewSourceReset = false
+                PLog.i(
+                    TAG,
+                    "Target capture session configured; switching renderer to its primary input on the first new frame",
+                )
+                onAlternatePreviewSourceChanged?.invoke(false)
+            }
             if (logicalDualPreviewPlan != null) {
                 PLog.i(
                     TAG,
@@ -6311,9 +6320,11 @@ class Camera2Controller(private val context: Context) {
                 PLog.i(TAG, "Instant preview source swap to alternate physical lens: $cameraId")
             }
             livePlan?.activeCameraId == cameraId -> {
-                pendingLogicalPreviewSourceReset = true
+                // This lens is already attached to the main input; keep the source on
+                // primary and wait there for its next acquired frame.
+                pendingLogicalPreviewSourceReset = false
                 onAlternatePreviewSourceChanged?.invoke(false)
-                PLog.i(TAG, "Instant preview source swap back to primary physical lens: $cameraId")
+                PLog.i(TAG, "Instant preview source swap to primary physical lens: $cameraId")
             }
             canUsePrewarmedStandby -> {
                 pendingLogicalPreviewSourceReset = true
