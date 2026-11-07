@@ -183,8 +183,10 @@ class StandbyCameraController(context: Context) {
                 standbyCameraDevice = null
                 standbyStateCallbackOwned = false
                 handoffCameraDevice = camera
-                adoptedCameraDevice = camera.takeIf { controllerOpenedCameraDevices.contains(it) }
-                adoptedDeviceCallbacks = null
+                if (controllerOpenedCameraDevices.contains(camera)) {
+                    adoptedCameraDevice = camera
+                    adoptedDeviceCallbacks = null
+                }
                 _status.value = StandbyCameraStatus(
                     phase = StandbyCameraPhase.IDLE,
                     activeCameraId = camera.id,
