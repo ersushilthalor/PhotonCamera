@@ -3359,18 +3359,30 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    /**
+     * The alternate lens must be streaming at the camera-side size negotiated for the
+     * selected video resolution. The smaller UI preview size is not sufficient for a
+     * seamless switch when the encoder is configured for 4K.
+     */
+    private fun resolveStandbyPreviewSize(state: CameraState): Size {
+        if (state.captureMode != CaptureMode.VIDEO) return state.currentPreviewSize
+        return state.videoCapabilities.cameraInputSizesByResolution[state.videoConfig.resolution]
+            ?.takeIf { it.width > 0 && it.height > 0 }
+            ?: state.currentPreviewSize
+    }
+
     private fun resolveLogicalDualPreviewPlan(): LogicalDualPreviewPlan? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
         val state = _state.value
         if (
-            state.captureMode != CaptureMode.PHOTO ||
-            state.useRaw ||
-            state.useP010 ||
             state.isCapturing ||
             state.videoRecordingState.isRecording ||
             state.videoRecordingState.isProcessing ||
-            state.photoPreviewStabilizationEnabled ||
-            shouldUseAlgorithmicStabilization()
+            shouldUseAlgorithmicStabilization() ||
+            (
+                state.captureMode == CaptureMode.PHOTO &&
+                    (state.useRaw || state.useP010 || state.photoPreviewStabilizationEnabled)
+            )
         ) {
             return null
         }
@@ -3419,8 +3431,8 @@ class Camera2Controller(private val context: Context) {
             )
             return null
         }
-        val activePhysicalCameraId = activeOutputPhysicalCameraId
-            ?: resolveRequestedPhysicalCameraId(state, activeCamera)
+        val activePhysicalCameraId = resolveRequestedPhysicalCameraId(state, activeCamera)
+            ?: activeOutputPhysicalCameraId
             ?: activeCamera.getBoundPhysicalCameraId(
                 getTargetZoomRatioByMain(state, activeCamera)
             )
@@ -3440,7 +3452,7 @@ class Camera2Controller(private val context: Context) {
             .orEmpty()
         if (supportedSizes.isEmpty()) return null
 
-        val requestedSize = state.currentPreviewSize
+        val requestedSize = resolveStandbyPreviewSize(state)
         if (requestedSize.width <= 0 || requestedSize.height <= 0) return null
         val requestedAspect = requestedSize.width.toFloat() / requestedSize.height.toFloat()
         val requestedArea = requestedSize.width.toLong() * requestedSize.height.toLong()
@@ -3471,7 +3483,7 @@ class Camera2Controller(private val context: Context) {
 
         PLog.i(
             TAG,
-            "Prepared same-device dual physical preview: logical=$openCameraId, " +
+            "Prepared same-device dual physical preview: mode=${state.captureMode}, logical=$openCameraId, " +
                 "active=$activePhysicalCameraId, alternate=$alternatePhysicalCameraId, " +
                 "size=${alternateSize.width}x${alternateSize.height}",
         )
@@ -3633,6 +3645,14 @@ class Camera2Controller(private val context: Context) {
                             }
                             PLog.e(TAG, "Video session configuration failed")
                             safeCloseCaptureSession(session, "video configure failure")
+                            if (retryPreviewSessionWithoutLogicalDualPreview(
+                                    "video configure failed",
+                                    openGeneration,
+                                    logicalDualPreviewPlan,
+                                )
+                            ) {
+                                return
+                            }
                             if (retryVideoSessionWithoutCameraHlg(openGeneration)) return
                             if (vendorSessionParametersApplied &&
                                 retryPreviewSessionWithoutVendorSessionParameters(
@@ -4322,7 +4342,7 @@ class Camera2Controller(private val context: Context) {
                     activeCamera = standbyState.getCurrentCameraInfo(),
                     availableCameras = standbyState.availableCameras,
                     activeOpenCameraId = activeOpenCameraId,
-                    previewSize = standbyState.currentPreviewSize,
+                    previewSize = resolveStandbyPreviewSize(standbyState),
                     callbackHandler = standbyHandler,
                     previewSurface = alternatePreviewSurface,
                     previewSurfaceTexture = alternatePreviewSurfaceTexture,
