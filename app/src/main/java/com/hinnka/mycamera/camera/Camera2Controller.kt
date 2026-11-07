@@ -3466,14 +3466,9 @@ class Camera2Controller(private val context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
         val state = _state.value
         if (
-            state.captureMode != CaptureMode.PHOTO ||
-            state.useRaw ||
-            state.useP010 ||
             state.isCapturing ||
-            state.videoRecordingState.isRecording ||
             state.videoRecordingState.isProcessing ||
-            state.photoPreviewStabilizationEnabled ||
-            shouldUseAlgorithmicStabilization()
+            shouldUseVideoEnhancedStabilization()
         ) {
             return null
         }
@@ -3626,10 +3621,11 @@ class Camera2Controller(private val context: Context) {
         val reader = imageReader
         val stabilizationReader = ensureStabilizationImageReader()
         val useEnhancedStabilization = shouldUseVideoEnhancedStabilization()
-        val logicalDualPreviewPlan = if (
-            stabilizationReader == null &&
-            !useEnhancedStabilization
-        ) {
+        // Keep the alternate physical stream available in PHOTO and VIDEO preview.
+        // The session may also contain RAW/P010 and stabilization outputs; Camera2's
+        // configure callback below retries without the optional dual stream on HALs whose
+        // stream-combination limits cannot support it.
+        val logicalDualPreviewPlan = if (!useEnhancedStabilization) {
             resolveLogicalDualPreviewPlan()
         } else {
             null
@@ -3737,6 +3733,14 @@ class Camera2Controller(private val context: Context) {
                             }
                             PLog.e(TAG, "Video session configuration failed")
                             safeCloseCaptureSession(session, "video configure failure")
+                            if (retryPreviewSessionWithoutLogicalDualPreview(
+                                    "video configure failed",
+                                    openGeneration,
+                                    logicalDualPreviewPlan,
+                                )
+                            ) {
+                                return
+                            }
                             if (retryVideoSessionWithoutCameraHlg(openGeneration)) return
                             if (vendorSessionParametersApplied &&
                                 retryPreviewSessionWithoutVendorSessionParameters(
@@ -4441,14 +4445,11 @@ class Camera2Controller(private val context: Context) {
                     previewSurface = alternatePreviewSurface,
                     previewSurfaceTexture = alternatePreviewSurfaceTexture,
                     onPreviewSizeChanged = onAlternatePreviewSizeChanged,
-                    requestTemplateType = if (
-                        standbyState.captureMode == CaptureMode.VIDEO &&
-                        !shouldUseVideoEnhancedStabilization()
-                    ) {
-                        CameraDevice.TEMPLATE_RECORD
-                    } else {
-                        CameraDevice.TEMPLATE_PREVIEW
-                    },
+                    // This secondary device is a warm preview source, not an encoder
+                    // session. Keep it on TEMPLATE_PREVIEW for reliable frame delivery and
+                    // instant takeover; the adopted main session switches to TEMPLATE_RECORD
+                    // when the camera is configured for actual video recording.
+                    requestTemplateType = CameraDevice.TEMPLATE_PREVIEW,
                 )
             } else {
                 standbyCameraController.release("standby disabled while video recording is active")
