@@ -2700,8 +2700,7 @@ class Camera2Controller(private val context: Context) {
         val now = SystemClock.elapsedRealtime()
 
         if (currentCamera.cameraId == mainCamera.cameraId) {
-            // A user-initiated return to Main cancels the automatic macro-return state.
-            autoMacroSwitchActive = false
+            // Keep the pending auto-switch state until the selected camera actually changes.
             val isSubjectVeryClose =
                 focusDistance >= minimumFocusDistance * 0.70f || focusDistance >= 6f
             val isAfStruggling =
