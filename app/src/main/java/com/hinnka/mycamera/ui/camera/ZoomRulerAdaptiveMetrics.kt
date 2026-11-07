@@ -5,8 +5,8 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-private const val DefaultItemSize = 40f
-private const val DefaultSpacing = 5f
+private const val DefaultItemSize = 32f
+private const val DefaultSpacing = 4f
 private const val SeparatorThickness = 1f
 
 internal data class ZoomRulerAdaptiveMetrics(
@@ -108,11 +108,11 @@ private fun buildZoomRulerAdaptiveMetrics(
             separatorCount = separatorCount,
             gapCount = gapCount
         ).dp,
-        selectedFontSize = (16.25f * scale).coerceIn(5f, 13f).sp,
-        normalFontSize = (12.5f * scale).coerceIn(5f, 10f).sp,
-        selectedIconSize = (20f * scale).coerceIn(6f, 16f).dp,
-        normalIconSize = (17.5f * scale).coerceIn(6f, 14f).dp,
-        separatorLength = (15f * scale).coerceIn(4f, 12f).dp
+        selectedFontSize = (13f * scale).coerceIn(5f, 13f).sp,
+        normalFontSize = (10f * scale).coerceIn(5f, 10f).sp,
+        selectedIconSize = (16f * scale).coerceIn(6f, 16f).dp,
+        normalIconSize = (14f * scale).coerceIn(6f, 14f).dp,
+        separatorLength = (12f * scale).coerceIn(4f, 12f).dp
     )
 }
 
