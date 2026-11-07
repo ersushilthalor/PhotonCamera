@@ -69,16 +69,33 @@ internal class LensSwitchTransitionState(
     private var snapshotZoom = 1f
     private var job: Job? = null
     private var switchPending = false
-    private data class Request(val cameraId: String, val targetZoom: Float, val onSwitch: () -> Unit)
+    private data class Request(
+        val cameraId: String,
+        val targetZoom: Float,
+        val expectedPreviewSourceStandby: Boolean,
+        val waitForPreviewRestart: Boolean,
+        val onSwitch: () -> Unit,
+    )
     private var pendingRequest: Request? = null
     private var awaitedCameraId: String? = null
-    private var previousTimestamp: Long? = null
 
-    fun switchLens(cameraId: String, targetZoom: Float, onSwitch: () -> Unit) {
+    fun switchLens(
+        cameraId: String,
+        targetZoom: Float,
+        expectedPreviewSourceStandby: Boolean,
+        waitForPreviewRestart: Boolean,
+        onSwitch: () -> Unit,
+    ) {
         require(targetZoom.isFinite() && targetZoom > 0f)
         // Coalesce gestures while the screenshot is being prepared. Once a switch has
         // started, replace its waiter but keep the frozen frame across subsequent switches.
-        pendingRequest = Request(cameraId, targetZoom, onSwitch)
+        pendingRequest = Request(
+            cameraId,
+            targetZoom,
+            expectedPreviewSourceStandby,
+            waitForPreviewRestart,
+            onSwitch,
+        )
         if (switchPending && job?.isActive == true) return
         job?.cancel()
         isActive = true
@@ -102,7 +119,6 @@ internal class LensSwitchTransitionState(
                 pendingRequest = null
                 switchPending = false
                 if (request != null) {
-                    previousTimestamp = viewModel.state.value.previewFirstFrameTimestampNs
                     awaitedCameraId = request.cameraId
                     request.onSwitch()
                 }
@@ -115,44 +131,54 @@ internal class LensSwitchTransitionState(
                     val animation = launch {
                         animateSnapshotTo(request?.targetZoom ?: viewModel.zoomRatioByMain)
                     }
-                    val readyState = withTimeoutOrNull(8_000L) {
-                        viewModel.state.first {
-                            it.currentCameraId == awaitedCameraId && it.isPreviewActive &&
-                                it.previewFirstFrameTimestampNs != null &&
-                                it.previewFirstFrameTimestampNs != previousTimestamp
+                    // Separate-device handoffs and cold opens must complete their preview
+                    // restart before a primary-source frame can be considered the new lens.
+                    // A logical multi-camera handoff already has the target physical stream
+                    // running, so it deliberately does not wait for a new Camera2 session.
+                    val previewRestarted = if (request?.waitForPreviewRestart == true) {
+                        withTimeoutOrNull(8_000L) {
+                            if (viewModel.state.value.isPreviewActive) {
+                                viewModel.state.first {
+                                    it.currentCameraId == awaitedCameraId && !it.isPreviewActive
+                                }
+                            }
+                            viewModel.state.first {
+                                it.currentCameraId == awaitedCameraId && it.isPreviewActive
+                            }
                         }
+                    } else {
+                        Unit
                     }
-                    if (readyState == null) {
-                        // Do not leave a frozen viewfinder over a camera request that failed or
-                        // never produced a fresh preview session.
+                    if (request?.waitForPreviewRestart == true && previewRestarted == null) {
                         PLog.w(
                             "LensSwitchTransition",
-                            "Timed out waiting for a fresh preview from camera $awaitedCameraId",
+                            "Timed out waiting for camera preview restart: $awaitedCameraId",
                         )
-                        animation.join()
-                        return@coroutineScope
                     }
-                    // Follow the current SurfaceView if preview dimensions change.
+
+                    // Readiness is acknowledged by the GL renderer only after it acquires
+                    // and draws a new frame from the requested input (primary or standby).
+                    // No capture-session timestamp is used as a proxy for a rendered frame.
                     val rendered = CompletableDeferred<Unit>()
                     val waiter = launch {
                         snapshotFlow { viewModel.glSurfaceView }.collectLatest { preview ->
                             if (preview != null) {
-                                preview.awaitPreviewFrame(readyState.previewFirstFrameTimestampNs!!)
+                                preview.awaitPreviewFrame(
+                                    expectedUseStandby = request?.expectedPreviewSourceStandby == true,
+                                )
                                 rendered.complete(Unit)
                             }
                         }
                     }
                     try {
-                        val frameRendered = withTimeoutOrNull(1_200L) {
+                        val frameRendered = withTimeoutOrNull(5_000L) {
                             rendered.await()
                             true
                         } == true
                         if (!frameRendered) {
-                            // Camera2 may be ready before the GL/EIS renderer reports a frame.
-                            // Release the transition overlay instead of freezing the old image.
                             PLog.w(
                                 "LensSwitchTransition",
-                                "Timed out waiting for the rendered preview frame from camera $awaitedCameraId",
+                                "Timed out waiting for a newly rendered switched preview frame: $awaitedCameraId",
                             )
                         }
                     } finally {
