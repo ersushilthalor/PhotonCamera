@@ -573,11 +573,16 @@ fun CameraScreen(
             return
         }
         cancelZoomStopAnimation()
-        lensSwitchTransition.switchLens(
-            cameraId,
-            targetZoom,
-            useInstantPreview = viewModel.canInstantlySwitchLens(cameraId),
-        ) { viewModel.switchToLens(cameraId) }
+        if (viewModel.canInstantlySwitchLens(cameraId)) {
+            // A warmed standby/dual-preview source is already rendering. Do not capture
+            // and hold the outgoing 1x frame; switch the GL source immediately.
+            lensSwitchTransition.cancel()
+            viewModel.switchToLens(cameraId)
+        } else {
+            lensSwitchTransition.switchLens(cameraId, targetZoom) {
+                viewModel.switchToLens(cameraId)
+            }
+        }
     }
 
     fun setZoomWithPreviewTransition(targetZoom: Float) {
@@ -599,12 +604,14 @@ fun CameraScreen(
             currentCameraId
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            lensSwitchTransition.switchLens(
-                camera.cameraId,
-                targetZoom,
-                useInstantPreview = viewModel.canInstantlySwitchLens(camera.cameraId),
-            ) {
+            if (viewModel.canInstantlySwitchLens(camera.cameraId)) {
+                // Apply the physical-lens/source handoff immediately when its preview is warm.
+                lensSwitchTransition.cancel()
                 viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
+            } else {
+                lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
+                    viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
+                }
             }
         } else {
             animateCurrentLensToZoomStop(targetZoom)
@@ -628,12 +635,14 @@ fun CameraScreen(
             currentCameraId
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            lensSwitchTransition.switchLens(
-                camera.cameraId,
-                targetZoom,
-                useInstantPreview = viewModel.canInstantlySwitchLens(camera.cameraId),
-            ) {
+            if (viewModel.canInstantlySwitchLens(camera.cameraId)) {
+                // Apply the physical-lens/source handoff immediately when its preview is warm.
+                lensSwitchTransition.cancel()
                 viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
+            } else {
+                lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
+                    viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
+                }
             }
         } else {
             animateCurrentLensToZoomStop(targetZoom)
