@@ -154,6 +154,15 @@ class Camera2Controller(private val context: Context) {
         val previewSize: Size,
     )
 
+    private data class PhotoOutputProfile(
+        val previewSize: Size,
+        val captureSize: Size,
+        val captureFormat: Int,
+        val isRawSupported: Boolean,
+        val isP010Supported: Boolean,
+        val isP3Supported: Boolean,
+    )
+
     private data class CameraOpenRequest(
         val surfaceTexture: SurfaceTexture,
         val preserveVideoRecording: Boolean,
@@ -433,6 +442,9 @@ class Camera2Controller(private val context: Context) {
     private val pendingFrameMetadata = ConcurrentHashMap<Long, CapturedFrameMetadata>()
     private val pendingCaptureStartedTimestamps = ConcurrentHashMap<Long, Long>()
     private val pendingCloseReaders = mutableListOf<ImageReader>()
+    private val pendingImageReaderClosures =
+        java.util.IdentityHashMap<CameraCaptureSession, MutableList<ImageReader>>()
+    private var pendingPreviewSizeForSession: Size? = null
     private val openImagesCount = AtomicInteger(0)
     private var imageReaderMaxImages = CAPTURE_READER_MAX_IMAGES
 
@@ -1115,6 +1127,30 @@ class Camera2Controller(private val context: Context) {
     fun onImageRelease() {
         if (openImagesCount.decrementAndGet() == 0) {
             checkAndClosePendingReaders()
+        }
+    }
+
+    private fun createPhotoImageReader(captureSize: Size, captureFormat: Int): ImageReader {
+        val readerMaxImages = resolveImageReaderMaxImages()
+        imageReaderMaxImages = readerMaxImages
+        return ImageReader.newInstance(
+            captureSize.width,
+            captureSize.height,
+            captureFormat,
+            readerMaxImages,
+        ).apply {
+            setOnImageAvailableListener({ reader ->
+                try {
+                    while (canAcquireImage("Too many open images")) {
+                        val image = trackImage(reader.acquireNextImage()) ?: break
+                        processOrBufferImageForCaptureResult(image)
+                    }
+                } catch (error: Exception) {
+                    PLog.e(TAG, "Error in onImageAvailable", error)
+                    photoCaptures.values.filter { it.reader === reader }.toList()
+                        .forEach { failPhotoCapture(it, "image acquisition failed") }
+                }
+            }, cameraHandler)
         }
     }
 
@@ -2481,7 +2517,10 @@ class Camera2Controller(private val context: Context) {
             afModes.contains(CaptureRequest.CONTROL_AF_MODE_AUTO)
     }
 
-    private fun refreshVideoCapabilities(characteristics: CameraCharacteristics? = null): Size {
+    private fun refreshVideoCapabilities(
+        characteristics: CameraCharacteristics? = null,
+        updatePreviewSize: Boolean = true,
+    ): Size {
         val openCameraId = getCurrentOpenCameraId()
         if (openCameraId.isEmpty()) {
             return _state.value.currentPreviewSize
@@ -2547,7 +2586,7 @@ class Camera2Controller(private val context: Context) {
         _state.value = _state.value.copy(
             videoConfig = resolvedConfig,
             videoCapabilities = snapshot.capabilities,
-            currentPreviewSize = if (_state.value.captureMode == CaptureMode.VIDEO) {
+            currentPreviewSize = if (updatePreviewSize && _state.value.captureMode == CaptureMode.VIDEO) {
                 snapshot.previewSize
             } else {
                 _state.value.currentPreviewSize
@@ -3059,7 +3098,8 @@ class Camera2Controller(private val context: Context) {
                         (outputPhysicalCameraId?.let {
                             !isPhysicalOutputProfileFailed(it, ImageFormat.YCBCR_P010)
                         } ?: true)
-                val resolvedVideoPreviewSize = refreshVideoCapabilities(openCharacteristics)
+                // Resolve capabilities against the selected physical output sensor.
+                val resolvedVideoPreviewSize = refreshVideoCapabilities(capabilityCharacteristics)
                 previewSize = when (captureMode) {
                     CaptureMode.VIDEO -> resolvedVideoPreviewSize
                     CaptureMode.PHOTO -> CameraUtils.getFixedPreviewSize(openCharacteristics, _state.value.aspectRatio)
@@ -3220,6 +3260,7 @@ class Camera2Controller(private val context: Context) {
 
                 _state.value = _state.value.copy(
                     isP3Supported = isP3Supported,
+                    currentPreviewSize = previewSize,
                     currentCaptureSize = captureSize
                 )
 
@@ -3237,25 +3278,7 @@ class Camera2Controller(private val context: Context) {
                         }
                     }, stream=$outputCameraIdForStreams, isP3Supported: $isP3Supported, imageReaderMaxImages: $readerMaxImages"
                 )
-                imageReader = ImageReader.newInstance(
-                    captureSize.width,
-                    captureSize.height,
-                    captureFormat,
-                    readerMaxImages
-                ).apply {
-                    setOnImageAvailableListener({ reader ->
-                        try {
-                            while (canAcquireImage("Too many open images")) {
-                                val image = trackImage(reader.acquireNextImage()) ?: break
-                                processOrBufferImageForCaptureResult(image)
-                            }
-                        } catch (e: Exception) {
-                            PLog.e(TAG, "Error in onImageAvailable", e)
-                            photoCaptures.values.filter { it.reader === reader }.toList()
-                                .forEach { failPhotoCapture(it, "image acquisition failed") }
-                        }
-                    }, cameraHandler)
-                }
+                imageReader = createPhotoImageReader(captureSize, captureFormat)
 
             } else {
                 safeCloseImageReader(imageReader)
@@ -4400,6 +4423,40 @@ class Camera2Controller(private val context: Context) {
             PLog.e(TAG, "Failed to start preview - unconfigured surface")
             handlePreviewSessionFailure("start preview unconfigured surface", openGeneration, e)
         }
+    }
+
+    private fun resolvePhotoOutputProfile(
+        characteristics: CameraCharacteristics,
+        physicalCameraId: String?,
+        state: CameraState,
+    ): PhotoOutputProfile {
+        val rawOutput = resolveRawCaptureOutput(characteristics, physicalCameraId)
+        val rawSupported = rawOutput != null
+        val p010Supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            isOutputFormatAdvertised(characteristics, ImageFormat.YCBCR_P010) &&
+            (physicalCameraId?.let { !isPhysicalOutputProfileFailed(it, ImageFormat.YCBCR_P010) } ?: true)
+        val selectedRawOutput = rawOutput.takeIf { state.useRaw }
+        val wantsP010 = selectedRawOutput == null && p010Supported && state.useP010
+        val captureFormat = when {
+            selectedRawOutput != null -> selectedRawOutput.format
+            wantsP010 -> ImageFormat.YCBCR_P010
+            else -> ImageFormat.YUV_420_888
+        }
+        val previewSize = CameraUtils.getFixedPreviewSize(characteristics, state.aspectRatio)
+        val captureSize = selectedRawOutput?.size
+            ?: CameraUtils.getBestCaptureSize(characteristics, state.aspectRatio, captureFormat)
+        val isP3Supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+            characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_COLOR_SPACE_PROFILES)
+                ?.getSupportedColorSpaces(captureFormat)
+                ?.contains(ColorSpace.Named.DISPLAY_P3) == true
+        return PhotoOutputProfile(
+            previewSize = previewSize,
+            captureSize = captureSize,
+            captureFormat = captureFormat,
+            isRawSupported = rawSupported,
+            isP010Supported = p010Supported,
+            isP3Supported = isP3Supported,
+        )
     }
 
     private fun imageFormatToString(format: Int): String {
