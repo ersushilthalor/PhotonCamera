@@ -160,6 +160,20 @@ class Camera2Controller(private val context: Context) {
         val standbyCameraId: String? = null,
     )
 
+    private data class CameraRoleSwap(
+        val request: CameraOpenRequest,
+        val previousDevice: CameraDevice,
+        val previousCamera: CameraInfo,
+        val previousSession: CameraCaptureSession,
+        val promotedOpenCameraId: String,
+        val startedElapsedRealtimeMs: Long,
+        var previousSessionClosed: Boolean = false,
+        var promotedSessionConfigured: Boolean = false,
+        var demotionStarted: Boolean = false,
+        var primaryFrameArrived: Boolean = false,
+        var standbyReady: Boolean = false,
+    )
+
     private enum class CameraDeviceLifecycle {
         CLOSED,
         OPENING,
@@ -289,6 +303,7 @@ class Camera2Controller(private val context: Context) {
     @Volatile
     private var releaseCloseLatch: java.util.concurrent.CountDownLatch? = null
     private var captureSession: CameraCaptureSession? = null
+    private var activeCameraRoleSwap: CameraRoleSwap? = null
     private var previewRequestBuilder: CaptureRequest.Builder? = null
     private var previewSessionGeneration: Long = 0L
     private val previewUpdateScheduled = AtomicBoolean(false)
@@ -1194,7 +1209,20 @@ class Camera2Controller(private val context: Context) {
             }
             if (session === captureSession && pendingLogicalPreviewSourceReset) {
                 pendingLogicalPreviewSourceReset = false
-                PLog.i(TAG, "New physical-lens preview frame is ready; returning renderer to primary input")
+                val roleSwap = activeCameraRoleSwap
+                if (roleSwap != null && !roleSwap.primaryFrameArrived) {
+                    roleSwap.primaryFrameArrived = true
+                    val elapsedMs = (SystemClock.elapsedRealtime() - roleSwap.startedElapsedRealtimeMs)
+                        .coerceAtLeast(0L)
+                    PLog.i(
+                        TAG,
+                        "[LENS_ROLE_SWAP] first primary frame: camera=$activeOpenCameraId, " +
+                            "elapsedMs=$elapsedMs; returning renderer to primary input",
+                    )
+                    completeCameraRoleSwapIfReady(roleSwap)
+                } else {
+                    PLog.i(TAG, "New physical-lens preview frame is ready; returning renderer to primary input")
+                }
                 onAlternatePreviewSourceChanged?.invoke(false)
             }
 
@@ -2358,6 +2386,7 @@ class Camera2Controller(private val context: Context) {
         reason: String,
         resetVideoState: Boolean = true
     ) {
+        queueRoleSwapColdFallback("active camera unavailable: $reason")
         cameraOpenGeneration++
         videoRecorder.forceStop()
         stopVideoRecordingTicker()
@@ -2374,6 +2403,7 @@ class Camera2Controller(private val context: Context) {
         message: String,
         error: Exception
     ) {
+        queueRoleSwapColdFallback("active camera open failed: $message")
         cameraOpenGeneration++
         PLog.e(TAG, "Camera open failed for $cameraId: $message", error)
         val device = cameraDevice
@@ -2398,6 +2428,7 @@ class Camera2Controller(private val context: Context) {
             PLog.w(TAG, "Ignoring stale preview session failure: $reason")
             return
         }
+        queueRoleSwapColdFallback("active preview session failed: $reason")
         cameraOpenGeneration++
         if (error != null) {
             PLog.e(TAG, "Preview session failed: $reason", error)
@@ -2644,11 +2675,20 @@ class Camera2Controller(private val context: Context) {
         val standbyCameraId = targetCamera
             ?.takeIf(standbyCameraController::canHandoffTo)
             ?.cameraId
-        pendingCameraOpenRequest = CameraOpenRequest(
+        val request = CameraOpenRequest(
             surfaceTexture = surfaceTexture,
             preserveVideoRecording = preserveVideoRecording,
             standbyCameraId = standbyCameraId,
         )
+        pendingCameraOpenRequest = request
+        if (
+            cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN &&
+            standbyCameraId != null &&
+            targetCamera != null &&
+            tryStartPersistentCameraRoleSwap(request, targetCamera)
+        ) {
+            return
+        }
         when (cameraDeviceLifecycle) {
             CameraDeviceLifecycle.CLOSED -> openPendingCameraRequest()
             CameraDeviceLifecycle.OPENING,
@@ -2660,6 +2700,253 @@ class Camera2Controller(private val context: Context) {
             CameraDeviceLifecycle.CLOSING -> {
                 PLog.d(TAG, "Camera open queued while previous device is closing")
             }
+        }
+    }
+
+    /**
+     * Swap two already-open, separate rear CameraDevices without closing either device.
+     *
+     * The ready standby is first detached from its lightweight session. The current active
+     * session is then retired (but its CameraDevice is retained), the prewarmed device receives
+     * the normal photo pipeline, and the previous active CameraDevice is reconfigured as the
+     * next lightweight standby on the alternate GL input.
+     */
+    private fun tryStartPersistentCameraRoleSwap(
+        request: CameraOpenRequest,
+        targetCamera: CameraInfo,
+    ): Boolean {
+        val state = _state.value
+        val activeDevice = cameraDevice ?: return false
+        val activeSession = captureSession ?: return false
+        val activeOpenId = activeOpenCameraId
+        val targetOpenId = runCatching { targetCamera.getOpenCameraId() }.getOrNull()
+            ?.takeIf { it.isNotBlank() } ?: return false
+        val alternateSurface = alternatePreviewSurface
+            ?.takeIf { runCatching { it.isValid }.getOrDefault(false) } ?: return false
+        if (
+            activeOpenId.isBlank() ||
+            activeOpenId == targetOpenId ||
+            activeDevice.id != activeOpenId ||
+            previewSurfaceTexture !== request.surfaceTexture ||
+            alternatePreviewSurfaceTexture == null ||
+            state.captureMode != CaptureMode.PHOTO ||
+            state.isCapturing ||
+            state.burstCapturing ||
+            state.videoRecordingState.isRecording ||
+            state.videoRecordingState.isProcessing ||
+            state.useLivePhoto ||
+            state.isCapturingLivePhoto ||
+            activeLogicalDualPreviewPlan != null
+        ) {
+            return false
+        }
+
+        val previousCamera = state.availableCameras.firstOrNull { candidate ->
+            candidate.cameraId != targetCamera.cameraId &&
+                candidate.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+                candidate.lensType != targetCamera.lensType &&
+                runCatching { candidate.getOpenCameraId() == activeOpenId }.getOrDefault(false)
+        } ?: run {
+            PLog.i(
+                TAG,
+                "Persistent role swap unavailable: cannot resolve previous lens metadata " +
+                    "for activeOpen=$activeOpenId target=${targetCamera.cameraId}",
+            )
+            return false
+        }
+
+        val transaction = CameraRoleSwap(
+            request = request,
+            previousDevice = activeDevice,
+            previousCamera = previousCamera,
+            previousSession = activeSession,
+            promotedOpenCameraId = targetOpenId,
+            startedElapsedRealtimeMs = SystemClock.elapsedRealtime(),
+        )
+        PLog.i(
+            TAG,
+            "[LENS_ROLE_SWAP] start: from=${previousCamera.cameraId}(${activeDevice.id}) " +
+                "to=${targetCamera.cameraId}($targetOpenId), standby=READY, " +
+                "elapsedRealtimeMs=${transaction.startedElapsedRealtimeMs}",
+        )
+
+        standbyCameraController.takeOver(
+            cameraId = targetCamera.cameraId,
+            expectedOpenCameraId = targetOpenId,
+        ) { prewarmedDevice ->
+            if (pendingCameraOpenRequest !== request ||
+                _state.value.currentCameraId != targetCamera.cameraId
+            ) {
+                PLog.w(
+                    TAG,
+                    "[LENS_ROLE_SWAP] cancelled before promotion: target=${targetCamera.cameraId}",
+                )
+                prewarmedDevice?.let {
+                    standbyCameraController.markHandoffDeviceActive(it)
+                    closeCameraDeviceAndAwait(it, "stale role-swap handoff", blocksLifecycle = false)
+                }
+                if (cameraDevice === activeDevice && cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN) {
+                    standbyCameraController.prepare(
+                        activeCamera = _state.value.getCurrentCameraInfo(),
+                        availableCameras = _state.value.availableCameras,
+                        activeOpenCameraId = activeOpenCameraId,
+                        previewSize = _state.value.currentPreviewSize,
+                        callbackHandler = cameraHandler ?: return@takeOver,
+                        previewSurface = alternatePreviewSurface,
+                        previewSurfaceTexture = alternatePreviewSurfaceTexture,
+                        onPreviewSizeChanged = onAlternatePreviewSizeChanged,
+                    )
+                }
+                return@takeOver
+            }
+
+            if (prewarmedDevice == null ||
+                prewarmedDevice.id != targetOpenId ||
+                cameraDevice !== activeDevice ||
+                captureSession !== activeSession
+            ) {
+                PLog.w(
+                    TAG,
+                    "[LENS_ROLE_SWAP] standby handoff failed; falling back to existing cold path: " +
+                        "target=${targetCamera.cameraId}, prewarmed=${prewarmedDevice?.id}",
+                )
+                activeCameraRoleSwap = null
+                pendingCameraOpenRequest = request.copy(standbyCameraId = null)
+                closeCameraInternal(
+                    preserveVideoRecording = request.preserveVideoRecording,
+                    clearPendingOpen = false,
+                    preserveStandbyCamera = false,
+                )
+                return@takeOver
+            }
+
+            activeCameraRoleSwap = transaction
+            clearCameraSessionState(
+                reason = "persistent Main/UW role swap",
+                preserveStandbyCamera = true,
+            )
+            cameraDevice = null
+            cameraDeviceLifecycle = CameraDeviceLifecycle.OPENING
+            clearCameraCapabilityCache()
+            _state.update { it.copy(isPreviewActive = false) }
+            standbyCameraController.markHandoffDeviceActive(prewarmedDevice)
+            PLog.i(
+                TAG,
+                "[LENS_ROLE_SWAP] promoting prewarmed device: camera=${prewarmedDevice.id}, " +
+                    "retaining oldDevice=${activeDevice.id}; no CameraDevice close/open",
+            )
+            openCameraNow(request.copy(standbyCameraId = null), preopenedCamera = prewarmedDevice)
+        }
+        return true
+    }
+
+    private fun startRoleSwapDemotionIfReady(transaction: CameraRoleSwap) {
+        if (
+            activeCameraRoleSwap !== transaction ||
+            !transaction.previousSessionClosed ||
+            !transaction.promotedSessionConfigured ||
+            transaction.demotionStarted
+        ) {
+            return
+        }
+        val handler = cameraHandler ?: run {
+            PLog.e(TAG, "[LENS_ROLE_SWAP] cannot demote previous device: camera handler unavailable")
+            return
+        }
+        val activeCamera = _state.value.getCurrentCameraInfo()
+        val currentOpenId = activeOpenCameraId
+        if (activeCamera == null || currentOpenId.isBlank()) {
+            PLog.e(TAG, "[LENS_ROLE_SWAP] cannot demote previous device: promoted camera metadata unavailable")
+            return
+        }
+        transaction.demotionStarted = true
+        val elapsedMs = (SystemClock.elapsedRealtime() - transaction.startedElapsedRealtimeMs)
+            .coerceAtLeast(0L)
+        PLog.i(
+            TAG,
+            "[LENS_ROLE_SWAP] demoting old device: camera=${transaction.previousDevice.id}, " +
+                "elapsedMs=$elapsedMs, surface=alternate",
+        )
+        standbyCameraController.adoptRetainedDevice(
+            camera = transaction.previousDevice,
+            activeCamera = activeCamera,
+            availableCameras = _state.value.availableCameras,
+            activeOpenCameraId = currentOpenId,
+            previewSize = _state.value.currentPreviewSize,
+            callbackHandler = handler,
+            previewSurface = alternatePreviewSurface,
+            previewSurfaceTexture = alternatePreviewSurfaceTexture,
+            onPreviewSizeChanged = onAlternatePreviewSizeChanged,
+        ) { ready ->
+            if (activeCameraRoleSwap !== transaction) return@adoptRetainedDevice
+            transaction.standbyReady = ready
+            val totalMs = (SystemClock.elapsedRealtime() - transaction.startedElapsedRealtimeMs)
+                .coerceAtLeast(0L)
+            if (ready) {
+                PLog.i(
+                    TAG,
+                    "[LENS_ROLE_SWAP] standby READY: oldDevice=${transaction.previousDevice.id}, " +
+                        "totalElapsedMs=$totalMs",
+                )
+            } else {
+                PLog.w(
+                    TAG,
+                    "[LENS_ROLE_SWAP] retained standby config failed; re-preparing via cold standby path: " +
+                        "device=${transaction.previousDevice.id}, elapsedMs=$totalMs",
+                )
+                handler.post {
+                    standbyCameraController.whenDeviceIdle {
+                        standbyCameraController.prepare(
+                            activeCamera = _state.value.getCurrentCameraInfo(),
+                            availableCameras = _state.value.availableCameras,
+                            activeOpenCameraId = activeOpenCameraId,
+                            previewSize = _state.value.currentPreviewSize,
+                            callbackHandler = handler,
+                            previewSurface = alternatePreviewSurface,
+                            previewSurfaceTexture = alternatePreviewSurfaceTexture,
+                            onPreviewSizeChanged = onAlternatePreviewSizeChanged,
+                        )
+                    }
+                }
+            }
+            completeCameraRoleSwapIfReady(transaction)
+        }
+    }
+
+    private fun completeCameraRoleSwapIfReady(transaction: CameraRoleSwap) {
+        if (
+            activeCameraRoleSwap === transaction &&
+            transaction.promotedSessionConfigured &&
+            transaction.primaryFrameArrived &&
+            transaction.demotionStarted &&
+            transaction.standbyReady
+        ) {
+            val totalMs = (SystemClock.elapsedRealtime() - transaction.startedElapsedRealtimeMs)
+                .coerceAtLeast(0L)
+            PLog.i(
+                TAG,
+                "[LENS_ROLE_SWAP] complete: from=${transaction.previousCamera.cameraId} " +
+                    "to=${activeOpenCameraId}, totalElapsedMs=$totalMs",
+            )
+            activeCameraRoleSwap = null
+        }
+    }
+
+    private fun queueRoleSwapColdFallback(reason: String) {
+        val transaction = activeCameraRoleSwap ?: return
+        activeCameraRoleSwap = null
+        pendingCameraOpenRequest = transaction.request.copy(standbyCameraId = null)
+        PLog.e(
+            TAG,
+            "[LENS_ROLE_SWAP] failed; falling back to cold CameraDevice open: reason=$reason, " +
+                "target=${_state.value.currentCameraId}",
+        )
+        if (!standbyCameraController.isRetainedStandbyDevice(transaction.previousDevice)) {
+            closeCameraDeviceAndAwait(
+                transaction.previousDevice,
+                "role-swap fallback: $reason",
+                blocksLifecycle = false,
+            )
         }
     }
 
@@ -2783,7 +3070,20 @@ class Camera2Controller(private val context: Context) {
             }
 
             override fun onDisconnected(camera: CameraDevice) {
-                if (openGeneration != cameraOpenGeneration) {
+                if (camera !== cameraDevice &&
+                    standbyCameraController.handleRetainedDeviceDisconnected(camera)
+                ) {
+                    return
+                }
+                if (camera !== cameraDevice &&
+                    standbyCameraController.isHandoffDevice(camera)
+                ) {
+                    PLog.e(TAG, "[LENS_ROLE_SWAP] promoted device disconnected during handoff: ${camera.id}")
+                    queueRoleSwapColdFallback("promoted device disconnected during handoff")
+                    closeCameraDeviceAndAwait(camera, "handoff device disconnected", blocksLifecycle = false)
+                    return
+                }
+                if (camera !== cameraDevice && openGeneration != cameraOpenGeneration) {
                     closeCameraDeviceAndAwait(camera, "stale camera disconnect", blocksLifecycle = false)
                     return
                 }
@@ -2802,7 +3102,20 @@ class Camera2Controller(private val context: Context) {
             }
 
             override fun onError(camera: CameraDevice, error: Int) {
-                if (openGeneration != cameraOpenGeneration) {
+                if (camera !== cameraDevice &&
+                    standbyCameraController.handleRetainedDeviceError(camera, error)
+                ) {
+                    return
+                }
+                if (camera !== cameraDevice &&
+                    standbyCameraController.isHandoffDevice(camera)
+                ) {
+                    PLog.e(TAG, "[LENS_ROLE_SWAP] promoted device errored during handoff: ${camera.id}, error=$error")
+                    queueRoleSwapColdFallback("promoted device error=$error")
+                    closeCameraDeviceAndAwait(camera, "handoff device error", blocksLifecycle = false)
+                    return
+                }
+                if (camera !== cameraDevice && openGeneration != cameraOpenGeneration) {
                     closeCameraDeviceAndAwait(camera, "stale camera error", blocksLifecycle = false)
                     return
                 }
@@ -2849,6 +3162,13 @@ class Camera2Controller(private val context: Context) {
             }
 
             override fun onClosed(camera: CameraDevice) {
+                if (standbyCameraController.handleRetainedDeviceClosed(camera)) return
+                if (standbyCameraController.isHandoffDevice(camera)) {
+                    PLog.w(TAG, "[LENS_ROLE_SWAP] handoff device closed before promotion: ${camera.id}")
+                    queueRoleSwapColdFallback("handoff device closed before promotion")
+                    standbyCameraController.markHandoffDeviceActive(camera)
+                    return
+                }
                 handleCameraDeviceClosed(camera)
             }
         }
@@ -2891,7 +3211,10 @@ class Camera2Controller(private val context: Context) {
         }
         // Keep the adopted device owned by the main controller during capability/session setup,
         // so any setup exception follows the normal close-and-release error path.
-        if (preopenedCamera != null) cameraDevice = preopenedCamera
+        if (preopenedCamera != null) {
+            cameraDevice = preopenedCamera
+            standbyCameraController.markHandoffDeviceActive(preopenedCamera)
+        }
 
         PLog.i(
             TAG,
@@ -4360,6 +4683,18 @@ class Camera2Controller(private val context: Context) {
 
             _state.value = _state.value.copy(isPreviewActive = true)
             activeLogicalDualPreviewPlan = logicalDualPreviewPlan
+            val roleSwap = activeCameraRoleSwap
+            if (roleSwap != null && activeOpenCameraId == roleSwap.promotedOpenCameraId) {
+                roleSwap.promotedSessionConfigured = true
+                val elapsedMs = (SystemClock.elapsedRealtime() - roleSwap.startedElapsedRealtimeMs)
+                    .coerceAtLeast(0L)
+                PLog.i(
+                    TAG,
+                    "[LENS_ROLE_SWAP] promoted full photo session configured: camera=$activeOpenCameraId, " +
+                        "elapsedMs=$elapsedMs, readerFormat=${imageFormatToString(imageReader?.imageFormat ?: NO_IMAGE_READER_FORMAT)}",
+                )
+                startRoleSwapDemotionIfReady(roleSwap)
+            }
             if (logicalDualPreviewPlan != null) {
                 PLog.i(
                     TAG,
@@ -4372,7 +4707,10 @@ class Camera2Controller(private val context: Context) {
 
             val standbyState = _state.value
             val standbyHandler = cameraHandler
-            if (standbyHandler != null &&
+            if (roleSwap != null && roleSwap.promotedOpenCameraId == activeOpenCameraId) {
+                // The previous active CameraDevice is being reused as the next standby by
+                // startRoleSwapDemotionIfReady(); do not cold-open it here.
+            } else if (standbyHandler != null &&
                 !standbyState.videoRecordingState.isRecording &&
                 !standbyState.videoRecordingState.isProcessing
             ) {
@@ -10017,6 +10355,18 @@ class Camera2Controller(private val context: Context) {
     }
 
     private fun invalidateCaptureSession(session: CameraCaptureSession?, reason: String) {
+        val roleSwap = activeCameraRoleSwap
+        if (session != null && roleSwap?.previousSession === session && !roleSwap.previousSessionClosed) {
+            roleSwap.previousSessionClosed = true
+            val elapsedMs = (SystemClock.elapsedRealtime() - roleSwap.startedElapsedRealtimeMs)
+                .coerceAtLeast(0L)
+            PLog.i(
+                TAG,
+                "[LENS_ROLE_SWAP] previous active session closed: device=${roleSwap.previousDevice.id}, " +
+                    "elapsedMs=$elapsedMs; CameraDevice retained",
+            )
+            startRoleSwapDemotionIfReady(roleSwap)
+        }
         // A delayed close callback from the old session must not clear its replacement.
         if (session == null || captureSession !== session) return
         captureSession = null
@@ -10041,6 +10391,19 @@ class Camera2Controller(private val context: Context) {
     }
 
     private fun safeCloseCaptureSession(session: CameraCaptureSession?, reason: String) {
+        // During role swap, wait for Camera2's asynchronous onClosed callback before
+        // configuring the retained device as standby. clearCameraSessionState() owns
+        // resetting the active references in this path.
+        if (session != null && activeCameraRoleSwap?.previousSession === session) {
+            try {
+                session.close()
+            } catch (e: SecurityException) {
+                PLog.w(TAG, "Ignoring SecurityException while closing role-swap session ($reason): ${e.message}")
+            } catch (e: Exception) {
+                PLog.e(TAG, "Error closing role-swap session ($reason)", e)
+            }
+            return
+        }
         invalidateCaptureSession(session, reason)
         try {
             session?.close()
