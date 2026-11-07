@@ -13,7 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Settings
-import com.hinnka.mycamera.ui.components.ScaledIcon as Icon
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -199,7 +199,6 @@ fun LutSelector(
     onEditClick: (() -> Unit)? = null,
     showEditButtonWhenNoLut: Boolean = false,
     onManageClick: ((String) -> Unit)? = null,
-    showManagementButton: Boolean = true,
     categoryOrder: List<String> = emptyList(),
     headerContent: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -339,7 +338,7 @@ fun LutSelector(
                                 LutEditButton(onClick = onEditClick)
                             }
 
-                            if (onManageClick != null && showManagementButton) {
+                            if (onManageClick != null) {
                                 var lastClickTime by remember { mutableLongStateOf(0L) }
                                 LutPanelIconButton(
                                     imageVector = Icons.Default.Settings,
