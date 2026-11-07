@@ -22,6 +22,7 @@ object VideoCapabilitiesResolver {
         characteristics: CameraCharacteristics,
         requestedConfig: VideoConfig,
         algorithmicStabilizationSupported: Boolean = false,
+        torchSupported: Boolean? = null,
     ): VideoCapabilitySnapshot {
         // Resolve from one metadata snapshot. Session caches are cleared while reopening,
         // which must not turn a supported user selection into an unsupported capability.
@@ -34,7 +35,11 @@ object VideoCapabilitiesResolver {
         val availableOpticalStabilizationModes = characteristics.get(
             CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION
         ) ?: intArrayOf()
-        val isFlashSupported = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
+        // A logical multi-camera may route preview through a physical sensor whose
+        // metadata reports no flash even though the logical CameraDevice owns a torch.
+        // The controller supplies that logical-device capability when available.
+        val isFlashSupported = torchSupported
+            ?: (characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false)
         val streamConfigMap = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         val previewOutputSizes = streamConfigMap?.getOutputSizes(SurfaceTexture::class.java)?.toList().orEmpty()
         val yuvOutputSizes = streamConfigMap?.getOutputSizes(ImageFormat.YUV_420_888)?.toList().orEmpty()
