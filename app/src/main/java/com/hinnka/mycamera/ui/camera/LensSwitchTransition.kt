@@ -141,8 +141,8 @@ internal class LensSwitchTransitionState(
                             if (!frameRendered) {
                                 PLog.w(
                                     "LensSwitchTransition",
-                                    "Timed out waiting for incoming preview frame \${frameIndex + 1} " +
-                                        "from camera " + request.cameraId,
+                                    "Timed out waiting for incoming preview frame " + (frameIndex + 1) +
+                                        " from camera " + request.cameraId,
                                 )
                                 break
                             }
