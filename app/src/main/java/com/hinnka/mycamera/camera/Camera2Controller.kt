@@ -2655,7 +2655,7 @@ class Camera2Controller(private val context: Context) {
         }
         val handler = cameraHandler
         if (handler != null && Looper.myLooper() != handler.looper) {
-            handler.post(update)
+            handler.post { update() }
         } else {
             update()
         }
@@ -2731,7 +2731,7 @@ class Camera2Controller(private val context: Context) {
                 PLog.i(
                     TAG,
                     "[AUTO_LENS_SWITCH] Main AF is struggling on a close subject; " +
-                        "switching to ultra-wide camera \${ultraWideCamera.cameraId}",
+                        "switching to ultra-wide camera " + ultraWideCamera.cameraId,
                 )
                 mainHandler.post {
                     if (autoSwitchToUltraWideEnabled &&
@@ -2771,7 +2771,7 @@ class Camera2Controller(private val context: Context) {
                 PLog.i(
                     TAG,
                     "[AUTO_LENS_SWITCH] Main AF recovered for a distant subject; " +
-                        "switching back to main camera \${mainCamera.cameraId}",
+                        "switching back to main camera " + mainCamera.cameraId,
                 )
                 mainHandler.post {
                     if (autoSwitchToUltraWideEnabled &&
