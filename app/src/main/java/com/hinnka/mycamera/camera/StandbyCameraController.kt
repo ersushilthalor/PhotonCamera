@@ -790,6 +790,7 @@ class StandbyCameraController(context: Context) {
                             val callbacks = adoptedDeviceCallbacks
                             adoptedCameraDevice = null
                             adoptedDeviceCallbacks = null
+                            controllerOpenedCameraDevices.remove(camera)
                             if (callbacks != null) {
                                 callbacks.onClosed(camera)
                                 return
@@ -806,8 +807,14 @@ class StandbyCameraController(context: Context) {
                             closingCameraDevice = null
                         }
                         if (standbyCameraDevice === camera) {
+                            val wasUnexpectedClose = closingCameraDevice !== camera &&
+                                activePlan != null &&
+                                _status.value.phase != StandbyCameraPhase.FAILED
                             standbyCameraDevice = null
                             standbyStateCallbackOwned = false
+                            if (wasUnexpectedClose) {
+                                failCurrentPlan("Standby CameraDevice closed unexpectedly: ${camera.id}", null)
+                            }
                         }
                         if (openRequestGeneration == null && closingCameraDevice == null) {
                             setDeviceTransitioning(false)
@@ -881,6 +888,14 @@ class StandbyCameraController(context: Context) {
         )
 
         val livePreviewSurface = plan.previewSurface.takeIf { includeAlternatePreviewSurface }
+        if (plan.previewSurface == null) {
+            standbyReaderOnlyFallback = true
+            PLog.w(
+                TAG,
+                "Standby reader-only fallback activated: camera=${camera.id}, " +
+                    "stage=plan, reason=alternate GL preview Surface unavailable",
+            )
+        }
         if (!includeAlternatePreviewSurface) standbyReaderOnlyFallback = true
         try {
             val builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
@@ -1182,6 +1197,7 @@ class StandbyCameraController(context: Context) {
         matchedFrameCount = 0
 
         closeSessionAndReader()
+        standbyStateCallbackOwned = false
         val device = standbyCameraDevice
         if (device != null) {
             PLog.d(TAG, "Releasing standby camera " + device.id + ": " + reason)
