@@ -306,6 +306,7 @@ class Camera2Controller(private val context: Context) {
     private var captureSession: CameraCaptureSession? = null
     private var activeCameraRoleSwap: CameraRoleSwap? = null
     private var roleSwapFallbackDeviceAwaitingClose: CameraDevice? = null
+    private var retainedStandbyRepreparePending = false
     private var previewRequestBuilder: CaptureRequest.Builder? = null
     private var previewSessionGeneration: Long = 0L
     private val previewUpdateScheduled = AtomicBoolean(false)
@@ -2942,6 +2943,48 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    private fun reprepareStandbyAfterRetainedFailure(reason: String) {
+        if (
+            activeCameraRoleSwap != null ||
+            retainedStandbyRepreparePending ||
+            standbyCameraController.status.value.phase != StandbyCameraPhase.FAILED
+        ) {
+            return
+        }
+        val handler = cameraHandler ?: return
+        retainedStandbyRepreparePending = true
+        PLog.w(TAG, "Retained standby failed; scheduling same-device-count cold re-prepare: reason=$reason")
+        handler.post {
+            standbyCameraController.whenDeviceIdle {
+                retainedStandbyRepreparePending = false
+                val state = _state.value
+                if (
+                    cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN &&
+                    cameraDevice != null &&
+                    state.captureMode == CaptureMode.PHOTO &&
+                    !state.videoRecordingState.isRecording &&
+                    !state.videoRecordingState.isProcessing
+                ) {
+                    standbyCameraController.prepare(
+                        activeCamera = state.getCurrentCameraInfo(),
+                        availableCameras = state.availableCameras,
+                        activeOpenCameraId = activeOpenCameraId,
+                        previewSize = state.currentPreviewSize,
+                        callbackHandler = handler,
+                        previewSurface = alternatePreviewSurface,
+                        previewSurfaceTexture = alternatePreviewSurfaceTexture,
+                        onPreviewSizeChanged = onAlternatePreviewSizeChanged,
+                    )
+                } else {
+                    PLog.i(
+                        TAG,
+                        "Skipping standby re-prepare because active camera is not in an idle photo preview",
+                    )
+                }
+            }
+        }
+    }
+
     private fun queueRoleSwapColdFallback(reason: String) {
         val transaction = activeCameraRoleSwap ?: return
         activeCameraRoleSwap = null
@@ -3088,6 +3131,7 @@ class Camera2Controller(private val context: Context) {
                 if (camera !== cameraDevice &&
                     standbyCameraController.handleRetainedDeviceDisconnected(camera)
                 ) {
+                    reprepareStandbyAfterRetainedFailure("retained camera disconnected: ${camera.id}")
                     return
                 }
                 if (camera !== cameraDevice &&
@@ -3120,6 +3164,9 @@ class Camera2Controller(private val context: Context) {
                 if (camera !== cameraDevice &&
                     standbyCameraController.handleRetainedDeviceError(camera, error)
                 ) {
+                    reprepareStandbyAfterRetainedFailure(
+                        "retained camera error: ${camera.id}, error=$error",
+                    )
                     return
                 }
                 if (camera !== cameraDevice &&
@@ -3177,7 +3224,10 @@ class Camera2Controller(private val context: Context) {
             }
 
             override fun onClosed(camera: CameraDevice) {
-                if (standbyCameraController.handleRetainedDeviceClosed(camera)) return
+                if (standbyCameraController.handleRetainedDeviceClosed(camera)) {
+                    reprepareStandbyAfterRetainedFailure("retained camera closed: ${camera.id}")
+                    return
+                }
                 if (standbyCameraController.isHandoffDevice(camera)) {
                     PLog.w(TAG, "[LENS_ROLE_SWAP] handoff device closed before promotion: ${camera.id}")
                     queueRoleSwapColdFallback("handoff device closed before promotion")
