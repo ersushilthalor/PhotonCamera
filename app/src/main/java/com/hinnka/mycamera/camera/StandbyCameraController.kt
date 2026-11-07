@@ -146,6 +146,8 @@ class StandbyCameraController(context: Context) {
                 camera != null &&
                 camera.id == expectedOpenCameraId &&
                 standbyCaptureSession != null &&
+                plan.previewSurface != null &&
+                !standbyReaderOnlyFallback &&
                 _status.value.phase == StandbyCameraPhase.READY &&
                 matchedFrameCount >= REQUIRED_MATCHED_FRAMES
             if (!ready || camera == null || plan == null) {
@@ -365,29 +367,6 @@ class StandbyCameraController(context: Context) {
                 lensType = plan.lensType,
                 message = "Reconfiguring retained CameraDevice as lightweight standby",
             )
-            reader.setOnImageAvailableListener({ source ->
-                if (openGeneration != generation || source !== standbyImageReader) {
-                    runCatching { source.acquireLatestImage()?.close() }
-                    return@setOnImageAvailableListener
-                }
-                val image = try {
-                    source.acquireLatestImage()
-                } catch (error: IllegalStateException) {
-                    PLog.w(TAG, "Retained standby frame acquisition failed", error)
-                    null
-                } ?: return@setOnImageAvailableListener
-                try {
-                    val timestamp = image.timestamp
-                    if (timestamp > 0L) {
-                        receivedFrameCount += 1L
-                        rememberTimestamp(imageTimestamps, timestamp)
-                        updateReadinessFromMatchedFrames(openGeneration)
-                    }
-                } finally {
-                    image.close()
-                }
-            }, callbackHandler)
-
             PLog.i(
                 TAG,
                 "Role-swap demotion started: retained=${camera.id}, active=${plan.activeOpenCameraId}, " +
