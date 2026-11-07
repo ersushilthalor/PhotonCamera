@@ -1,7 +1,6 @@
 <resources>
     <string name="camera_video_fps_unavailable">Recording is unavailable because the camera did not provide valid frame rate ranges.</string>
     <string name="app_name">Photon Camera</string>
-    <string name="settings_category_photon">Photon</string>
 
     <!-- Camera Controls -->
     <string name="switch_camera">Switch Camera</string>
@@ -9,7 +8,6 @@
     <string name="flash">Flash</string>
     <string name="timer">Timer</string>
     <string name="toolbox_title">Toolbox</string>
-    <string name="settings_toolbox_description">Open camera tools and utilities.</string>
     <string name="toolbox_description">Utility tools and creative features</string>
     <string name="film_library_title">Film Library</string>
     <string name="film_library_desc">Explore a wide range of film stocks and their characteristics.</string>
@@ -1424,14 +1422,4 @@
     <string name="oppo_refocus_plane_count">Plane %1$d of %2$d</string>
     <string name="oppo_refocus_near">Near</string>
     <string name="oppo_refocus_far">Far</string>
-    <string name="quick_settings_photo_title">Photo settings</string>
-    <string name="quick_settings_video_title">Video settings</string>
-    <string name="quick_settings_more">More settings</string>
-    <string name="quick_settings_general">General</string>
-    <string name="quick_settings_pro">Pro</string>
-    <string name="quick_settings_on">On</string>
-    <string name="quick_settings_jpeg">JPEG</string>
-    <string name="quick_settings_timer_seconds">%1$d s</string>
-    <string name="quick_settings_fps">%1$d FPS</string>
-    <string name="quick_settings_hdr">HDR</string>
 </resources>
