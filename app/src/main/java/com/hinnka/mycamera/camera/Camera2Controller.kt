@@ -4418,6 +4418,14 @@ class Camera2Controller(private val context: Context) {
                     previewSurface = alternatePreviewSurface,
                     previewSurfaceTexture = alternatePreviewSurfaceTexture,
                     onPreviewSizeChanged = onAlternatePreviewSizeChanged,
+                    requestTemplateType = if (
+                        standbyState.captureMode == CaptureMode.VIDEO &&
+                        !shouldUseVideoEnhancedStabilization()
+                    ) {
+                        CameraDevice.TEMPLATE_RECORD
+                    } else {
+                        CameraDevice.TEMPLATE_PREVIEW
+                    },
                 )
             } else {
                 standbyCameraController.release("standby disabled while video recording is active")
