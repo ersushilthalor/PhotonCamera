@@ -2816,8 +2816,7 @@ class Camera2Controller(private val context: Context) {
                 queuedRoleSwapSurfaceTexture = null
                 queuedRoleSwapPreserveVideoRecording = false
                 prewarmedDevice?.let {
-                    standbyCameraController.markHandoffDeviceActive(it)
-                    closeCameraDeviceAndAwait(it, "stale role-swap handoff", blocksLifecycle = false)
+                    standbyCameraController.discardHandoffDevice(it, "stale role-swap handoff")
                 }
                 if (cameraDevice === activeDevice && cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN) {
                     standbyCameraController.prepare(
@@ -2845,6 +2844,12 @@ class Camera2Controller(private val context: Context) {
                         "target=${targetCamera.cameraId}, prewarmed=${prewarmedDevice?.id}",
                 )
                 activeCameraRoleSwap = null
+                prewarmedDevice?.let {
+                    standbyCameraController.discardHandoffDevice(
+                        it,
+                        "handoff did not match requested target or active-session ownership changed",
+                    )
+                }
                 val fallbackRequest = consumeQueuedRoleSwapRequest(transaction)
                 pendingCameraOpenRequest = fallbackRequest
                 closeCameraInternal(
