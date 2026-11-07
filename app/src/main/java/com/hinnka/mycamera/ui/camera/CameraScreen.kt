@@ -24,7 +24,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
-import com.hinnka.mycamera.ui.components.ScaledIcon as Icon
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -100,6 +99,7 @@ import com.hinnka.mycamera.ui.icons.AppIcons
  */
 enum class ActivePanel {
     NONE,
+    SETTINGS,
     FILTERS,
     EDIT,
     PRESETS
@@ -119,9 +119,8 @@ private const val DefaultShutterSpeedNs = 1_000_000_000f / 60f
 private const val DefaultIso = 100f
 private const val DefaultAwbTemperature = 5000f
 private const val DefaultFocusDistance = 0f
-private val CameraTopBarBaseTopPadding = 20.dp
-private val VideoTopBarBaseTopPadding = 24.dp
-private val CameraTopBarBaseHeight = 64.dp
+private val CameraTopBarBaseTopPadding = 32.dp
+private val CameraTopBarBaseHeight = 80.dp
 private val VideoTopBarBaseHeight = 80.dp
 private val VideoTopBarLoweredOffset = 36.dp
 private val XpanViewfinderInnerBorder = 4.dp
@@ -133,7 +132,7 @@ private fun formatVirtualApertureFStop(aperture: Float): String {
 }
 
 @Composable
-private fun cameraTopSafePadding(baseTopPadding: Dp): Dp {
+private fun cameraTopSafePadding(): Dp {
     val density = LocalDensity.current
     val topInset = with(density) {
         maxOf(
@@ -141,7 +140,7 @@ private fun cameraTopSafePadding(baseTopPadding: Dp): Dp {
             WindowInsets.displayCutout.getTop(this).toDp()
         )
     }
-    return (topInset - baseTopPadding).coerceAtLeast(0.dp)
+    return (topInset - CameraTopBarBaseTopPadding).coerceAtLeast(0.dp)
 }
 
 private fun Bitmap.copyForCaptureAnimation(): Bitmap? {
@@ -343,7 +342,6 @@ fun CameraScreen(
 
     // UI State
     var activePanel by remember { mutableStateOf(ActivePanel.NONE) }
-    var showQuickSettings by remember { mutableStateOf(false) }
     var selectedParameter by remember { mutableStateOf(CameraParameter.EXPOSURE_COMPENSATION) }
     var showParameterRuler by remember(state.captureMode, state.useRaw) { mutableStateOf(false) }
     val isXpan = state.aspectRatio == AspectRatio.XPAN
@@ -575,8 +573,6 @@ fun CameraScreen(
             return
         }
         cancelZoomStopAnimation()
-        // Even a warmed camera must wait for its new active session and first rendered GL
-        // frame. Keep the last presented viewfinder frame over the Camera2 reconfiguration gap.
         lensSwitchTransition.switchLens(cameraId, targetZoom) { viewModel.switchToLens(cameraId) }
     }
 
@@ -599,8 +595,6 @@ fun CameraScreen(
             currentCameraId
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            // Use the rendered-frame transition for warmed handoffs too; the standby session
-            // still has to become the active capture session before its preview can continue.
             lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
                 viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
             }
@@ -626,8 +620,6 @@ fun CameraScreen(
             currentCameraId
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            // Use the rendered-frame transition for warmed handoffs too; the standby session
-            // still has to become the active capture session before its preview can continue.
             lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
                 viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
             }
@@ -900,9 +892,7 @@ fun CameraScreen(
         val density = LocalDensity.current
         val width = with(density) { constraints.maxWidth.toDp() }
         val height = with(density) { constraints.maxHeight.toDp() }
-        val topSafePadding = cameraTopSafePadding(
-            if (isVideoMode) VideoTopBarBaseTopPadding else CameraTopBarBaseTopPadding
-        )
+        val topSafePadding = cameraTopSafePadding()
         val topBarOffset = 0.dp
         val topBarBaseHeight = if (isVideoMode) {
             VideoTopBarBaseHeight
@@ -923,9 +913,7 @@ fun CameraScreen(
             (contentHeight - topBarBottom - CameraControlsLayoutDefaults.XpanViewfinderClearance)
                 .coerceAtLeast(viewfinderFramePadding)
         } else {
-            // Keep the preview above the zoom bar, shutter/gallery row, and mode selector.
-            (contentHeight - topBarBottom - CameraControlsLayoutDefaults.BottomControlsReservedHeight)
-                .coerceAtLeast(0.dp)
+            contentHeight
         }
         val maxViewfinderContentWidth = (maxCardWidth - viewfinderFramePadding)
             .coerceAtLeast(0.dp)
@@ -941,9 +929,7 @@ fun CameraScreen(
         val placeViewfinderBelowTopBar = contentHeight - cardHeight >= topBarBottom
         // Balance small previews between the toolbar and collapsed controls. Reserving both
         // bars first prevents the downward shift from pushing parameters back into the image.
-        val extraViewfinderTopSpacing = if (isXpan || previewAspectRatio < 1f) {
-            // Portrait viewfinders begin immediately below the top bar, matching the
-            // edge-to-edge camera framing. Landscape previews retain balanced centering.
+        val extraViewfinderTopSpacing = if (isXpan) {
             0.dp
         } else {
             ((contentHeight - topBarBottom - cardHeight -
@@ -990,8 +976,7 @@ fun CameraScreen(
                     viewModel.setVideoHdrEnabled(!videoHdrEnabled)
                 },
                 onSettingsClick = {
-                    activePanel = ActivePanel.NONE
-                    showQuickSettings = true
+                    activePanel = if (activePanel == ActivePanel.SETTINGS) ActivePanel.NONE else ActivePanel.SETTINGS
                 },
                 modifier = Modifier
                     .padding(top = topSafePadding)
@@ -1010,13 +995,15 @@ fun CameraScreen(
                     onZoomStopClick = { animateZoomStopWithPreviewTransition(it) },
                     onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
                     onFilterClick = {
-                        // Open the horizontal LUT strip in both Photo and Video.
-                        // The selector's Edit action opens the color-adjustment sheet.
-                        if (activePanel == ActivePanel.FILTERS) {
-                            activePanel = ActivePanel.NONE
+                        if (isVideoMode) {
+                            // Open the regular LUT selector; its Edit action opens adjustments.
+                            activePanel = if (activePanel == ActivePanel.FILTERS) {
+                                ActivePanel.NONE
+                            } else {
+                                ActivePanel.FILTERS
+                            }
                         } else {
-                            viewModel.setLutSelectorMode(LutSelectorMode.Style)
-                            activePanel = ActivePanel.FILTERS
+                            activePanel = if (activePanel == ActivePanel.EDIT) ActivePanel.NONE else ActivePanel.EDIT
                         }
                     },
                     onFilterButtonBoundsChanged = { bounds ->
@@ -1141,9 +1128,7 @@ fun CameraScreen(
         val viewfinder = @Composable {
             Card(
                 modifier = Modifier
-                    // GLSurfaceView is backed by an independent SurfaceView layer. Animating
-                    // this host while photo/video aspect ratios change can leave that surface
-                    // at its previous position. The preview transition already masks mode changes.
+                    .animateContentSize(alignment = Alignment.Center)
                     .width(cardWidth)
                     .height(cardHeight),
                 shape = RoundedCornerShape(if (isXpan) XpanViewfinderInnerBorder else 0.dp),
@@ -1562,13 +1547,15 @@ fun CameraScreen(
                             onZoomStopClick = { animateZoomStopWithPreviewTransition(it) },
                             onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
                             onFilterClick = {
-                                // Open the horizontal LUT strip in both Photo and Video.
-                                // The selector's Edit action opens the color-adjustment sheet.
-                                if (activePanel == ActivePanel.FILTERS) {
-                                    activePanel = ActivePanel.NONE
+                                if (isVideoMode) {
+                                    // Open the regular LUT selector; its Edit action opens adjustments.
+                                    activePanel = if (activePanel == ActivePanel.FILTERS) {
+                                        ActivePanel.NONE
+                                    } else {
+                                        ActivePanel.FILTERS
+                                    }
                                 } else {
-                                    viewModel.setLutSelectorMode(LutSelectorMode.Style)
-                                    activePanel = ActivePanel.FILTERS
+                                    activePanel = if (activePanel == ActivePanel.EDIT) ActivePanel.NONE else ActivePanel.EDIT
                                 }
                             },
                             onFilterButtonBoundsChanged = { bounds ->
@@ -1668,13 +1655,13 @@ fun CameraScreen(
                 contentAlignment = Alignment.Center
             ) {
                 viewfinder()
-                if (activePanel == ActivePanel.NONE && !isXpan) {
+                if (uiStyle == "OPPO" && activePanel == ActivePanel.NONE && !isXpan) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
-                            .height(CameraControlsLayoutDefaults.ZoomBarHeight)
-                            .offset(y = CameraControlsLayoutDefaults.ZoomBarDownwardOffset),
+                            .padding(bottom = 8.dp)
+                            .height(CameraControlsLayoutDefaults.ZoomBarHeight),
                         contentAlignment = Alignment.Center
                     ) {
                         zoomBar()
@@ -1715,11 +1702,20 @@ fun CameraScreen(
             CameraBottomControlsLayout(
                 viewfinderBottom = viewfinderTop + cardHeight,
                 modifier = Modifier.fillMaxSize(),
-                // The zoom selector is overlaid at the lower edge of the viewfinder.
-                // Keep this measurement slot empty so it cannot shift the shutter or
-                // reserve a second row beneath the preview.
                 zoomBar = {
-                    Spacer(modifier = Modifier.height(0.dp))
+                    // Panel visibility changes the zoom content, not the space used to
+                    // position the parameter row beneath it. XPAN has no horizontal bar.
+                    if (uiStyle != "OPPO" || isXpan) {
+                        Box(
+                            modifier = if (isXpan) Modifier else Modifier
+                                .fillMaxWidth()
+                                .height(CameraControlsLayoutDefaults.ZoomBarHeight)
+                        ) {
+                            zoomBar()
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.height(0.dp))
+                    }
                 },
                 // Hide the manual controls (EV/Tv/ISO/AF/AWB and their value ruler)
                 // in both Photo and Video modes without changing capture functionality.
@@ -1741,12 +1737,100 @@ fun CameraScreen(
             PanelDismissPreviewOverlay(
                 bounds = panelDismissBounds,
                 parentBounds = cameraScreenBounds,
-                dimBackground = false,
+                dimBackground = activePanel == ActivePanel.SETTINGS,
                 onDismiss = { activePanel = ActivePanel.NONE }
             )
         }
 
         // TopSheet for settings
+        CameraTopSheet(
+            visible = activePanel == ActivePanel.SETTINGS,
+            captureMode = state.captureMode,
+            aspectRatio = state.aspectRatio,
+            topSheetAspectRatios = topSheetAspectRatios,
+            onAspectRatioChange = { runPreviewTransition { viewModel.setAspectRatio(it) } },
+            videoAspectRatio = state.videoConfig.aspectRatio,
+            onVideoAspectRatioChange = { runPreviewTransition { viewModel.setVideoAspectRatio(it) } },
+            videoLogProfile = state.videoConfig.logProfile,
+            availableVideoLogProfiles = state.videoCapabilities.availableLogProfiles,
+            onVideoLogProfileChange = { viewModel.setVideoLogProfile(it) },
+            videoBitrate = state.videoConfig.bitrate,
+            onVideoBitrateChange = { viewModel.setVideoBitrate(it) },
+            videoCodec = videoCodec,
+            onVideoCodecChange = { viewModel.setVideoCodec(it) },
+            videoAudioInputId = state.videoConfig.audioInputId,
+            videoAudioInputOptions = videoAudioInputOptions,
+            onVideoAudioInputChange = { viewModel.setVideoAudioInputId(it) },
+            useRaw = useRaw && state.isRawSupported,
+            isRawSupported = state.isRawSupported,
+            rawDcpId = rawDcpId,
+            rawDcpIdsByLens = rawDcpIdsByLens,
+            rawDcpLensOptions = rawDcpLensOptions(state.availableCameras),
+            availableDcps = viewModel.availableDcps,
+            rawHncsFilmCurveMode = rawHncsFilmCurveMode,
+            rawRenderingEngine = rawColorEngine,
+            rawToneMappingParameters = rawToneMappingParameters,
+            rawSpectralFilmSelection = rawSpectralFilmSelection ?: SpectralFilmSelection(rawSpectralFilmStock ?: "kodak_portra_400"),
+            rawSpectralFilmPrint = rawSpectralFilmPrint ?: "kodak_portra_endura",
+            ultraHdrEnabled = ultraHdrEnabled,
+            onUltraHdrToggle = viewModel::setUltraHdrGainMapEnabled,
+            photoPreviewStabilizationEnabled =
+                state.photoPreviewStabilizationEnabled,
+            photoPreviewStabilizationAvailable =
+                viewModel.realtimeStabilizationCoordinator.isCurrentCameraSupported,
+            onPhotoPreviewStabilizationChange =
+                viewModel::setPhotoPreviewStabilizationEnabled,
+            onRawDcpChange = { viewModel.setRawDcpId(it) },
+            onRawDcpIdsByLensChange = { viewModel.setRawDcpIdsByLens(it) },
+            onRawHncsFilmCurveModeChange = { viewModel.setRawHncsFilmCurveMode(it) },
+            onImportRawDcp = { dcpImportLauncher.launch(arrayOf("*/*")) },
+            onDeleteRawDcp = { dcp ->
+                viewModel.deleteRawDcp(dcp.id) { success ->
+                    android.widget.Toast.makeText(
+                        context,
+                        if (success) R.string.raw_dcp_delete_success else R.string.raw_dcp_delete_failed,
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            },
+            onRawColorEngineChange = { viewModel.setRawColorEngine(it) },
+            onRawToneMappingParametersChange = { viewModel.setRawToneMappingParameters(it) },
+            onRawSpectralFilmSelectionChange = { viewModel.setRawSpectralFilmSelection(it) },
+            onRawSpectralFilmPrintChange = { viewModel.setRawSpectralFilmPrint(it) },
+            meteringMode = state.meteringMode,
+            onMeteringModeChange = { viewModel.setMeteringMode(it) },
+            onFilterManageClick = {
+                activePanel = ActivePanel.NONE
+                onFilterManagementClick(null)
+            },
+            onFrameManageClick = {
+                activePanel = ActivePanel.NONE
+                onFrameManagementClick()
+            },
+            onPresetManageClick = {
+                activePanel = ActivePanel.NONE
+                onPresetManagementClick()
+            },
+            onToolboxClick = {
+                activePanel = ActivePanel.NONE
+                onToolboxClick()
+            },
+            onMoreSettingsClick = {
+                activePanel = ActivePanel.NONE
+                onSettingsClick()
+            },
+            useJpgMax = useJpgMax,
+            onJpgMaxToggle = {
+                viewModel.setUseJpgMax(it)
+            },
+            useMultipleExposure = useMultipleExposure,
+            onMultipleExposureToggle = { viewModel.setUseMultipleExposure(it) },
+            oppoPhotoSettings = oppoPhotoSettings,
+            onOppoPhotoSettingsChange = viewModel::updateOppoPhotoSettings,
+            refocusAvailable = state.minimumFocusDistance > 0f,
+            contentTopPadding = CameraTopBarBaseTopPadding + topSafePadding
+        )
+
         // During navigation measurement or window resizing, the viewport can be
         // shorter than the toolbar. The panel then has no available vertical space.
         val filterPanelTop = minOf(
@@ -1852,9 +1936,6 @@ fun CameraScreen(
                         activePanel = ActivePanel.NONE
                         onFilterManagementClick(lutId)
                     },
-                    // Keep per-LUT long-press management, but remove the header shortcut.
-                    // Quick LUT access lives on the right side of the zoom bar.
-                    showManagementButton = false,
                     categoryOrder = categoryOrder,
                     headerContent = if (isVideoLog) {
                         {
@@ -1900,136 +1981,6 @@ fun CameraScreen(
                         captureAnimationSnapshot = null
                     }
                 }
-            )
-        }
-
-        if (showQuickSettings) {
-            val flashOffLabel = stringResource(R.string.video_option_off)
-            val flashAutoLabel = stringResource(R.string.video_microphone_auto)
-            val onLabel = stringResource(R.string.quick_settings_on)
-            val offLabel = stringResource(R.string.video_option_off)
-            val timerValue = if (state.timerSeconds == 0) {
-                offLabel
-            } else {
-                stringResource(R.string.quick_settings_timer_seconds, state.timerSeconds)
-            }
-            val flashValue = when (state.flashMode) {
-                1 -> flashAutoLabel
-                2 -> onLabel
-                else -> flashOffLabel
-            }
-            val canChangeQuickSettings = !state.videoRecordingState.isRecording &&
-                !state.videoRecordingState.isProcessing
-            val photoGeneralActions = listOf(
-                QuickSettingAction(
-                    title = stringResource(R.string.flash),
-                    value = flashValue,
-                    active = state.flashMode != 0,
-                    enabled = canChangeQuickSettings,
-                    onClick = viewModel::toggleFlash
-                ),
-                QuickSettingAction(
-                    title = stringResource(R.string.timer),
-                    value = timerValue,
-                    active = state.timerSeconds > 0,
-                    enabled = canChangeQuickSettings,
-                    onClick = viewModel::toggleTimer
-                ),
-                QuickSettingAction(
-                    title = stringResource(R.string.settings_use_live_photo),
-                    value = if (state.useLivePhoto) onLabel else offLabel,
-                    active = state.useLivePhoto,
-                    enabled = canChangeQuickSettings,
-                    onClick = { viewModel.setUseLivePhoto(!state.useLivePhoto) }
-                )
-            )
-            val photoProActions = listOf(
-                QuickSettingAction(
-                    title = stringResource(R.string.settings_use_raw),
-                    value = if (state.useRaw) stringResource(R.string.gallery_raw_badge)
-                    else stringResource(R.string.quick_settings_jpeg),
-                    active = state.useRaw,
-                    enabled = canChangeQuickSettings && state.isRawSupported,
-                    onClick = { viewModel.setUseRaw(!state.useRaw) }
-                )
-            )
-            val availableVideoRatios = state.videoCapabilities.availableAspectRatios
-            val currentVideoRatio = state.videoConfig.aspectRatio
-            val videoGeneralActions = listOf(
-                QuickSettingAction(
-                    title = stringResource(R.string.export_video_select_resolution),
-                    value = state.videoConfig.resolution.displayName,
-                    active = true,
-                    enabled = canChangeQuickSettings &&
-                        state.videoConfig.aspectRatio != VideoAspectRatio.OPEN_GATE,
-                    onClick = { cycleVideoResolution(state)?.let(viewModel::setVideoResolution) }
-                ),
-                QuickSettingAction(
-                    title = stringResource(R.string.video_info_frame_rate),
-                    value = stringResource(R.string.quick_settings_fps, state.videoConfig.fps.fps),
-                    active = true,
-                    enabled = canChangeQuickSettings,
-                    onClick = { cycleVideoFps(state)?.let(viewModel::setVideoFps) }
-                ),
-                QuickSettingAction(
-                    title = stringResource(R.string.video_aspect_chip),
-                    value = currentVideoRatio.getDisplayName(),
-                    active = true,
-                    enabled = canChangeQuickSettings && availableVideoRatios.size > 1,
-                    onClick = {
-                        if (availableVideoRatios.isNotEmpty()) {
-                            val currentIndex = availableVideoRatios.indexOf(currentVideoRatio)
-                            val nextIndex = (currentIndex + 1) % availableVideoRatios.size
-                            viewModel.setVideoAspectRatio(availableVideoRatios[nextIndex])
-                        }
-                    }
-                ),
-                QuickSettingAction(
-                    title = stringResource(R.string.video_torch_chip),
-                    value = if (state.videoConfig.torchEnabled) onLabel else offLabel,
-                    active = state.videoConfig.torchEnabled,
-                    enabled = canChangeQuickSettings && state.videoCapabilities.supportsTorch,
-                    onClick = { viewModel.setVideoTorchEnabled(!state.videoConfig.torchEnabled) }
-                )
-            )
-            val availableStabilizationModes = state.videoCapabilities.availableStabilizationModes
-                .ifEmpty { VideoStabilizationMode.entries }
-            val stabilizationIndex = availableStabilizationModes.indexOf(state.videoConfig.stabilizationMode)
-            val nextStabilizationMode = availableStabilizationModes[
-                (stabilizationIndex + 1) % availableStabilizationModes.size
-            ]
-            val videoProActions = listOf(
-                QuickSettingAction(
-                    title = stringResource(R.string.settings_video_stabilization_default),
-                    value = state.videoConfig.stabilizationMode.displayName,
-                    active = state.videoConfig.stabilizationMode != VideoStabilizationMode.OFF,
-                    enabled = canChangeQuickSettings && availableStabilizationModes.size > 1,
-                    onClick = { viewModel.setVideoStabilizationMode(nextStabilizationMode) }
-                ),
-                QuickSettingAction(
-                    title = stringResource(R.string.quick_settings_hdr),
-                    value = if (videoHdrEnabled) onLabel else offLabel,
-                    active = videoHdrEnabled,
-                    enabled = canChangeQuickSettings,
-                    onClick = { viewModel.setVideoHdrEnabled(!videoHdrEnabled) }
-                )
-            )
-            QuickSettingsSheet(
-                title = stringResource(
-                    if (isVideoMode) R.string.quick_settings_video_title
-                    else R.string.quick_settings_photo_title
-                ),
-                generalTabLabel = stringResource(R.string.quick_settings_general),
-                proTabLabel = stringResource(R.string.quick_settings_pro),
-                moreSettingsLabel = stringResource(R.string.quick_settings_more),
-                closeDescription = stringResource(R.string.close),
-                generalActions = if (isVideoMode) videoGeneralActions else photoGeneralActions,
-                proActions = if (isVideoMode) videoProActions else photoProActions,
-                onMoreSettings = {
-                    showQuickSettings = false
-                    onSettingsClick()
-                },
-                onDismiss = { showQuickSettings = false }
             )
         }
 
@@ -2171,7 +2122,7 @@ private fun Controls(
                 Box(
                     modifier = Modifier
                         .align(Alignment.CenterStart)
-                        .padding(start = sideControlInset ?: CameraControlsLayoutDefaults.GallerySideInset)
+                        .padding(start = sideControlInset ?: 32.dp)
                         .onGloballyPositioned { coordinates ->
                             onGalleryThumbnailBoundsChanged(coordinates.boundsInRoot())
                         }
@@ -2243,10 +2194,7 @@ private fun Controls(
                         },
                         modifier = Modifier
                             .align(Alignment.CenterStart)
-                            .padding(
-                                start = (sideControlInset ?: CameraControlsLayoutDefaults.GallerySideInset) +
-                                    48.dp + CameraControlsLayoutDefaults.CapturePauseButtonSpacing
-                            )
+                            .padding(start = 100.dp)
                             .size(48.dp)
                             .autoRotate()
                     ) {
