@@ -1,22 +1,5 @@
 package com.hinnka.mycamera.ui.settings
 
-import com.hinnka.mycamera.camera.MeteringMode
-import com.hinnka.mycamera.raw.HncsFilmCurveMode
-import com.hinnka.mycamera.raw.RawRenderingEngine
-import com.hinnka.mycamera.raw.RawToneMappingParameters
-import com.hinnka.mycamera.ui.camera.OppoPhotoPipelineSheet
-import com.hinnka.mycamera.ui.camera.videoAudioInputLabel
-import com.hinnka.mycamera.ui.camera.videoAspectRatioLabel
-import com.hinnka.mycamera.ui.camera.videoLogProfileLabel
-import com.hinnka.mycamera.ui.components.RawRenderingEngineSettingsPanel
-import com.hinnka.mycamera.video.VideoAspectRatio
-import com.hinnka.mycamera.video.VideoBitratePreset
-import com.hinnka.mycamera.video.VideoCodec
-import com.hinnka.mycamera.video.VideoFpsPreset
-import com.hinnka.mycamera.video.VideoLogProfile
-import com.hinnka.mycamera.video.VideoResolutionPreset
-import com.hinnka.mycamera.video.VIDEO_AUDIO_INPUT_AUTO
-
 import com.hinnka.mycamera.ui.components.AppModalBottomSheet
 
 import android.content.Context
@@ -76,7 +59,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import com.hinnka.mycamera.ui.components.ScaledIcon as Icon
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.Switch
@@ -94,7 +77,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -193,7 +175,7 @@ import kotlin.math.roundToInt
 import com.hinnka.mycamera.ui.icons.AppIcons
 
 private enum class SettingsPage {
-    PHOTON,
+    ASSIST,
     FOCUS_LENS,
     CAPTURE_STORAGE,
     VIDEO,
@@ -326,14 +308,9 @@ fun SettingsScreen(
     onVideoFilterManagementClick: () -> Unit,
     onFrameManagementClick: () -> Unit,
     onPresetManagementClick: () -> Unit,
-    onToolboxClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.state.collectAsState()
-    var selectedSettingsPage by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
-    val oppoPhotoSettings by viewModel.oppoPhotoSettings.collectAsState()
-    val rawRenderingEngine by viewModel.rawRenderingEngine.collectAsState()
-    val videoAudioInputOptions by viewModel.videoAudioInputOptions.collectAsState()
     val userPreferences by viewModel.userPreferences.collectAsState()
     val showLevelIndicator by viewModel.showLevelIndicator.collectAsState(initial = false)
     val focusPeakingEnabled by viewModel.focusPeakingEnabled.collectAsState(initial = true)
@@ -445,6 +422,7 @@ fun SettingsScreen(
     val availableFrames = viewModel.availableFrameList
     val previewThumbnail = viewModel.previewThumbnail
 
+    var selectedPage by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
     var isRawSliderAdjusting by remember { mutableStateOf(false) }
     var mainCameraIdOptions by remember { mutableStateOf<List<String>>(emptyList()) }
     var macroCameraIdOptions by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -521,14 +499,12 @@ fun SettingsScreen(
     }
 
     LaunchedEffect(
-        selectedSettingsPage,
         customLensIds,
         lensIdBlacklist,
         preferredMacroCameraId,
         enableLogicalMultiCameraDiscovery,
         logicalCameraBindingWhitelist
     ) {
-        if (selectedSettingsPage != SettingsPage.FOCUS_LENS) return@LaunchedEffect
         mainCameraIdOptions = runCatching {
             viewModel.discoverMainCameraIdOptions()
         }.getOrElse {
@@ -801,7 +777,6 @@ fun SettingsScreen(
     var downloadedUpdateApk by remember { mutableStateOf<File?>(null) }
     var showInstallUpdateDialog by remember { mutableStateOf(false) }
     var showRawBaselineRecipeEditor by remember { mutableStateOf(false) }
-    var showOppoPipelineSheet by remember { mutableStateOf(false) }
     val ghostLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
         onResult = { _ ->
@@ -987,8 +962,9 @@ fun SettingsScreen(
             rippleAlpha = SettingsRippleAlpha
         )
     }
-    val screenTitle = when (selectedSettingsPage) {
-        SettingsPage.PHOTON -> stringResource(R.string.settings_category_photon)
+    val screenTitle = when (selectedPage) {
+        null -> stringResource(R.string.settings_title)
+        SettingsPage.ASSIST -> stringResource(R.string.settings_section_assist)
         SettingsPage.FOCUS_LENS -> stringResource(R.string.settings_section_focus_lens)
         SettingsPage.CAPTURE_STORAGE -> stringResource(R.string.settings_section_capture_storage)
         SettingsPage.VIDEO -> stringResource(R.string.settings_section_video)
@@ -998,15 +974,19 @@ fun SettingsScreen(
         SettingsPage.SYSTEM_CONTROL -> stringResource(R.string.settings_section_system_control)
         SettingsPage.DATA_MAINTENANCE -> stringResource(R.string.settings_section_data_maintenance)
         SettingsPage.HELP_ABOUT -> stringResource(R.string.settings_section_help_about)
-        null -> stringResource(R.string.settings_title)
     }
-    BackHandler {
-        if (selectedSettingsPage != null) selectedSettingsPage = null else onBack()
+
+    BackHandler(enabled = selectedPage != null) {
+        selectedPage = null
     }
-    val settingsScrollState = rememberScrollState()
-    LaunchedEffect(selectedSettingsPage) {
-        settingsScrollState.scrollTo(0)
+    val overviewScrollState = rememberScrollState()
+    val detailScrollState = rememberScrollState()
+    LaunchedEffect(selectedPage) {
+        if (selectedPage != null) {
+            detailScrollState.scrollTo(0)
+        }
     }
+    val settingsScrollState = if (selectedPage == null) overviewScrollState else detailScrollState
 
     CompositionLocalProvider(LocalRippleConfiguration provides settingsRippleConfiguration) {
         Column(
@@ -1023,14 +1003,18 @@ fun SettingsScreen(
                     Text(
                         text = screenTitle,
                         color = Color.White,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Normal
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Medium
                     )
                 },
                 navigationIcon = {
                     IconButton(
                         onClick = {
-                            if (selectedSettingsPage != null) selectedSettingsPage = null else onBack()
+                            if (selectedPage == null) {
+                                onBack()
+                            } else {
+                                selectedPage = null
+                            }
                         },
                         modifier = Modifier.autoRotate()
                     ) {
@@ -1054,16 +1038,19 @@ fun SettingsScreen(
                     .padding(horizontal = 16.dp)
             ) {
                 Spacer(modifier = Modifier.height(16.dp))
-                when (selectedSettingsPage) {
-                    null -> {
-                        SettingsCategoryOverview(
-                            showPremium = !isPurchased,
-                            onPremiumClick = { context.findActivity()?.let(viewModel::purchase) },
-                            onPageSelected = { selectedSettingsPage = it }
-                        )
-                    }
-                SettingsPage.PHOTON -> {
-key("settings-assist") {
+
+            when (selectedPage) {
+                null -> {
+                    SettingsCategoryOverview(
+                        showPremium = !isPurchased,
+                        onPremiumClick = {
+                            context.findActivity()?.let { viewModel.purchase(it) }
+                        },
+                        onPageSelected = { selectedPage = it }
+                    )
+                }
+
+                SettingsPage.ASSIST -> {
                     // 辅助工具
                     SettingsSection(
                         title = stringResource(R.string.settings_section_assist),
@@ -1140,39 +1127,9 @@ key("settings-assist") {
                                 .isCurrentCameraSupported,
                         )
                     }
-
-
-                    SettingsSection(title = stringResource(R.string.metering_mode)) {
-                        val meteringLabels = MeteringMode.entries.map { mode ->
-                            mode to stringResource(
-                                when (mode) {
-                                    MeteringMode.SYSTEM_DEFAULT -> R.string.metering_system_default
-                                    MeteringMode.CENTER_WEIGHTED -> R.string.metering_center_weighted
-                                    MeteringMode.SPOT -> R.string.metering_spot
-                                    MeteringMode.AVERAGE -> R.string.metering_average
-                                    MeteringMode.HIGHLIGHT_PRIORITY -> R.string.metering_highlight_priority
-                                }
-                            )
-                        }
-                        val selectedMeteringLabel = meteringLabels.first { it.first == state.meteringMode }.second
-                        DropdownSettingItem(
-                            title = stringResource(R.string.metering_mode),
-                            value = selectedMeteringLabel,
-                            options = meteringLabels.map { it.second },
-                            isLoading = false,
-                            onExpanded = {},
-                            onOptionSelected = { label ->
-                                meteringLabels.firstOrNull { it.second == label }?.first?.let(viewModel::setMeteringMode)
-                            }
-                        )
-                    }
-
-
-                }
                 }
 
                 SettingsPage.FOCUS_LENS -> {
-key("settings-focus_lens") {
                     // 对焦与镜头
                     SettingsSection(
                         title = stringResource(R.string.settings_focus_lens_group_autofocus)
@@ -1404,50 +1361,9 @@ key("settings-focus_lens") {
                             onClick = { showCustomVendorKeysDialog = true }
                         )
                     }
-
-
-                    if (useRaw && state.isRawSupported) {
-                        Spacer(modifier = Modifier.height(20.dp))
-                        SettingsSection(title = stringResource(R.string.settings_raw_color_engine)) {
-                            RawRenderingEngineSettingsPanel(
-                                selectedDcpId = rawDcpId,
-                                rawDcpIdsByLens = rawDcpIdsByLens,
-                                dcpLensOptions = rawDcpLensOptions(state.availableCameras),
-                                availableDcps = availableDcps,
-                                rawRenderingEngine = rawRenderingEngine,
-                                rawToneMappingParameters = rawToneMappingParameters,
-                                spectralFilmSelection = rawSpectralFilmSelection,
-                                spectralFilmPrint = rawSpectralFilmPrint,
-                                onSelectDcp = viewModel::setRawDcpId,
-                                onRawDcpIdsByLensChange = viewModel::setRawDcpIdsByLens,
-                                onImportDcp = { importDcpLauncher.launch(arrayOf("*/*")) },
-                                onDeleteDcp = { dcp ->
-                                    viewModel.deleteRawDcp(dcp.id) { success ->
-                                        android.widget.Toast.makeText(
-                                            context,
-                                            if (success) R.string.raw_dcp_delete_success else R.string.raw_dcp_delete_failed,
-                                            android.widget.Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                },
-                                onRawColorEngineChange = viewModel::setRawColorEngine,
-                                onRawToneMappingParametersChange = viewModel::setRawToneMappingParameters,
-                                onSpectralFilmSelectionChange = viewModel::setRawSpectralFilmSelection,
-                                onSpectralFilmPrintChange = viewModel::setRawSpectralFilmPrint,
-                                hncsFilmCurveMode = rawHncsFilmCurveMode,
-                                onHncsFilmCurveModeChange = viewModel::setRawHncsFilmCurveMode,
-                                inlineEngineOptions = true,
-                                showToneMappingControls = true
-                            )
-                        }
-                    }
-
-
-                }
                 }
 
                 SettingsPage.CAPTURE_STORAGE -> {
-key("settings-capture_storage") {
                     // 拍摄行为
                     SettingsSection(
                         title = stringResource(R.string.settings_section_capture_storage),
@@ -1632,67 +1548,9 @@ key("settings-capture_storage") {
                             }
                         )
                     }
-
-
-                    SettingsSection(title = stringResource(R.string.oppo_custom_pipeline)) {
-                        SwitchSettingItem(
-                            title = stringResource(R.string.oppo_auto_hdr),
-                            checked = oppoPhotoSettings.autoHdrEnabled,
-                            onCheckedChange = { enabled ->
-                                viewModel.updateOppoPhotoSettings(
-                                    oppoPhotoSettings.copy(
-                                        autoHdrEnabled = enabled,
-                                        refocusEnabled = if (enabled) false else oppoPhotoSettings.refocusEnabled
-                                    )
-                                )
-                            }
-                        )
-                        SwitchSettingItem(
-                            title = stringResource(R.string.oppo_fast_shutter),
-                            checked = oppoPhotoSettings.fastShutterEnabled,
-                            onCheckedChange = { enabled ->
-                                viewModel.updateOppoPhotoSettings(oppoPhotoSettings.copy(fastShutterEnabled = enabled))
-                            }
-                        )
-                        SwitchSettingItem(
-                            title = stringResource(R.string.oppo_refocus),
-                            checked = oppoPhotoSettings.refocusEnabled,
-                            enabled = state.minimumFocusDistance > 0f,
-                            onCheckedChange = { enabled ->
-                                viewModel.updateOppoPhotoSettings(
-                                    oppoPhotoSettings.copy(
-                                        refocusEnabled = enabled,
-                                        autoHdrEnabled = if (enabled) false else oppoPhotoSettings.autoHdrEnabled
-                                    )
-                                )
-                            }
-                        )
-                        SwitchSettingItem(
-                            title = stringResource(R.string.oppo_enable_custom_pipeline),
-                            checked = oppoPhotoSettings.customPipelineEnabled,
-                            onCheckedChange = { enabled ->
-                                viewModel.updateOppoPhotoSettings(oppoPhotoSettings.copy(customPipelineEnabled = enabled))
-                            }
-                        )
-                        NavigationSettingItem(
-                            title = stringResource(R.string.oppo_custom_pipeline),
-                            description = stringResource(R.string.oppo_enable_custom_pipeline),
-                            onClick = { showOppoPipelineSheet = true }
-                        )
-                    }
-                    SwitchSettingItem(
-                        title = stringResource(R.string.settings_ultra_hdr_gain_map),
-                        description = stringResource(R.string.settings_ultra_hdr_gain_map_description),
-                        checked = ultraHdrGainMapEnabled,
-                        onCheckedChange = viewModel::setUltraHdrGainMapEnabled
-                    )
-
-
-                }
                 }
 
                 SettingsPage.VIDEO -> {
-key("settings-video") {
                     val stabilizationModes = state.videoCapabilities
                         .availableStabilizationModes
                         .ifEmpty {
@@ -1721,101 +1579,6 @@ key("settings-video") {
                         title = stringResource(R.string.settings_section_video),
                         showTitle = false
                     ) {
-
-                        val resolutionOptions = state.videoCapabilities.availableResolutions
-                            .ifEmpty { VideoResolutionPreset.entries }
-                        DropdownSettingItem(
-                            title = stringResource(R.string.photo_info_resolution),
-                            value = state.videoConfig.resolution.displayName,
-                            options = resolutionOptions.map { it.displayName },
-                            isLoading = false,
-                            onExpanded = {},
-                            enabled = state.videoConfig.aspectRatio != VideoAspectRatio.OPEN_GATE,
-                            onOptionSelected = { label ->
-                                resolutionOptions.firstOrNull { it.displayName == label }?.let(viewModel::setVideoResolution)
-                            }
-                        )
-                        val fpsOptions = state.videoCapabilities.availableFps.ifEmpty { VideoFpsPreset.entries }
-                        DropdownSettingItem(
-                            title = stringResource(R.string.video_info_frame_rate),
-                            value = "${state.videoConfig.fps.fps} FPS",
-                            options = fpsOptions.map { "${it.fps} FPS" },
-                            isLoading = false,
-                            onExpanded = {},
-                            onOptionSelected = { label ->
-                                fpsOptions.firstOrNull { "${it.fps} FPS" == label }?.let(viewModel::setVideoFps)
-                            }
-                        )
-                        val aspectOptions = state.videoCapabilities.availableAspectRatios.ifEmpty { VideoAspectRatio.entries }
-                        val aspectRows = aspectOptions.map { it to videoAspectRatioLabel(it) }
-                        DropdownSettingItem(
-                            title = stringResource(R.string.video_aspect_chip),
-                            value = aspectRows.firstOrNull { it.first == state.videoConfig.aspectRatio }?.second
-                                ?: videoAspectRatioLabel(state.videoConfig.aspectRatio),
-                            options = aspectRows.map { it.second },
-                            isLoading = false,
-                            onExpanded = {},
-                            onOptionSelected = { label ->
-                                aspectRows.firstOrNull { it.second == label }?.first?.let(viewModel::setVideoAspectRatio)
-                            }
-                        )
-                        val logProfileOptions = state.videoCapabilities.availableLogProfiles.ifEmpty { VideoLogProfile.SELECTABLE_PROFILES }
-                        val logProfileRows = logProfileOptions.map { it to videoLogProfileLabel(it) }
-                        DropdownSettingItem(
-                            title = stringResource(R.string.video_log_chip),
-                            value = logProfileRows.firstOrNull { it.first == state.videoConfig.logProfile }?.second
-                                ?: videoLogProfileLabel(state.videoConfig.logProfile),
-                            options = logProfileRows.map { it.second },
-                            isLoading = false,
-                            onExpanded = {},
-                            onOptionSelected = { label ->
-                                logProfileRows.firstOrNull { it.second == label }?.first?.let(viewModel::setVideoLogProfile)
-                            }
-                        )
-                        val bitrateOptions = state.videoCapabilities.availableBitrates.ifEmpty { VideoBitratePreset.entries }
-                        DropdownSettingItem(
-                            title = stringResource(R.string.video_bitrate_chip),
-                            value = "${state.videoConfig.bitrate.bitrateMbps} Mbps",
-                            options = bitrateOptions.map { "${it.bitrateMbps} Mbps" },
-                            isLoading = false,
-                            onExpanded = {},
-                            onOptionSelected = { label ->
-                                bitrateOptions.firstOrNull { "${it.bitrateMbps} Mbps" == label }?.let(viewModel::setVideoBitrate)
-                            }
-                        )
-                        val codecOptions = state.videoCapabilities.availableCodecs.ifEmpty { VideoCodec.entries }
-                        DropdownSettingItem(
-                            title = stringResource(R.string.video_codec_chip),
-                            value = state.videoConfig.codec.displayName,
-                            options = codecOptions.map { it.displayName },
-                            isLoading = false,
-                            onExpanded = {},
-                            onOptionSelected = { label ->
-                                codecOptions.firstOrNull { it.displayName == label }?.let(viewModel::setVideoCodec)
-                            }
-                        )
-                        val audioRows = listOf(VIDEO_AUDIO_INPUT_AUTO to stringResource(R.string.video_microphone_auto)) +
-                            videoAudioInputOptions.map { it.id to videoAudioInputLabel(it) }
-                        DropdownSettingItem(
-                            title = stringResource(R.string.video_microphone_title),
-                            value = audioRows.firstOrNull { it.first == state.videoConfig.audioInputId }?.second
-                                ?: stringResource(R.string.video_microphone_disconnected),
-                            options = audioRows.map { it.second },
-                            isLoading = false,
-                            onExpanded = {},
-                            onOptionSelected = { label ->
-                                audioRows.firstOrNull { it.second == label }?.first?.let(viewModel::setVideoAudioInputId)
-                            }
-                        )
-                        if (state.videoCapabilities.supportsTorch) {
-                            SwitchSettingItem(
-                                title = stringResource(R.string.video_torch_chip),
-                                checked = state.videoConfig.torchEnabled,
-                                onCheckedChange = viewModel::setVideoTorchEnabled
-                            )
-                        }
-
-
                         QualityLevelSetting(
                             title = stringResource(R.string.settings_nr_level),
                             description = stringResource(R.string.settings_video_nr_level_description),
@@ -2097,12 +1860,9 @@ key("settings-video") {
                             }
                         )
                     }
-                
-                }
                 }
 
                 SettingsPage.INTERFACE -> {
-key("settings-interface") {
                     // 界面样式
                     SettingsSection(
                         title = stringResource(R.string.settings_section_interface),
@@ -2197,12 +1957,9 @@ key("settings-interface") {
                             )
                         }
                     }
-                
-                }
                 }
 
                 SettingsPage.CONTENT_MANAGEMENT -> {
-key("settings-content_management") {
                     // 内容管理
                     SettingsSection(
                         title = stringResource(R.string.settings_section_management),
@@ -2236,22 +1993,9 @@ key("settings-content_management") {
                             onClick = onPresetManagementClick
                         )
                     }
-
-
-                    SettingsSection(title = stringResource(R.string.toolbox_title)) {
-                        NavigationSettingItem(
-                            title = stringResource(R.string.toolbox_title),
-                            description = stringResource(R.string.settings_toolbox_description),
-                            onClick = onToolboxClick
-                        )
-                    }
-
-
-                }
                 }
 
                 SettingsPage.AI_SERVICE -> {
-key("settings-ai_service") {
                     // AI 服务设置
                     SettingsSection(
                         title = stringResource(R.string.ai_service),
@@ -2301,12 +2045,9 @@ key("settings-ai_service") {
                             }
                         )
                     }
-                
-                }
                 }
 
                 SettingsPage.SYSTEM_CONTROL -> {
-key("settings-system_control") {
                     // 系统与控制
                     SettingsSection(
                         title = stringResource(R.string.settings_section_system_control),
@@ -2410,12 +2151,9 @@ key("settings-system_control") {
                             onActionSelected = { viewModel.setVolumeKeyAction(it) }
                         )
                     }
-                
-                }
                 }
 
                 SettingsPage.DATA_MAINTENANCE -> {
-key("settings-data_maintenance") {
                     // 数据维护
                     SettingsSection(
                         title = stringResource(R.string.settings_section_data_maintenance),
@@ -2457,12 +2195,9 @@ key("settings-data_maintenance") {
                             onClick = { restoreLauncher.launch("*/*") }
                         )
                     }
-                
-                }
                 }
 
                 SettingsPage.HELP_ABOUT -> {
-key("settings-help_about") {
                     // 帮助与关于
                     val isGoogleFlavor = BuildConfig.FLAVOR == "google"
 
@@ -2621,10 +2356,9 @@ key("settings-help_about") {
                             )
                         }
                     }
-                
                 }
-                }
-                }
+            }
+
                 Spacer(modifier = Modifier.height(32.dp))
             }
         }
@@ -2745,14 +2479,6 @@ key("settings-help_about") {
             showRawBaselineRecipeEditor = false
         }
     }
-    if (showOppoPipelineSheet) {
-        OppoPhotoPipelineSheet(
-            settings = oppoPhotoSettings,
-            onSettingsChange = viewModel::updateOppoPhotoSettings,
-            onDismiss = { showOppoPipelineSheet = false }
-        )
-    }
-
     if (showRawBaselineRecipeEditor) {
         rawBaselineLutId?.let { lutId ->
             LutEditBottomSheet(
@@ -2762,18 +2488,6 @@ key("settings-help_about") {
             )
         }
     }
-}
-
-
-@Composable
-private fun MergedSettingsCategoryTitle(title: String) {
-    Text(
-        text = title,
-        color = MaterialTheme.colorScheme.primary,
-        fontSize = 14.sp,
-        fontWeight = FontWeight.Normal,
-        modifier = Modifier.padding(start = 8.dp, top = 20.dp, bottom = 8.dp)
-    )
 }
 
 @Composable
@@ -2789,14 +2503,13 @@ private fun SettingsCategoryOverview(
 
     SettingsSection(title = stringResource(R.string.settings_tab_camera)) {
         NavigationSettingItem(
-            title = stringResource(R.string.settings_category_photon),
+            title = stringResource(R.string.settings_section_assist),
             description = listOf(
                 stringResource(R.string.settings_grid_lines),
                 stringResource(R.string.settings_level_indicator),
-                stringResource(R.string.settings_focus_peaking),
-                stringResource(R.string.metering_mode)
+                stringResource(R.string.settings_focus_peaking)
             ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.PHOTON) }
+            onClick = { onPageSelected(SettingsPage.ASSIST) }
         )
 
         SettingsCategoryDivider()
@@ -2835,50 +2548,20 @@ private fun SettingsCategoryOverview(
                 stringResource(R.string.settings_edge_level),
                 stringResource(R.string.settings_separate_video_lut),
                 stringResource(R.string.settings_video_lock_lens),
-                stringResource(R.string.settings_video_lock_white_balance)
+                stringResource(R.string.settings_video_lock_white_balance),
+                stringResource(
+                    R.string.settings_storage_path_title,
+                    stringResource(R.string.settings_storage_path_video_title_arg)
+                )
             ).joinToString(" · "),
             onClick = { onPageSelected(SettingsPage.VIDEO) }
         )
+
     }
 
     Spacer(modifier = Modifier.height(24.dp))
 
-    SettingsSection(title = stringResource(R.string.settings_tab_system)) {
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_interface),
-            description = listOf(
-                stringResource(R.string.settings_language),
-                stringResource(R.string.settings_develop_animation)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.INTERFACE) }
-        )
-
-        SettingsCategoryDivider()
-
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_management),
-            description = listOf(
-                stringResource(R.string.settings_filter_management),
-                stringResource(R.string.settings_frame_management),
-                stringResource(R.string.settings_preset_management),
-                stringResource(R.string.toolbox_title)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.CONTENT_MANAGEMENT) }
-        )
-
-        SettingsCategoryDivider()
-
-        NavigationSettingItem(
-            title = stringResource(R.string.ai_service),
-            description = listOf(
-                stringResource(R.string.settings_openai_api_key),
-                stringResource(R.string.settings_ai_model)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.AI_SERVICE) }
-        )
-
-        SettingsCategoryDivider()
-
+SettingsSection(title = stringResource(R.string.settings_tab_system)) {
         NavigationSettingItem(
             title = stringResource(R.string.settings_section_system_control),
             description = listOf(
@@ -2888,28 +2571,6 @@ private fun SettingsCategoryOverview(
                 stringResource(R.string.settings_volume_key_action)
             ).joinToString(" · "),
             onClick = { onPageSelected(SettingsPage.SYSTEM_CONTROL) }
-        )
-
-        SettingsCategoryDivider()
-
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_data_maintenance),
-            description = listOf(
-                stringResource(R.string.settings_backup_settings),
-                stringResource(R.string.settings_restore_settings)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.DATA_MAINTENANCE) }
-        )
-
-        SettingsCategoryDivider()
-
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_help_about),
-            description = listOf(
-                stringResource(R.string.settings_log_viewer),
-                stringResource(R.string.settings_community_group)
-            ).joinToString(" · "),
-            onClick = { onPageSelected(SettingsPage.HELP_ABOUT) }
         )
     }
 }
@@ -2940,9 +2601,9 @@ fun SettingsSection(
         if (showTitle && !isExpandable) {
             Text(
                 text = title,
-                color = MaterialTheme.colorScheme.primary,
+                color = Color.White.copy(alpha = 0.6f),
                 fontSize = 14.sp,
-                fontWeight = FontWeight.Normal,
+                fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(bottom = 12.dp)
             )
         }
@@ -3338,7 +2999,7 @@ fun SwitchSettingItem(
             Text(
                 text = title,
                 color = Color.White.copy(alpha = if (enabled) 1f else 0.38f),
-                fontSize = 17.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Normal
             )
             if (description != null) {
@@ -3346,8 +3007,8 @@ fun SwitchSettingItem(
                 Text(
                     text = description,
                     color = Color.White.copy(alpha = if (enabled) 0.6f else 0.38f),
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
                 )
             }
         }
@@ -3394,7 +3055,7 @@ fun TextInputSettingItem(
             Text(
                 text = title,
                 color = Color.White,
-                fontSize = 17.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Normal
             )
             if (description != null) {
@@ -3402,8 +3063,8 @@ fun TextInputSettingItem(
                 Text(
                     text = description,
                     color = Color.White.copy(alpha = 0.6f),
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
                 )
             }
             if (value.isNotEmpty()) {
@@ -3504,7 +3165,7 @@ fun DropdownSettingItem(
             Text(
                 text = title,
                 color = Color.White.copy(alpha = alpha),
-                fontSize = 17.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Normal
             )
             if (description != null) {
@@ -3512,8 +3173,8 @@ fun DropdownSettingItem(
                 Text(
                     text = description,
                     color = Color.White.copy(alpha = 0.6f * alpha),
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
                 )
             }
             Spacer(modifier = Modifier.height(4.dp))
@@ -3609,15 +3270,15 @@ fun NavigationSettingItem(
             Text(
                 text = title,
                 color = Color.White.copy(alpha = if (enabled || showProgress) 1f else 0.5f),
-                fontSize = 17.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Normal
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = description,
                 color = Color.White.copy(alpha = 0.6f),
-                fontSize = 14.sp,
-                lineHeight = 20.sp
+                fontSize = 13.sp,
+                lineHeight = 18.sp
             )
         }
 
