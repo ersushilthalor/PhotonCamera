@@ -300,6 +300,9 @@ class Camera2Controller(private val context: Context) {
     private var captureSession: CameraCaptureSession? = null
     private var previewRequestBuilder: CaptureRequest.Builder? = null
     private var previewSessionGeneration: Long = 0L
+    private var captureModeSwitchGeneration: Long = 0L
+    @Volatile
+    private var captureModeSessionReconfigurePending = false
     private val previewUpdateScheduled = AtomicBoolean(false)
     private var pendingVendorSessionParameterRestart = false
     private var oppoSuperStabilizationEnabled = false
@@ -2253,6 +2256,7 @@ class Camera2Controller(private val context: Context) {
         }
         previewSessionGeneration++
         pendingPreviewSizeForSession = null
+        captureModeSessionReconfigurePending = false
         previewUpdateScheduled.set(false)
         livePhotoVideoStartTimestampUs = null
         clearPrecaptureTracking()
@@ -4404,6 +4408,7 @@ class Camera2Controller(private val context: Context) {
 
             val configuredPreviewSize = pendingPreviewSizeForSession
             pendingPreviewSizeForSession = null
+            captureModeSessionReconfigurePending = false
             _state.update {
                 it.copy(
                     isPreviewActive = true,
@@ -8135,19 +8140,20 @@ class Camera2Controller(private val context: Context) {
         createPreviewSession()
     }
 
-    fun setCaptureMode(mode: CaptureMode) {
-        if (_state.value.captureMode == mode ||
-            _state.value.videoRecordingState.isRecording ||
-            _state.value.videoRecordingState.isProcessing
+    fun setCaptureMode(mode: CaptureMode, reconfigurePreview: Boolean = true) {
+        val currentState = _state.value
+        if (currentState.captureMode == mode ||
+            currentState.videoRecordingState.isRecording ||
+            currentState.videoRecordingState.isProcessing
         ) {
             return
         }
         val nextVideoConfig = if (mode == CaptureMode.VIDEO) {
-            _state.value.videoConfig
+            currentState.videoConfig
         } else {
-            _state.value.videoConfig.copy(logProfile = VideoLogProfile.OFF)
+            currentState.videoConfig.copy(logProfile = VideoLogProfile.OFF)
         }
-        val nextState = _state.value.copy(
+        val nextState = currentState.copy(
             captureMode = mode,
             videoConfig = nextVideoConfig,
             countdownValue = 0,
@@ -8160,15 +8166,158 @@ class Camera2Controller(private val context: Context) {
             }
         }
         _state.value = nextState
-        if (mode == CaptureMode.VIDEO) {
-            livePhotoRecorder.stopRecording()
-            refreshVideoCapabilities()
-        } else {
-            stopVideoRecordingTicker()
-            _state.value = _state.value.copy(videoRecordingState = VideoRecordingState())
-            if (_state.value.useLivePhoto) {
-                livePhotoRecorder.startRecording()
+
+        // Mode changes replace the CameraCaptureSession, not the CameraDevice or GL
+        // SurfaceTexture. The old implementation closed the device and waited for a new
+        // SurfaceTexture callback; GL may retain the same texture, leaving preview detached.
+        val generation = ++captureModeSwitchGeneration
+        captureModeSessionReconfigurePending = true
+        val transition = Runnable {
+            if (generation != captureModeSwitchGeneration || _state.value.captureMode != mode) {
+                return@Runnable
             }
+
+            val openCameraId = getActiveOpenCameraId()
+            val openCharacteristics = getCameraCharacteristicsOrNull(
+                openCameraId,
+                "capture mode output profile",
+            )
+            val requestedPhysicalCameraId = activeOutputPhysicalCameraId
+                ?.takeIf { it.isNotBlank() && it != openCameraId }
+            val physicalCharacteristics = requestedPhysicalCameraId?.let {
+                getCameraCharacteristicsOrNull(it, "capture mode physical output profile")
+            }
+            val resolvedPhysicalCameraId = requestedPhysicalCameraId
+                ?.takeIf { physicalCharacteristics != null }
+            val outputCharacteristics = physicalCharacteristics ?: openCharacteristics
+
+            val previousSession = captureSession
+            if (mode == CaptureMode.VIDEO) {
+                livePhotoRecorder.stopRecording()
+
+                // A PHOTO ImageReader is part of the old session. Retire it only after
+                // that session closes (or after the replacement configures if its session
+                // callback has not arrived yet).
+                imageReader?.let { previousReader ->
+                    imageReader = null
+                    when {
+                        previousSession != null ->
+                            pendingImageReaderClosures.getOrPut(previousSession) { mutableListOf() }
+                                .add(previousReader)
+                        cameraDevice != null ->
+                            pendingUnboundImageReaderClosures += previousReader
+                        else -> safeCloseImageReader(previousReader)
+                    }
+                }
+
+                val videoPreviewSize = if (outputCharacteristics != null) {
+                    refreshVideoCapabilities(
+                        characteristics = outputCharacteristics,
+                        updatePreviewSize = false,
+                    )
+                } else {
+                    refreshVideoCapabilities(updatePreviewSize = false)
+                }
+                pendingPreviewSizeForSession = videoPreviewSize
+                previewSurfaceTexture?.setDefaultBufferSize(
+                    videoPreviewSize.width,
+                    videoPreviewSize.height,
+                )
+                _state.update {
+                    it.copy(
+                        isP3Supported = false,
+                        currentCaptureSize = videoPreviewSize,
+                    )
+                }
+            } else {
+                stopVideoRecordingTicker()
+                _state.update { it.copy(videoRecordingState = VideoRecordingState()) }
+
+                if (outputCharacteristics != null) {
+                    val profile = resolvePhotoOutputProfile(
+                        characteristics = outputCharacteristics,
+                        physicalCameraId = resolvedPhysicalCameraId,
+                        state = _state.value,
+                    )
+                    isRawSupported = profile.isRawSupported
+                    isP010Supported = profile.isP010Supported
+                    val currentReader = imageReader
+                    val readerMatches = currentReader != null &&
+                        currentReader.width == profile.captureSize.width &&
+                        currentReader.height == profile.captureSize.height &&
+                        currentReader.imageFormat == profile.captureFormat
+                    if (!readerMatches) {
+                        val replacementReader = createPhotoImageReader(
+                            captureSize = profile.captureSize,
+                            captureFormat = profile.captureFormat,
+                        )
+                        imageReader = replacementReader
+                        currentReader?.let { previousReader ->
+                            when {
+                                previousSession != null ->
+                                    pendingImageReaderClosures.getOrPut(previousSession) { mutableListOf() }
+                                        .add(previousReader)
+                                cameraDevice != null ->
+                                    pendingUnboundImageReaderClosures += previousReader
+                                else -> safeCloseImageReader(previousReader)
+                            }
+                        }
+                    }
+                    pendingPreviewSizeForSession = profile.previewSize
+                    previewSurfaceTexture?.setDefaultBufferSize(
+                        profile.previewSize.width,
+                        profile.previewSize.height,
+                    )
+                    _state.update {
+                        it.copy(
+                            isRawSupported = profile.isRawSupported,
+                            isP010Supported = profile.isP010Supported,
+                            isP3Supported = profile.isP3Supported,
+                            currentCaptureSize = profile.captureSize,
+                        )
+                    }
+                } else {
+                    // With the camera closed, openCameraNow() will build the full PHOTO
+                    // output profile and reader when the existing preview texture is opened.
+                    imageReader?.let(::safeCloseImageReader)
+                    imageReader = null
+                    pendingPreviewSizeForSession = null
+                    _state.update { it.copy(isP3Supported = false) }
+                }
+
+                if (_state.value.useLivePhoto) {
+                    livePhotoRecorder.startRecording()
+                }
+            }
+
+            if (reconfigurePreview) {
+                if (cameraDevice != null && previewSurface != null) {
+                    createPreviewSession(openGeneration = cameraOpenGeneration)
+                } else {
+                    captureModeSessionReconfigurePending = false
+                }
+            }
+        }
+
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post(transition)
+        } else {
+            transition.run()
+        }
+    }
+
+    /** Finish a deferred mode switch after the caller has applied mode-specific settings. */
+    fun reconfigurePreviewSession() {
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { reconfigurePreviewSession() }
+            return
+        }
+        if (cameraDevice != null && previewSurface != null) {
+            createPreviewSession(openGeneration = cameraOpenGeneration)
+        } else {
+            captureModeSessionReconfigurePending = false
         }
     }
 
@@ -8229,9 +8378,11 @@ class Camera2Controller(private val context: Context) {
                     "lifecycle=$cameraDeviceLifecycle"
             )
         }
-        previewRequestBuilder?.apply {
-            applyBaseCameraSettings(this, isCapture = false)
-            updatePreview()
+        if (!captureModeSessionReconfigurePending) {
+            previewRequestBuilder?.apply {
+                applyBaseCameraSettings(this, isCapture = false)
+                updatePreview()
+            }
         }
     }
 
