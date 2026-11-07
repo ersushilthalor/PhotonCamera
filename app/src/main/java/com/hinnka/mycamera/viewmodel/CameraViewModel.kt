@@ -1653,6 +1653,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         userPreferencesRepository.userPreferences.map { it.logicalCameraBindingWhitelist }
     val userPreferences: StateFlow<UserPreferences> = userPreferencesRepository.userPreferences
         .stateIn(viewModelScope, SharingStarted.Eagerly, UserPreferences())
+    val keepUltraWideReady: StateFlow<Boolean> = userPreferences
+        .map { it.keepUltraWideReady }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val frameBasedLensHandoffEnabled: StateFlow<Boolean> = userPreferences
+        .map { it.frameBasedLensHandoffEnabled }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val lensSwitchOverlapDurationSec: StateFlow<Float> = userPreferences
+        .map { it.lensSwitchOverlapDurationSec }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0.3f)
+    val autoSwitchToUltraWide: StateFlow<Boolean> = userPreferences
+        .map { it.autoSwitchToUltraWide }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val isAutoMacroActive: StateFlow<Boolean> = cameraController.isAutoMacroActive
     val photoLutId: StateFlow<String?> = userPreferencesRepository.userPreferences
         .map { it.lutId }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -2023,6 +2036,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         private set
 
     init {
+        cameraController.onAutoLensSwitchRequested = { cameraId, zoomRatio ->
+            switchToLensAndSetZoomRatio(cameraId, zoomRatio)
+        }
+        viewModelScope.launch {
+            userPreferences.collect { preferences ->
+                cameraController.setStandbyPreviewEnabled(preferences.keepUltraWideReady)
+                cameraController.setAutoSwitchToUltraWide(preferences.autoSwitchToUltraWide)
+            }
+        }
         cameraController.onEnhancedStabilizationUnavailable = { fallback ->
             viewModelScope.launch(Dispatchers.Main.immediate) {
                 showEnhancedStabilizationUnavailableDialog = true
@@ -3842,6 +3864,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val previewView = glSurfaceView ?: return false
         return cameraController.canSwitchToInstantPreview(cameraId) &&
             previewView.hasStandbyPreviewFrame
+    }
+
+    fun canSwitchToLogicalDualPreview(cameraId: String): Boolean {
+        return cameraController.canSwitchToLogicalDualPreview(cameraId)
     }
 
     fun usesLogicalAlternatePreview(cameraId: String): Boolean {
@@ -6011,6 +6037,33 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             userPreferencesRepository.saveLogicalCameraBindingWhitelist(value.split(","))
             cameraController.refreshCameraList()
+        }
+    }
+
+    fun setKeepUltraWideReady(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveKeepUltraWideReady(enabled)
+            cameraController.setStandbyPreviewEnabled(enabled)
+        }
+    }
+
+    fun setFrameBasedLensHandoffEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveFrameBasedLensHandoffEnabled(enabled)
+        }
+    }
+
+    fun setLensSwitchOverlapDurationSec(seconds: Float) {
+        val normalized = (seconds.coerceIn(0.1f, 1.0f) * 10f + 0.5f).toInt() / 10f
+        viewModelScope.launch {
+            userPreferencesRepository.saveLensSwitchOverlapDurationSec(normalized)
+        }
+    }
+
+    fun setAutoSwitchToUltraWide(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveAutoSwitchToUltraWide(enabled)
+            cameraController.setAutoSwitchToUltraWide(enabled)
         }
     }
 
