@@ -7285,22 +7285,117 @@ class Camera2Controller(private val context: Context) {
                     "falling back to logical camera $openCameraId",
             )
         }
-        val stabilizationCharacteristics = physicalCharacteristics ?: openCharacteristics
+        val outputCharacteristics = physicalCharacteristics ?: openCharacteristics
         val stabilizationCameraId = resolvedPhysicalCameraId ?: openCameraId
 
         PLog.i(
             TAG,
             "Recreating session for zoom physical output: " +
                     "old=$activeOutputPhysicalCameraId, new=$resolvedPhysicalCameraId, " +
-                    "targetZoom=${getTargetZoomRatioByMain(state, state.getCurrentCameraInfo())}"
+                    "mode=${state.captureMode}",
         )
+
+        val previousSession = captureSession
+        val previousReader = imageReader
 
         // Retire the old session before changing the coordinator's camera calibration. Its
         // late CaptureResults must never be tagged with the new active physical-camera ID.
-        safeCloseCaptureSession(captureSession, "physical zoom output changed")
+        if (previousSession != null) {
+            safeCloseCaptureSession(previousSession, "physical zoom output changed")
+        }
         captureSession = null
         _enginePreviewSource.value = null
         activeOutputPhysicalCameraId = resolvedPhysicalCameraId
+
+        // Camera2 output profiles belong to a physical sensor, even when several sensors
+        // share one logical CameraDevice. Resolve the complete mode-specific stream profile
+        // before opening the replacement session.
+        var nextPreviewSize = state.currentPreviewSize
+        var nextCaptureSize = state.currentCaptureSize
+        var nextRawSupported = isRawSupported
+        var nextP010Supported = isP010Supported
+        var nextP3Supported = state.isP3Supported
+        var replacementReader: ImageReader? = null
+        if (state.captureMode == CaptureMode.PHOTO) {
+            val profile = resolvePhotoOutputProfile(
+                characteristics = outputCharacteristics,
+                physicalCameraId = resolvedPhysicalCameraId,
+                state = state,
+            )
+            nextPreviewSize = profile.previewSize
+            nextCaptureSize = profile.captureSize
+            nextRawSupported = profile.isRawSupported
+            nextP010Supported = profile.isP010Supported
+            nextP3Supported = profile.isP3Supported
+
+            val currentReaderMatches = previousReader != null &&
+                previousReader.width == profile.captureSize.width &&
+                previousReader.height == profile.captureSize.height &&
+                previousReader.imageFormat == profile.captureFormat
+            if (!currentReaderMatches) {
+                replacementReader = createPhotoImageReader(
+                    captureSize = profile.captureSize,
+                    captureFormat = profile.captureFormat,
+                )
+                imageReader = replacementReader
+                if (previousReader != null) {
+                    if (previousSession != null) {
+                        pendingImageReaderClosures.getOrPut(previousSession) { mutableListOf() }
+                            .add(previousReader)
+                    } else {
+                        safeCloseImageReader(previousReader)
+                    }
+                }
+                PLog.i(
+                    TAG,
+                    "Physical PHOTO output profile updated: physical=$resolvedPhysicalCameraId, " +
+                        "format=${imageFormatToString(profile.captureFormat)}, " +
+                        "capture=${profile.captureSize.width}x${profile.captureSize.height}, " +
+                        "preview=${profile.previewSize.width}x${profile.previewSize.height}",
+                )
+            }
+        } else {
+            nextPreviewSize = refreshVideoCapabilities(
+                characteristics = outputCharacteristics,
+                updatePreviewSize = false,
+            )
+            nextCaptureSize = nextPreviewSize
+            PLog.i(
+                TAG,
+                "Physical VIDEO output profile updated: physical=$resolvedPhysicalCameraId, " +
+                    "preview=${nextPreviewSize.width}x${nextPreviewSize.height}, " +
+                    "resolution=${_state.value.videoConfig.resolution}, " +
+                    "fps=${_state.value.videoConfig.fps.fps}",
+            )
+        }
+
+        // A mode transition normally owns closing the previous reader. If a reader is
+        // unexpectedly still attached while switching to VIDEO, retire it with its session.
+        if (previousReader != null && state.captureMode != CaptureMode.PHOTO) {
+            imageReader = null
+            if (previousSession != null) {
+                pendingImageReaderClosures.getOrPut(previousSession) { mutableListOf() }
+                    .add(previousReader)
+            } else {
+                safeCloseImageReader(previousReader)
+            }
+        }
+
+        isRawSupported = nextRawSupported
+        isP010Supported = nextP010Supported
+        _state.update {
+            it.copy(
+                isRawSupported = nextRawSupported,
+                isP010Supported = nextP010Supported,
+                isP3Supported = nextP3Supported,
+                currentCaptureSize = nextCaptureSize,
+            )
+        }
+        // Do not publish the new preview size until onSessionConfigured. This keeps
+        // CameraPreviewGL from reporting the same SurfaceTexture as a fresh camera-open
+        // request while the in-place session replacement is already underway.
+        pendingPreviewSizeForSession = nextPreviewSize
+        previewSurfaceTexture?.setDefaultBufferSize(nextPreviewSize.width, nextPreviewSize.height)
 
         // Flush timestamped YUV images still queued by the previous sensor before the new
         // calibration starts accepting CaptureResults and image boundaries.
@@ -7311,12 +7406,29 @@ class Camera2Controller(private val context: Context) {
 
         val stabilizationCameraChanged = realtimeStabilizationCoordinator.configureCamera(
             cameraId = stabilizationCameraId,
-            characteristics = stabilizationCharacteristics,
+            characteristics = outputCharacteristics,
             timingCharacteristics = openCharacteristics,
         )
         if (_state.value.videoRecordingState.isRecording) {
+            val useEnhancedStabilization = shouldUseVideoEnhancedStabilization()
+            val switchedInputSize = if (useEnhancedStabilization) {
+                _state.value.videoCapabilities.enhancedStabilizationInputSizesByResolution[
+                    _state.value.videoConfig.resolution
+                ]
+            } else {
+                _state.value.videoCapabilities.cameraInputSizesByResolution[
+                    _state.value.videoConfig.resolution
+                ]
+            } ?: nextPreviewSize
+            videoRecorder.updateCameraInputSize(
+                size = switchedInputSize,
+                currentCameraUsesEnhancedStabilization = useEnhancedStabilization,
+                sensorOrientationDegrees = outputCharacteristics.get(
+                    CameraCharacteristics.SENSOR_ORIENTATION,
+                ) ?: cachedSensorOrientation,
+            )
             videoRecorder.onCameraSwitched(
-                sensorOrientationDegrees = stabilizationCharacteristics.get(
+                sensorOrientationDegrees = outputCharacteristics.get(
                     CameraCharacteristics.SENSOR_ORIENTATION,
                 ) ?: cachedSensorOrientation,
                 frontFacing = isCurrentCameraFrontFacing(),
