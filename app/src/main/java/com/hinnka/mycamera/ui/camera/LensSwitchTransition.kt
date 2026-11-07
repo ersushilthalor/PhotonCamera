@@ -123,7 +123,7 @@ internal class LensSwitchTransitionState(
                         if (readyState == null) {
                             PLog.w(
                                 "LensSwitchTransition",
-                                "Timed out waiting for camera \${request.cameraId} to become active",
+                                "Timed out waiting for camera " + request.cameraId + " to become active",
                             )
                             animation.join()
                             return@coroutineScope
@@ -144,7 +144,7 @@ internal class LensSwitchTransitionState(
                                 PLog.w(
                                     "LensSwitchTransition",
                                     "Timed out waiting for incoming preview frame \${frameIndex + 1} " +
-                                        "from camera \${request.cameraId}",
+                                        "from camera " + request.cameraId,
                                 )
                                 break
                             }
