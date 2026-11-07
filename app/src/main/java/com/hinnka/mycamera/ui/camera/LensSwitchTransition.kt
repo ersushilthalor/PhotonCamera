@@ -224,7 +224,7 @@ internal class LensSwitchTransitionState(
                         )
                     usedFrameBasedHandoff = useFrameHandoff
                     val blendFrames = if (useFrameHandoff) {
-                        ((request!!.handoffDurationMs * 60L) / 1_000L).toInt().coerceIn(4, 32)
+                        ((request!!.handoffDurationMs * 60L) / 1_000L).toInt().coerceIn(4, 60)
                     } else {
                         0
                     }
@@ -263,7 +263,11 @@ internal class LensSwitchTransitionState(
                         }
                     }
                     try {
-                        val waitMs = if (useFrameHandoff) FRAME_HANDOFF_TIMEOUT_MS else 5_000L
+                        val waitMs = if (useFrameHandoff) {
+                            (request?.handoffDurationMs ?: 300L) + FRAME_HANDOFF_TIMEOUT_MS
+                        } else {
+                            5_000L
+                        }
                         val frameRendered = withTimeoutOrNull(waitMs) {
                             rendered.await()
                             true
