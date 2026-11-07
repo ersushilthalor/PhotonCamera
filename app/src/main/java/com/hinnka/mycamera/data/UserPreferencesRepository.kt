@@ -169,6 +169,7 @@ data class UserPreferences(
     val showLevelIndicator: Boolean = false,  // 水平仪显示
     val focusPeakingEnabled: Boolean = true,  // 手动对焦峰值显示
     val eyeFocusEnabled: Boolean = false,  // MediaPipe 人眼对焦
+    val autoSwitchToUltraWide: Boolean = false,
     val shutterSoundEnabled: Boolean = true,  // 快门声音
     val shutterSoundFileName: String? = null,
     val burstSoundFileName: String? = null,
@@ -433,6 +434,7 @@ class UserPreferencesRepository(private val context: Context) {
         private val SHOW_LEVEL_INDICATOR = booleanPreferencesKey("show_level_indicator")
         private val FOCUS_PEAKING_ENABLED = booleanPreferencesKey("focus_peaking_enabled")
         private val EYE_FOCUS_ENABLED = booleanPreferencesKey("eye_focus_enabled")
+        private val AUTO_SWITCH_TO_ULTRA_WIDE = booleanPreferencesKey("auto_switch_to_ultra_wide")
         private val SHUTTER_SOUND_ENABLED = booleanPreferencesKey("shutter_sound_enabled")
         private val SHUTTER_SOUND_FILE_NAME = stringPreferencesKey("shutter_sound_file_name")
         private val BURST_SOUND_FILE_NAME = stringPreferencesKey("burst_sound_file_name")
@@ -750,6 +752,7 @@ class UserPreferencesRepository(private val context: Context) {
                 showLevelIndicator = preferences[SHOW_LEVEL_INDICATOR] ?: false,
                 focusPeakingEnabled = preferences[FOCUS_PEAKING_ENABLED] ?: true,
                 eyeFocusEnabled = preferences[EYE_FOCUS_ENABLED] ?: false,
+                autoSwitchToUltraWide = preferences[AUTO_SWITCH_TO_ULTRA_WIDE] ?: false,
                 shutterSoundEnabled = preferences[SHUTTER_SOUND_ENABLED] ?: true,
                 shutterSoundFileName = preferences[SHUTTER_SOUND_FILE_NAME],
                 burstSoundFileName = preferences[BURST_SOUND_FILE_NAME],
@@ -1599,6 +1602,12 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun saveEyeFocusEnabled(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[EYE_FOCUS_ENABLED] = enabled
+        }
+    }
+
+    suspend fun saveAutoSwitchToUltraWide(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[AUTO_SWITCH_TO_ULTRA_WIDE] = enabled
         }
     }
 
