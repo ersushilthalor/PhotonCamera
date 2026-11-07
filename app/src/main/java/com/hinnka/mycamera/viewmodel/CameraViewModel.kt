@@ -4012,6 +4012,29 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         setCameraControllerZoomRatio(ratio, cameraInfo)
     }
 
+    /**
+     * Apply one tick of an animated zoom gesture and switch to the best optical lens
+     * when the calibrated global zoom trajectory crosses that lens's visible zoom stop.
+     */
+    fun setZoomRatioWithLensSelection(ratio: Float) {
+        if (!ratio.isFinite() || ratio <= 0f) return
+        if (isVideoLensLocked()) {
+            setZoomRatio(ratio)
+            return
+        }
+        val currentCamera = state.value.getCurrentCameraInfo()
+        val targetCamera = findOptimalLens(
+            targetZoom = ratio,
+            cameras = state.value.availableCameras,
+            currentCameraId = currentCamera?.cameraId ?: state.value.currentCameraId,
+        )
+        if (targetCamera != null && targetCamera.cameraId != currentCamera?.cameraId) {
+            switchToLensAndSetZoomRatio(targetCamera.cameraId, ratio)
+        } else {
+            setZoomRatio(ratio)
+        }
+    }
+
     /** Apply a normalized delta from the on-screen joystick to the camera crop. */
     fun panZoomBy(deltaX: Float, deltaY: Float) {
         cameraController.panZoomBy(deltaX, deltaY)
