@@ -2763,10 +2763,16 @@ class Camera2Controller(private val context: Context) {
             return false
         }
 
+        val previousLensType = when (targetCamera.lensType) {
+            LensType.BACK_MAIN -> LensType.BACK_ULTRA_WIDE
+            LensType.BACK_ULTRA_WIDE -> LensType.BACK_MAIN
+            else -> return false
+        }
         val previousCamera = state.availableCameras.firstOrNull { candidate ->
             candidate.cameraId != targetCamera.cameraId &&
                 candidate.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
-                candidate.lensType != targetCamera.lensType &&
+                candidate.lensType == previousLensType &&
+                !candidate.isVirtualIszLens &&
                 runCatching { candidate.getOpenCameraId() == activeOpenId }.getOrDefault(false)
         } ?: run {
             PLog.i(
