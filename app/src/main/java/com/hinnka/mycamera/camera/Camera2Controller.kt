@@ -444,6 +444,10 @@ class Camera2Controller(private val context: Context) {
     private val pendingCloseReaders = mutableListOf<ImageReader>()
     private val pendingImageReaderClosures =
         java.util.IdentityHashMap<CameraCaptureSession, MutableList<ImageReader>>()
+    // Readers detached while createCaptureSession() is still configuring have no session
+    // callback to attach to; keep them until the replacement session is configured or the
+    // owning CameraDevice is closed.
+    private val pendingUnboundImageReaderClosures = mutableListOf<ImageReader>()
     private var pendingPreviewSizeForSession: Size? = null
     private val openImagesCount = AtomicInteger(0)
     private var imageReaderMaxImages = CAPTURE_READER_MAX_IMAGES
@@ -2383,6 +2387,7 @@ class Camera2Controller(private val context: Context) {
             lifecycleClosingCameraDevice = null
         }
         cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
+        releasePendingUnboundImageReaders()
         PLog.d(TAG, "Camera device closed: ${camera.id}")
         openPendingCameraRequest()
         if (cameraDeviceLifecycle == CameraDeviceLifecycle.CLOSED) {
@@ -4361,6 +4366,7 @@ class Camera2Controller(private val context: Context) {
             return
         }
         captureSession = session
+        releasePendingUnboundImageReaders()
         _state.update { it.copy(previewFirstFrameTimestampNs = null) }
 
         try {
@@ -7388,7 +7394,7 @@ class Camera2Controller(private val context: Context) {
                         pendingImageReaderClosures.getOrPut(previousSession) { mutableListOf() }
                             .add(previousReader)
                     } else {
-                        safeCloseImageReader(previousReader)
+                        pendingUnboundImageReaderClosures += previousReader
                     }
                 }
                 PLog.i(
@@ -7422,7 +7428,7 @@ class Camera2Controller(private val context: Context) {
                 pendingImageReaderClosures.getOrPut(previousSession) { mutableListOf() }
                     .add(previousReader)
             } else {
-                safeCloseImageReader(previousReader)
+                pendingUnboundImageReaderClosures += previousReader
             }
         }
 
@@ -10267,6 +10273,12 @@ class Camera2Controller(private val context: Context) {
 
     private fun releasePendingImageReaders(session: CameraCaptureSession) {
         pendingImageReaderClosures.remove(session)?.forEach(::safeCloseImageReader)
+    }
+
+    private fun releasePendingUnboundImageReaders() {
+        if (pendingUnboundImageReaderClosures.isEmpty()) return
+        pendingUnboundImageReaderClosures.toList().forEach(::safeCloseImageReader)
+        pendingUnboundImageReaderClosures.clear()
     }
 
     private fun safeCloseImageReader(reader: ImageReader?) {
