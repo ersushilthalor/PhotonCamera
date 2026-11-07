@@ -69,16 +69,21 @@ internal class LensSwitchTransitionState(
     private var snapshotZoom = 1f
     private var job: Job? = null
     private var switchPending = false
-    private data class Request(val cameraId: String, val targetZoom: Float, val onSwitch: () -> Unit)
+    private data class Request(
+        val cameraId: String,
+        val targetZoom: Float,
+        val useInstantPreview: Boolean,
+        val onSwitch: () -> Unit,
+    )
     private var pendingRequest: Request? = null
     private var awaitedCameraId: String? = null
     private var previousTimestamp: Long? = null
 
-    fun switchLens(cameraId: String, targetZoom: Float, onSwitch: () -> Unit) {
+    fun switchLens(cameraId: String, targetZoom: Float, useInstantPreview: Boolean = false, onSwitch: () -> Unit) {
         require(targetZoom.isFinite() && targetZoom > 0f)
         // Coalesce gestures while the screenshot is being prepared. Once a switch has
         // started, replace its waiter but keep the frozen frame across subsequent switches.
-        pendingRequest = Request(cameraId, targetZoom, onSwitch)
+        pendingRequest = Request(cameraId, targetZoom, useInstantPreview, onSwitch)
         if (switchPending && job?.isActive == true) return
         job?.cancel()
         isActive = true
@@ -114,6 +119,26 @@ internal class LensSwitchTransitionState(
                 coroutineScope {
                     val animation = launch {
                         animateSnapshotTo(request?.targetZoom ?: viewModel.zoomRatioByMain)
+                    }
+                    var instantPreviewRendered = false
+                    if (request?.useInstantPreview == true) {
+                        // The source swap is queued before switchToCameraId publishes its target ID.
+                        // Wait for that already-warm GL input to render instead of waiting for a
+                        // newly configured Camera2 session, which can briefly expose the old 1x frame.
+                        instantPreviewRendered = withTimeoutOrNull(500L) {
+                            viewModel.state.first { it.currentCameraId == request.cameraId }
+                            val preview = snapshotFlow { viewModel.glSurfaceView }.first { it != null }
+                                ?: return@withTimeoutOrNull false
+                            preview.awaitPreviewFrame(0L)
+                            true
+                        } == true
+                        if (instantPreviewRendered) {
+                            // The target lens is already on screen. Fade the outgoing snapshot
+                            // immediately; do not hold it through the primary-session first frame.
+                            opacity.animateTo(0f, tween(60))
+                            animation.cancel()
+                            return@coroutineScope
+                        }
                     }
                     val readyState = withTimeoutOrNull(8_000L) {
                         viewModel.state.first {
@@ -159,6 +184,12 @@ internal class LensSwitchTransitionState(
                         waiter.cancel()
                     }
                     animation.join()
+                }
+                if (instantPreviewRendered) {
+                    clearSnapshot()
+                    isActive = false
+                    awaitedCameraId = null
+                    return@launch
                 }
                 // Renderer callbacks run before GLSurfaceView swaps buffers.
                 withFrameNanos { }
