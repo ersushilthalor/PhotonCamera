@@ -8368,7 +8368,19 @@ class Camera2Controller(private val context: Context) {
             VideoLogProfile.OFF
         }
         _state.value = _state.value.copy(videoConfig = _state.value.videoConfig.copy(logProfile = resolvedProfile))
-        refreshVideoCapabilities()
+        val refreshedPreviewSize = refreshVideoCapabilities(
+            updatePreviewSize = !captureModeSessionReconfigurePending,
+        )
+        if (captureModeSessionReconfigurePending && _state.value.captureMode == CaptureMode.VIDEO) {
+            // Keep the target geometry staged with the pending mode session. Publishing it
+            // before configuration can cause the GL view to report its retained texture as
+            // a new camera surface.
+            pendingPreviewSizeForSession = refreshedPreviewSize
+            previewSurfaceTexture?.setDefaultBufferSize(
+                refreshedPreviewSize.width,
+                refreshedPreviewSize.height,
+            )
+        }
         val appliedProfile = _state.value.videoConfig.logProfile
         if (previousProfile != appliedProfile || logProfile != appliedProfile) {
             PLog.d(
