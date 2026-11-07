@@ -304,6 +304,14 @@ class Camera2Controller(private val context: Context) {
     private var onAlternatePreviewSizeChanged: ((Int, Int) -> Unit)? = null
     @Volatile private var activeLogicalDualPreviewPlan: LogicalDualPreviewPlan? = null
     @Volatile private var pendingLogicalPreviewSourceReset = false
+    @Volatile private var keepStandbyCameraReady = true
+    @Volatile private var autoSwitchToUltraWideEnabled = false
+    @Volatile var onAutoLensSwitchRequested: ((String, Float) -> Unit)? = null
+    private var lastAutoLensSwitchTimestampMs = 0L
+    private var closeSubjectUnfocusedFrames = 0
+    private var subjectFarFrames = 0
+    private val _isAutoMacroActive = MutableStateFlow(false)
+    val isAutoMacroActive: StateFlow<Boolean> = _isAutoMacroActive.asStateFlow()
     private val failedLogicalDualPreviewPlanKeys = mutableSetOf<String>()
     private var stabilizationImageReader: StabilizationImageReader? = null
 
@@ -1192,12 +1200,9 @@ class Camera2Controller(private val context: Context) {
                     _state.update { it.copy(previewFirstFrameTimestampNs = timestamp) }
                 }
             }
-            if (session === captureSession && pendingLogicalPreviewSourceReset) {
-                pendingLogicalPreviewSourceReset = false
-                PLog.i(TAG, "New physical-lens preview frame is ready; returning renderer to primary input")
-                onAlternatePreviewSourceChanged?.invoke(false)
+            if (session === captureSession) {
+                maybeAutoSwitchToUltraWide(result)
             }
-
             // Only the currently active CameraCaptureSession may feed the EIS timeline.
             // Results from a retired session can arrive after a physical-output handoff; using
             // the new global physical-camera ID for those old frames mixes two sensors' metadata.
@@ -2609,7 +2614,128 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    fun setStandbyPreviewEnabled(enabled: Boolean) {
+        val action = standbyAction@{
+            if (keepStandbyCameraReady == enabled) return@standbyAction
+            keepStandbyCameraReady = enabled
+            if (!enabled) {
+                standbyCameraController.release("Keep Ultra-Wide Ready disabled")
+            } else {
+                val current = _state.value
+                if (current.isPreviewActive &&
+                    !current.videoRecordingState.isRecording &&
+                    !current.videoRecordingState.isProcessing
+                ) {
+                    standbyCameraController.prepare(
+                        activeCamera = current.getCurrentCameraInfo(),
+                        availableCameras = current.availableCameras,
+                        activeOpenCameraId = activeOpenCameraId,
+                        previewSize = current.currentPreviewSize,
+                        callbackHandler = cameraHandler ?: return@standbyAction,
+                        previewSurface = alternatePreviewSurface,
+                        previewSurfaceTexture = alternatePreviewSurfaceTexture,
+                        onPreviewSizeChanged = onAlternatePreviewSizeChanged,
+                    )
+                }
+            }
+        }
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { action() }
+        } else {
+            action()
+        }
+    }
+
+    fun setAutoSwitchToUltraWide(enabled: Boolean) {
+        autoSwitchToUltraWideEnabled = enabled
+        closeSubjectUnfocusedFrames = 0
+        subjectFarFrames = 0
+        if (!enabled) _isAutoMacroActive.value = false
+    }
+
+    private fun maybeAutoSwitchToUltraWide(result: TotalCaptureResult) {
+        val state = _state.value
+        if (!autoSwitchToUltraWideEnabled ||
+            state.captureMode != CaptureMode.PHOTO ||
+            state.isCapturing ||
+            state.videoRecordingState.isRecording ||
+            state.videoRecordingState.isProcessing ||
+            SystemClock.uptimeMillis() - lastAutoLensSwitchTimestampMs < 2_000L
+        ) return
+
+        val currentCamera = state.getCurrentCameraInfo() ?: return
+        if (currentCamera.lensFacing != CameraCharacteristics.LENS_FACING_BACK) return
+        val rearCameras = state.availableCameras.filter {
+            it.lensFacing == CameraCharacteristics.LENS_FACING_BACK
+        }
+        val ultraWide = rearCameras.firstOrNull {
+            it.lensType == LensType.BACK_ULTRA_WIDE && !it.isVirtualIszLens
+        } ?: return
+        val main = rearCameras.firstOrNull {
+            it.lensType == LensType.BACK_MAIN && !it.isVirtualIszLens
+        } ?: return
+
+        val afState = result.get(CaptureResult.CONTROL_AF_STATE)
+            ?: CaptureResult.CONTROL_AF_STATE_INACTIVE
+        val focusDistance = result.get(CaptureResult.LENS_FOCUS_DISTANCE) ?: 0f
+        val minFocusDistance = getCameraCharacteristicsOrNull(
+            currentCamera.cameraId,
+            "automatic macro lens switching",
+        )?.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 10f
+        val now = SystemClock.uptimeMillis()
+
+        val isMain = currentCamera.cameraId == main.cameraId
+        if (isMain) {
+            val effectiveMinimum = minFocusDistance.takeIf { it > 0f } ?: 10f
+            val subjectVeryClose = focusDistance >= effectiveMinimum * 0.70f || focusDistance >= 6f
+            val autofocusStruggling =
+                afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED ||
+                    afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_UNFOCUSED ||
+                    (focusDistance >= effectiveMinimum * 0.85f &&
+                        (afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN ||
+                            afState == CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN))
+            if (subjectVeryClose && autofocusStruggling && state.zoomRatio in 0.9f..1.6f) {
+                closeSubjectUnfocusedFrames++
+                subjectFarFrames = 0
+            } else {
+                closeSubjectUnfocusedFrames = (closeSubjectUnfocusedFrames - 1).coerceAtLeast(0)
+            }
+            if (closeSubjectUnfocusedFrames >= 10) {
+                closeSubjectUnfocusedFrames = 0
+                lastAutoLensSwitchTimestampMs = now
+                _isAutoMacroActive.value = true
+                PLog.i(TAG, "Auto macro: sustained close-subject AF failure; switching to ultra-wide")
+                onAutoLensSwitchRequested?.invoke(ultraWide.cameraId, 0.5f)
+            }
+        } else if (currentCamera.cameraId == ultraWide.cameraId && _isAutoMacroActive.value) {
+            val subjectFarAway = focusDistance < 4f ||
+                ((afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED ||
+                    afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED) && focusDistance < 5f)
+            if (subjectFarAway) {
+                subjectFarFrames++
+                closeSubjectUnfocusedFrames = 0
+            } else {
+                subjectFarFrames = (subjectFarFrames - 1).coerceAtLeast(0)
+            }
+            if (subjectFarFrames >= 14) {
+                subjectFarFrames = 0
+                lastAutoLensSwitchTimestampMs = now
+                _isAutoMacroActive.value = false
+                PLog.i(TAG, "Auto macro: subject moved away; switching back to main")
+                onAutoLensSwitchRequested?.invoke(main.cameraId, 1f)
+            }
+        }
+    }
+
     fun canSwitchToLogicalDualPreview(cameraId: String): Boolean {
+        val plan = activeLogicalDualPreviewPlan ?: return false
+        return (plan.alternateCameraId == cameraId || plan.activeCameraId == cameraId) &&
+            alternatePreviewSurface === plan.surface &&
+            alternatePreviewSurface?.let { runCatching { it.isValid }.getOrDefault(false) } == true
+    }
+
+    fun usesLogicalAlternatePreview(cameraId: String): Boolean {
         val plan = activeLogicalDualPreviewPlan ?: return false
         return plan.alternateCameraId == cameraId &&
             alternatePreviewSurface === plan.surface &&
@@ -4360,6 +4486,14 @@ class Camera2Controller(private val context: Context) {
 
             _state.value = _state.value.copy(isPreviewActive = true)
             activeLogicalDualPreviewPlan = logicalDualPreviewPlan
+            if (pendingLogicalPreviewSourceReset) {
+                pendingLogicalPreviewSourceReset = false
+                PLog.i(
+                    TAG,
+                    "Target capture session configured; switching renderer to its primary input on the first new frame",
+                )
+                onAlternatePreviewSourceChanged?.invoke(false)
+            }
             if (logicalDualPreviewPlan != null) {
                 PLog.i(
                     TAG,
@@ -4372,7 +4506,8 @@ class Camera2Controller(private val context: Context) {
 
             val standbyState = _state.value
             val standbyHandler = cameraHandler
-            if (standbyHandler != null &&
+            if (keepStandbyCameraReady &&
+                standbyHandler != null &&
                 !standbyState.videoRecordingState.isRecording &&
                 !standbyState.videoRecordingState.isProcessing
             ) {
@@ -6311,9 +6446,11 @@ class Camera2Controller(private val context: Context) {
                 PLog.i(TAG, "Instant preview source swap to alternate physical lens: $cameraId")
             }
             livePlan?.activeCameraId == cameraId -> {
-                pendingLogicalPreviewSourceReset = true
+                // This lens is already attached to the main input; keep the source on
+                // primary and wait there for its next acquired frame.
+                pendingLogicalPreviewSourceReset = false
                 onAlternatePreviewSourceChanged?.invoke(false)
-                PLog.i(TAG, "Instant preview source swap back to primary physical lens: $cameraId")
+                PLog.i(TAG, "Instant preview source swap to primary physical lens: $cameraId")
             }
             canUsePrewarmedStandby -> {
                 pendingLogicalPreviewSourceReset = true

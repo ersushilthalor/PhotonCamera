@@ -511,8 +511,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     var onMeteringUpdated: ((Double, Double) -> Unit)? = null
     var onHighlightPointUpdated: ((Float, Float) -> Unit)? = null
     var onFirstFrameRendered: (() -> Unit)? = null
-    // 仅在有等待者时安装；时间戳属于已经完成所有预览 pass 的画面。
-    var onPreviewFrameRendered: ((Long) -> Unit)? = null
+    // Fired only after a newly acquired input frame has completed all preview passes.
+    var onPreviewFrameRendered: ((Boolean) -> Unit)? = null
 
     // Live Photo 录制器
     var livePhotoRecorder: LivePhotoRecorder? = null
@@ -1345,8 +1345,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             firstFrameRendered = true
             onFirstFrameRendered?.invoke()
         }
-        if (currentFrameTimestampNs > 0L) {
-            onPreviewFrameRendered?.invoke(currentFrameTimestampNs)
+        if (cameraFrameUpdated) {
+            onPreviewFrameRendered?.invoke(useStandbyPreviewSource)
         }
     }
 

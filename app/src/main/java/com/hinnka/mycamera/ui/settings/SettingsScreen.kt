@@ -338,6 +338,16 @@ fun SettingsScreen(
     val preferredMainCameraId by viewModel.preferredMainCameraId.collectAsState(initial = null)
     val preferredMacroCameraId by viewModel.preferredMacroCameraId.collectAsState(initial = null)
     val enableLogicalMultiCameraDiscovery by viewModel.enableLogicalMultiCameraDiscovery.collectAsState(initial = false)
+    val keepUltraWideReady by viewModel.keepUltraWideReady.collectAsState()
+    val frameBasedLensHandoffEnabled by viewModel.frameBasedLensHandoffEnabled.collectAsState()
+    val lensSwitchOverlapDurationSec by viewModel.lensSwitchOverlapDurationSec.collectAsState()
+    val autoSwitchToUltraWide by viewModel.autoSwitchToUltraWide.collectAsState()
+    var lensSwitchOverlapDurationUi by remember {
+        mutableStateOf(lensSwitchOverlapDurationSec)
+    }
+    LaunchedEffect(lensSwitchOverlapDurationSec) {
+        lensSwitchOverlapDurationUi = lensSwitchOverlapDurationSec
+    }
     val logicalCameraBindingWhitelist by viewModel.logicalCameraBindingWhitelist.collectAsState(initial = emptyList())
     val jpgMultiFrameDenoiseFrameCount by viewModel.jpgMultiFrameDenoiseFrameCount.collectAsState()
     val jpgMultiFrameDenoiseOutputScale by viewModel.jpgMultiFrameDenoiseOutputScale.collectAsState()
@@ -1303,6 +1313,67 @@ fun SettingsScreen(
                     SettingsSection(
                         title = stringResource(R.string.settings_focus_lens_group_lens_discovery)
                     ) {
+                        SwitchSettingItem(
+                            title = "Frame-Based Lens Handoff",
+                            description = "Keep the outgoing preview visible until fresh frames arrive from the selected lens. Handoff progress follows real camera buffers, not a fixed delay.",
+                            checked = frameBasedLensHandoffEnabled,
+                            onCheckedChange = viewModel::setFrameBasedLensHandoffEnabled,
+                        )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+
+                        SwitchSettingItem(
+                            title = "Keep Ultra-Wide Ready",
+                            description = "Pre-warm the alternate rear camera so separate-camera lens changes can reuse an already streaming CameraDevice.",
+                            checked = keepUltraWideReady,
+                            onCheckedChange = viewModel::setKeepUltraWideReady,
+                        )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+
+                        SwitchSettingItem(
+                            title = "Auto Switch to Ultra-Wide",
+                            description = "Switch to Ultra-Wide when close subjects repeatedly fail autofocus on the main camera, and return when the subject moves away.",
+                            checked = autoSwitchToUltraWide,
+                            onCheckedChange = viewModel::setAutoSwitchToUltraWide,
+                        )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+
+                        SliderSettingItem(
+                            title = "Lens Handoff Duration",
+                            description = "Controls the frame blend window used by the lens transition.",
+                            value = lensSwitchOverlapDurationUi,
+                            valueRange = 0.1f..1.0f,
+                            resetValue = 0.3f,
+                            onResetValue = { duration ->
+                                lensSwitchOverlapDurationUi = duration
+                                viewModel.setLensSwitchOverlapDurationSec(duration)
+                            },
+                            onValueChange = { duration ->
+                                lensSwitchOverlapDurationUi =
+                                    (duration.coerceIn(0.1f, 1.0f) * 10f + 0.5f).toInt() / 10f
+                            },
+                            onValueChangeFinished = {
+                                viewModel.setLensSwitchOverlapDurationSec(lensSwitchOverlapDurationUi)
+                            },
+                            valueTextFormatter = { String.format("%.1fs", it) },
+                        )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+
                         SwitchSettingItem(
                             title = stringResource(R.string.settings_logical_multi_camera_discovery),
                             description = stringResource(R.string.settings_logical_multi_camera_discovery_description),

@@ -383,16 +383,36 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         }
     }
 
-    /** 等待新会话的画面完成渲染，不能用 session configured 代替画面就绪。 */
-    suspend fun awaitPreviewFrame(minimumTimestampNs: Long) {
-        var listener: ((Long) -> Unit)? = null
+    /** Wait for real rendered frames from the requested preview input. */
+    suspend fun awaitPreviewFrame(expectedUseStandby: Boolean) {
+        awaitPreviewFrames(expectedUseStandby, frameCount = 1) {}
+    }
+
+    /**
+     * Wait for a sequence of newly acquired target-source frames. Progress is delivered
+     * on the view thread, after the renderer has completed the corresponding preview pass.
+     */
+    suspend fun awaitPreviewFrames(
+        expectedUseStandby: Boolean,
+        frameCount: Int,
+        onProgress: (Float) -> Unit,
+    ) {
+        val requiredFrames = frameCount.coerceAtLeast(1)
+        var matchedFrames = 0
+        var listener: ((Boolean) -> Unit)? = null
         try {
             suspendCancellableCoroutine<Unit> { continuation ->
-                val callback: (Long) -> Unit = { timestamp ->
-                    if (timestamp >= minimumTimestampNs) {
-                        renderer.onPreviewFrameRendered = null
+                val callback: (Boolean) -> Unit = { useStandby ->
+                    if (useStandby == expectedUseStandby && matchedFrames < requiredFrames) {
+                        matchedFrames += 1
+                        val progress = matchedFrames.toFloat() / requiredFrames.toFloat()
+                        val complete = matchedFrames >= requiredFrames
+                        if (complete) renderer.onPreviewFrameRendered = null
                         post {
-                            if (continuation.isActive) continuation.resume(Unit)
+                            if (continuation.isActive) {
+                                onProgress(progress)
+                                if (complete) continuation.resume(Unit)
+                            }
                         }
                     }
                 }
