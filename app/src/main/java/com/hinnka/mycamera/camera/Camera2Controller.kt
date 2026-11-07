@@ -2248,6 +2248,7 @@ class Camera2Controller(private val context: Context) {
             )
         }
         previewSessionGeneration++
+        pendingPreviewSizeForSession = null
         previewUpdateScheduled.set(false)
         livePhotoVideoStartTimestampUs = null
         clearPrecaptureTracking()
