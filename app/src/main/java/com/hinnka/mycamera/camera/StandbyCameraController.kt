@@ -1116,16 +1116,16 @@ class StandbyCameraController(context: Context) {
                     "frames=$receivedFrameCount, elapsedMs=$elapsedMs, " +
                     "readerOnlyFallback=$standbyReaderOnlyFallback",
             )
-            retainedReadyCallback?.let { callback ->
-                retainedReadyCallback = null
-                callback(true)
-            }
             _status.value = current.copy(
                 phase = StandbyCameraPhase.READY,
                 frameCount = receivedFrameCount,
                 matchedFrameCount = matchedFrameCount,
                 message = "Standby camera is streaming real preview frames",
             )
+            retainedReadyCallback?.let { callback ->
+                retainedReadyCallback = null
+                callback(true)
+            }
         } else {
             _status.value = current.copy(
                 frameCount = receivedFrameCount,
