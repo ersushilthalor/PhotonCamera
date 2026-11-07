@@ -213,7 +213,7 @@ internal class LensSwitchTransitionState(
                                         )
                                         previousProgress = calculateFrameHandoffProgress(
                                             incomingFrameCount = blendFrame,
-                                            targetUseStandby = request?.expectedPreviewSourceStandby == true,
+                                            targetIsUltraWide = (request?.targetZoom ?: snapshotZoom) < 0.75f,
                                             currentZoom = currentZoom,
                                             requiredBlendFrames = blendFrames,
                                             previousProgress = previousProgress,
@@ -363,7 +363,7 @@ private fun isFrameBasedHandoffEligible(fromZoom: Float, targetZoom: Float): Boo
 
 private fun calculateFrameHandoffProgress(
     incomingFrameCount: Int,
-    targetUseStandby: Boolean,
+    targetIsUltraWide: Boolean,
     currentZoom: Float,
     requiredBlendFrames: Int,
     previousProgress: Float,
@@ -371,7 +371,7 @@ private fun calculateFrameHandoffProgress(
     val frameProgress = incomingFrameCount.coerceIn(0, requiredBlendFrames).toFloat() /
         requiredBlendFrames.toFloat()
     val frameEased = ((1.0 - kotlin.math.cos(Math.PI * frameProgress.toDouble())) * 0.5).toFloat()
-    val zoomEased = if (targetUseStandby) {
+    val zoomEased = if (targetIsUltraWide) {
         val zoomProgress = ((1f - currentZoom) / 0.5f).coerceIn(0f, 1f)
         val accelerated = 1f - (1f - zoomProgress) * (1f - zoomProgress) * (1f - zoomProgress)
         ((1.0 - kotlin.math.cos(Math.PI * accelerated.toDouble())) * 0.5).toFloat()
