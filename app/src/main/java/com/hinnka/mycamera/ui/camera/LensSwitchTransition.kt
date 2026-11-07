@@ -6,7 +6,6 @@ import android.os.Looper
 import android.view.PixelCopy
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Easing
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -144,6 +143,7 @@ internal class LensSwitchTransitionState(
                     isActive = false
                     return@launch
                 }
+                var usedFrameBasedHandoff = false
                 coroutineScope {
                     val animation = launch {
                         animateSnapshotTo(
@@ -179,11 +179,13 @@ internal class LensSwitchTransitionState(
                     // The target stream is warmed before any alpha handoff. For direct
                     // Ultra-Wide <-> 2x/3x transitions, VCamera blends over actual incoming
                     // buffers (two warm-up frames plus a frame-counted overlap window).
-                    val useFrameHandoff = request?.frameBasedHandoffEnabled == true &&
+                    val useFrameHandoff = request != null &&
+                        request.frameBasedHandoffEnabled &&
                         isFrameBasedHandoffEligible(
                             fromZoom = snapshotZoom,
                             targetZoom = request.targetZoom,
                         )
+                    usedFrameBasedHandoff = useFrameHandoff
                     val blendFrames = if (useFrameHandoff) {
                         ((request!!.handoffDurationMs * 60L) / 1_000L).toInt().coerceIn(4, 32)
                     } else {
@@ -246,7 +248,7 @@ internal class LensSwitchTransitionState(
                 // Renderer callbacks run before GLSurfaceView swaps buffers.
                 withFrameNanos { }
                 withFrameNanos { }
-                opacity.animateTo(0f, tween(if (request?.frameBasedHandoffEnabled == true) 1 else 160))
+                opacity.animateTo(0f, tween(if (usedFrameBasedHandoff) 1 else 160))
                 clearSnapshot()
                 isActive = false
                 awaitedCameraId = null
