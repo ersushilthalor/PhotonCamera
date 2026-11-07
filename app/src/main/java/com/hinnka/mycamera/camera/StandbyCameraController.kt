@@ -231,6 +231,9 @@ class StandbyCameraController(context: Context) {
     fun isRetainedStandbyDevice(camera: CameraDevice): Boolean =
         standbyCameraDevice === camera && activePlan?.standbyOpenCameraId == camera.id
 
+    fun isClosingRetainedStandbyDevice(camera: CameraDevice): Boolean =
+        closingCameraDevice === camera && closingCameraWasStandby
+
     /**
      * Route lifecycle callbacks for a main-controller-opened device after it has been demoted.
      * Its original StateCallback cannot be replaced, so Camera2Controller forwards these events.
