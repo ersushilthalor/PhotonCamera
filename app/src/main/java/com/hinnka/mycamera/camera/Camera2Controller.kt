@@ -2540,12 +2540,24 @@ class Camera2Controller(private val context: Context) {
         }
 
         val requestedConfig = _state.value.videoConfig
+        // FLASH_INFO_AVAILABLE belongs to the logical CameraDevice torch, not
+        // necessarily to each physical sensor routed by a logical multi-camera session.
+        // Resolving a wide/tele physical output must not clear an already enabled torch.
+        val logicalCameraCharacteristics = getCameraCharacteristicsOrNull(
+            openCameraId,
+            "logical video torch capability",
+        )
+        val logicalTorchSupported = logicalCameraCharacteristics
+            ?.get(CameraCharacteristics.FLASH_INFO_AVAILABLE)
+            ?: isFlashSupported
+        isFlashSupported = logicalTorchSupported
         val snapshot = VideoCapabilitiesResolver.resolve(
             characteristics = resolvedCharacteristics,
             requestedConfig = requestedConfig,
             algorithmicStabilizationSupported =
                 realtimeStabilizationCoordinator.isCameraSupported(resolvedCharacteristics) &&
                     !isEnhancedStabilizationUnavailableForCurrentCamera(),
+            torchSupported = logicalTorchSupported,
         )
         if (snapshot.config.logProfile != requestedConfig.logProfile) {
             PLog.w(
@@ -7349,10 +7361,13 @@ class Camera2Controller(private val context: Context) {
         val previousSession = captureSession
         val previousReader = imageReader
 
-        // Retire the old session before changing the coordinator's camera calibration. Its
-        // late CaptureResults must never be tagged with the new active physical-camera ID.
+        // Detach its callbacks before changing the coordinator's camera calibration so
+        // late CaptureResults cannot be tagged with the new physical-camera ID. Do not close
+        // it here: keep its repeating request (including FLASH_MODE_TORCH) running while the
+        // replacement output profile is prepared. createPreviewSession() lets CameraDevice
+        // retire the old session as part of the actual session handoff.
         if (previousSession != null) {
-            safeCloseCaptureSession(previousSession, "physical zoom output changed")
+            invalidateCaptureSession(previousSession, "physical zoom output changed")
         }
         captureSession = null
         _enginePreviewSource.value = null
