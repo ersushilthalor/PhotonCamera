@@ -575,11 +575,8 @@ fun CameraScreen(
             return
         }
         cancelZoomStopAnimation()
-        if (viewModel.canInstantlySwitchLens(cameraId)) {
-            lensSwitchTransition.cancel()
-            viewModel.switchToLens(cameraId)
-            return
-        }
+        // Even a warmed camera must wait for its new active session and first rendered GL
+        // frame. Keep the last presented viewfinder frame over the Camera2 reconfiguration gap.
         lensSwitchTransition.switchLens(cameraId, targetZoom) { viewModel.switchToLens(cameraId) }
     }
 
@@ -602,11 +599,8 @@ fun CameraScreen(
             currentCameraId
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            if (viewModel.canInstantlySwitchLens(camera.cameraId)) {
-                lensSwitchTransition.cancel()
-                viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
-                return
-            }
+            // Use the rendered-frame transition for warmed handoffs too; the standby session
+            // still has to become the active capture session before its preview can continue.
             lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
                 viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
             }
@@ -632,11 +626,8 @@ fun CameraScreen(
             currentCameraId
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            if (viewModel.canInstantlySwitchLens(camera.cameraId)) {
-                lensSwitchTransition.cancel()
-                viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
-                return
-            }
+            // Use the rendered-frame transition for warmed handoffs too; the standby session
+            // still has to become the active capture session before its preview can continue.
             lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
                 viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
             }
