@@ -10476,6 +10476,24 @@ class Camera2Controller(private val context: Context) {
         if (clearPendingOpen) {
             pendingCameraOpenRequest = null
         }
+        activeCameraRoleSwap?.let { transaction ->
+            activeCameraRoleSwap = null
+            queuedRoleSwapCameraId = null
+            queuedRoleSwapSurfaceTexture = null
+            queuedRoleSwapPreserveVideoRecording = false
+            if (!standbyCameraController.isRetainedStandbyDevice(transaction.previousDevice) &&
+                !standbyCameraController.isClosingRetainedStandbyDevice(transaction.previousDevice)
+            ) {
+                if (!clearPendingOpen && pendingCameraOpenRequest != null) {
+                    roleSwapFallbackDeviceAwaitingClose = transaction.previousDevice
+                }
+                closeCameraDeviceAndAwait(
+                    transaction.previousDevice,
+                    "cancel incomplete persistent lens role swap",
+                    blocksLifecycle = false,
+                )
+            }
+        }
         try {
             burstGyroRecorder.stop()
             pendingFrameMetadata.clear()
