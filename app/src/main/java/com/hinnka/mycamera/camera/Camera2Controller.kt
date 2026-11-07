@@ -170,6 +170,7 @@ class Camera2Controller(private val context: Context) {
         var previousSessionClosed: Boolean = false,
         var promotedSessionConfigured: Boolean = false,
         var demotionStarted: Boolean = false,
+        var demotionCompleted: Boolean = false,
         var primaryFrameArrived: Boolean = false,
         var standbyReady: Boolean = false,
     )
@@ -304,6 +305,7 @@ class Camera2Controller(private val context: Context) {
     private var releaseCloseLatch: java.util.concurrent.CountDownLatch? = null
     private var captureSession: CameraCaptureSession? = null
     private var activeCameraRoleSwap: CameraRoleSwap? = null
+    private var roleSwapFallbackDeviceAwaitingClose: CameraDevice? = null
     private var previewRequestBuilder: CaptureRequest.Builder? = null
     private var previewSessionGeneration: Long = 0L
     private val previewUpdateScheduled = AtomicBoolean(false)
@@ -2359,6 +2361,11 @@ class Camera2Controller(private val context: Context) {
         // Retired devices closed after a warm handoff only release their own bookkeeping.
         // They cannot mark the replacement camera CLOSED or trigger another open.
         if (!wasActiveDevice && !blocksCurrentLifecycle) {
+            if (roleSwapFallbackDeviceAwaitingClose === camera) {
+                roleSwapFallbackDeviceAwaitingClose = null
+                PLog.i(TAG, "[LENS_ROLE_SWAP] retained device close completed; cold fallback may open")
+                openPendingCameraRequest()
+            }
             PLog.d(
                 TAG,
                 "Retired camera ${camera.id} closed after handoff; active lifecycle remains $cameraDeviceLifecycle"
@@ -2820,6 +2827,7 @@ class Camera2Controller(private val context: Context) {
                 return@takeOver
             }
 
+            pendingCameraOpenRequest = null
             activeCameraRoleSwap = transaction
             clearCameraSessionState(
                 reason = "persistent Main/UW role swap",
@@ -2836,6 +2844,7 @@ class Camera2Controller(private val context: Context) {
                     "retaining oldDevice=${activeDevice.id}; no CameraDevice close/open",
             )
             openCameraNow(request.copy(standbyCameraId = null), preopenedCamera = prewarmedDevice)
+            startRoleSwapDemotionIfReady(transaction)
         }
         return true
     }
@@ -2844,7 +2853,7 @@ class Camera2Controller(private val context: Context) {
         if (
             activeCameraRoleSwap !== transaction ||
             !transaction.previousSessionClosed ||
-            !transaction.promotedSessionConfigured ||
+            activeOpenCameraId != transaction.promotedOpenCameraId ||
             transaction.demotionStarted
         ) {
             return
@@ -2880,6 +2889,7 @@ class Camera2Controller(private val context: Context) {
         ) { ready ->
             if (activeCameraRoleSwap !== transaction) return@adoptRetainedDevice
             transaction.standbyReady = ready
+            transaction.demotionCompleted = true
             val totalMs = (SystemClock.elapsedRealtime() - transaction.startedElapsedRealtimeMs)
                 .coerceAtLeast(0L)
             if (ready) {
@@ -2918,15 +2928,15 @@ class Camera2Controller(private val context: Context) {
             activeCameraRoleSwap === transaction &&
             transaction.promotedSessionConfigured &&
             transaction.primaryFrameArrived &&
-            transaction.demotionStarted &&
-            transaction.standbyReady
+            transaction.demotionCompleted
         ) {
             val totalMs = (SystemClock.elapsedRealtime() - transaction.startedElapsedRealtimeMs)
                 .coerceAtLeast(0L)
             PLog.i(
                 TAG,
                 "[LENS_ROLE_SWAP] complete: from=${transaction.previousCamera.cameraId} " +
-                    "to=${activeOpenCameraId}, totalElapsedMs=$totalMs",
+                    "to=${activeOpenCameraId}, standbyReady=${transaction.standbyReady}, " +
+                    "totalElapsedMs=$totalMs",
             )
             activeCameraRoleSwap = null
         }
@@ -2942,6 +2952,7 @@ class Camera2Controller(private val context: Context) {
                 "target=${_state.value.currentCameraId}",
         )
         if (!standbyCameraController.isRetainedStandbyDevice(transaction.previousDevice)) {
+            roleSwapFallbackDeviceAwaitingClose = transaction.previousDevice
             closeCameraDeviceAndAwait(
                 transaction.previousDevice,
                 "role-swap fallback: $reason",
@@ -2952,6 +2963,10 @@ class Camera2Controller(private val context: Context) {
 
     private fun openPendingCameraRequest() {
         if (cameraDeviceLifecycle != CameraDeviceLifecycle.CLOSED) return
+        if (roleSwapFallbackDeviceAwaitingClose != null) {
+            PLog.d(TAG, "Cold role-swap fallback waiting for retained CameraDevice close")
+            return
+        }
         if (standbyCameraController.isDeviceTransitioning) {
             if (!waitingForStandbyRelease) {
                 waitingForStandbyRelease = true
