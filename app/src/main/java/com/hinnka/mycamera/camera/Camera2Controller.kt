@@ -3689,6 +3689,7 @@ class Camera2Controller(private val context: Context) {
                     Executor { handler.post(it) },
                     object : CameraCaptureSession.StateCallback() {
                         override fun onClosed(session: CameraCaptureSession) {
+                            releasePendingImageReaders(session)
                             invalidateCaptureSession(session, "video session closed")
                         }
 
@@ -3767,6 +3768,7 @@ class Camera2Controller(private val context: Context) {
                 Executor { handler.post(it) },
                 object : CameraCaptureSession.StateCallback() {
                     override fun onClosed(session: CameraCaptureSession) {
+                        releasePendingImageReaders(session)
                         invalidateCaptureSession(session, "photo session closed")
                     }
 
@@ -3889,7 +3891,7 @@ class Camera2Controller(private val context: Context) {
         val state = _state.value
         if (!shouldUseAlgorithmicStabilization()) return null
         val size = when (state.captureMode) {
-            CaptureMode.PHOTO -> state.currentPreviewSize
+            CaptureMode.PHOTO -> pendingPreviewSizeForSession ?: state.currentPreviewSize
             CaptureMode.VIDEO -> state.videoCapabilities
                 .enhancedStabilizationInputSizesByResolution[state.videoConfig.resolution]
                 ?: return null
@@ -4381,7 +4383,14 @@ class Camera2Controller(private val context: Context) {
                 }
             }
 
-            _state.value = _state.value.copy(isPreviewActive = true)
+            val configuredPreviewSize = pendingPreviewSizeForSession
+            pendingPreviewSizeForSession = null
+            _state.update {
+                it.copy(
+                    isPreviewActive = true,
+                    currentPreviewSize = configuredPreviewSize ?: it.currentPreviewSize,
+                )
+            }
             activeLogicalDualPreviewPlan = logicalDualPreviewPlan
             if (logicalDualPreviewPlan != null) {
                 PLog.i(
@@ -6349,15 +6358,31 @@ class Camera2Controller(private val context: Context) {
      * 切换到指定的相机 ID
      */
     fun switchToCameraId(cameraId: String) {
-        val cameras = _state.value.availableCameras
-        val targetCamera = cameras.find { it.cameraId == cameraId }
+        switchToCameraId(cameraId, 1f)
+    }
+
+    /**
+     * Atomically select a lens and its visible zoom target. The previous two-step flow
+     * briefly published zoomRatio=1x before the requested zoom was queued on cameraHandler;
+     * on logical multi-camera devices that could select/reconfigure a different physical
+     * output before the final zoom arrived.
+     */
+    fun switchToCameraId(cameraId: String, visibleZoomRatio: Float) {
+        val currentState = _state.value
+        val targetCamera = currentState.availableCameras.find { it.cameraId == cameraId }
+        if (targetCamera == null) {
+            PLog.w(TAG, "Camera with ID $cameraId not found")
+            return
+        }
+        val displayIntrinsicZoomRatio = targetCamera.displayIntrinsicZoomRatio
+            .takeIf { it.isFinite() && it > 0f } ?: 1f
+        val cameraZoomRatio = sanitizeZoomRatio(visibleZoomRatio / displayIntrinsicZoomRatio)
 
         val livePlan = activeLogicalDualPreviewPlan
         val alternateFrameAvailable = alternatePreviewSurfaceTexture?.let { texture ->
             runCatching { texture.timestamp > 0L }.getOrDefault(false)
         } == true
         val canUsePrewarmedStandby = livePlan == null &&
-            targetCamera != null &&
             alternateFrameAvailable &&
             alternatePreviewSurface?.let { runCatching { it.isValid }.getOrDefault(false) } == true &&
             standbyCameraController.canHandoffTo(targetCamera)
@@ -6379,16 +6404,24 @@ class Camera2Controller(private val context: Context) {
             }
         }
 
-        targetCamera?.let { cam ->
-            PLog.d(TAG, "Switching to camera ID: $cameraId")
-            _state.value = _state.value.copy(
-                currentCameraId = cam.cameraId,
-                currentLensType = cam.lensType,
-                zoomRatio = 1f
-            )
-        } ?: PLog.w(TAG, "Camera with ID $cameraId not found")
+        PLog.d(
+            TAG,
+            "Switching to camera ID: $cameraId with visibleZoom=$visibleZoomRatio " +
+                "cameraZoom=$cameraZoomRatio",
+        )
+        _state.value = currentState.copy(
+            currentCameraId = targetCamera.cameraId,
+            currentLensType = targetCamera.lensType,
+            zoomRatio = cameraZoomRatio,
+            zoomPanX = 0f,
+            zoomPanY = 0f,
+            zoomPanEnabled = false,
+        )
+        // The selected camera and target zoom are now one state transition. setZoomRatio()
+        // queues only the physical-output/session operation and cannot observe an intermediate
+        // lens-at-1x state.
+        setZoomRatio(cameraZoomRatio)
     }
-
 // ==================== 曝光控制 ====================
 
     /** Serialize user changes and their snapshots with the asynchronous focus controls. */
@@ -10218,6 +10251,10 @@ class Camera2Controller(private val context: Context) {
         } catch (e: Exception) {
             PLog.e(TAG, "Error closing capture session ($reason)", e)
         }
+    }
+
+    private fun releasePendingImageReaders(session: CameraCaptureSession) {
+        pendingImageReaderClosures.remove(session)?.forEach(::safeCloseImageReader)
     }
 
     private fun safeCloseImageReader(reader: ImageReader?) {
