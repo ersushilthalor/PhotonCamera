@@ -3853,9 +3853,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun canInstantlySwitchLens(cameraId: String): Boolean {
-        val previewView = glSurfaceView ?: return false
-        return cameraController.canSwitchToInstantPreview(cameraId) &&
-            previewView.hasStandbyPreviewFrame
+        return cameraController.canSwitchToInstantPreview(cameraId)
     }
 
     /**
@@ -3868,15 +3866,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val sharesOpenCameraDevice = currentCamera != null && targetCamera != null &&
             runCatching { currentCamera.getOpenCameraId() == targetCamera.getOpenCameraId() }
                 .getOrDefault(false)
+        val canUseInstantPreview = canInstantlySwitchLens(cameraId)
         syncVendorCaptureSettingsToController()
         cameraController.switchToCameraId(cameraId)
         targetCamera?.let { camera ->
             setZoomRatioForCamera(camera.defaultVisibleZoomRatio(), camera.cameraId)
         }
-        // Physical lenses exposed by one logical Camera2 device can be switched by
-        // rebuilding only its capture session. Closing the CameraDevice here adds an
-        // avoidable black-frame/cold-open gap and defeats seamless physical handoff.
-        if (!sharesOpenCameraDevice) {
+        // If a same-device physical pair does not have a ready dual preview, reopen on the
+        // target physical output rather than leaving the old sensor bound to the session.
+        if (!sharesOpenCameraDevice || !canUseInstantPreview) {
             reopenCamera(preserveVideoRecording = true)
         }
     }
@@ -3891,10 +3889,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val sharesOpenCameraDevice = currentCamera != null && targetCamera != null &&
             runCatching { currentCamera.getOpenCameraId() == targetCamera.getOpenCameraId() }
                 .getOrDefault(false)
+        val canUseInstantPreview = canInstantlySwitchLens(cameraId)
         syncVendorCaptureSettingsToController()
         cameraController.switchToCameraId(cameraId)
         setZoomRatioForCamera(ratio, cameraId)
-        if (!sharesOpenCameraDevice) {
+        if (!sharesOpenCameraDevice || !canUseInstantPreview) {
             reopenCamera(preserveVideoRecording = true)
         }
     }
