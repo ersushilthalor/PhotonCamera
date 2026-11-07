@@ -10,26 +10,22 @@ import androidx.compose.ui.unit.dp
 
 /** Shared dimensions keep preview placement and control measurement in agreement. */
 internal object CameraControlsLayoutDefaults {
-    val ParameterBarHeight = 60.dp
-    val ZoomBarHeight = 40.dp
-    val ZoomBarDownwardOffset = 55.dp
-    val CaptureButtonSize = 90.dp
-    val SideButtonSize = 60.dp
-    val GallerySideInset = 20.dp
-    val CapturePauseButtonSpacing = 5.dp
-    val ModeSwitcherHeight = 45.dp
-    val ModeSwitcherSpacing = 37.5.dp
-    val BottomPadding = 10.dp
-    val CaptureClearance = 10.dp
-    val BarSpacing = 5.dp
-    val ViewfinderModeSpacing = 15.dp
+    val ParameterBarHeight = 48.dp
+    val ZoomBarHeight = 33.dp
+    val CaptureButtonSize = 72.dp
+    val SideButtonSize = 48.dp
+    val ModeSwitcherHeight = 36.dp
+    val ModeSwitcherSpacing = 30.dp
+    val BottomPadding = 8.dp
+    val CaptureClearance = 8.dp
+    val BarSpacing = 4.dp
+    val ViewfinderModeSpacing = 12.dp
 
     val ModeAreaHeight = ModeSwitcherSpacing + ModeSwitcherHeight + BottomPadding
     val XpanViewfinderClearance = ViewfinderModeSpacing + ModeSwitcherHeight + BottomPadding
     val CaptureAreaHeight = CaptureButtonSize + ModeAreaHeight
-    // Reserve a separate lane below the preview for the shifted zoom bar and capture row.
-    val BottomControlsReservedHeight = CaptureAreaHeight + CaptureClearance + ZoomBarDownwardOffset
-    val CollapsedControlsHeight = BottomControlsReservedHeight
+    val CollapsedControlsHeight = CaptureAreaHeight + CaptureClearance +
+        ParameterBarHeight + BarSpacing + ZoomBarHeight
 }
 
 /**
