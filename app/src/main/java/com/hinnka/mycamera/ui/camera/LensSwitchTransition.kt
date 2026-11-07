@@ -41,6 +41,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 private const val SnapshotMaxLongEdge = 1440
@@ -83,7 +84,8 @@ internal class LensSwitchTransitionState(
         val frameBasedHandoffEnabled: Boolean,
         val handoffDurationMs: Long,
         val transitionDurationMs: Long,
-        val onSwitch: () -> Unit,
+        val onSwitch: (() -> Unit)?,
+        val onZoomStep: ((Float) -> Unit)?,
     )
     private var pendingRequest: Request? = null
     private var awaitedCameraId: String? = null
@@ -96,7 +98,8 @@ internal class LensSwitchTransitionState(
         frameBasedHandoffEnabled: Boolean,
         handoffDurationMs: Long,
         transitionDurationMs: Long,
-        onSwitch: () -> Unit,
+        onSwitch: (() -> Unit)?,
+        onZoomStep: ((Float) -> Unit)?,
     ) {
         require(targetZoom.isFinite() && targetZoom > 0f)
         // Coalesce gestures while the screenshot is being prepared. Once a switch has
@@ -110,6 +113,7 @@ internal class LensSwitchTransitionState(
             handoffDurationMs.coerceIn(100L, 1_000L),
             transitionDurationMs.coerceIn(1L, 1_000L),
             onSwitch,
+            onZoomStep,
         )
         if (switchPending && job?.isActive == true) return
         job?.cancel()
@@ -136,7 +140,7 @@ internal class LensSwitchTransitionState(
                 switchPending = false
                 if (request != null) {
                     awaitedCameraId = request.cameraId
-                    request.onSwitch()
+                    request.onSwitch?.invoke()
                 }
                 if (awaitedCameraId == null) {
                     clearSnapshot()
@@ -150,6 +154,38 @@ internal class LensSwitchTransitionState(
                             targetZoom = request?.targetZoom ?: viewModel.zoomRatioByMain,
                             durationMs = request?.transitionDurationMs ?: 400L,
                         )
+                    }
+                    // Drive real Camera2 zoom using the same 60Hz, logarithmic slider
+                    // trajectory as VCamera. The ViewModel resolves each step to the optimal
+                    // physical lens, so lens boundaries are crossed during the animation.
+                    val engineZoomAnimation = request?.onZoomStep?.let { updateZoom ->
+                        launch {
+                            val transition = request
+                            val durationNanos = transition.transitionDurationMs * 1_000_000L
+                            val startFrameNanos = withFrameNanos { it }
+                            var lastAppliedZoom = Float.NaN
+                            while (true) {
+                                val frameNanos = withFrameNanos { it }
+                                val linearProgress = (
+                                    (frameNanos - startFrameNanos).toDouble() /
+                                        durationNanos.toDouble()
+                                    ).coerceIn(0.0, 1.0)
+                                val easedProgress = easeZoomTransitionProgress(linearProgress)
+                                val zoom = interpolateZoomRatio(
+                                    snapshotZoom,
+                                    transition.targetZoom,
+                                    easedProgress,
+                                )
+                                if (lastAppliedZoom.isNaN() ||
+                                    abs(zoom - lastAppliedZoom) >= 0.01f ||
+                                    linearProgress >= 1.0
+                                ) {
+                                    updateZoom(zoom)
+                                    lastAppliedZoom = zoom
+                                }
+                                if (linearProgress >= 1.0) break
+                            }
+                        }
                     }
                     // Separate-device handoffs and cold opens must complete their preview
                     // restart before a primary-source frame can be considered the new lens.
@@ -244,6 +280,7 @@ internal class LensSwitchTransitionState(
                         waiter.cancel()
                     }
                     animation.join()
+                    engineZoomAnimation?.join()
                 }
                 // Renderer callbacks run before GLSurfaceView swaps buffers.
                 withFrameNanos { }
@@ -349,6 +386,11 @@ internal fun LensSwitchTransitionOverlay(state: LensSwitchTransitionState, modif
             }
         }
     }
+}
+
+private fun easeZoomTransitionProgress(progress: Double): Float {
+    val t = progress.coerceIn(0.0, 1.0)
+    return (0.45 * t + 2.10 * t * t - 1.55 * t * t * t).toFloat().coerceIn(0f, 1f)
 }
 
 private fun isFrameBasedHandoffEligible(fromZoom: Float, targetZoom: Float): Boolean {
