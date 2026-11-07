@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.PixelCopy
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -50,6 +51,10 @@ private const val BlurLevelCount = 4
 private const val BlurSigma = 5f
 private const val BlurEnterDurationMillis = 80
 private const val BlurExitDurationMillis = 240
+private const val FRAME_HANDOFF_WARMUP_FRAMES = 2
+private const val FRAME_HANDOFF_TIMEOUT_MS = 900L
+private const val FRAME_HANDOFF_DIVERGENCE_RANGE = 0.20f
+private const val MAX_FRAME_HANDOFF_ALPHA_STEP = 0.30f
 
 /** Owns the frozen viewfinder independently of camera / SurfaceView recreation. */
 internal class LensSwitchTransitionState(
@@ -67,6 +72,8 @@ internal class LensSwitchTransitionState(
     var blurFrames by mutableStateOf<List<ImageBitmap>>(emptyList())
         private set
     private var snapshotZoom = 1f
+    var frameHandoffProgress by mutableFloatStateOf(0f)
+        private set
     private var job: Job? = null
     private var switchPending = false
     private data class Request(
@@ -74,6 +81,9 @@ internal class LensSwitchTransitionState(
         val targetZoom: Float,
         val expectedPreviewSourceStandby: Boolean,
         val waitForPreviewRestart: Boolean,
+        val frameBasedHandoffEnabled: Boolean,
+        val handoffDurationMs: Long,
+        val transitionDurationMs: Long,
         val onSwitch: () -> Unit,
     )
     private var pendingRequest: Request? = null
@@ -84,6 +94,9 @@ internal class LensSwitchTransitionState(
         targetZoom: Float,
         expectedPreviewSourceStandby: Boolean,
         waitForPreviewRestart: Boolean,
+        frameBasedHandoffEnabled: Boolean,
+        handoffDurationMs: Long,
+        transitionDurationMs: Long,
         onSwitch: () -> Unit,
     ) {
         require(targetZoom.isFinite() && targetZoom > 0f)
@@ -94,6 +107,9 @@ internal class LensSwitchTransitionState(
             targetZoom,
             expectedPreviewSourceStandby,
             waitForPreviewRestart,
+            frameBasedHandoffEnabled,
+            handoffDurationMs.coerceIn(100L, 1_000L),
+            transitionDurationMs.coerceIn(1L, 1_000L),
             onSwitch,
         )
         if (switchPending && job?.isActive == true) return
@@ -107,6 +123,7 @@ internal class LensSwitchTransitionState(
                     snapshotZoom = viewModel.zoomRatioByMain
                     scale = 1f
                     blurProgress.snapTo(0f)
+                    frameHandoffProgress = 0f
                     blurFrames = emptyList()
                     val bitmap = viewModel.glSurfaceView?.captureLastFrame()
                     ensureActive()
@@ -129,7 +146,10 @@ internal class LensSwitchTransitionState(
                 }
                 coroutineScope {
                     val animation = launch {
-                        animateSnapshotTo(request?.targetZoom ?: viewModel.zoomRatioByMain)
+                        animateSnapshotTo(
+                            targetZoom = request?.targetZoom ?: viewModel.zoomRatioByMain,
+                            durationMs = request?.transitionDurationMs ?: 400L,
+                        )
                     }
                     // Separate-device handoffs and cold opens must complete their preview
                     // restart before a primary-source frame can be considered the new lens.
@@ -156,30 +176,67 @@ internal class LensSwitchTransitionState(
                         )
                     }
 
-                    // Readiness is acknowledged by the GL renderer only after it acquires
-                    // and draws a new frame from the requested input (primary or standby).
-                    // No capture-session timestamp is used as a proxy for a rendered frame.
+                    // The target stream is warmed before any alpha handoff. For direct
+                    // Ultra-Wide <-> 2x/3x transitions, VCamera blends over actual incoming
+                    // buffers (two warm-up frames plus a frame-counted overlap window).
+                    val useFrameHandoff = request?.frameBasedHandoffEnabled == true &&
+                        isFrameBasedHandoffEligible(
+                            fromZoom = snapshotZoom,
+                            targetZoom = request.targetZoom,
+                        )
+                    val blendFrames = if (useFrameHandoff) {
+                        ((request!!.handoffDurationMs * 60L) / 1_000L).toInt().coerceIn(4, 32)
+                    } else {
+                        0
+                    }
+                    val requiredFrames = if (useFrameHandoff) blendFrames + FRAME_HANDOFF_WARMUP_FRAMES else 1
                     val rendered = CompletableDeferred<Unit>()
                     val waiter = launch {
                         snapshotFlow { viewModel.glSurfaceView }.collectLatest { preview ->
                             if (preview != null) {
-                                preview.awaitPreviewFrame(
+                                var incomingFrameCount = 0
+                                var previousProgress = 0f
+                                preview.awaitPreviewFrames(
                                     expectedUseStandby = request?.expectedPreviewSourceStandby == true,
-                                )
+                                    frameCount = requiredFrames,
+                                ) {
+                                    incomingFrameCount++
+                                    if (useFrameHandoff && incomingFrameCount > FRAME_HANDOFF_WARMUP_FRAMES) {
+                                        val blendFrame = incomingFrameCount - FRAME_HANDOFF_WARMUP_FRAMES
+                                        val frameProgress = blendFrame.toFloat() / blendFrames.toFloat()
+                                        val currentZoom = interpolateZoomRatio(
+                                            snapshotZoom,
+                                            request?.targetZoom ?: snapshotZoom,
+                                            frameProgress,
+                                        )
+                                        previousProgress = calculateFrameHandoffProgress(
+                                            incomingFrameCount = blendFrame,
+                                            targetUseStandby = request?.expectedPreviewSourceStandby == true,
+                                            currentZoom = currentZoom,
+                                            requiredBlendFrames = blendFrames,
+                                            previousProgress = previousProgress,
+                                        )
+                                        frameHandoffProgress = previousProgress
+                                    }
+                                }
                                 rendered.complete(Unit)
                             }
                         }
                     }
                     try {
-                        val frameRendered = withTimeoutOrNull(5_000L) {
+                        val waitMs = if (useFrameHandoff) FRAME_HANDOFF_TIMEOUT_MS else 5_000L
+                        val frameRendered = withTimeoutOrNull(waitMs) {
                             rendered.await()
                             true
                         } == true
                         if (!frameRendered) {
                             PLog.w(
                                 "LensSwitchTransition",
-                                "Timed out waiting for a newly rendered switched preview frame: $awaitedCameraId",
+                                "Timed out waiting for switched preview frames: $awaitedCameraId",
                             )
+                            // Match VCamera's fail-safe: never leave the outgoing layer frozen
+                            // forever when the target camera fails to deliver its frame callback.
+                            if (useFrameHandoff) frameHandoffProgress = 1f
                         }
                     } finally {
                         waiter.cancel()
@@ -189,7 +246,7 @@ internal class LensSwitchTransitionState(
                 // Renderer callbacks run before GLSurfaceView swaps buffers.
                 withFrameNanos { }
                 withFrameNanos { }
-                opacity.animateTo(0f, tween(160))
+                opacity.animateTo(0f, tween(if (request?.frameBasedHandoffEnabled == true) 1 else 160))
                 clearSnapshot()
                 isActive = false
                 awaitedCameraId = null
@@ -207,6 +264,7 @@ internal class LensSwitchTransitionState(
     }
 
     fun cancel() {
+        frameHandoffProgress = 0f
         job?.cancel()
         job = null
         clearSnapshot()
@@ -221,11 +279,12 @@ internal class LensSwitchTransitionState(
     }
 
     private fun clearSnapshot() {
+        frameHandoffProgress = 0f
         snapshot = null
         blurFrames = emptyList()
     }
 
-    private suspend fun animateSnapshotTo(targetZoom: Float) = coroutineScope {
+    private suspend fun animateSnapshotTo(targetZoom: Float, durationMs: Long) = coroutineScope {
         val bitmap = snapshot ?: return@coroutineScope
         val visibleZoom = snapshotZoom * scale
         if (targetZoom >= visibleZoom) {
@@ -234,9 +293,13 @@ internal class LensSwitchTransitionState(
             launch { blurProgress.animateTo(0f, tween(BlurExitDurationMillis)) }
             val startScale = scale
             val progress = Animatable(0f)
+            val transitionEasing = Easing { fraction ->
+                val t = fraction.coerceIn(0f, 1f)
+                (0.45f * t + 2.10f * t * t - 1.55f * t * t * t).coerceIn(0f, 1f)
+            }
             progress.animateTo(
                 1f,
-                tween(resolveZoomStopAnimationDurationMillis(visibleZoom, targetZoom), easing = FastOutSlowInEasing),
+                tween(durationMs.coerceAtLeast(1L).toInt(), easing = transitionEasing),
             ) {
                 // Logarithmic interpolation matches the existing in-lens zoom animation.
                 scale = interpolateZoomRatio(startScale, targetZoom / snapshotZoom, value)
@@ -258,7 +321,9 @@ internal class LensSwitchTransitionState(
 @Composable
 internal fun LensSwitchTransitionOverlay(state: LensSwitchTransitionState, modifier: Modifier = Modifier) {
     state.snapshot?.let { bitmap ->
-        Box(modifier.clipToBounds().graphicsLayer { alpha = state.opacity.value }) {
+        Box(modifier.clipToBounds().graphicsLayer {
+            alpha = state.opacity.value * (1f - state.frameHandoffProgress).coerceIn(0f, 1f)
+        }) {
             Box(Modifier.matchParentSize().graphicsLayer {
                 scaleX = state.scale
                 scaleY = state.scale
@@ -282,6 +347,40 @@ internal fun LensSwitchTransitionOverlay(state: LensSwitchTransitionState, modif
             }
         }
     }
+}
+
+private fun isFrameBasedHandoffEligible(fromZoom: Float, targetZoom: Float): Boolean {
+    val fromHalfX = kotlin.math.abs(fromZoom - 0.5f) < 0.025f
+    val targetHalfX = kotlin.math.abs(targetZoom - 0.5f) < 0.025f
+    val fromTelephoto = kotlin.math.abs(fromZoom - 2f) < 0.05f ||
+        kotlin.math.abs(fromZoom - 3f) < 0.05f
+    val targetTelephoto = kotlin.math.abs(targetZoom - 2f) < 0.05f ||
+        kotlin.math.abs(targetZoom - 3f) < 0.05f
+    return (fromHalfX && targetTelephoto) || (fromTelephoto && targetHalfX)
+}
+
+private fun calculateFrameHandoffProgress(
+    incomingFrameCount: Int,
+    targetUseStandby: Boolean,
+    currentZoom: Float,
+    requiredBlendFrames: Int,
+    previousProgress: Float,
+): Float {
+    val frameProgress = incomingFrameCount.coerceIn(0, requiredBlendFrames).toFloat() /
+        requiredBlendFrames.toFloat()
+    val frameEased = ((1.0 - kotlin.math.cos(Math.PI * frameProgress.toDouble())) * 0.5).toFloat()
+    val zoomEased = if (targetUseStandby) {
+        val zoomProgress = ((1f - currentZoom) / 0.5f).coerceIn(0f, 1f)
+        val accelerated = 1f - (1f - zoomProgress) * (1f - zoomProgress) * (1f - zoomProgress)
+        ((1.0 - kotlin.math.cos(Math.PI * accelerated.toDouble())) * 0.5).toFloat()
+    } else {
+        val zoomProgress = ((currentZoom - 1f) / FRAME_HANDOFF_DIVERGENCE_RANGE).coerceIn(0f, 1f)
+        val accelerated = 1f - (1f - zoomProgress) * (1f - zoomProgress) * (1f - zoomProgress)
+        ((1.0 - kotlin.math.cos(Math.PI * accelerated.toDouble())) * 0.5).toFloat()
+    }
+    val previous = previousProgress.coerceIn(0f, 1f)
+    val desired = maxOf(frameEased, zoomEased)
+    return minOf(desired, previous + MAX_FRAME_HANDOFF_ALPHA_STEP).coerceIn(previous, 1f)
 }
 
 private suspend fun CameraGLSurfaceView.captureLastFrame(): Bitmap? {
