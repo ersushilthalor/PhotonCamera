@@ -303,8 +303,18 @@ class Camera2Controller(private val context: Context) {
     @Volatile private var onAlternatePreviewSourceChanged: ((Boolean) -> Unit)? = null
     private var onAlternatePreviewSizeChanged: ((Int, Int) -> Unit)? = null
     @Volatile private var activeLogicalDualPreviewPlan: LogicalDualPreviewPlan? = null
-    @Volatile private var pendingLogicalPreviewSourceReset = false
+    // A standby-to-active source reset belongs to the target CameraDevice session, not
+    // to whichever old session happens to deliver the next capture result.
+    @Volatile private var pendingLogicalPreviewSourceResetCameraId: String? = null
     private val failedLogicalDualPreviewPlanKeys = mutableSetOf<String>()
+
+    @Volatile private var autoSwitchToUltraWideEnabled = false
+    @Volatile var onAutoLensSwitchRequested: ((cameraId: String, targetZoom: Float) -> Unit)? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var closeSubjectUnfocusedFrames = 0
+    private var subjectFarFrames = 0
+    private var lastAutoLensSwitchElapsedMs = 0L
+    private var autoMacroSwitchActive = false
     private var stabilizationImageReader: StabilizationImageReader? = null
 
     // 降噪等级 (0=Off, 1=Fast, 2=High Quality, 3=ZSL, 4=Minimal)
@@ -1192,9 +1202,16 @@ class Camera2Controller(private val context: Context) {
                     _state.update { it.copy(previewFirstFrameTimestampNs = timestamp) }
                 }
             }
-            if (session === captureSession && pendingLogicalPreviewSourceReset) {
-                pendingLogicalPreviewSourceReset = false
-                PLog.i(TAG, "New physical-lens preview frame is ready; returning renderer to primary input")
+            val pendingResetCameraId = pendingLogicalPreviewSourceResetCameraId
+            val selectedOpenCameraId = _state.value.getCurrentCameraInfo()
+                ?.let { runCatching { it.getOpenCameraId() }.getOrNull() }
+            if (session === captureSession &&
+                pendingResetCameraId != null &&
+                pendingResetCameraId == _state.value.currentCameraId &&
+                selectedOpenCameraId == activeOpenCameraId
+            ) {
+                pendingLogicalPreviewSourceResetCameraId = null
+                PLog.i(TAG, "New active CameraDevice preview frame is ready; returning renderer to primary input")
                 onAlternatePreviewSourceChanged?.invoke(false)
             }
 
@@ -1210,6 +1227,9 @@ class Camera2Controller(private val context: Context) {
             }
 
             lastCaptureResult = result
+            if (session === captureSession) {
+                updateAutoMacroLensSwitch(result)
+            }
             logVideoCaptureStats(result)
             if (session === captureSession) {
                 updateEnginePreviewSource(result)
@@ -2590,7 +2610,7 @@ class Camera2Controller(private val context: Context) {
             onAlternatePreviewSizeChanged = onPreviewSizeChanged
             if (changed) {
                 activeLogicalDualPreviewPlan = null
-                pendingLogicalPreviewSourceReset = false
+                pendingLogicalPreviewSourceResetCameraId = null
                 onSourceChanged?.invoke(false)
                 if (validSurface != null &&
                     cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN &&
@@ -2624,6 +2644,148 @@ class Camera2Controller(private val context: Context) {
         val hasLiveSurface = alternatePreviewSurface
             ?.let { runCatching { it.isValid }.getOrDefault(false) } == true
         return hasLiveSurface && standbyCameraController.canHandoffTo(targetCamera)
+    }
+
+    fun setAutoSwitchToUltraWide(enabled: Boolean) {
+        val update = {
+            autoSwitchToUltraWideEnabled = enabled
+            closeSubjectUnfocusedFrames = 0
+            subjectFarFrames = 0
+            autoMacroSwitchActive = false
+        }
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post(update)
+        } else {
+            update()
+        }
+    }
+
+    /**
+     * VCamera-style close-subject fallback: switch to the real ultra-wide lens only after
+     * sustained main-lens AF struggle, then return after AF confirms the subject is distant.
+     * All switching is delegated to the ViewModel so same-device and standby-device paths use
+     * the exact same Camera2 hand-off logic as a manual lens selection.
+     */
+    private fun updateAutoMacroLensSwitch(result: TotalCaptureResult) {
+        if (!autoSwitchToUltraWideEnabled) return
+        val cameraState = _state.value
+        if (cameraState.captureMode != CaptureMode.PHOTO ||
+            cameraState.videoRecordingState.isRecording ||
+            cameraState.videoRecordingState.isProcessing ||
+            cameraState.isCapturing ||
+            !cameraState.isAutoFocus ||
+            cameraState.isHyperfocalFocusEnabled
+        ) {
+            return
+        }
+
+        val currentCamera = cameraState.getCurrentCameraInfo() ?: return
+        if (currentCamera.lensFacing != CameraCharacteristics.LENS_FACING_BACK) return
+        val backCameras = cameraState.availableCameras.filter {
+            it.lensFacing == CameraCharacteristics.LENS_FACING_BACK && !it.isVirtualIszLens
+        }
+        val ultraWideCamera = backCameras.firstOrNull {
+            it.lensType == LensType.BACK_ULTRA_WIDE
+        } ?: return
+        val mainCamera = backCameras.firstOrNull {
+            it.lensType == LensType.BACK_MAIN && !it.isCustomLensId
+        } ?: return
+
+        val afState = result.get(CaptureResult.CONTROL_AF_STATE)
+            ?: CaptureResult.CONTROL_AF_STATE_INACTIVE
+        val focusDistance = result.get(CaptureResult.LENS_FOCUS_DISTANCE) ?: 0f
+        val minimumFocusDistance = currentCamera.minimumFocusDistance
+            .takeIf { it.isFinite() && it > 0f } ?: 10f
+        val now = SystemClock.elapsedRealtime()
+
+        if (currentCamera.cameraId == mainCamera.cameraId) {
+            // A user-initiated return to Main cancels the automatic macro-return state.
+            autoMacroSwitchActive = false
+            val isSubjectVeryClose =
+                focusDistance >= minimumFocusDistance * 0.70f || focusDistance >= 6f
+            val isAfStruggling =
+                afState == CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED ||
+                    afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_UNFOCUSED ||
+                    (
+                        focusDistance >= minimumFocusDistance * 0.85f &&
+                            (afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN ||
+                                afState == CaptureResult.CONTROL_AF_STATE_ACTIVE_SCAN)
+                        )
+            if (isSubjectVeryClose && isAfStruggling && cameraState.zoomRatio in 0.9f..1.6f) {
+                closeSubjectUnfocusedFrames++
+                subjectFarFrames = 0
+            } else {
+                closeSubjectUnfocusedFrames = (closeSubjectUnfocusedFrames - 1).coerceAtLeast(0)
+            }
+
+            if (closeSubjectUnfocusedFrames >= 10 &&
+                now - lastAutoLensSwitchElapsedMs >= 2_000L
+            ) {
+                closeSubjectUnfocusedFrames = 0
+                subjectFarFrames = 0
+                autoMacroSwitchActive = true
+                lastAutoLensSwitchElapsedMs = now
+                val targetZoom = ultraWideCamera.displayIntrinsicZoomRatio
+                    .takeIf { it.isFinite() && it > 0f } ?: 0.5f
+                PLog.i(
+                    TAG,
+                    "[AUTO_LENS_SWITCH] Main AF is struggling on a close subject; " +
+                        "switching to ultra-wide camera \${ultraWideCamera.cameraId}",
+                )
+                mainHandler.post {
+                    if (autoSwitchToUltraWideEnabled &&
+                        _state.value.currentCameraId == mainCamera.cameraId
+                    ) {
+                        onAutoLensSwitchRequested?.invoke(ultraWideCamera.cameraId, targetZoom)
+                    }
+                }
+            }
+        } else if (currentCamera.cameraId == ultraWideCamera.cameraId && autoMacroSwitchActive) {
+            val isSubjectFarAway =
+                focusDistance < 4f ||
+                    (
+                        afState == CaptureResult.CONTROL_AF_STATE_PASSIVE_FOCUSED &&
+                            focusDistance < 5f
+                        ) ||
+                    (
+                        afState == CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED &&
+                            focusDistance < 5f
+                        )
+            if (isSubjectFarAway) {
+                subjectFarFrames++
+                closeSubjectUnfocusedFrames = 0
+            } else {
+                subjectFarFrames = (subjectFarFrames - 1).coerceAtLeast(0)
+            }
+
+            if (subjectFarFrames >= 14 &&
+                now - lastAutoLensSwitchElapsedMs >= 2_000L
+            ) {
+                subjectFarFrames = 0
+                closeSubjectUnfocusedFrames = 0
+                autoMacroSwitchActive = false
+                lastAutoLensSwitchElapsedMs = now
+                val targetZoom = mainCamera.displayIntrinsicZoomRatio
+                    .takeIf { it.isFinite() && it > 0f } ?: 1f
+                PLog.i(
+                    TAG,
+                    "[AUTO_LENS_SWITCH] Main AF recovered for a distant subject; " +
+                        "switching back to main camera \${mainCamera.cameraId}",
+                )
+                mainHandler.post {
+                    if (autoSwitchToUltraWideEnabled &&
+                        _state.value.currentCameraId == ultraWideCamera.cameraId
+                    ) {
+                        onAutoLensSwitchRequested?.invoke(mainCamera.cameraId, targetZoom)
+                    }
+                }
+            }
+        } else {
+            closeSubjectUnfocusedFrames = 0
+            subjectFarFrames = 0
+            autoMacroSwitchActive = false
+        }
     }
 
     /**
@@ -6295,6 +6457,8 @@ class Camera2Controller(private val context: Context) {
         val cameras = _state.value.availableCameras
         val targetCamera = cameras.find { it.cameraId == cameraId }
 
+        // Each new switch supersedes any pending cold-handoff source reset.
+        pendingLogicalPreviewSourceResetCameraId = null
         val livePlan = activeLogicalDualPreviewPlan
         val alternateFrameAvailable = alternatePreviewSurfaceTexture?.let { texture ->
             runCatching { texture.timestamp > 0L }.getOrDefault(false)
@@ -6306,17 +6470,20 @@ class Camera2Controller(private val context: Context) {
             standbyCameraController.canHandoffTo(targetCamera)
         when {
             livePlan?.alternateCameraId == cameraId && alternateFrameAvailable -> {
-                pendingLogicalPreviewSourceReset = true
+                // A shared logical session keeps both physical preview outputs alive. Its
+                // active session continues producing old-lens capture results, so it must
+                // never trigger the cold-handoff reset back to the primary texture.
+                pendingLogicalPreviewSourceResetCameraId = null
                 onAlternatePreviewSourceChanged?.invoke(true)
                 PLog.i(TAG, "Instant preview source swap to alternate physical lens: $cameraId")
             }
             livePlan?.activeCameraId == cameraId -> {
-                pendingLogicalPreviewSourceReset = true
+                pendingLogicalPreviewSourceResetCameraId = null
                 onAlternatePreviewSourceChanged?.invoke(false)
                 PLog.i(TAG, "Instant preview source swap back to primary physical lens: $cameraId")
             }
             canUsePrewarmedStandby -> {
-                pendingLogicalPreviewSourceReset = true
+                pendingLogicalPreviewSourceResetCameraId = cameraId
                 onAlternatePreviewSourceChanged?.invoke(true)
                 PLog.i(TAG, "Instant preview source swap to warmed standby CameraDevice: $cameraId")
             }
