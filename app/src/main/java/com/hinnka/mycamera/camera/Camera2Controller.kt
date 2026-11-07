@@ -2959,7 +2959,7 @@ class Camera2Controller(private val context: Context) {
             )
             activeCameraRoleSwap = null
             val queuedCameraId = queuedRoleSwapCameraId
-            val queuedSurfaceTexture = queuedRoleSwapSurfaceTexture ?: transaction.request.surfaceTexture
+            val queuedSurfaceTexture = queuedRoleSwapSurfaceTexture
             val queuedPreserve = queuedRoleSwapPreserveVideoRecording
             queuedRoleSwapCameraId = null
             queuedRoleSwapSurfaceTexture = null
@@ -2978,7 +2978,11 @@ class Camera2Controller(private val context: Context) {
                             "${transaction.targetCamera.cameraId} -> ${queuedCamera.cameraId}",
                     )
                     switchToCameraId(queuedCamera.cameraId)
-                    openCamera(queuedSurfaceTexture, queuedPreserve)
+                    // switchToCameraId is also called before the ViewModel reopens the camera.
+                    // Only replay here when that reopen already arrived during the in-flight swap.
+                    if (queuedSurfaceTexture != null) {
+                        openCamera(queuedSurfaceTexture, queuedPreserve)
+                    }
                 } else {
                     PLog.w(TAG, "[LENS_ROLE_SWAP] queued camera disappeared: $queuedCameraId")
                 }
@@ -6772,7 +6776,6 @@ class Camera2Controller(private val context: Context) {
 
         activeCameraRoleSwap?.let { transaction ->
             queuedRoleSwapCameraId = cameraId
-            queuedRoleSwapSurfaceTexture = previewSurfaceTexture ?: transaction.request.surfaceTexture
             _state.update { current ->
                 current.copy(
                     currentCameraId = transaction.targetCamera.cameraId,
