@@ -2705,9 +2705,28 @@ class Camera2Controller(private val context: Context) {
             it.lensType == LensType.BACK_MAIN && !it.isCustomLensId
         } ?: return
 
-        val afState = result.get(CaptureResult.CONTROL_AF_STATE)
+        val logicalDualPlan = activeLogicalDualPreviewPlan
+        val selectedPhysicalCameraId = if (logicalDualPlan?.activeCameraId == currentCamera.cameraId) {
+            activeOutputPhysicalCameraId
+        } else {
+            currentCamera.outputPhysicalCameraId
+                ?: currentCamera.getBoundPhysicalCameraId(1f)
+                ?: currentCamera.cameraId.takeIf {
+                    it != currentCamera.getOpenCameraId()
+                }
+        }
+        val selectedPhysicalResult = selectedPhysicalCameraId
+            ?.let { result.physicalCameraResults[it] }
+            ?: if (logicalDualPlan?.alternateCameraId == currentCamera.cameraId) {
+                // The primary repeating request can continue while the alternate GL input is
+                // selected. Never infer ultra-wide focus from the still-running main sensor.
+                return
+            } else {
+                result
+            }
+        val afState = selectedPhysicalResult.get(CaptureResult.CONTROL_AF_STATE)
             ?: CaptureResult.CONTROL_AF_STATE_INACTIVE
-        val focusDistance = result.get(CaptureResult.LENS_FOCUS_DISTANCE) ?: 0f
+        val focusDistance = selectedPhysicalResult.get(CaptureResult.LENS_FOCUS_DISTANCE) ?: 0f
         val minimumFocusDistance = currentCamera.minimumFocusDistance
             .takeIf { it.isFinite() && it > 0f } ?: 10f
         val now = SystemClock.elapsedRealtime()
