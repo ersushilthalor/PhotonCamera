@@ -2808,6 +2808,7 @@ class Camera2Controller(private val context: Context) {
                 activeCameraRoleSwap = null
                 queuedRoleSwapCameraId = null
                 queuedRoleSwapSurfaceTexture = null
+                queuedRoleSwapPreserveVideoRecording = false
                 prewarmedDevice?.let {
                     standbyCameraController.markHandoffDeviceActive(it)
                     closeCameraDeviceAndAwait(it, "stale role-swap handoff", blocksLifecycle = false)
@@ -2838,9 +2839,10 @@ class Camera2Controller(private val context: Context) {
                         "target=${targetCamera.cameraId}, prewarmed=${prewarmedDevice?.id}",
                 )
                 activeCameraRoleSwap = null
-                pendingCameraOpenRequest = request.copy(standbyCameraId = null)
+                val fallbackRequest = consumeQueuedRoleSwapRequest(transaction)
+                pendingCameraOpenRequest = fallbackRequest
                 closeCameraInternal(
-                    preserveVideoRecording = request.preserveVideoRecording,
+                    preserveVideoRecording = fallbackRequest.preserveVideoRecording,
                     clearPendingOpen = false,
                     preserveStandbyCamera = false,
                 )
@@ -2942,6 +2944,34 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    private fun consumeQueuedRoleSwapRequest(transaction: CameraRoleSwap): CameraOpenRequest {
+        val queuedCameraId = queuedRoleSwapCameraId
+        if (queuedCameraId != null) {
+            val queuedCamera = _state.value.availableCameras.firstOrNull {
+                it.cameraId == queuedCameraId
+            }
+            if (queuedCamera != null) {
+                _state.update { current ->
+                    current.copy(
+                        currentCameraId = queuedCamera.cameraId,
+                        currentLensType = queuedCamera.lensType,
+                        zoomRatio = 1f,
+                    )
+                }
+            }
+        }
+        val request = CameraOpenRequest(
+            surfaceTexture = queuedRoleSwapSurfaceTexture ?: transaction.request.surfaceTexture,
+            preserveVideoRecording = queuedRoleSwapPreserveVideoRecording ||
+                transaction.request.preserveVideoRecording,
+            standbyCameraId = null,
+        )
+        queuedRoleSwapCameraId = null
+        queuedRoleSwapSurfaceTexture = null
+        queuedRoleSwapPreserveVideoRecording = false
+        return request
+    }
+
     private fun completeCameraRoleSwapIfReady(transaction: CameraRoleSwap) {
         if (
             activeCameraRoleSwap === transaction &&
@@ -3035,7 +3065,7 @@ class Camera2Controller(private val context: Context) {
     private fun queueRoleSwapColdFallback(reason: String) {
         val transaction = activeCameraRoleSwap ?: return
         activeCameraRoleSwap = null
-        pendingCameraOpenRequest = transaction.request.copy(standbyCameraId = null)
+        pendingCameraOpenRequest = consumeQueuedRoleSwapRequest(transaction)
         PLog.e(
             TAG,
             "[LENS_ROLE_SWAP] failed; falling back to cold CameraDevice open: reason=$reason, " +
