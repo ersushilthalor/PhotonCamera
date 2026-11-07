@@ -1345,7 +1345,9 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             firstFrameRendered = true
             onFirstFrameRendered?.invoke()
         }
-        if (currentFrameTimestampNs > 0L) {
+        // A transition waiter must only advance for a newly consumed frame from the
+        // currently selected camera input. Re-drawing a cached texture is not a hand-off.
+        if (cameraFrameUpdated && currentFrameTimestampNs > 0L) {
             onPreviewFrameRendered?.invoke(currentFrameTimestampNs)
         }
     }
