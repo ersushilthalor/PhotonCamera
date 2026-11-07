@@ -12,7 +12,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
-import com.hinnka.mycamera.ui.components.ScaledIcon as Icon
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,7 +81,7 @@ fun CameraTopBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 20.dp, bottom = 8.dp),
+            .padding(top = 32.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -179,7 +178,6 @@ private fun VideoTopBar(
     modifier: Modifier = Modifier
 ) {
     var stabilizationMenuExpanded by remember { mutableStateOf(false) }
-
     Box(
         modifier = modifier
             .fillMaxWidth()
