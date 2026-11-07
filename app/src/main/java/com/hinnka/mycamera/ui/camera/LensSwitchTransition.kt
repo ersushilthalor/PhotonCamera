@@ -158,32 +158,33 @@ internal class LensSwitchTransitionState(
                     // Drive real Camera2 zoom using the same 60Hz, logarithmic slider
                     // trajectory as VCamera. The ViewModel resolves each step to the optimal
                     // physical lens, so lens boundaries are crossed during the animation.
-                    val engineZoomAnimation = request?.onZoomStep?.let { updateZoom ->
-                        launch {
-                            val transition = request
-                            val durationNanos = transition.transitionDurationMs * 1_000_000L
-                            val startFrameNanos = withFrameNanos { it }
-                            var lastAppliedZoom = Float.NaN
-                            while (true) {
-                                val frameNanos = withFrameNanos { it }
-                                val linearProgress = (
-                                    (frameNanos - startFrameNanos).toDouble() /
-                                        durationNanos.toDouble()
-                                    ).coerceIn(0.0, 1.0)
-                                val easedProgress = easeZoomTransitionProgress(linearProgress)
-                                val zoom = interpolateZoomRatio(
-                                    snapshotZoom,
-                                    transition.targetZoom,
-                                    easedProgress,
-                                )
-                                if (lastAppliedZoom.isNaN() ||
-                                    abs(zoom - lastAppliedZoom) >= 0.01f ||
-                                    linearProgress >= 1.0
-                                ) {
-                                    updateZoom(zoom)
-                                    lastAppliedZoom = zoom
+                    val engineZoomAnimation = request?.let { transition ->
+                        transition.onZoomStep?.let { updateZoom ->
+                            launch {
+                                val durationNanos = transition.transitionDurationMs * 1_000_000L
+                                val startFrameNanos = withFrameNanos { it }
+                                var lastAppliedZoom = Float.NaN
+                                while (true) {
+                                    val frameNanos = withFrameNanos { it }
+                                    val linearProgress = (
+                                        (frameNanos - startFrameNanos).toDouble() /
+                                            durationNanos.toDouble()
+                                        ).coerceIn(0.0, 1.0)
+                                    val easedProgress = easeZoomTransitionProgress(linearProgress)
+                                    val zoom = interpolateZoomRatio(
+                                        snapshotZoom,
+                                        transition.targetZoom,
+                                        easedProgress,
+                                    )
+                                    if (lastAppliedZoom.isNaN() ||
+                                        abs(zoom - lastAppliedZoom) >= 0.01f ||
+                                        linearProgress >= 1.0
+                                    ) {
+                                        updateZoom(zoom)
+                                        lastAppliedZoom = zoom
+                                    }
+                                    if (linearProgress >= 1.0) break
                                 }
-                                if (linearProgress >= 1.0) break
                             }
                         }
                     }
