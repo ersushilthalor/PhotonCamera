@@ -2944,8 +2944,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             cameraController.setAlternatePreviewSurface(
                 surface = previewView?.standbyCameraInputSurface,
                 surfaceTexture = previewView?.getStandbyCameraSurfaceTexture(),
-                onSourceChanged = { useStandby ->
-                    previewView?.setActivePreviewSource(useStandby)
+                onSourceChanged = { useStandby, waitForPrimaryFrame ->
+                    previewView?.setActivePreviewSource(useStandby, waitForPrimaryFrame)
                 },
                 onPreviewSizeChanged = { width, height ->
                     previewView?.setStandbyPreviewSize(width, height)

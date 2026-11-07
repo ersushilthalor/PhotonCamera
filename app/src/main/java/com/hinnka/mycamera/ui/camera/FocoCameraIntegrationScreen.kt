@@ -296,8 +296,13 @@ fun FocoCameraIntegrationScreen(
             currentCamera?.cameraId ?: "0"
         )
         if (selectedCamera != null && selectedCamera.cameraId != currentCamera?.cameraId) {
-            lensSwitchTransition.switchLens(selectedCamera.cameraId, safeZoom) {
+            if (viewModel.canInstantlySwitchLens(selectedCamera.cameraId)) {
+                lensSwitchTransition.cancel()
                 viewModel.switchToLensAndSetZoomRatio(selectedCamera.cameraId, safeZoom)
+            } else {
+                lensSwitchTransition.switchLens(selectedCamera.cameraId, safeZoom) {
+                    viewModel.switchToLensAndSetZoomRatio(selectedCamera.cameraId, safeZoom)
+                }
             }
         } else if (animateSameLens) {
             animateCurrentLensToZoomStop(safeZoom)
@@ -356,12 +361,25 @@ fun FocoCameraIntegrationScreen(
                         if (viewModel.state.value.timerSeconds != focoSettings.timer.seconds) viewModel.toggleTimer()
                     }
                     SettingKey.MACRO -> {
+                        lensSwitchTransition.cancelPendingSwitch()
                         val target = if (focoSettings.macro) {
                             viewModel.state.value.availableCameras.firstOrNull { it.lensType.name == "BACK_MACRO" }
                         } else {
                             viewModel.state.value.availableCameras.firstOrNull { it.lensType.name == "BACK_MAIN" }
                         }
-                        target?.let { viewModel.switchToLens(it.cameraId) }
+                        target?.let { camera ->
+                            val targetZoom = camera.displayIntrinsicZoomRatio.takeIf { it > 0f }
+                                ?: camera.intrinsicZoomRatio.takeIf { it > 0f }
+                                ?: 1f
+                            if (viewModel.canInstantlySwitchLens(camera.cameraId)) {
+                                lensSwitchTransition.cancel()
+                                viewModel.switchToLens(camera.cameraId)
+                            } else {
+                                lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
+                                    viewModel.switchToLens(camera.cameraId)
+                                }
+                            }
+                        }
                     }
                     SettingKey.RATIO -> viewModel.setAspectRatio(
                         if (focoSettings.ratio == RatioSetting.WIDE_9_16) AspectRatio.RATIO_16_9 else AspectRatio.RATIO_4_3
