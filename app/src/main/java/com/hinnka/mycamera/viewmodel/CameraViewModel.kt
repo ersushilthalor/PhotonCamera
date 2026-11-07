@@ -3844,6 +3844,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             previewView.hasStandbyPreviewFrame
     }
 
+    fun usesLogicalAlternatePreview(cameraId: String): Boolean {
+        return cameraController.usesLogicalAlternatePreview(cameraId)
+    }
+
     /**
      * 切换到指定的镜头类型
      */
