@@ -16,8 +16,10 @@ if grep -Fq "FocoCameraIntegrationScreen(" "app/src/main/java/com/hinnka/mycamer
   exit 1
 fi
 
-# Keep the original Photon UI's instant standby-frame handoff path.
-require "app/src/main/java/com/hinnka/mycamera/ui/camera/CameraScreen.kt" "viewModel.canInstantlySwitchLens(cameraId)"
+# Keep the frame-aware standby-preview handoff in the original Photon UI.
+# Warm standby frames do not bypass Camera2 session activation or first-frame readiness.
+require "app/src/main/java/com/hinnka/mycamera/ui/camera/CameraScreen.kt" "lensSwitchTransition.switchLens(cameraId, targetZoom)"
+require "app/src/main/java/com/hinnka/mycamera/ui/camera/CameraScreen.kt" "lensSwitchTransition.switchLens(camera.cameraId, targetZoom)"
 require "app/src/main/java/com/hinnka/mycamera/ui/camera/CameraScreen.kt" "viewModel.switchToLens(cameraId)"
 require "app/src/main/java/com/hinnka/mycamera/ui/camera/CameraScreen.kt" "viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)"
 require "app/src/main/java/com/hinnka/mycamera/viewmodel/CameraViewModel.kt" "fun canInstantlySwitchLens(cameraId: String)"
@@ -26,4 +28,4 @@ require "app/src/main/java/com/hinnka/mycamera/viewmodel/CameraViewModel.kt" "fu
 require "app/src/main/java/com/hinnka/mycamera/camera/Camera2Controller.kt" "StandbyCameraController(context)"
 require "app/src/main/java/com/hinnka/mycamera/camera/StandbyCameraController.kt" "class StandbyCameraController(context: Context)"
 
-echo "Original Photon UI and instant lens-switch protection checks passed."
+echo "Original Photon UI and frame-aware standby lens-switch protection checks passed."
