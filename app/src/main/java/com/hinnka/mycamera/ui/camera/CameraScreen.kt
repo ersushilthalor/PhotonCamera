@@ -573,7 +573,12 @@ fun CameraScreen(
             return
         }
         cancelZoomStopAnimation()
-        lensSwitchTransition.switchLens(cameraId, targetZoom) { viewModel.switchToLens(cameraId) }
+        val instantPreviewHandoff =
+            isOneXOrBelowTransition(viewModel.zoomRatioByMain, targetZoom) &&
+                viewModel.canInstantlySwitchLens(cameraId)
+        lensSwitchTransition.switchLens(cameraId, targetZoom, instantPreviewHandoff) {
+            viewModel.switchToLens(cameraId)
+        }
     }
 
     fun setZoomWithPreviewTransition(targetZoom: Float) {
@@ -595,7 +600,10 @@ fun CameraScreen(
             currentCameraId
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
+            val instantPreviewHandoff =
+                isOneXOrBelowTransition(viewModel.zoomRatioByMain, targetZoom) &&
+                    viewModel.canInstantlySwitchLens(camera.cameraId)
+            lensSwitchTransition.switchLens(camera.cameraId, targetZoom, instantPreviewHandoff) {
                 viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
             }
         } else {
@@ -620,7 +628,10 @@ fun CameraScreen(
             currentCameraId
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
+            val instantPreviewHandoff =
+                isOneXOrBelowTransition(viewModel.zoomRatioByMain, targetZoom) &&
+                    viewModel.canInstantlySwitchLens(camera.cameraId)
+            lensSwitchTransition.switchLens(camera.cameraId, targetZoom, instantPreviewHandoff) {
                 viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
             }
         } else {

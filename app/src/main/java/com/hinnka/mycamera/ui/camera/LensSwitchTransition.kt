@@ -48,6 +48,16 @@ private const val BlurWorkingMaxLongEdge = 320
 // Four blended levels are sufficient for the short ramp and halve prefiltering work.
 private const val BlurLevelCount = 4
 private const val BlurSigma = 5f
+
+/**
+ * The 0.5x-to-1x region can use the already-streaming standby image as its transition
+ * underlay. Above 1x, retain the rendered-frame hand-off for the normal telephoto path.
+ */
+internal fun isOneXOrBelowTransition(sourceZoom: Float, targetZoom: Float): Boolean =
+    sourceZoom.isFinite() && targetZoom.isFinite() &&
+        sourceZoom > 0f && targetZoom > 0f &&
+        sourceZoom <= 1.001f && targetZoom <= 1.001f
+
 private const val BlurEnterDurationMillis = 80
 private const val BlurExitDurationMillis = 240
 
@@ -69,16 +79,26 @@ internal class LensSwitchTransitionState(
     private var snapshotZoom = 1f
     private var job: Job? = null
     private var switchPending = false
-    private data class Request(val cameraId: String, val targetZoom: Float, val onSwitch: () -> Unit)
+    private data class Request(
+        val cameraId: String,
+        val targetZoom: Float,
+        val instantPreviewHandoff: Boolean,
+        val onSwitch: () -> Unit,
+    )
     private var pendingRequest: Request? = null
     private var awaitedCameraId: String? = null
     private var previousTimestamp: Long? = null
 
-    fun switchLens(cameraId: String, targetZoom: Float, onSwitch: () -> Unit) {
+    fun switchLens(
+        cameraId: String,
+        targetZoom: Float,
+        instantPreviewHandoff: Boolean = false,
+        onSwitch: () -> Unit,
+    ) {
         require(targetZoom.isFinite() && targetZoom > 0f)
         // Coalesce gestures while the screenshot is being prepared. Once a switch has
         // started, replace its waiter but keep the frozen frame across subsequent switches.
-        pendingRequest = Request(cameraId, targetZoom, onSwitch)
+        pendingRequest = Request(cameraId, targetZoom, instantPreviewHandoff, onSwitch)
         if (switchPending && job?.isActive == true) return
         job?.cancel()
         isActive = true
@@ -112,51 +132,65 @@ internal class LensSwitchTransitionState(
                     return@launch
                 }
                 coroutineScope {
+                    val activeRequest = checkNotNull(request)
                     val animation = launch {
-                        animateSnapshotTo(request?.targetZoom ?: viewModel.zoomRatioByMain)
-                    }
-                    val readyState = withTimeoutOrNull(8_000L) {
-                        viewModel.state.first {
-                            it.currentCameraId == awaitedCameraId && it.isPreviewActive &&
-                                it.previewFirstFrameTimestampNs != null &&
-                                it.previewFirstFrameTimestampNs != previousTimestamp
-                        }
-                    }
-                    if (readyState == null) {
-                        // Do not leave a frozen viewfinder over a camera request that failed or
-                        // never produced a fresh preview session.
-                        PLog.w(
-                            "LensSwitchTransition",
-                            "Timed out waiting for a fresh preview from camera $awaitedCameraId",
+                        animateSnapshotTo(
+                            targetZoom = activeRequest.targetZoom,
+                            useSymmetricZoomAnimation = activeRequest.instantPreviewHandoff,
                         )
-                        animation.join()
-                        return@coroutineScope
                     }
-                    // Follow the current SurfaceView if preview dimensions change.
-                    val rendered = CompletableDeferred<Unit>()
-                    val waiter = launch {
-                        snapshotFlow { viewModel.glSurfaceView }.collectLatest { preview ->
-                            if (preview != null) {
-                                preview.awaitPreviewFrame(readyState.previewFirstFrameTimestampNs!!)
-                                rendered.complete(Unit)
+                    if (activeRequest.instantPreviewHandoff) {
+                        // The alternate GL input is already streaming the target lens. Waiting
+                        // for a new primary-session timestamp here adds latency and can stall
+                        // physical-lens switches that reuse an existing CameraDevice.
+                        PLog.d(
+                            "LensSwitchTransition",
+                            "Using prewarmed preview for ${activeRequest.cameraId}; skipping frame wait",
+                        )
+                    } else {
+                        val readyState = withTimeoutOrNull(8_000L) {
+                            viewModel.state.first {
+                                it.currentCameraId == awaitedCameraId && it.isPreviewActive &&
+                                    it.previewFirstFrameTimestampNs != null &&
+                                    it.previewFirstFrameTimestampNs != previousTimestamp
                             }
                         }
-                    }
-                    try {
-                        val frameRendered = withTimeoutOrNull(1_200L) {
-                            rendered.await()
-                            true
-                        } == true
-                        if (!frameRendered) {
-                            // Camera2 may be ready before the GL/EIS renderer reports a frame.
-                            // Release the transition overlay instead of freezing the old image.
+                        if (readyState == null) {
+                            // Do not leave a frozen viewfinder over a camera request that failed or
+                            // never produced a fresh preview session.
                             PLog.w(
                                 "LensSwitchTransition",
-                                "Timed out waiting for the rendered preview frame from camera $awaitedCameraId",
+                                "Timed out waiting for a fresh preview from camera $awaitedCameraId",
                             )
+                            animation.join()
+                            return@coroutineScope
                         }
-                    } finally {
-                        waiter.cancel()
+                        // Follow the current SurfaceView if preview dimensions change.
+                        val rendered = CompletableDeferred<Unit>()
+                        val waiter = launch {
+                            snapshotFlow { viewModel.glSurfaceView }.collectLatest { preview ->
+                                if (preview != null) {
+                                    preview.awaitPreviewFrame(readyState.previewFirstFrameTimestampNs!!)
+                                    rendered.complete(Unit)
+                                }
+                            }
+                        }
+                        try {
+                            val frameRendered = withTimeoutOrNull(1_200L) {
+                                rendered.await()
+                                true
+                            } == true
+                            if (!frameRendered) {
+                                // Camera2 may be ready before the GL/EIS renderer reports a frame.
+                                // Release the transition overlay instead of freezing the old image.
+                                PLog.w(
+                                    "LensSwitchTransition",
+                                    "Timed out waiting for the rendered preview frame from camera $awaitedCameraId",
+                                )
+                            }
+                        } finally {
+                            waiter.cancel()
+                        }
                     }
                     animation.join()
                 }
@@ -199,13 +233,22 @@ internal class LensSwitchTransitionState(
         blurFrames = emptyList()
     }
 
-    private suspend fun animateSnapshotTo(targetZoom: Float) = coroutineScope {
+    private suspend fun animateSnapshotTo(
+        targetZoom: Float,
+        useSymmetricZoomAnimation: Boolean,
+    ) = coroutineScope {
         val bitmap = snapshot ?: return@coroutineScope
         val visibleZoom = snapshotZoom * scale
-        if (targetZoom >= visibleZoom) {
-            // A frozen wide frame contains the narrower field of view. Retarget from the
-            // currently displayed scale so rapid lens changes do not restart the zoom.
-            launch { blurProgress.animateTo(0f, tween(BlurExitDurationMillis)) }
+        if (targetZoom >= visibleZoom || useSymmetricZoomAnimation) {
+            // For a prewarmed lens pair, the live target preview is already underneath this
+            // overlay. Scale in either direction so 0.5x<->1x follows the same light,
+            // logarithmic zoom curve as 1x<->2x without building CPU blur frames.
+            if (useSymmetricZoomAnimation) {
+                blurProgress.snapTo(0f)
+                blurFrames = emptyList()
+            } else {
+                launch { blurProgress.animateTo(0f, tween(BlurExitDurationMillis)) }
+            }
             val startScale = scale
             val progress = Animatable(0f)
             progress.animateTo(
@@ -217,8 +260,8 @@ internal class LensSwitchTransitionState(
             }
             scale = targetZoom / snapshotZoom
         } else {
-            // A telephoto frame cannot supply a wider field of view. Increase the Gaussian
-            // radius instead; adjacent prefiltered levels blend smoothly on Android 11 too.
+            // A telephoto frame cannot supply a wider field of view. Keep the existing
+            // prefiltered blur fallback for non-prewarmed, wider-field transitions.
             if (blurFrames.isEmpty()) {
                 blurFrames = createBlurFrames(bitmap.asAndroidBitmap())
             }
