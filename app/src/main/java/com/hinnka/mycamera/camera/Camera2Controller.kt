@@ -3756,7 +3756,13 @@ class Camera2Controller(private val context: Context) {
     }
 
     private fun resolveLogicalDualPreviewPlan(): LogicalDualPreviewPlan? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
+        fun unavailable(reason: String): LogicalDualPreviewPlan? {
+            PLog.i(TAG, "Logical dual preview unavailable: " + reason)
+            return null
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            return unavailable("Android API is below 28")
+        }
         val state = _state.value
         if (
             state.captureMode != CaptureMode.PHOTO ||
@@ -3768,40 +3774,52 @@ class Camera2Controller(private val context: Context) {
             state.photoPreviewStabilizationEnabled ||
             shouldUseAlgorithmicStabilization()
         ) {
-            return null
+            val reason = when {
+                state.captureMode != CaptureMode.PHOTO -> "captureMode=" + state.captureMode
+                state.useRaw -> "RAW capture enabled"
+                state.useP010 -> "P010 capture enabled"
+                state.isCapturing -> "photo capture in progress"
+                state.videoRecordingState.isRecording -> "video recording active"
+                state.videoRecordingState.isProcessing -> "video processing active"
+                state.photoPreviewStabilizationEnabled -> "photo preview stabilization enabled"
+                else -> "algorithmic stabilization active"
+            }
+            return unavailable(reason)
         }
 
-        val activeCamera = state.getCurrentCameraInfo() ?: return null
+        val activeCamera = state.getCurrentCameraInfo() ?: return unavailable("active CameraInfo missing")
         val alternateLensType = when (activeCamera.lensType) {
             LensType.BACK_MAIN -> LensType.BACK_ULTRA_WIDE
             LensType.BACK_ULTRA_WIDE -> LensType.BACK_MAIN
-            else -> return null
+            else -> return unavailable("active lens type is not Main or UltraWide: " + activeCamera.lensType)
         }
         val openCameraId = runCatching { activeCamera.getOpenCameraId() }.getOrNull()
             ?.takeIf { it.isNotBlank() && it == activeOpenCameraId }
-            ?: return null
+            ?: return unavailable("selected/open camera ID mismatch: selected=" +
+                runCatching { activeCamera.getOpenCameraId() }.getOrNull() + ", active=" + activeOpenCameraId)
         val alternateSurface = alternatePreviewSurface
             ?.takeIf { runCatching { it.isValid }.getOrDefault(false) }
-            ?: return null
-        val alternateTexture = alternatePreviewSurfaceTexture ?: return null
+            ?: return unavailable("alternate GL Surface missing or invalid")
+        val alternateTexture = alternatePreviewSurfaceTexture
+            ?: return unavailable("alternate GL SurfaceTexture missing")
         val alternateCamera = state.availableCameras.firstOrNull { candidate ->
             candidate.cameraId != activeCamera.cameraId &&
                 candidate.lensType == alternateLensType &&
                 !candidate.isVirtualIszLens &&
                 runCatching { candidate.getOpenCameraId() == openCameraId }.getOrDefault(false)
-        } ?: return null
+        } ?: return unavailable("no separate alternate lens camera found for " + alternateLensType)
 
         val logicalCharacteristics = getCameraCharacteristicsOrNull(
             openCameraId,
             "same-logical-camera instant lens handoff",
-        ) ?: return null
+        ) ?: return unavailable("logical camera characteristics unavailable: " + openCameraId)
         val capabilities = logicalCharacteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
-            ?: return null
+            ?: return unavailable("logical camera capabilities unavailable: " + openCameraId)
         if (!capabilities.contains(
                 CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA
             )
         ) {
-            return null
+            return unavailable("logical multi-camera capability not advertised: " + openCameraId)
         }
 
         val alternatePhysicalCameraId = alternateCamera.outputPhysicalCameraId
@@ -3813,7 +3831,7 @@ class Camera2Controller(private val context: Context) {
                 "Instant physical lens handoff unavailable: alternate $alternatePhysicalCameraId " +
                     "is not exposed by logical camera $openCameraId",
             )
-            return null
+            return unavailable("alternate physical camera is not part of logical device: " + alternatePhysicalCameraId)
         }
         val activePhysicalCameraId = activeOutputPhysicalCameraId
             ?: resolveRequestedPhysicalCameraId(state, activeCamera)
@@ -3821,23 +3839,29 @@ class Camera2Controller(private val context: Context) {
                 getTargetZoomRatioByMain(state, activeCamera)
             )
             ?: activeCamera.cameraId.takeIf { it != openCameraId }
-            ?: return null
-        if (activePhysicalCameraId == alternatePhysicalCameraId) return null
+            ?: return unavailable("active physical camera ID could not be resolved")
+        if (activePhysicalCameraId == alternatePhysicalCameraId) {
+            return unavailable("active and alternate physical camera IDs are equal: " + activePhysicalCameraId)
+        }
 
         val alternateCharacteristics = getCameraCharacteristicsOrNull(
             alternatePhysicalCameraId,
             "alternate physical preview output",
-        ) ?: return null
+        ) ?: return unavailable("alternate physical characteristics missing: " + alternatePhysicalCameraId)
         val streamMap = alternateCharacteristics.get(
             CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
-        ) ?: return null
+        ) ?: return unavailable("alternate physical stream configuration map missing")
         val supportedSizes = streamMap.getOutputSizes(SurfaceTexture::class.java)
             ?.toList()
             .orEmpty()
-        if (supportedSizes.isEmpty()) return null
+        if (supportedSizes.isEmpty()) {
+            return unavailable("alternate physical camera has no SurfaceTexture output sizes")
+        }
 
         val requestedSize = state.currentPreviewSize
-        if (requestedSize.width <= 0 || requestedSize.height <= 0) return null
+        if (requestedSize.width <= 0 || requestedSize.height <= 0) {
+            return unavailable("invalid active preview size: " + requestedSize.width + "x" + requestedSize.height)
+        }
         val requestedAspect = requestedSize.width.toFloat() / requestedSize.height.toFloat()
         val requestedArea = requestedSize.width.toLong() * requestedSize.height.toLong()
         val alternateSize = supportedSizes.minWithOrNull(
@@ -3845,7 +3869,7 @@ class Camera2Controller(private val context: Context) {
                 { abs(it.width.toFloat() / it.height.toFloat() - requestedAspect) },
                 { kotlin.math.abs(it.width.toLong() * it.height.toLong() - requestedArea) },
             )
-        ) ?: return null
+        ) ?: return unavailable("no compatible alternate SurfaceTexture size")
 
         val key = listOf(
             openCameraId,
@@ -3855,14 +3879,16 @@ class Camera2Controller(private val context: Context) {
             alternatePhysicalCameraId,
             "${alternateSize.width}x${alternateSize.height}",
         ).joinToString("|")
-        if (failedLogicalDualPreviewPlanKeys.contains(key)) return null
+        if (failedLogicalDualPreviewPlanKeys.contains(key)) {
+            return unavailable("previously failed logical dual-preview plan: " + key)
+        }
 
         try {
             alternateTexture.setDefaultBufferSize(alternateSize.width, alternateSize.height)
             onAlternatePreviewSizeChanged?.invoke(alternateSize.width, alternateSize.height)
         } catch (error: Exception) {
             PLog.w(TAG, "Could not size alternate physical preview SurfaceTexture", error)
-            return null
+            return unavailable("alternate SurfaceTexture buffer sizing failed: " + error.message)
         }
 
         PLog.i(
