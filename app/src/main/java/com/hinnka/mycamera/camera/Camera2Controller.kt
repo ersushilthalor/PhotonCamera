@@ -162,6 +162,7 @@ class Camera2Controller(private val context: Context) {
 
     private data class CameraRoleSwap(
         val request: CameraOpenRequest,
+        val targetCamera: CameraInfo,
         val previousDevice: CameraDevice,
         val previousCamera: CameraInfo,
         val previousSession: CameraCaptureSession,
@@ -304,7 +305,10 @@ class Camera2Controller(private val context: Context) {
     @Volatile
     private var releaseCloseLatch: java.util.concurrent.CountDownLatch? = null
     private var captureSession: CameraCaptureSession? = null
-    private var activeCameraRoleSwap: CameraRoleSwap? = null
+    @Volatile private var activeCameraRoleSwap: CameraRoleSwap? = null
+    @Volatile private var queuedRoleSwapCameraId: String? = null
+    @Volatile private var queuedRoleSwapSurfaceTexture: SurfaceTexture? = null
+    @Volatile private var queuedRoleSwapPreserveVideoRecording = false
     private var roleSwapFallbackDeviceAwaitingClose: CameraDevice? = null
     private var retainedStandbyRepreparePending = false
     private var previewRequestBuilder: CaptureRequest.Builder? = null
@@ -2679,6 +2683,16 @@ class Camera2Controller(private val context: Context) {
             }
             return
         }
+        activeCameraRoleSwap?.let { transaction ->
+            queuedRoleSwapSurfaceTexture = surfaceTexture
+            queuedRoleSwapPreserveVideoRecording = preserveVideoRecording
+            PLog.i(
+                TAG,
+                "[LENS_ROLE_SWAP] queued reopen during active handoff: target=${queuedRoleSwapCameraId}, " +
+                    "inFlight=${transaction.targetCamera.cameraId}",
+            )
+            return
+        }
         val targetCamera = _state.value.getCurrentCameraInfo()
         val standbyCameraId = targetCamera
             ?.takeIf(standbyCameraController::canHandoffTo)
@@ -2765,6 +2779,7 @@ class Camera2Controller(private val context: Context) {
 
         val transaction = CameraRoleSwap(
             request = request,
+            targetCamera = targetCamera,
             previousDevice = activeDevice,
             previousCamera = previousCamera,
             previousSession = activeSession,
@@ -2778,6 +2793,7 @@ class Camera2Controller(private val context: Context) {
                 "elapsedRealtimeMs=${transaction.startedElapsedRealtimeMs}",
         )
 
+        activeCameraRoleSwap = transaction
         standbyCameraController.takeOver(
             cameraId = targetCamera.cameraId,
             expectedOpenCameraId = targetOpenId,
@@ -2789,6 +2805,9 @@ class Camera2Controller(private val context: Context) {
                     TAG,
                     "[LENS_ROLE_SWAP] cancelled before promotion: target=${targetCamera.cameraId}",
                 )
+                activeCameraRoleSwap = null
+                queuedRoleSwapCameraId = null
+                queuedRoleSwapSurfaceTexture = null
                 prewarmedDevice?.let {
                     standbyCameraController.markHandoffDeviceActive(it)
                     closeCameraDeviceAndAwait(it, "stale role-swap handoff", blocksLifecycle = false)
@@ -2829,7 +2848,6 @@ class Camera2Controller(private val context: Context) {
             }
 
             pendingCameraOpenRequest = null
-            activeCameraRoleSwap = transaction
             clearCameraSessionState(
                 reason = "persistent Main/UW role swap",
                 preserveStandbyCamera = true,
@@ -2940,6 +2958,31 @@ class Camera2Controller(private val context: Context) {
                     "totalElapsedMs=$totalMs",
             )
             activeCameraRoleSwap = null
+            val queuedCameraId = queuedRoleSwapCameraId
+            val queuedSurfaceTexture = queuedRoleSwapSurfaceTexture ?: transaction.request.surfaceTexture
+            val queuedPreserve = queuedRoleSwapPreserveVideoRecording
+            queuedRoleSwapCameraId = null
+            queuedRoleSwapSurfaceTexture = null
+            queuedRoleSwapPreserveVideoRecording = false
+            if (transaction.standbyReady &&
+                queuedCameraId != null &&
+                queuedCameraId != transaction.targetCamera.cameraId
+            ) {
+                val queuedCamera = _state.value.availableCameras.firstOrNull {
+                    it.cameraId == queuedCameraId
+                }
+                if (queuedCamera != null) {
+                    PLog.i(
+                        TAG,
+                        "[LENS_ROLE_SWAP] executing coalesced rapid switch: " +
+                            "${transaction.targetCamera.cameraId} -> ${queuedCamera.cameraId}",
+                    )
+                    switchToCameraId(queuedCamera.cameraId)
+                    openCamera(queuedSurfaceTexture, queuedPreserve)
+                } else {
+                    PLog.w(TAG, "[LENS_ROLE_SWAP] queued camera disappeared: $queuedCameraId")
+                }
+            }
         }
     }
 
@@ -6722,7 +6765,28 @@ class Camera2Controller(private val context: Context) {
      */
     fun switchToCameraId(cameraId: String) {
         val cameras = _state.value.availableCameras
-        val targetCamera = cameras.find { it.cameraId == cameraId }
+        val targetCamera = cameras.find { it.cameraId == cameraId } ?: run {
+            PLog.w(TAG, "Camera with ID $cameraId not found")
+            return
+        }
+
+        activeCameraRoleSwap?.let { transaction ->
+            queuedRoleSwapCameraId = cameraId
+            queuedRoleSwapSurfaceTexture = previewSurfaceTexture ?: transaction.request.surfaceTexture
+            _state.update { current ->
+                current.copy(
+                    currentCameraId = transaction.targetCamera.cameraId,
+                    currentLensType = transaction.targetCamera.lensType,
+                    zoomRatio = 1f,
+                )
+            }
+            PLog.i(
+                TAG,
+                "[LENS_ROLE_SWAP] coalescing rapid tap: requested=${targetCamera.cameraId}, " +
+                    "currentHandoff=${transaction.targetCamera.cameraId}",
+            )
+            return
+        }
 
         val livePlan = activeLogicalDualPreviewPlan
         val alternateFrameAvailable = alternatePreviewSurfaceTexture?.let { texture ->
@@ -6758,7 +6822,7 @@ class Camera2Controller(private val context: Context) {
                 currentLensType = cam.lensType,
                 zoomRatio = 1f
             )
-        } ?: PLog.w(TAG, "Camera with ID $cameraId not found")
+        }
     }
 
 // ==================== 曝光控制 ====================
