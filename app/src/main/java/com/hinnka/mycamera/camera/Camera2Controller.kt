@@ -6367,7 +6367,10 @@ class Camera2Controller(private val context: Context) {
      * 切换到指定的相机 ID
      */
     fun switchToCameraId(cameraId: String) {
-        switchToCameraId(cameraId, 1f)
+        val targetCamera = _state.value.availableCameras.firstOrNull { it.cameraId == cameraId }
+        val visibleZoomRatio = targetCamera?.displayIntrinsicZoomRatio
+            ?.takeIf { it.isFinite() && it > 0f } ?: 1f
+        switchToCameraId(cameraId, visibleZoomRatio)
     }
 
     /**
