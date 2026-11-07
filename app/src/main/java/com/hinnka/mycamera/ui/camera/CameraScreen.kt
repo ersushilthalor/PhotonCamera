@@ -561,6 +561,23 @@ fun CameraScreen(
         }
     }
 
+    fun switchLensWithPreviewTransition(
+        cameraId: String,
+        targetZoom: Float,
+        onSwitch: () -> Unit,
+    ) {
+        val canInstantlySwitch = viewModel.canInstantlySwitchLens(cameraId)
+        val useLogicalAlternatePreview = canInstantlySwitch &&
+            viewModel.usesLogicalAlternatePreview(cameraId)
+        lensSwitchTransition.switchLens(
+            cameraId = cameraId,
+            targetZoom = targetZoom,
+            expectedPreviewSourceStandby = useLogicalAlternatePreview,
+            waitForPreviewRestart = !useLogicalAlternatePreview,
+            onSwitch = onSwitch,
+        )
+    }
+
     fun switchToLensWithPreviewTransition(cameraId: String) {
         lensSwitchTransition.cancelPendingSwitch()
         if (cameraId == state.getCurrentCameraInfo()?.cameraId) return
@@ -573,7 +590,7 @@ fun CameraScreen(
             return
         }
         cancelZoomStopAnimation()
-        lensSwitchTransition.switchLens(cameraId, targetZoom) { viewModel.switchToLens(cameraId) }
+        switchLensWithPreviewTransition(cameraId, targetZoom) { viewModel.switchToLens(cameraId) }
     }
 
     fun setZoomWithPreviewTransition(targetZoom: Float) {
@@ -595,7 +612,7 @@ fun CameraScreen(
             currentCameraId
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
+            switchLensWithPreviewTransition(camera.cameraId, targetZoom) {
                 viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
             }
         } else {
@@ -620,7 +637,7 @@ fun CameraScreen(
             currentCameraId
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            lensSwitchTransition.switchLens(camera.cameraId, targetZoom) {
+            switchLensWithPreviewTransition(camera.cameraId, targetZoom) {
                 viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
             }
         } else {
