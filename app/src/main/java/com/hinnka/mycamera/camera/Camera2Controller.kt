@@ -279,6 +279,12 @@ class Camera2Controller(private val context: Context) {
 
     private var cameraDevice: CameraDevice? = null
     private var cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
+    // Track all retired devices by identity. A late onClosed callback from an older lens
+    // must never reset the lifecycle of a newer active CameraDevice.
+    private val closingCameraDevices = java.util.Collections.newSetFromMap(
+        java.util.IdentityHashMap<CameraDevice, Boolean>()
+    )
+    private var lifecycleClosingCameraDevice: CameraDevice? = null
     private var pendingCameraOpenRequest: CameraOpenRequest? = null
     @Volatile
     private var releaseCloseLatch: java.util.concurrent.CountDownLatch? = null
@@ -2275,17 +2281,69 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
-    private fun closeCameraDeviceAndAwait(camera: CameraDevice, reason: String) {
+    private fun closeCameraDeviceAndAwait(
+        camera: CameraDevice,
+        reason: String,
+        blocksLifecycle: Boolean = true,
+    ) {
         if (cameraDevice === camera) {
             cameraDevice = null
         }
-        cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSING
+        closingCameraDevices.add(camera)
+        if (blocksLifecycle) {
+            lifecycleClosingCameraDevice = camera
+            cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSING
+        }
         closeCameraDeviceSafely(camera, reason)
     }
 
-    private fun handleCameraDeviceClosed(camera: CameraDevice) {
+    /**
+     * The requested target is already open and streaming as the standby camera. Closing the
+     * previous active device is cleanup, not a prerequisite for starting this warm handoff.
+     */
+    private fun closeCameraDeviceForWarmHandoff(camera: CameraDevice, reason: String) {
         if (cameraDevice === camera) {
             cameraDevice = null
+        }
+        closingCameraDevices.add(camera)
+        closeCameraDeviceSafely(camera, reason)
+        cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
+        PLog.i(
+            TAG,
+            "Retired active camera ${camera.id} asynchronously; proceeding with the already-open standby camera"
+        )
+        openPendingCameraRequest()
+    }
+
+    private fun handleCameraDeviceClosed(camera: CameraDevice) {
+        val wasActiveDevice = cameraDevice === camera
+        val wasRequestedClose = closingCameraDevices.remove(camera)
+        val blocksCurrentLifecycle = lifecycleClosingCameraDevice === camera
+        if (!wasActiveDevice && !wasRequestedClose) {
+            PLog.d(TAG, "Ignoring close callback from an unowned camera device: ${camera.id}")
+            return
+        }
+
+        if (wasActiveDevice) {
+            cameraDevice = null
+        }
+
+        // Retired devices closed after a warm handoff only release their own bookkeeping.
+        // They cannot mark the replacement camera CLOSED or trigger another open.
+        if (!wasActiveDevice && !blocksCurrentLifecycle) {
+            PLog.d(
+                TAG,
+                "Retired camera ${camera.id} closed after handoff; active lifecycle remains $cameraDeviceLifecycle"
+            )
+            return
+        }
+        if (cameraDevice != null) {
+            PLog.d(TAG, "Ignoring close callback for non-active camera ${camera.id}")
+            return
+        }
+
+        if (blocksCurrentLifecycle) {
+            lifecycleClosingCameraDevice = null
         }
         cameraDeviceLifecycle = CameraDeviceLifecycle.CLOSED
         PLog.d(TAG, "Camera device closed: ${camera.id}")
@@ -2712,7 +2770,7 @@ class Camera2Controller(private val context: Context) {
                     cameraDeviceLifecycle != CameraDeviceLifecycle.OPENING
                 ) {
                     PLog.w(TAG, "Ignoring stale camera open callback: camera=${camera.id}")
-                    closeCameraDeviceAndAwait(camera, "stale camera open")
+                    closeCameraDeviceAndAwait(camera, "stale camera open", blocksLifecycle = false)
                     return
                 }
                 PLog.d(TAG, "Camera opened: ${camera.id}")
@@ -2726,7 +2784,7 @@ class Camera2Controller(private val context: Context) {
 
             override fun onDisconnected(camera: CameraDevice) {
                 if (openGeneration != cameraOpenGeneration) {
-                    closeCameraDeviceAndAwait(camera, "stale camera disconnect")
+                    closeCameraDeviceAndAwait(camera, "stale camera disconnect", blocksLifecycle = false)
                     return
                 }
                 PLog.w(TAG, "Camera disconnected: ${camera.id} - 相机被其他应用或系统接管")
@@ -2745,7 +2803,7 @@ class Camera2Controller(private val context: Context) {
 
             override fun onError(camera: CameraDevice, error: Int) {
                 if (openGeneration != cameraOpenGeneration) {
-                    closeCameraDeviceAndAwait(camera, "stale camera error")
+                    closeCameraDeviceAndAwait(camera, "stale camera error", blocksLifecycle = false)
                     return
                 }
                 val errorMessage = when (error) {
@@ -9928,7 +9986,17 @@ class Camera2Controller(private val context: Context) {
 
             when {
                 deviceToClose != null -> {
-                    closeCameraDeviceAndAwait(deviceToClose, "closeCamera")
+                    if (
+                        preserveStandbyCamera &&
+                        pendingCameraOpenRequest?.standbyCameraId != null
+                    ) {
+                        closeCameraDeviceForWarmHandoff(
+                            deviceToClose,
+                            "close previous active camera for warm lens handoff"
+                        )
+                    } else {
+                        closeCameraDeviceAndAwait(deviceToClose, "closeCamera")
+                    }
                 }
                 lifecycleBeforeClose == CameraDeviceLifecycle.OPENING -> {
                     // CameraManager 没有取消打开的 API；等待其回调后立即关闭。

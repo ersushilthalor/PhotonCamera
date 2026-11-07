@@ -775,16 +775,31 @@ class StandbyCameraController(context: Context) {
                                     TAG,
                                     "Standby GL output rejected while starting repeating request; retrying without it: ${error.message}",
                                 )
-                                runCatching { session.stopRepeating() }
-                                runCatching { session.close() }
-                                if (standbyCaptureSession === session) standbyCaptureSession = null
-                                configureStandbySession(
-                                    camera,
-                                    reader,
-                                    plan,
-                                    openGeneration,
-                                    includeAlternatePreviewSurface = false,
-                                )
+                                pendingSessionCloseActions[session] = {
+                                    if (
+                                        openGeneration == generation &&
+                                        camera === standbyCameraDevice &&
+                                        reader === standbyImageReader
+                                    ) {
+                                        configureStandbySession(
+                                            camera,
+                                            reader,
+                                            plan,
+                                            openGeneration,
+                                            includeAlternatePreviewSurface = false,
+                                        )
+                                    }
+                                }
+                                try {
+                                    // A failed session is still owned by Camera2 until onClosed.
+                                    session.close()
+                                } catch (closeError: Exception) {
+                                    pendingSessionCloseActions.remove(session)
+                                    failCurrentPlan(
+                                        "Could not close rejected standby session before retry: ${closeError.message}",
+                                        closeError,
+                                    )
+                                }
                             } else {
                                 failCurrentPlan("Could not start standby repeating request: " + error.message, error)
                             }
@@ -792,18 +807,37 @@ class StandbyCameraController(context: Context) {
                     }
 
                     override fun onConfigureFailed(session: CameraCaptureSession) {
-                        runCatching { session.close() }
-                        if (openGeneration == generation) {
-                            if (livePreviewSurface != null) {
-                                PLog.w(TAG, "Standby GL output combination rejected; retrying reader-only standby")
-                                configureStandbySession(
-                                    camera,
-                                    reader,
-                                    plan,
-                                    openGeneration,
-                                    includeAlternatePreviewSurface = false,
+                        if (openGeneration == generation && livePreviewSurface != null) {
+                            PLog.w(TAG, "Standby GL output combination rejected; retrying reader-only standby")
+                            pendingSessionCloseActions[session] = {
+                                if (
+                                    openGeneration == generation &&
+                                    camera === standbyCameraDevice &&
+                                    reader === standbyImageReader
+                                ) {
+                                    configureStandbySession(
+                                        camera,
+                                        reader,
+                                        plan,
+                                        openGeneration,
+                                        includeAlternatePreviewSurface = false,
+                                    )
+                                }
+                            }
+                            try {
+                                // Do not race a replacement session against this failed session's
+                                // asynchronous teardown on the same CameraDevice.
+                                session.close()
+                            } catch (closeError: Exception) {
+                                pendingSessionCloseActions.remove(session)
+                                failCurrentPlan(
+                                    "Could not close failed standby session before retry: ${closeError.message}",
+                                    closeError,
                                 )
-                            } else {
+                            }
+                        } else {
+                            runCatching { session.close() }
+                            if (openGeneration == generation) {
                                 failCurrentPlan("Standby capture session configuration failed", null)
                             }
                         }
@@ -957,9 +991,9 @@ class StandbyCameraController(context: Context) {
 
         // Register before close(): onClosed() is dispatched asynchronously on the camera handler.
         pendingSessionCloseActions[session] = finishClose
-        runCatching { session.stopRepeating() }
-        runCatching { session.abortCaptures() }
         try {
+            // Closing this preview-only session stops its repeating request. Avoid an
+            // unnecessary abortCaptures() pipeline flush during the lens handoff.
             session.close()
         } catch (error: Exception) {
             PLog.w(TAG, "Failed to close standby capture session; closing its device before releasing outputs", error)
