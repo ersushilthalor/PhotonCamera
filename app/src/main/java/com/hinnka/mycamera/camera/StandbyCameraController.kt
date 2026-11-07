@@ -61,6 +61,7 @@ class StandbyCameraController(context: Context) {
         val aspectRatio: Float,
         val previewSize: Size,
         val previewSurface: Surface?,
+        val requestTemplateType: Int,
     )
 
     private data class PreviewOutput(
@@ -202,6 +203,7 @@ class StandbyCameraController(context: Context) {
         previewSurface: Surface? = null,
         previewSurfaceTexture: SurfaceTexture? = null,
         onPreviewSizeChanged: ((Int, Int) -> Unit)? = null,
+        requestTemplateType: Int = CameraDevice.TEMPLATE_PREVIEW,
     ) {
         handler = callbackHandler
         dispatch {
@@ -215,6 +217,7 @@ class StandbyCameraController(context: Context) {
                 availableCameras = availableCameras,
                 activeOpenCameraId = activeOpenCameraId,
                 previewSize = previewSize,
+                requestTemplateType = requestTemplateType,
             )
         }
     }
@@ -265,12 +268,14 @@ class StandbyCameraController(context: Context) {
         availableCameras: List<CameraInfo>,
         activeOpenCameraId: String,
         previewSize: Size,
+        requestTemplateType: Int,
     ) {
         val plan = resolvePlan(
             activeCamera = activeCamera,
             availableCameras = availableCameras,
             activeOpenCameraId = activeOpenCameraId,
             previewSize = previewSize,
+            requestTemplateType = requestTemplateType,
         ) ?: run {
             pendingPlan = null
             releaseResources("standby plan unavailable", resetStatus = false)
@@ -295,6 +300,7 @@ class StandbyCameraController(context: Context) {
         availableCameras: List<CameraInfo>,
         activeOpenCameraId: String,
         previewSize: Size,
+        requestTemplateType: Int,
     ): StandbyPlan? {
         if (activeCamera == null || activeOpenCameraId.isBlank()) {
             publishUnavailable(StandbyCameraPhase.NO_TARGET_LENS, "Active camera information unavailable")
@@ -393,6 +399,7 @@ class StandbyCameraController(context: Context) {
                 targetCamera.cameraId,
                 livePreviewSurface?.let { System.identityHashCode(it) } ?: 0,
                 livePreviewSizeKey,
+                requestTemplateType,
             ).joinToString("|"),
             activeOpenCameraId = activeOpenCameraId,
             standbyOpenCameraId = standbyOpenCameraId,
@@ -402,6 +409,7 @@ class StandbyCameraController(context: Context) {
             aspectRatio = ratio,
             previewSize = previewSize,
             previewSurface = livePreviewSurface,
+            requestTemplateType = requestTemplateType,
         )
     }
 
@@ -682,7 +690,7 @@ class StandbyCameraController(context: Context) {
 
         val livePreviewSurface = plan.previewSurface.takeIf { includeAlternatePreviewSurface }
         try {
-            val builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+            val builder = camera.createCaptureRequest(plan.requestTemplateType).apply {
                 addTarget(reader.surface)
                 livePreviewSurface?.let(::addTarget)
                 set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
@@ -691,6 +699,9 @@ class StandbyCameraController(context: Context) {
                 val afModes = cameraManager.getCameraCharacteristics(camera.id)
                     .get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: intArrayOf()
                 val preferredAfMode = when {
+                    plan.requestTemplateType == CameraDevice.TEMPLATE_RECORD &&
+                        afModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO) ->
+                        CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
                     afModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE) ->
                         CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
                     afModes.contains(CaptureRequest.CONTROL_AF_MODE_AUTO) ->
