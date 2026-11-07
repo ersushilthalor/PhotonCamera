@@ -1435,17 +1435,26 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         currentFrameTimestampNs = standbySurfaceTexture?.timestamp ?: 0L
     }
 
-    fun setActivePreviewSource(useStandby: Boolean) {
+    fun setActivePreviewSource(
+        useStandby: Boolean,
+        waitForPrimaryFrame: Boolean = true,
+    ) {
         if (useStandby) {
             switchToPrimaryWhenFrameReady = false
             useStandbyPreviewSource = true
             if ((standbySurfaceTexture?.timestamp ?: 0L) > 0L) {
                 useCurrentStandbyOesFrame()
             }
-        } else if (useStandbyPreviewSource) {
-            // Keep displaying the current lens until the newly configured primary stream
-            // has delivered a frame. Never flash an old main-camera buffer during handoff.
+        } else if (useStandbyPreviewSource && waitForPrimaryFrame) {
+            // A different CameraDevice has just replaced the active session. Keep the
+            // selected standby image until the new primary SurfaceTexture has a fresh frame.
             switchToPrimaryWhenFrameReady = true
+        } else if (useStandbyPreviewSource) {
+            // Same-session logical dual preview: both sources are continuously streaming,
+            // so switch back immediately instead of waiting an extra frame interval.
+            switchToPrimaryWhenFrameReady = false
+            useStandbyPreviewSource = false
+            if (acquireLatestCameraFrame()) useCurrentOesFrame()
         } else {
             switchToPrimaryWhenFrameReady = false
         }
