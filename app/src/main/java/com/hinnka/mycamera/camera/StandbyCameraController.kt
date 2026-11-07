@@ -203,6 +203,22 @@ class StandbyCameraController(context: Context) {
         }
     }
 
+    /**
+     * Dispose of a device returned by takeOver() when the main controller cannot adopt it.
+     * The StandbyCameraController owns this device's StateCallback, so it must also own close().
+     */
+    fun discardHandoffDevice(camera: CameraDevice, reason: String) {
+        dispatch {
+            if (handoffCameraDevice === camera) handoffCameraDevice = null
+            if (adoptedCameraDevice === camera) {
+                adoptedCameraDevice = null
+                adoptedDeviceCallbacks = null
+            }
+            PLog.w(TAG, "Discarding handed-off CameraDevice ${camera.id}: $reason")
+            closeOpenedCamera(camera)
+        }
+    }
+
     /** True while a just-detached device is being installed as the main camera. */
     fun isHandoffDevice(camera: CameraDevice): Boolean = handoffCameraDevice === camera
 
