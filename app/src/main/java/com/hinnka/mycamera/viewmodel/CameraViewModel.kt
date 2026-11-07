@@ -3855,10 +3855,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             runCatching { currentCamera.getOpenCameraId() == targetCamera.getOpenCameraId() }
                 .getOrDefault(false)
         syncVendorCaptureSettingsToController()
-        cameraController.switchToCameraId(cameraId)
-        targetCamera?.let { camera ->
-            setZoomRatioForCamera(camera.defaultVisibleZoomRatio(), camera.cameraId)
-        }
+        val targetZoom = targetCamera?.defaultVisibleZoomRatio() ?: 1f
+        zoomRatioByMain = targetZoom
+        cameraController.switchToCameraId(cameraId, targetZoom)
         // Physical lenses exposed by one logical Camera2 device can be switched by
         // rebuilding only its capture session. Closing the CameraDevice here adds an
         // avoidable black-frame/cold-open gap and defeats seamless physical handoff.
@@ -3878,8 +3877,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             runCatching { currentCamera.getOpenCameraId() == targetCamera.getOpenCameraId() }
                 .getOrDefault(false)
         syncVendorCaptureSettingsToController()
-        cameraController.switchToCameraId(cameraId)
-        setZoomRatioForCamera(ratio, cameraId)
+        zoomRatioByMain = ratio
+        cameraController.switchToCameraId(cameraId, ratio)
         if (!sharesOpenCameraDevice) {
             reopenCamera(preserveVideoRecording = true)
         }
