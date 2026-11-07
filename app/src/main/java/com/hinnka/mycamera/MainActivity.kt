@@ -73,7 +73,6 @@ import com.hinnka.mycamera.lut.creator.LutCreatorScreen
 import com.hinnka.mycamera.lut.creator.LutCreatorViewModel
 import com.hinnka.mycamera.screencapture.ScreenCaptureRenderConfigStore
 import com.hinnka.mycamera.ui.camera.CameraScreen
-import com.hinnka.mycamera.ui.camera.FocoCameraIntegrationScreen
 import com.hinnka.mycamera.data.FilmData
 import com.hinnka.mycamera.ui.camera.ColorWalkScreen
 import com.hinnka.mycamera.ui.camera.FilmDetailScreen
@@ -741,7 +740,7 @@ fun NavigationHost(
                         )
                     }
                 } else {
-                    FocoCameraIntegrationScreen(
+                    CameraScreen(
                         viewModel = cameraViewModel,
                         galleryViewModel = galleryViewModel,
                         onGalleryClick = {
@@ -776,9 +775,6 @@ fun NavigationHost(
                                         cameraViewModel.separateVideoLutEnabled.value
                                 )
                             )
-                        },
-                        onVideoLutClick = {
-                            navController.navigate(Routes.filterManagement(videoLut = true))
                         },
                         onFrameManagementClick = {
                             navController.navigate(Routes.FRAME_MANAGEMENT)
