@@ -1536,6 +1536,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val eyeFocusEnabled: StateFlow<Boolean> = userPreferencesRepository.userPreferences
         .map { it.eyeFocusEnabled }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val autoSwitchToUltraWideEnabled: StateFlow<Boolean> =
+        userPreferencesRepository.userPreferences
+            .map { it.autoSwitchToUltraWide }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val shutterSoundEnabled: Flow<Boolean> = userPreferencesRepository.userPreferences.map { it.shutterSoundEnabled }
     val colorPaletteEnabled: StateFlow<Boolean> = userPreferencesRepository.userPreferences
         .map { it.colorPaletteEnabled }
@@ -2096,6 +2100,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     resetEyeFocusTracking(cancelCameraFocus = true, reason = "disabled")
                 }
             }
+        }
+        cameraController.onAutoLensSwitchRequested = { cameraId, targetZoom ->
+            viewModelScope.launch(Dispatchers.Main.immediate) {
+                if (!isVideoLensLocked()) {
+                    switchToLensAndSetZoomRatio(cameraId, targetZoom)
+                }
+            }
+        }
+        viewModelScope.launch {
+            autoSwitchToUltraWideEnabled.collect(cameraController::setAutoSwitchToUltraWide)
         }
         cameraController.initialize()
         viewModelScope.launch {
@@ -5348,6 +5362,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         viewModelScope.launch {
             userPreferencesRepository.saveEyeFocusEnabled(enabled)
+        }
+    }
+
+    fun setAutoSwitchToUltraWide(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveAutoSwitchToUltraWide(enabled)
         }
     }
 
