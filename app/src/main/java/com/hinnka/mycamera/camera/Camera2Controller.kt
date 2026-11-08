@@ -2614,6 +2614,20 @@ class Camera2Controller(private val context: Context) {
                 "Using single-device logical zoom for main/ultra-wide: open=$openCameraId, " +
                     "zoom=$logicalZoomRatio, atNs=${SystemClock.elapsedRealtimeNanos()}"
             )
+        } else if (wasSameLogicalOpenDevice) {
+            // A mode change (for example RAW capture) can disable the logical zoom path while
+            // reopening the same lens. Convert its main-camera-equivalent ratio back to the
+            // selected sensor's local crop so the regular physical-output path is unchanged.
+            val sensorIntrinsicRatio = selectedCamera?.intrinsicZoomRatio
+                ?.takeIf { it.isFinite() && it > 0f } ?: 1f
+            val sensorLocalZoomRatio = _state.value.zoomRatio / sensorIntrinsicRatio
+            _state.update { it.copy(zoomRatio = sensorLocalZoomRatio) }
+            PLog.i(
+                TAG,
+                "Leaving single-device logical zoom: open=$openCameraId, " +
+                    "sensorRatio=$sensorIntrinsicRatio, localZoom=$sensorLocalZoomRatio, " +
+                    "atNs=${SystemClock.elapsedRealtimeNanos()}"
+            )
         }
         val targetZoomRatioByMain = if (seamlessLogicalLensZoomEnabled) {
             _state.value.zoomRatio
