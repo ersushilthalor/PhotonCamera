@@ -55,6 +55,7 @@ fun ZoomControlBarVerticel(
     availableCameras: List<CameraInfo>,
     currentCameraId: String,
     onZoomChange: (Float) -> Unit,
+    onPreviewZoomChange: (Float) -> Unit = onZoomChange,
     onZoomStopClick: (Float) -> Unit,
     onLensSwitch: (String) -> Unit,
     onFilterClick: () -> Unit,
@@ -183,7 +184,7 @@ fun ZoomControlBarVerticel(
                             val newZoom = (internalZoomRatio * exp(-dragAmount.toDouble() * sensitivity).toFloat()).coerceIn(minZoom, maxZoom)
                             internalZoomRatio = newZoom
 
-                            onZoomChange(newZoom)
+                            onPreviewZoomChange(newZoom)
                         }
                     },
                     onDragEnd = {
