@@ -115,6 +115,7 @@ private enum class CameraShootingMode {
 private const val InitialPreviewTransitionDelayMillis = 150L
 private const val PreviewTransitionRevealDurationMillis = 800
 private const val RawCaptureTapDebounceMillis = 1000L
+private const val LensZoomTransitionHandoffHoldMillis = 10L
 private const val DefaultShutterSpeedNs = 1_000_000_000f / 60f
 private const val DefaultIso = 100f
 private const val DefaultAwbTemperature = 5000f
@@ -383,6 +384,7 @@ fun CameraScreen(
         state.isPreviewActive,
         state.previewFirstFrameTimestampNs
     ) {
+        val transitionToken = lensZoomTransitionToken
         val targetCameraId = lensZoomTransitionTargetCameraId ?: return@LaunchedEffect
         val frameTimestampNs = state.previewFirstFrameTimestampNs ?: return@LaunchedEffect
         val targetPreviewReady = state.currentCameraId == targetCameraId &&
@@ -390,11 +392,22 @@ fun CameraScreen(
             frameTimestampNs != lensZoomTransitionStartFrameTimestampNs
         if (!targetPreviewReady) return@LaunchedEffect
 
-        // On 1x -> 0.5x, the Camera2 handoff happens first. Start the digital
-        // zoom-out only after the ultra-wide sensor has delivered its first frame.
+        // On 1x -> 0.5x, hold the matched ultra-wide crop briefly after its first
+        // preview frame, then start the digital zoom-out animation.
         if (!lensZoomTransitionAnimationStarted) {
+            delay(LensZoomTransitionHandoffHoldMillis)
+            if (
+                transitionToken != lensZoomTransitionToken ||
+                lensZoomTransitionTargetCameraId != targetCameraId ||
+                lensZoomTransitionAnimationStarted ||
+                state.currentCameraId != targetCameraId ||
+                !state.isPreviewActive ||
+                state.previewFirstFrameTimestampNs != frameTimestampNs
+            ) {
+                return@LaunchedEffect
+            }
             startLensZoomTransitionAnimation(
-                transitionToken = lensZoomTransitionToken,
+                transitionToken = transitionToken,
                 targetScale = lensZoomTransitionTargetScale,
                 durationMillis = lensZoomTransitionDurationMillis
             )
@@ -664,9 +677,9 @@ fun CameraScreen(
                 onFinished = { viewModel.switchToLens(cameraId) }
             )
         } else {
-            // 1x -> 0.5x: switch to ultra-wide at its 1x-equivalent crop first.
-            // The target preview effect starts the digital zoom-out from that first frame.
-            viewModel.switchToLens(cameraId)
+            // 1x -> 0.5x: open the ultra-wide at the current 1x-equivalent crop.
+            // The effect waits 10 ms after its first preview frame before animating out.
+            viewModel.switchToLensAndSetZoomRatio(cameraId, currentZoom)
         }
     }
 
