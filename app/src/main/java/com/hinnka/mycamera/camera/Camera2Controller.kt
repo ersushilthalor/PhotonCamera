@@ -290,7 +290,7 @@ class Camera2Controller(private val context: Context) {
     private var releaseCloseLatch: java.util.concurrent.CountDownLatch? = null
     private var captureSession: CameraCaptureSession? = null
     private var previewRequestBuilder: CaptureRequest.Builder? = null
-    private var previewSessionGeneration: Long = 0L
+    @Volatile private var previewSessionGeneration: Long = 0L
     private val previewUpdateScheduled = AtomicBoolean(false)
     private var pendingVendorSessionParameterRestart = false
     private var oppoSuperStabilizationEnabled = false
@@ -303,7 +303,7 @@ class Camera2Controller(private val context: Context) {
     @Volatile private var onAlternatePreviewSourceChanged: ((Boolean) -> Unit)? = null
     private var onAlternatePreviewSizeChanged: ((Int, Int) -> Unit)? = null
     @Volatile private var activeLogicalDualPreviewPlan: LogicalDualPreviewPlan? = null
-    @Volatile private var pendingLogicalPreviewSourceReset = false
+    @Volatile private var pendingLogicalPreviewSourceResetGeneration: Long? = null
     private val failedLogicalDualPreviewPlanKeys = mutableSetOf<String>()
     private var stabilizationImageReader: StabilizationImageReader? = null
 
@@ -1191,11 +1191,6 @@ class Camera2Controller(private val context: Context) {
                 result.get(CaptureResult.SENSOR_TIMESTAMP)?.let { timestamp ->
                     _state.update { it.copy(previewFirstFrameTimestampNs = timestamp) }
                 }
-            }
-            if (session === captureSession && pendingLogicalPreviewSourceReset) {
-                pendingLogicalPreviewSourceReset = false
-                PLog.i(TAG, "New physical-lens preview frame is ready; returning renderer to primary input")
-                onAlternatePreviewSourceChanged?.invoke(false)
             }
 
             // Only the currently active CameraCaptureSession may feed the EIS timeline.
@@ -2590,7 +2585,7 @@ class Camera2Controller(private val context: Context) {
             onAlternatePreviewSizeChanged = onPreviewSizeChanged
             if (changed) {
                 activeLogicalDualPreviewPlan = null
-                pendingLogicalPreviewSourceReset = false
+                pendingLogicalPreviewSourceResetGeneration = null
                 onSourceChanged?.invoke(false)
                 if (validSurface != null &&
                     cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN &&
@@ -4360,6 +4355,22 @@ class Camera2Controller(private val context: Context) {
 
             _state.value = _state.value.copy(isPreviewActive = true)
             activeLogicalDualPreviewPlan = logicalDualPreviewPlan
+            val pendingSourceResetGeneration = pendingLogicalPreviewSourceResetGeneration
+            if (pendingSourceResetGeneration != null &&
+                sessionGeneration >= pendingSourceResetGeneration
+            ) {
+                // Only a newly configured target-lens session may release the standby
+                // source. The old session can still deliver callbacks between the tap
+                // and close/open handoff; switching on those callbacks flashes the
+                // outgoing lens for a few frames.
+                pendingLogicalPreviewSourceResetGeneration = null
+                PLog.i(
+                    TAG,
+                    "Target preview session configured (generation=$sessionGeneration); " +
+                        "waiting for its first primary GL frame before source reset",
+                )
+                onAlternatePreviewSourceChanged?.invoke(false)
+            }
             if (logicalDualPreviewPlan != null) {
                 PLog.i(
                     TAG,
@@ -6306,17 +6317,20 @@ class Camera2Controller(private val context: Context) {
             standbyCameraController.canHandoffTo(targetCamera)
         when {
             livePlan?.alternateCameraId == cameraId && alternateFrameAvailable -> {
-                pendingLogicalPreviewSourceReset = true
+                // Do not let the outgoing capture session release the GL standby source.
+                // onSessionConfigured() will do so only after the target sensor's session
+                // is installed; the renderer then waits for that session's first GL frame.
+                pendingLogicalPreviewSourceResetGeneration = previewSessionGeneration + 1L
                 onAlternatePreviewSourceChanged?.invoke(true)
                 PLog.i(TAG, "Instant preview source swap to alternate physical lens: $cameraId")
             }
             livePlan?.activeCameraId == cameraId -> {
-                pendingLogicalPreviewSourceReset = true
+                pendingLogicalPreviewSourceResetGeneration = null
                 onAlternatePreviewSourceChanged?.invoke(false)
                 PLog.i(TAG, "Instant preview source swap back to primary physical lens: $cameraId")
             }
             canUsePrewarmedStandby -> {
-                pendingLogicalPreviewSourceReset = true
+                pendingLogicalPreviewSourceResetGeneration = previewSessionGeneration + 1L
                 onAlternatePreviewSourceChanged?.invoke(true)
                 PLog.i(TAG, "Instant preview source swap to warmed standby CameraDevice: $cameraId")
             }
