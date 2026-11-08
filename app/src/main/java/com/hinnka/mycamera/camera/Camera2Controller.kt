@@ -2615,7 +2615,11 @@ class Camera2Controller(private val context: Context) {
                     "zoom=$logicalZoomRatio, atNs=${SystemClock.elapsedRealtimeNanos()}"
             )
         }
-        val targetZoomRatioByMain = getTargetZoomRatioByMain(_state.value, selectedCamera)
+        val targetZoomRatioByMain = if (seamlessLogicalLensZoomEnabled) {
+            _state.value.zoomRatio
+        } else {
+            getTargetZoomRatioByMain(_state.value, selectedCamera)
+        }
         if (cameraId.isEmpty()) {
             handleCameraOpenFailure(
                 cameraId = cameraId,
@@ -3860,6 +3864,11 @@ class Camera2Controller(private val context: Context) {
         openCameraId: String
     ): Boolean {
         if (camera == null ||
+            state.useRaw ||
+            state.videoConfig.shouldLockLens(
+                captureMode = state.captureMode,
+                isRecording = state.videoRecordingState.isRecording
+            ) ||
             camera.logicalCameraId != openCameraId ||
             camera.lensFacing != CameraCharacteristics.LENS_FACING_BACK ||
             camera.isVirtualIszLens ||
@@ -3914,8 +3923,8 @@ class Camera2Controller(private val context: Context) {
         state: CameraState = _state.value,
         camera: CameraInfo? = state.getCurrentCameraInfo()
     ): String? {
-        return camera
-            ?.getBoundPhysicalCameraId(getTargetZoomRatioByMain(state, camera))
+        if (usesSeamlessLogicalLensZoom(camera)) return null
+        return camera?.getBoundPhysicalCameraId(getTargetZoomRatioByMain(state, camera))
     }
 
     private fun resolveOutputPhysicalCameraId(
@@ -6838,8 +6847,15 @@ class Camera2Controller(private val context: Context) {
                         currentState.getCurrentCameraInfo()?.supportsFreeformZoomPan == true,
                 )
             }
-            if (cameraDevice != null && captureSession != null) {
-                updatePreview()
+            val session = captureSession
+            if (cameraDevice != null && session != null) {
+                // This method is serialized on the Camera2 handler. Submit the request directly
+                // so updatePreview's coalescing flag cannot drop intermediate transition steps.
+                session.setRepeatingRequest(
+                    builder.build(),
+                    previewCallback,
+                    cameraHandler
+                )
             }
 
             PLog.v(
