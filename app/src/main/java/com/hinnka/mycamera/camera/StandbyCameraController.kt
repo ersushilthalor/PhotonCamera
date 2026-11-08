@@ -508,8 +508,9 @@ class StandbyCameraController(context: Context) {
             return
         }
 
+        val openGeneration = ++generation
         val reader = try {
-            ImageReader.newInstance(output.size.width, output.size.height, output.format, 3)
+            createStandbyImageReader(output, openGeneration, callbackHandler)
         } catch (error: Exception) {
             publishUnavailable(
                 phase = StandbyCameraPhase.FAILED,
@@ -521,7 +522,13 @@ class StandbyCameraController(context: Context) {
             return
         }
 
-        val openGeneration = ++generation
+        PLog.i(
+            TAG,
+            "Standby stream selected: camera=$outputCameraId, mode=${plan.captureMode}, " +
+                "reader=${output.size.width}x${output.size.height}, " +
+                "requestedPhoto=${plan.photoCaptureSize?.let { "${it.width}x${it.height}" } ?: "none"}, " +
+                "surfaceTexture=${plan.previewSize.width}x${plan.previewSize.height}",
+        )
         activePlan = plan
         standbyImageReader = reader
         imageTimestamps.clear()
@@ -535,30 +542,6 @@ class StandbyCameraController(context: Context) {
             lensType = plan.lensType,
             message = "Opening real standby camera stream",
         )
-
-        reader.setOnImageAvailableListener({ source ->
-            if (openGeneration != generation || source !== standbyImageReader) {
-                runCatching { source.acquireLatestImage()?.close() }
-                return@setOnImageAvailableListener
-            }
-            val image = try {
-                source.acquireLatestImage()
-            } catch (error: IllegalStateException) {
-                PLog.w(TAG, "Standby frame acquisition failed", error)
-                null
-            } ?: return@setOnImageAvailableListener
-
-            try {
-                val timestamp = image.timestamp
-                if (timestamp > 0L) {
-                    receivedFrameCount += 1L
-                    rememberTimestamp(imageTimestamps, timestamp)
-                    updateReadinessFromMatchedFrames(openGeneration)
-                }
-            } finally {
-                image.close()
-            }
-        }, callbackHandler)
 
         isDeviceTransitioning = true
         openRequestGeneration = openGeneration
@@ -656,6 +639,137 @@ class StandbyCameraController(context: Context) {
         }
     }
 
+    private fun createStandbyImageReader(
+        output: PreviewOutput,
+        openGeneration: Long,
+        callbackHandler: Handler,
+    ): ImageReader {
+        return ImageReader.newInstance(
+            output.size.width,
+            output.size.height,
+            output.format,
+            3,
+        ).apply {
+            setOnImageAvailableListener({ source ->
+                if (openGeneration != generation || source !== standbyImageReader) {
+                    runCatching { source.acquireLatestImage()?.close() }
+                    return@setOnImageAvailableListener
+                }
+                val image = try {
+                    source.acquireLatestImage()
+                } catch (error: IllegalStateException) {
+                    PLog.w(TAG, "Standby frame acquisition failed", error)
+                    null
+                } ?: return@setOnImageAvailableListener
+
+                try {
+                    val timestamp = image.timestamp
+                    if (timestamp > 0L) {
+                        receivedFrameCount += 1L
+                        rememberTimestamp(imageTimestamps, timestamp)
+                        updateReadinessFromMatchedFrames(openGeneration)
+                    }
+                } finally {
+                    image.close()
+                }
+            }, callbackHandler)
+        }
+    }
+
+    private fun closeStandbyImageReader(reader: ImageReader) {
+        runCatching { reader.setOnImageAvailableListener(null, null) }
+        runCatching { reader.close() }
+    }
+
+    private fun shouldRetryPhotoResolutionWithPreviewReader(
+        plan: StandbyPlan,
+        reader: ImageReader,
+        includeAlternatePreviewSurface: Boolean,
+        allowPhotoResolutionFallback: Boolean,
+    ): Boolean {
+        return includeAlternatePreviewSurface &&
+            allowPhotoResolutionFallback &&
+            plan.captureMode == CaptureMode.PHOTO &&
+            plan.photoCaptureSize != null &&
+            reader.width.toLong() * reader.height.toLong() > TARGET_PREVIEW_AREA
+    }
+
+    /**
+     * A high-resolution photo reader may be rejected with the standby GL SurfaceTexture by a
+     * restrictive HAL. Retry at preview resolution without dropping the live alternate preview,
+     * so a supported instant source handoff remains available.
+     */
+    private fun retryWithPreviewResolutionReader(
+        camera: CameraDevice,
+        reader: ImageReader,
+        plan: StandbyPlan,
+        openGeneration: Long,
+        failedSession: CameraCaptureSession?,
+    ) {
+        val retry = {
+            if (openGeneration != generation ||
+                camera !== standbyCameraDevice ||
+                standbyImageReader !== reader
+            ) {
+                closeStandbyImageReader(reader)
+            } else {
+                closeStandbyImageReader(reader)
+                standbyImageReader = null
+                val outputCameraId = plan.standbyPhysicalCameraId ?: plan.standbyOpenCameraId
+                val fallbackOutput = resolvePreviewOutput(
+                    cameraId = outputCameraId,
+                    desiredAspectRatio = plan.aspectRatio,
+                )
+                if (fallbackOutput == null) {
+                    failCurrentPlan("No fallback standby preview output is available", null)
+                } else {
+                    try {
+                        val callbackHandler = handler
+                            ?: throw IllegalStateException("Camera handler stopped during standby fallback")
+                        val fallbackReader = createStandbyImageReader(
+                            fallbackOutput,
+                            openGeneration,
+                            callbackHandler,
+                        )
+                        standbyImageReader = fallbackReader
+                        PLog.w(
+                            TAG,
+                            "Full-resolution standby photo stream was rejected with the GL preview; " +
+                                "retrying with ${fallbackOutput.size.width}x${fallbackOutput.size.height} " +
+                                "while retaining instant preview",
+                        )
+                        configureStandbySession(
+                            camera = camera,
+                            reader = fallbackReader,
+                            plan = plan,
+                            openGeneration = openGeneration,
+                            includeAlternatePreviewSurface = true,
+                            allowPhotoResolutionFallback = false,
+                        )
+                    } catch (error: Exception) {
+                        failCurrentPlan(
+                            "Could not create fallback standby preview reader: ${error.message}",
+                            error,
+                        )
+                    }
+                }
+            }
+            Unit
+        }
+        if (failedSession == null) {
+            retry()
+            return
+        }
+
+        pendingSessionCloseActions[failedSession] = retry
+        try {
+            failedSession.close()
+        } catch (error: Exception) {
+            pendingSessionCloseActions.remove(failedSession)?.invoke()
+            PLog.w(TAG, "Failed to close rejected high-resolution standby session", error)
+        }
+    }
+
     private fun resolvePreviewOutput(
         cameraId: String,
         desiredAspectRatio: Float,
@@ -709,6 +823,7 @@ class StandbyCameraController(context: Context) {
         plan: StandbyPlan,
         openGeneration: Long,
         includeAlternatePreviewSurface: Boolean = true,
+        allowPhotoResolutionFallback: Boolean = true,
     ) {
         if (openGeneration != generation || camera !== standbyCameraDevice) {
             closeOpenedCamera(camera)
@@ -814,7 +929,26 @@ class StandbyCameraController(context: Context) {
                             )
                             scheduleFrameReadyTimeout(openGeneration, callbackHandler)
                         } catch (error: Exception) {
-                            if (livePreviewSurface != null) {
+                            if (shouldRetryPhotoResolutionWithPreviewReader(
+                                    plan,
+                                    reader,
+                                    livePreviewSurface != null,
+                                    allowPhotoResolutionFallback,
+                                )
+                            ) {
+                                PLog.w(
+                                    TAG,
+                                    "High-resolution standby photo reader was rejected with the GL preview; " +
+                                        "retrying at preview resolution: ${error.message}",
+                                )
+                                retryWithPreviewResolutionReader(
+                                    camera = camera,
+                                    reader = reader,
+                                    plan = plan,
+                                    openGeneration = openGeneration,
+                                    failedSession = session,
+                                )
+                            } else if (livePreviewSurface != null) {
                                 PLog.w(
                                     TAG,
                                     "Standby GL output rejected while starting repeating request; retrying without it: ${error.message}",
@@ -851,7 +985,27 @@ class StandbyCameraController(context: Context) {
                     }
 
                     override fun onConfigureFailed(session: CameraCaptureSession) {
-                        if (openGeneration == generation && livePreviewSurface != null) {
+                        if (openGeneration == generation &&
+                            shouldRetryPhotoResolutionWithPreviewReader(
+                                plan,
+                                reader,
+                                livePreviewSurface != null,
+                                allowPhotoResolutionFallback,
+                            )
+                        ) {
+                            PLog.w(
+                                TAG,
+                                "High-resolution standby photo session was rejected with the GL preview; " +
+                                    "retrying at preview resolution",
+                            )
+                            retryWithPreviewResolutionReader(
+                                camera = camera,
+                                reader = reader,
+                                plan = plan,
+                                openGeneration = openGeneration,
+                                failedSession = session,
+                            )
+                        } else if (openGeneration == generation && livePreviewSurface != null) {
                             PLog.w(TAG, "Standby GL output combination rejected; retrying reader-only standby")
                             pendingSessionCloseActions[session] = {
                                 if (
@@ -897,7 +1051,26 @@ class StandbyCameraController(context: Context) {
             )
             camera.createCaptureSession(sessionConfiguration)
         } catch (error: Exception) {
-            if (livePreviewSurface != null) {
+            if (shouldRetryPhotoResolutionWithPreviewReader(
+                    plan,
+                    reader,
+                    livePreviewSurface != null,
+                    allowPhotoResolutionFallback,
+                )
+            ) {
+                PLog.w(
+                    TAG,
+                    "High-resolution standby photo outputs could not be configured with the GL preview; " +
+                        "retrying at preview resolution: ${error.message}",
+                )
+                retryWithPreviewResolutionReader(
+                    camera = camera,
+                    reader = reader,
+                    plan = plan,
+                    openGeneration = openGeneration,
+                    failedSession = null,
+                )
+            } else if (livePreviewSurface != null) {
                 PLog.w(
                     TAG,
                     "Standby GL output could not be configured; retrying reader-only standby: ${error.message}",
