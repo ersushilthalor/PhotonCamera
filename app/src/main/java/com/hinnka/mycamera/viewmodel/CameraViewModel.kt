@@ -2944,8 +2944,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             cameraController.setAlternatePreviewSurface(
                 surface = previewView?.standbyCameraInputSurface,
                 surfaceTexture = previewView?.getStandbyCameraSurfaceTexture(),
-                onSourceChanged = { useStandby ->
-                    previewView?.setActivePreviewSource(useStandby)
+                onSourceChanged = { useStandby, initialPreviewScale ->
+                    previewView?.setActivePreviewSource(useStandby, initialPreviewScale)
                 },
                 onPreviewSizeChanged = { width, height ->
                     previewView?.setStandbyPreviewSize(width, height)
@@ -3847,7 +3847,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /**
      * 切换到指定的镜头类型
      */
-    fun switchToLens(cameraId: String) {
+    fun switchToLens(cameraId: String, previewTransitionScale: Float = 1f) {
         if (isVideoLensLocked()) return
         val currentCamera = state.value.getCurrentCameraInfo()
         val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId }
@@ -3855,7 +3855,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             runCatching { currentCamera.getOpenCameraId() == targetCamera.getOpenCameraId() }
                 .getOrDefault(false)
         syncVendorCaptureSettingsToController()
-        cameraController.switchToCameraId(cameraId)
+        cameraController.switchToCameraId(cameraId, previewTransitionScale)
         targetCamera?.let { camera ->
             setZoomRatioForCamera(camera.defaultVisibleZoomRatio(), camera.cameraId)
         }
@@ -3867,7 +3867,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun switchToLensAndSetZoomRatio(cameraId: String, ratio: Float) {
+    fun switchToLensAndSetZoomRatio(
+        cameraId: String,
+        ratio: Float,
+        previewTransitionScale: Float = 1f
+    ) {
         if (isVideoLensLocked()) {
             setZoomRatio(ratio)
             return
@@ -3878,7 +3882,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             runCatching { currentCamera.getOpenCameraId() == targetCamera.getOpenCameraId() }
                 .getOrDefault(false)
         syncVendorCaptureSettingsToController()
-        cameraController.switchToCameraId(cameraId)
+        cameraController.switchToCameraId(cameraId, previewTransitionScale)
         setZoomRatioForCamera(ratio, cameraId)
         if (!sharesOpenCameraDevice) {
             reopenCamera(preserveVideoRecording = true)
