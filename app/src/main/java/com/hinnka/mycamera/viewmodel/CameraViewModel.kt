@@ -3847,7 +3847,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /**
      * 切换到指定的镜头类型
      */
-    fun switchToLens(cameraId: String, previewTransitionScale: Float = 1f) {
+    fun switchToLens(cameraId: String) = switchToLens(cameraId, 1f)
+
+    fun switchToLens(cameraId: String, previewTransitionScale: Float) {
         if (isVideoLensLocked()) return
         val currentCamera = state.value.getCurrentCameraInfo()
         val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId }
@@ -3867,10 +3869,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun switchToLensAndSetZoomRatio(cameraId: String, ratio: Float) =
+        switchToLensAndSetZoomRatio(cameraId, ratio, 1f)
+
     fun switchToLensAndSetZoomRatio(
         cameraId: String,
         ratio: Float,
-        previewTransitionScale: Float = 1f
+        previewTransitionScale: Float
     ) {
         if (isVideoLensLocked()) {
             setZoomRatio(ratio)
