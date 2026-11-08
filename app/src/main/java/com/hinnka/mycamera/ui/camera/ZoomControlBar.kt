@@ -269,6 +269,7 @@ fun ZoomControlBar(
             } else {
                 ZoomPresetPill(
                     zoomRatio = internalZoomRatio,
+                    quickLensSwitch = currentCamera?.isQuickLensSwitchVirtualCamera == true,
                     onPresetClick = { preset ->
                         val matchingLensCameras = availableCameras
                             .filter { camera ->
@@ -308,10 +309,11 @@ fun ZoomControlBar(
 @Composable
 private fun ZoomPresetPill(
     zoomRatio: Float,
+    quickLensSwitch: Boolean,
     onPresetClick: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val basePresets = listOf(0.6f, 1f, 2f, 3f)
+    val basePresets = if (quickLensSwitch) listOf(0.5f, 1f, 2f, 3f) else listOf(0.6f, 1f, 2f, 3f)
     val visiblePresets = if (zoomRatio >= 3f) basePresets + listOf(5f, 10f) else basePresets
     val selectedPreset = visiblePresets.firstOrNull { abs(it - zoomRatio) <= 0.05f }
 
@@ -341,6 +343,7 @@ private fun ZoomPresetPill(
                     )
                 }
                 val label = when {
+                    abs(preset - 0.5f) <= 0.01f -> ".5"
                     abs(preset - 0.6f) <= 0.01f -> ".6"
                     else -> preset.toInt().toString()
                 }
