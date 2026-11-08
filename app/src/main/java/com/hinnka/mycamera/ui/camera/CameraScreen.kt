@@ -68,6 +68,7 @@ import com.hinnka.mycamera.MyCameraApplication
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.CameraState
+import com.hinnka.mycamera.camera.LensType
 import com.hinnka.mycamera.camera.FocusPointSource
 import com.hinnka.mycamera.camera.PhotoCaptureProgress
 import com.hinnka.mycamera.data.CaptureButtonStyle
@@ -304,27 +305,22 @@ fun CameraScreen(
     var previewTransitionSawPause by remember { mutableStateOf(false) }
     var hasPlayedInitialPreviewTransition by remember { mutableStateOf(false) }
     var rawCaptureTapLocked by remember { mutableStateOf(false) }
-    var lensZoomTransitionScale by remember { mutableFloatStateOf(1f) }
     var lensZoomTransitionTargetCameraId by remember { mutableStateOf<String?>(null) }
     var lensZoomTransitionStartFrameTimestampNs by remember { mutableStateOf<Long?>(null) }
     var lensZoomTransitionAnimationStarted by remember { mutableStateOf(false) }
     var lensZoomTransitionAnimationFinished by remember { mutableStateOf(false) }
-    var lensZoomTransitionTargetScale by remember { mutableFloatStateOf(1f) }
     var lensZoomTransitionDurationMillis by remember { mutableIntStateOf(0) }
-    // Non-null when the transition drives the real camera zoom (start -> target) instead of
-    // magnifying the already-rendered preview. Zooming out needs real sensor FOV that the
-    // cropped ultra-wide frame no longer contains, so a view scale below 1x cannot do it.
+    // Animate the Camera2 zoom request itself so the transition is present in both the
+    // viewfinder and the encoded video stream, not only in a Compose preview transform.
     var lensZoomTransitionCameraZoomPath by remember { mutableStateOf<Pair<Float, Float>?>(null) }
     var lensZoomTransitionToken by remember { mutableIntStateOf(0) }
     var lensZoomTransitionJob by remember { mutableStateOf<Job?>(null) }
 
     fun clearLensZoomTransition() {
-        lensZoomTransitionScale = 1f
         lensZoomTransitionTargetCameraId = null
         lensZoomTransitionStartFrameTimestampNs = null
         lensZoomTransitionAnimationStarted = false
         lensZoomTransitionAnimationFinished = false
-        lensZoomTransitionTargetScale = 1f
         lensZoomTransitionDurationMillis = 0
         lensZoomTransitionCameraZoomPath = null
     }
@@ -339,9 +335,8 @@ fun CameraScreen(
 
     fun startLensZoomTransitionAnimation(
         transitionToken: Int,
-        targetScale: Float,
         durationMillis: Int,
-        cameraZoomPath: Pair<Float, Float>? = null,
+        cameraZoomPath: Pair<Float, Float>,
         onFinished: (() -> Unit)? = null
     ) {
         if (transitionToken != lensZoomTransitionToken ||
@@ -361,25 +356,17 @@ fun CameraScreen(
                 )
             ) {
                 if (transitionToken == lensZoomTransitionToken) {
-                    if (cameraZoomPath != null) {
-                        viewModel.setZoomRatio(
-                            interpolateZoomRatio(
-                                startZoom = cameraZoomPath.first,
-                                targetZoom = cameraZoomPath.second,
-                                progress = value
-                            )
-                        )
-                    } else {
-                        lensZoomTransitionScale = interpolateZoomRatio(
-                            startZoom = 1f,
-                            targetZoom = targetScale,
+                    viewModel.setZoomRatio(
+                        interpolateZoomRatio(
+                            startZoom = cameraZoomPath.first,
+                            targetZoom = cameraZoomPath.second,
                             progress = value
                         )
-                    }
+                    )
                 }
             }
             if (transitionToken == lensZoomTransitionToken) {
-                cameraZoomPath?.let { viewModel.setZoomRatio(it.second) }
+                viewModel.setZoomRatio(cameraZoomPath.second)
                 lensZoomTransitionAnimationFinished = true
                 onFinished?.invoke()
             }
@@ -403,7 +390,6 @@ fun CameraScreen(
         lensZoomTransitionTargetCameraId,
         lensZoomTransitionAnimationStarted,
         lensZoomTransitionAnimationFinished,
-        lensZoomTransitionTargetScale,
         lensZoomTransitionDurationMillis,
         lensZoomTransitionCameraZoomPath,
         lensZoomTransitionStartFrameTimestampNs,
@@ -447,11 +433,11 @@ fun CameraScreen(
             ) {
                 return@LaunchedEffect
             }
+            val cameraZoomPath = lensZoomTransitionCameraZoomPath ?: return@LaunchedEffect
             startLensZoomTransitionAnimation(
                 transitionToken = transitionToken,
-                targetScale = lensZoomTransitionTargetScale,
                 durationMillis = lensZoomTransitionDurationMillis,
-                cameraZoomPath = lensZoomTransitionCameraZoomPath
+                cameraZoomPath = cameraZoomPath
             )
             return@LaunchedEffect
         }
@@ -669,11 +655,15 @@ fun CameraScreen(
         }
     }
 
-    fun switchToLensWithPreviewTransition(cameraId: String) {
+    fun switchToLensWithPreviewTransition(
+        cameraId: String,
+        requestedTargetZoom: Float? = null
+    ) {
         val currentCamera = state.getCurrentCameraInfo() ?: return
         if (cameraId == currentCamera.cameraId) return
         val targetCamera = state.availableCameras.firstOrNull { it.cameraId == cameraId } ?: return
-        val targetZoom = targetCamera.displayIntrinsicZoomRatio.takeIf { it > 0f }
+        val targetZoom = requestedTargetZoom?.takeIf { it.isFinite() && it > 0f }
+            ?: targetCamera.displayIntrinsicZoomRatio.takeIf { it > 0f }
             ?: targetCamera.intrinsicZoomRatio.takeIf { it > 0f }
             ?: 1f
         if (viewModel.isVideoLensLocked()) {
@@ -685,29 +675,35 @@ fun CameraScreen(
             ?: currentCamera.displayIntrinsicZoomRatio.takeIf { it > 0f }
             ?: 1f
         val isZoomingInFromUltraWide =
-            currentZoom < 0.9f && abs(targetZoom - 1f) <= 0.05f
+            currentCamera.lensType == LensType.BACK_ULTRA_WIDE &&
+                targetCamera.lensType == LensType.BACK_MAIN &&
+                currentZoom < 0.9f &&
+                abs(targetZoom - 1f) <= 0.1f
         val isZoomingOutToUltraWide =
-            abs(currentZoom - 1f) <= 0.05f && targetZoom < 0.9f
+            currentCamera.lensType == LensType.BACK_MAIN &&
+                targetCamera.lensType == LensType.BACK_ULTRA_WIDE &&
+                abs(currentZoom - 1f) <= 0.15f &&
+                targetZoom < 0.9f
 
         lensZoomTransitionJob?.cancel()
         lensZoomTransitionToken += 1
         clearLensZoomTransition()
 
         if (!isZoomingInFromUltraWide && !isZoomingOutToUltraWide) {
-            viewModel.switchToLens(cameraId)
+            if (requestedTargetZoom != null) {
+                viewModel.switchToLensAndSetZoomRatio(cameraId, targetZoom)
+            } else {
+                viewModel.switchToLens(cameraId)
+            }
             return
         }
 
         val transitionToken = lensZoomTransitionToken
-        val targetScale = (targetZoom / currentZoom).coerceAtLeast(0.01f)
         val durationMillis = resolveZoomStopAnimationDurationMillis(currentZoom, targetZoom)
         lensZoomTransitionTargetCameraId = cameraId
         lensZoomTransitionStartFrameTimestampNs = state.previewFirstFrameTimestampNs
-        lensZoomTransitionTargetScale = targetScale
         lensZoomTransitionDurationMillis = durationMillis
-        lensZoomTransitionScale = 1f
-        lensZoomTransitionCameraZoomPath =
-            if (isZoomingOutToUltraWide) currentZoom to targetZoom else null
+        lensZoomTransitionCameraZoomPath = currentZoom to targetZoom
 
         // Keep the regular Camera2 lens-switch implementation unchanged. Only the order
         // of the zoom animation and the existing switch call differs by direction.
@@ -716,9 +712,15 @@ fun CameraScreen(
             // then perform the normal switch to the main lens at the matching 1x crop.
             startLensZoomTransitionAnimation(
                 transitionToken = transitionToken,
-                targetScale = targetScale,
                 durationMillis = durationMillis,
-                onFinished = { viewModel.switchToLens(cameraId) }
+                cameraZoomPath = currentZoom to targetZoom,
+                onFinished = {
+                    if (requestedTargetZoom != null) {
+                        viewModel.switchToLensAndSetZoomRatio(cameraId, targetZoom)
+                    } else {
+                        viewModel.switchToLens(cameraId)
+                    }
+                }
             )
         } else {
             // 1x -> 0.5x: open the ultra-wide at the current 1x-equivalent crop. Once its first
@@ -743,7 +745,7 @@ fun CameraScreen(
             currentCamera?.cameraId ?: "0"
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
+            switchToLensWithPreviewTransition(camera.cameraId, targetZoom)
         } else {
             viewModel.setZoomRatio(targetZoom)
         }
@@ -1366,10 +1368,6 @@ fun CameraScreen(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .clipToBounds()
-                                .graphicsLayer {
-                                    scaleX = lensZoomTransitionScale
-                                    scaleY = lensZoomTransitionScale
-                                }
                         ) {
                             CameraPreviewGL(
                             aspectRatio = previewAspectRatio,
