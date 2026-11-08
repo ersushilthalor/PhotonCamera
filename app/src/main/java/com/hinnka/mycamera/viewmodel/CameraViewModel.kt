@@ -3832,8 +3832,48 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         targetCamera?.let { camera ->
             setZoomRatioForCamera(camera.defaultVisibleZoomRatio(), camera.cameraId)
         }
-        // Always use the regular Camera2 close/open path for lens changes.
+        // Keep the established close/open behavior for ordinary lens switches.
         reopenCamera(preserveVideoRecording = true)
+    }
+
+    /**
+     * Handoff used only by the back main <-> ultra-wide zoom transition.
+     * It is available only when both lenses share a logical Camera2 device whose native
+     * zoom-ratio range spans the two sensors. In that case the repeating preview stream
+     * stays alive and the HAL performs the physical sensor handoff.
+     */
+    fun switchToLensForZoomTransition(cameraId: String, ratio: Float): Boolean {
+        if (isVideoLensLocked()) return false
+
+        val currentCamera = state.value.getCurrentCameraInfo() ?: return false
+        val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId } ?: return false
+        val isMainUltraWidePair =
+            (currentCamera.lensType == LensType.BACK_MAIN &&
+                targetCamera.lensType == LensType.BACK_ULTRA_WIDE) ||
+                (currentCamera.lensType == LensType.BACK_ULTRA_WIDE &&
+                    targetCamera.lensType == LensType.BACK_MAIN)
+        if (!isMainUltraWidePair ||
+            !cameraController.usesSeamlessLogicalLensZoom(currentCamera) ||
+            !cameraController.usesSeamlessLogicalLensZoom(targetCamera) ||
+            currentCamera.getOpenCameraId() != targetCamera.getOpenCameraId()
+        ) {
+            return false
+        }
+
+        syncVendorCaptureSettingsToController()
+        cameraController.switchToCameraId(
+            cameraId,
+            resetPreviewFirstFrameTimestamp = true
+        )
+        setZoomRatioForCamera(ratio, cameraId)
+        PLog.i(
+            TAG,
+            "Seamless main/ultra-wide handoff kept CameraDevice open: " +
+                "${currentCamera.cameraId}->${targetCamera.cameraId}, " +
+                "logical=${targetCamera.logicalCameraId}, zoom=$ratio, " +
+                "atNs=${SystemClock.elapsedRealtimeNanos()}"
+        )
+        return true
     }
 
     fun switchToLensAndSetZoomRatio(cameraId: String, ratio: Float) {
@@ -3944,6 +3984,39 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         setCameraControllerZoomRatio(ratio, cameraInfo)
     }
 
+    private var lastLensTransitionZoomSubmitNs = 0L
+    private var lastLensTransitionUiUpdateNs = 0L
+
+    /**
+     * High-frequency animation path. Camera2 receives at most 30 zoom updates per second and
+     * the full CameraState is not copied on every Compose animation frame. The final exact
+     * ratio is committed through setZoomRatio() when the animation completes.
+     */
+    fun setLensTransitionZoomRatio(mainZoomRatio: Float) {
+        if (!mainZoomRatio.isFinite() || mainZoomRatio <= 0f) return
+
+        val nowNs = SystemClock.elapsedRealtimeNanos()
+        if (nowNs - lastLensTransitionZoomSubmitNs < 33_000_000L) return
+        lastLensTransitionZoomSubmitNs = nowNs
+
+        val cameraInfo = state.value.getCurrentCameraInfo()
+        val displayIntrinsicZoomRatio = cameraInfo?.displayIntrinsicZoomRatio
+            ?.takeIf { it > 0f } ?: 1f
+        val controllerRatio = if (cameraController.usesSeamlessLogicalLensZoom(cameraInfo)) {
+            mainZoomRatio
+        } else {
+            mainZoomRatio / displayIntrinsicZoomRatio
+        }
+        cameraController.setZoomRatioDuringLensTransition(controllerRatio)
+
+        // Keep the visible zoom readout responsive without causing a full Compose update
+        // on every animation frame.
+        if (nowNs - lastLensTransitionUiUpdateNs >= 100_000_000L) {
+            lastLensTransitionUiUpdateNs = nowNs
+            zoomRatioByMain = mainZoomRatio
+        }
+    }
+
     /** Apply a normalized delta from the on-screen joystick to the camera crop. */
     fun panZoomBy(deltaX: Float, deltaY: Float) {
         cameraController.panZoomBy(deltaX, deltaY)
@@ -3962,7 +4035,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun setCameraControllerZoomRatio(ratio: Float, cameraInfo: CameraInfo?) {
         val displayIntrinsicZoomRatio = cameraInfo?.displayIntrinsicZoomRatio?.takeIf { it > 0f } ?: 1.0f
-        cameraController.setZoomRatio(ratio / displayIntrinsicZoomRatio)
+        val controllerRatio = if (cameraController.usesSeamlessLogicalLensZoom(cameraInfo)) {
+            ratio
+        } else {
+            ratio / displayIntrinsicZoomRatio
+        }
+        cameraController.setZoomRatio(controllerRatio)
     }
 
     private fun CameraInfo.defaultVisibleZoomRatio(): Float {
