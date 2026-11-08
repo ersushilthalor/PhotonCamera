@@ -84,7 +84,7 @@ class CameraDiscovery(private val context: Context) {
                     add(quickCamera)
                     discoveredCameras.frontCamera
                         ?.takeIf { !lensIdBlacklist.contains(it.cameraId) }
-                        ?.let(::add)
+                        ?.let { add(it) }
                 }
             }
             PLog.w(
