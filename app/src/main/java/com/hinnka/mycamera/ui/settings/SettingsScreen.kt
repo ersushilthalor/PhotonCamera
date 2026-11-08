@@ -1153,6 +1153,18 @@ fun SettingsScreen(
                             onFocalLengthSelected = { viewModel.setDefaultFocalLength(it) }
                         )
 
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+
+                        SwitchSettingItem(
+                            title = stringResource(R.string.settings_quick_lens_switch),
+                            description = stringResource(R.string.settings_quick_lens_switch_description),
+                            checked = userPreferences.quickLensSwitchEnabled,
+                            onCheckedChange = viewModel::setQuickLensSwitchEnabled
+                        )
+
                         if (mainCameraIdOptions.size > 1) {
                             HorizontalDivider(
                                 color = Color.White.copy(alpha = 0.1f),
