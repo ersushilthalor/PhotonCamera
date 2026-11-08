@@ -20,6 +20,8 @@ import android.util.Size
 import android.view.Surface
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.video.CaptureMode
+import com.hinnka.mycamera.video.VideoCapabilitiesResolver
+import com.hinnka.mycamera.video.VideoConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -203,6 +205,7 @@ class StandbyCameraController(context: Context) {
         previewSize: Size,
         captureMode: CaptureMode = CaptureMode.PHOTO,
         photoCaptureSize: Size? = null,
+        videoConfig: VideoConfig? = null,
         callbackHandler: Handler,
         previewSurface: Surface? = null,
         previewSurfaceTexture: SurfaceTexture? = null,
@@ -222,6 +225,7 @@ class StandbyCameraController(context: Context) {
                 previewSize = previewSize,
                 captureMode = captureMode,
                 photoCaptureSize = photoCaptureSize,
+                videoConfig = videoConfig,
             )
         }
     }
@@ -274,6 +278,7 @@ class StandbyCameraController(context: Context) {
         previewSize: Size,
         captureMode: CaptureMode,
         photoCaptureSize: Size?,
+        videoConfig: VideoConfig?,
     ) {
         val plan = resolvePlan(
             activeCamera = activeCamera,
@@ -282,6 +287,7 @@ class StandbyCameraController(context: Context) {
             previewSize = previewSize,
             captureMode = captureMode,
             photoCaptureSize = photoCaptureSize,
+            videoConfig = videoConfig,
         ) ?: run {
             pendingPlan = null
             releaseResources("standby plan unavailable", resetStatus = false)
@@ -308,6 +314,7 @@ class StandbyCameraController(context: Context) {
         previewSize: Size,
         captureMode: CaptureMode,
         photoCaptureSize: Size?,
+        videoConfig: VideoConfig?,
     ): StandbyPlan? {
         if (activeCamera == null || activeOpenCameraId.isBlank()) {
             publishUnavailable(StandbyCameraPhase.NO_TARGET_LENS, "Active camera information unavailable")
@@ -384,19 +391,51 @@ class StandbyCameraController(context: Context) {
             )
         }
 
-        val ratio = if (previewSize.width > 0 && previewSize.height > 0) {
-            previewSize.width.toFloat() / previewSize.height.toFloat()
+        val outputCameraId = standbyPhysicalId ?: standbyOpenCameraId
+        val outputCharacteristics = runCatching {
+            cameraManager.getCameraCharacteristics(outputCameraId)
+        }.getOrNull()
+        // Resolve video input dimensions using the standby lens itself. Main and ultra-wide
+        // sensors frequently advertise different SurfaceTexture sizes for the same preset.
+        val standbyPreviewSize = if (
+            captureMode == CaptureMode.VIDEO &&
+            videoConfig != null &&
+            outputCharacteristics != null
+        ) {
+            val targetVideoSnapshot = runCatching {
+                VideoCapabilitiesResolver.resolve(outputCharacteristics, videoConfig)
+            }.onFailure {
+                PLog.w(TAG, "Could not resolve target-lens video input size for $outputCameraId", it)
+            }.getOrNull()
+            targetVideoSnapshot?.capabilities
+                ?.cameraInputSizesByResolution
+                ?.get(targetVideoSnapshot.config.resolution)
+                ?: targetVideoSnapshot?.previewSize
+                ?: previewSize
+        } else {
+            previewSize
+        }
+        val ratio = if (standbyPreviewSize.width > 0 && standbyPreviewSize.height > 0) {
+            standbyPreviewSize.width.toFloat() / standbyPreviewSize.height.toFloat()
         } else {
             4f / 3f
         }
         val livePreviewSurface = resolveStandbyPreviewSurface(
-            cameraId = standbyPhysicalId ?: standbyOpenCameraId,
-            requestedSize = previewSize,
+            cameraId = outputCameraId,
+            requestedSize = standbyPreviewSize,
         )
         val livePreviewSizeKey = if (livePreviewSurface != null) {
-            "${previewSize.width}x${previewSize.height}"
+            "${standbyPreviewSize.width}x${standbyPreviewSize.height}"
         } else {
             "reader-only"
+        }
+        if (captureMode == CaptureMode.VIDEO) {
+            PLog.i(
+                TAG,
+                "Standby video input resolved: target=$outputCameraId, " +
+                    "requested=${videoConfig?.resolution?.displayName}, " +
+                    "size=${standbyPreviewSize.width}x${standbyPreviewSize.height}",
+            )
         }
         return StandbyPlan(
             key = listOf(
@@ -405,7 +444,9 @@ class StandbyCameraController(context: Context) {
                 standbyPhysicalId.orEmpty(),
                 targetCamera.cameraId,
                 captureMode.name,
+                videoConfig?.let { "${it.resolution.name}:${it.aspectRatio.name}" }.orEmpty(),
                 photoCaptureSize?.let { "${it.width}x${it.height}" }.orEmpty(),
+                "${standbyPreviewSize.width}x${standbyPreviewSize.height}",
                 livePreviewSurface?.let { System.identityHashCode(it) } ?: 0,
                 livePreviewSizeKey,
             ).joinToString("|"),
@@ -415,7 +456,7 @@ class StandbyCameraController(context: Context) {
             standbyCameraId = targetCamera.cameraId,
             lensType = targetCamera.lensType,
             aspectRatio = ratio,
-            previewSize = previewSize,
+            previewSize = standbyPreviewSize,
             captureMode = captureMode,
             photoCaptureSize = photoCaptureSize?.takeIf { it.width > 0 && it.height > 0 },
             previewSurface = livePreviewSurface,
@@ -495,7 +536,7 @@ class StandbyCameraController(context: Context) {
         val output = resolvePreviewOutput(
             cameraId = outputCameraId,
             desiredAspectRatio = plan.aspectRatio,
-            requestedSize = plan.photoCaptureSize.takeIf { plan.captureMode == CaptureMode.PHOTO },
+            preferHighResolution = plan.captureMode == CaptureMode.PHOTO,
         )
         if (output == null) {
             publishUnavailable(
@@ -773,7 +814,7 @@ class StandbyCameraController(context: Context) {
     private fun resolvePreviewOutput(
         cameraId: String,
         desiredAspectRatio: Float,
-        requestedSize: Size? = null,
+        preferHighResolution: Boolean = false,
     ): PreviewOutput? {
         val characteristics = try {
             cameraManager.getCameraCharacteristics(cameraId)
@@ -788,30 +829,30 @@ class StandbyCameraController(context: Context) {
         for (format in candidateFormats) {
             val sizes = streamMap.getOutputSizes(format)?.toList().orEmpty()
             if (sizes.isEmpty()) continue
-            // In photo mode the standby stream must exercise the same sensor-resolution tier
-            // that will be used after handoff. In video mode this reader is only a lightweight
-            // timestamp source; the alternate SurfaceTexture carries the selected video input
-            // resolution, so keep this reader bounded to avoid unnecessary bandwidth.
-            val candidates = if (requestedSize != null) {
-                sizes
+            // In photo mode prewarm the target sensor's own best still-output size. This
+            // mirrors the capture-size selection performed after that lens becomes active.
+            // Video uses this reader only for timestamp matching; its alternate SurfaceTexture
+            // is configured at the target lens's resolved camera-input size instead.
+            val selectedSize = if (preferHighResolution) {
+                val aspectMatchedSizes = sizes.filter {
+                    abs(it.width.toFloat() / it.height.toFloat() - desiredAspectRatio) < 0.01f
+                }
+                val highResolutionMatch = aspectMatchedSizes
+                    .filter { it.height >= 2160 }
+                    .maxByOrNull { it.width.toLong() * it.height.toLong() }
+                highResolutionMatch
+                    ?: sizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
             } else {
-                sizes.filter {
+                val boundedSizes = sizes.filter {
                     maxOf(it.width, it.height) <= MAX_PREVIEW_DIMENSION
                 }.ifEmpty { sizes }
-            }
-            val requestedArea = requestedSize?.let { it.width.toLong() * it.height.toLong() }
-            val selectedSize = candidates.minWithOrNull(
-                compareBy<Size>(
-                    { abs(it.width.toFloat() / it.height.toFloat() - desiredAspectRatio) },
-                    {
-                        if (requestedArea != null) {
-                            abs(it.width.toLong() * it.height.toLong() - requestedArea)
-                        } else {
-                            abs(it.width.toLong() * it.height.toLong() - TARGET_PREVIEW_AREA)
-                        }
-                    },
-                ),
-            ) ?: continue
+                boundedSizes.minWithOrNull(
+                    compareBy<Size>(
+                        { abs(it.width.toFloat() / it.height.toFloat() - desiredAspectRatio) },
+                        { abs(it.width.toLong() * it.height.toLong() - TARGET_PREVIEW_AREA) },
+                    ),
+                )
+            } ?: continue
             return PreviewOutput(selectedSize, format)
         }
         return null
