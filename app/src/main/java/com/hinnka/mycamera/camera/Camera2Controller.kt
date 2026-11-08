@@ -3864,12 +3864,14 @@ class Camera2Controller(private val context: Context) {
     }
 
     fun usesSeamlessLogicalLensZoom(camera: CameraInfo?): Boolean {
-        val logicalCameraId = camera?.logicalCameraId ?: return false
+        val selectedCamera = camera ?: return false
+        val logicalCameraId = selectedCamera.logicalCameraId ?: return false
         return seamlessLogicalLensZoomEnabled &&
             logicalCameraId == activeOpenCameraId &&
-            camera.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
-            !camera.isVirtualIszLens &&
-            (camera.lensType == LensType.BACK_MAIN || camera.lensType == LensType.BACK_ULTRA_WIDE)
+            selectedCamera.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+            !selectedCamera.isVirtualIszLens &&
+            (selectedCamera.lensType == LensType.BACK_MAIN ||
+                selectedCamera.lensType == LensType.BACK_ULTRA_WIDE)
     }
 
     private fun canUseSeamlessLogicalLensZoom(
@@ -6803,7 +6805,11 @@ class Camera2Controller(private val context: Context) {
                 "SCALER_CROP_REGION"
             }
             val applyTiming = if (captureSession == null) "builder-only" else "preview"
-            PLog.d(TAG, "setZoomRatio: $ratio -> $clampedRatio ($zoomMode, $applyTiming)")
+            PLog.d(
+                TAG,
+                "setZoomRatio: $ratio -> $clampedRatio ($zoomMode, $applyTiming), " +
+                    "atNs=${SystemClock.elapsedRealtimeNanos()}"
+            )
 
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to set zoom", e)
