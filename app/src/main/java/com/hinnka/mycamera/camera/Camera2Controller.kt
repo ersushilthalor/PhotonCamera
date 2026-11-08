@@ -298,6 +298,8 @@ class Camera2Controller(private val context: Context) {
     private var previewSurface: Surface? = null
     private var previewSurfaceTexture: SurfaceTexture? = null
     private var imageReader: ImageReader? = null
+    // Retired photo readers must outlive their old Camera2 session.
+    private val pendingPhysicalOutputReaderCloseActions = mutableMapOf<CameraCaptureSession, ImageReader>()
     @Volatile private var alternatePreviewSurface: Surface? = null
     private var alternatePreviewSurfaceTexture: SurfaceTexture? = null
     @Volatile private var onAlternatePreviewSourceChanged: ((Boolean) -> Unit)? = null
@@ -1992,7 +1994,12 @@ class Camera2Controller(private val context: Context) {
             if (cameraId.isEmpty()) {
                 false
             } else {
-                val characteristics = getCameraCharacteristicsCached(cameraId)
+                val openCharacteristics = getCameraCharacteristicsCached(cameraId)
+                val characteristics = resolveCurrentOutputCharacteristics(
+                    state = state,
+                    fallbackCharacteristics = openCharacteristics,
+                    reason = "prepare preview size",
+                ) ?: openCharacteristics
                 val previewSize = when (state.captureMode) {
                     CaptureMode.PHOTO -> CameraUtils.getFixedPreviewSize(
                         characteristics,
@@ -2488,7 +2495,11 @@ class Camera2Controller(private val context: Context) {
         }
 
         val resolvedCharacteristics = characteristics
-            ?: getCameraCharacteristicsOrNull(openCameraId, "video capabilities")
+            ?: resolveCurrentOutputCharacteristics(
+                state = _state.value,
+                fallbackCharacteristics = getCameraCharacteristicsOrNull(openCameraId, "video capabilities"),
+                reason = "video capabilities",
+            )
         if (resolvedCharacteristics == null) {
             PLog.e(TAG, "Failed to load video capabilities")
             return _state.value.currentPreviewSize
@@ -2761,6 +2772,17 @@ class Camera2Controller(private val context: Context) {
         activeOpenCameraId = openCameraId
         val requestedPhysicalCameraId = resolveRequestedPhysicalCameraId(_state.value, selectedCamera)
         var outputPhysicalCameraId = requestedPhysicalCameraId
+        if (
+            captureMode == CaptureMode.VIDEO &&
+            outputPhysicalCameraId != null &&
+            isPhysicalOutputProfileFailed(outputPhysicalCameraId, NO_IMAGE_READER_FORMAT)
+        ) {
+            PLog.w(
+                TAG,
+                "Skipping a previously rejected physical video output: physicalCameraId=$outputPhysicalCameraId",
+            )
+            outputPhysicalCameraId = null
+        }
         activeOutputPhysicalCameraId = outputPhysicalCameraId
 
         val cameraStateCallback = object : CameraDevice.StateCallback() {
@@ -3059,10 +3081,13 @@ class Camera2Controller(private val context: Context) {
                         (outputPhysicalCameraId?.let {
                             !isPhysicalOutputProfileFailed(it, ImageFormat.YCBCR_P010)
                         } ?: true)
-                val resolvedVideoPreviewSize = refreshVideoCapabilities(openCharacteristics)
+                val resolvedVideoPreviewSize = refreshVideoCapabilities(capabilityCharacteristics)
                 previewSize = when (captureMode) {
                     CaptureMode.VIDEO -> resolvedVideoPreviewSize
-                    CaptureMode.PHOTO -> CameraUtils.getFixedPreviewSize(openCharacteristics, _state.value.aspectRatio)
+                    CaptureMode.PHOTO -> CameraUtils.getFixedPreviewSize(
+                        capabilityCharacteristics,
+                        _state.value.aspectRatio,
+                    )
                 }
                 surfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height)
 
@@ -3220,7 +3245,8 @@ class Camera2Controller(private val context: Context) {
 
                 _state.value = _state.value.copy(
                     isP3Supported = isP3Supported,
-                    currentCaptureSize = captureSize
+                    currentPreviewSize = previewSize,
+                    currentCaptureSize = captureSize,
                 )
 
                 val readerMaxImages = resolveImageReaderMaxImages()
@@ -3745,6 +3771,7 @@ class Camera2Controller(private val context: Context) {
                 object : CameraCaptureSession.StateCallback() {
                     override fun onClosed(session: CameraCaptureSession) {
                         invalidateCaptureSession(session, "photo session closed")
+                            pendingPhysicalOutputReaderCloseActions.remove(session)?.let(::safeCloseImageReader)
                     }
 
                     override fun onConfigured(session: CameraCaptureSession) {
@@ -4231,6 +4258,118 @@ class Camera2Controller(private val context: Context) {
     ): String? {
         return camera
             ?.getBoundPhysicalCameraId(getTargetZoomRatioByMain(state, camera))
+    }
+
+    /**
+     * Resolve stream capabilities for the selected physical sensor while retaining
+     * the logical CameraDevice as the capture-session owner.
+     */
+    private fun resolveCurrentOutputCharacteristics(
+        state: CameraState,
+        fallbackCharacteristics: CameraCharacteristics?,
+        reason: String,
+    ): CameraCharacteristics? {
+        val camera = state.getCurrentCameraInfo()
+        val openCameraId = camera?.getOpenCameraId() ?: state.currentCameraId
+        if (openCameraId.isBlank()) return fallbackCharacteristics
+
+        val requestedPhysicalCameraId = resolveRequestedPhysicalCameraId(state, camera)
+            ?.takeIf { it != openCameraId }
+        val outputFormat = when (state.captureMode) {
+            CaptureMode.VIDEO -> NO_IMAGE_READER_FORMAT
+            CaptureMode.PHOTO -> when {
+                requestedRawCaptureEnabled -> ImageFormat.RAW_SENSOR
+                state.useP010 -> ImageFormat.YCBCR_P010
+                else -> ImageFormat.YUV_420_888
+            }
+        }
+        val usablePhysicalCameraId = requestedPhysicalCameraId
+            ?.takeUnless { isPhysicalOutputProfileFailed(it, outputFormat) }
+        val physicalCharacteristics = usablePhysicalCameraId?.let {
+            getCameraCharacteristicsOrNull(it, "$reason physical output")
+        }
+        return physicalCharacteristics
+            ?: fallbackCharacteristics
+            ?: getCameraCharacteristicsOrNull(openCameraId, reason)
+    }
+
+    /**
+     * Rebuild the still-capture stream for the selected physical sensor without
+     * reopening the shared logical CameraDevice. The old reader stays alive until
+     * Camera2 confirms that its previous session has closed.
+     */
+    private fun replacePhotoImageReaderForPhysicalOutput(
+        state: CameraState,
+        characteristics: CameraCharacteristics,
+        physicalCameraId: String?,
+    ): ImageReader? {
+        val rawOutput = if (requestedRawCaptureEnabled) {
+            resolveRawCaptureOutput(characteristics, physicalCameraId)
+        } else {
+            null
+        }
+        val rawSupported = resolveRawCaptureOutput(characteristics, physicalCameraId) != null
+        val p010Supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            isOutputFormatAdvertised(characteristics, ImageFormat.YCBCR_P010) &&
+            (physicalCameraId?.let {
+                !isPhysicalOutputProfileFailed(it, ImageFormat.YCBCR_P010)
+            } ?: true)
+        val useRawOutput = requestedRawCaptureEnabled && rawOutput != null
+        val useP010Output = !useRawOutput && state.useP010 && p010Supported
+        val captureFormat = when {
+            useRawOutput -> requireNotNull(rawOutput).format
+            useP010Output -> ImageFormat.YCBCR_P010
+            else -> ImageFormat.YUV_420_888
+        }
+        val captureSize = if (useRawOutput) {
+            requireNotNull(rawOutput).size
+        } else {
+            CameraUtils.getBestCaptureSize(characteristics, state.aspectRatio, captureFormat)
+        }
+        val isP3Supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+            characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_COLOR_SPACE_PROFILES)
+                ?.getSupportedColorSpaces(captureFormat)
+                ?.contains(ColorSpace.Named.DISPLAY_P3) == true
+        val readerMaxImages = resolveImageReaderMaxImages()
+        val replacementReader = ImageReader.newInstance(
+            captureSize.width,
+            captureSize.height,
+            captureFormat,
+            readerMaxImages,
+        ).apply {
+            setOnImageAvailableListener({ reader ->
+                try {
+                    while (canAcquireImage("Too many open images")) {
+                        val image = trackImage(reader.acquireNextImage()) ?: break
+                        processOrBufferImageForCaptureResult(image)
+                    }
+                } catch (error: Exception) {
+                    PLog.e(TAG, "Error in onImageAvailable after physical lens switch", error)
+                    photoCaptures.values.filter { it.reader === reader }.toList()
+                        .forEach { failPhotoCapture(it, "image acquisition failed after physical lens switch") }
+                }
+            }, cameraHandler)
+        }
+
+        val previousReader = imageReader
+        imageReader = replacementReader
+        imageReaderMaxImages = readerMaxImages
+        isRawSupported = rawSupported
+        isP010Supported = p010Supported
+        _state.update {
+            it.copy(
+                isRawSupported = rawSupported,
+                isP010Supported = p010Supported,
+                isP3Supported = isP3Supported,
+                currentCaptureSize = captureSize,
+            )
+        }
+        PLog.i(
+            TAG,
+            "Rebuilt photo ImageReader for physical lens: camera=$physicalCameraId, " +
+                "size=${captureSize.width}x${captureSize.height}, format=${imageFormatToString(captureFormat)}",
+        )
+        return previousReader
     }
 
     private fun resolveOutputPhysicalCameraId(
@@ -7231,16 +7370,47 @@ class Camera2Controller(private val context: Context) {
         val stabilizationCharacteristics = physicalCharacteristics ?: openCharacteristics
         val stabilizationCameraId = resolvedPhysicalCameraId ?: openCameraId
 
+        val outputPreviewSize = when (state.captureMode) {
+            CaptureMode.PHOTO -> CameraUtils.getFixedPreviewSize(
+                stabilizationCharacteristics,
+                state.aspectRatio,
+            )
+            CaptureMode.VIDEO -> refreshVideoCapabilities(stabilizationCharacteristics)
+        }
+        previewSurfaceTexture?.setDefaultBufferSize(
+            outputPreviewSize.width,
+            outputPreviewSize.height,
+        )
+        _state.update { it.copy(currentPreviewSize = outputPreviewSize) }
+        val previousReader = if (state.captureMode == CaptureMode.PHOTO) {
+            replacePhotoImageReaderForPhysicalOutput(
+                state = state,
+                characteristics = stabilizationCharacteristics,
+                physicalCameraId = resolvedPhysicalCameraId,
+            )
+        } else {
+            null
+        }
+
         PLog.i(
             TAG,
             "Recreating session for zoom physical output: " +
                     "old=$activeOutputPhysicalCameraId, new=$resolvedPhysicalCameraId, " +
-                    "targetZoom=${getTargetZoomRatioByMain(state, state.getCurrentCameraInfo())}"
+                    "targetZoom=${getTargetZoomRatioByMain(state, state.getCurrentCameraInfo())}, " +
+                    "previewSize=${outputPreviewSize.width}x${outputPreviewSize.height}"
         )
 
         // Retire the old session before changing the coordinator's camera calibration. Its
         // late CaptureResults must never be tagged with the new active physical-camera ID.
-        safeCloseCaptureSession(captureSession, "physical zoom output changed")
+        val previousSession = captureSession
+        if (previousReader != null) {
+            if (previousSession != null) {
+                pendingPhysicalOutputReaderCloseActions[previousSession] = previousReader
+            } else {
+                safeCloseImageReader(previousReader)
+            }
+        }
+        safeCloseCaptureSession(previousSession, "physical zoom output changed")
         captureSession = null
         _enginePreviewSource.value = null
         activeOutputPhysicalCameraId = resolvedPhysicalCameraId
