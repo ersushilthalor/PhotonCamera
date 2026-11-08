@@ -3938,10 +3938,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 设置变焦倍数
      */
     fun setZoomRatio(ratio: Float) {
-        zoomRatioByMain = ratio
-        if (ratio <= 2f) cameraController.resetZoomPan()
         val cameraInfo = state.value.getCurrentCameraInfo()
-        setCameraControllerZoomRatio(ratio, cameraInfo)
+        val appliedRatio = if (cameraInfo?.isQuickLensSwitchVirtualCamera == true) {
+            ratio.coerceIn(cameraInfo.minZoom, cameraInfo.maxZoom)
+        } else {
+            ratio
+        }
+        zoomRatioByMain = appliedRatio
+        if (appliedRatio <= 2f) cameraController.resetZoomPan()
+        setCameraControllerZoomRatio(appliedRatio, cameraInfo)
     }
 
     /** Apply a normalized delta from the on-screen joystick to the camera crop. */
@@ -5969,6 +5974,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             userPreferencesRepository.saveLogicalCameraBindingWhitelist(value.split(","))
             cameraController.refreshCameraList()
+        }
+    }
+
+    fun setQuickLensSwitchEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveQuickLensSwitchEnabled(enabled)
+            zoomRatioByMain = 1f
+            cameraController.refreshCameraList()
+            cameraController.setZoomRatio(1f)
+            reopenCamera(preserveVideoRecording = true)
         }
     }
 
