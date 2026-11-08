@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.PointF
 import android.graphics.SurfaceTexture
+import android.os.SystemClock
 import android.opengl.GLSurfaceView
 import android.util.AttributeSet
 import android.view.Surface
@@ -368,6 +369,11 @@ class CameraGLSurfaceView @JvmOverloads constructor(
             suspendCancellableCoroutine<Unit> { continuation ->
                 val callback: (Long) -> Unit = { timestamp ->
                     if (timestamp >= minimumTimestampNs) {
+                        PLog.i(
+                            TAG,
+                            "GL preview frame rendered: requestedSensorNs=$minimumTimestampNs, " +
+                                "renderedSensorNs=$timestamp, atNs=${SystemClock.elapsedRealtimeNanos()}"
+                        )
                         renderer.onPreviewFrameRendered = null
                         post {
                             if (continuation.isActive) continuation.resume(Unit)
