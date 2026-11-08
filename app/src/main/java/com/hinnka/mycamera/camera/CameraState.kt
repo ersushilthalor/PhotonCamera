@@ -201,6 +201,7 @@ data class CameraInfo(
     val rawBlackBorderCrop: RawBlackBorderCrop = RawBlackBorderCrop(), // RAW 原始分辨率黑边裁切像素
     val minimumFocusDistance: Float = 0f, // 最小对焦距离 (diopters, 0 = infinity only)
     val supportsFreeformZoomPan: Boolean = false, // Requires Camera2 freeform crop support for joystick panning
+    val isQuickLensSwitchVirtualCamera: Boolean = false, // One logical Camera2 device spanning the ultra-wide and main lenses
 ) {
     fun getOpenCameraId(): String {
         if (!isVirtualIszLens) return logicalCameraId ?: cameraId
@@ -212,6 +213,9 @@ data class CameraInfo(
     fun getBoundPhysicalCameraId(): String? = outputPhysicalCameraId
 
     fun getBoundPhysicalCameraId(zoomRatioByMain: Float): String? {
+        // Quick Lens Switch intentionally leaves the logical output unbound so the HAL
+        // can select the active physical sensor from CONTROL_ZOOM_RATIO without a session handoff.
+        if (isQuickLensSwitchVirtualCamera) return outputPhysicalCameraId
         if (physicalCameras.isEmpty()) return outputPhysicalCameraId
         return physicalCameras.minByOrNull {
             abs(it.intrinsicZoomRatio - zoomRatioByMain)
