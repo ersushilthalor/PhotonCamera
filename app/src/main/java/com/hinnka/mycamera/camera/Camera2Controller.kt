@@ -3771,7 +3771,7 @@ class Camera2Controller(private val context: Context) {
                 object : CameraCaptureSession.StateCallback() {
                     override fun onClosed(session: CameraCaptureSession) {
                         invalidateCaptureSession(session, "photo session closed")
-                            pendingPhysicalOutputReaderCloseActions.remove(session)?.let(::safeCloseImageReader)
+                        pendingPhysicalOutputReaderCloseActions.remove(session)?.let(::safeCloseImageReader)
                     }
 
                     override fun onConfigured(session: CameraCaptureSession) {
@@ -4275,22 +4275,27 @@ class Camera2Controller(private val context: Context) {
 
         val requestedPhysicalCameraId = resolveRequestedPhysicalCameraId(state, camera)
             ?.takeIf { it != openCameraId }
+        val physicalCharacteristics = requestedPhysicalCameraId?.let {
+            getCameraCharacteristicsOrNull(it, "$reason physical output")
+        }
         val outputFormat = when (state.captureMode) {
             CaptureMode.VIDEO -> NO_IMAGE_READER_FORMAT
             CaptureMode.PHOTO -> when {
-                requestedRawCaptureEnabled -> ImageFormat.RAW_SENSOR
+                requestedRawCaptureEnabled -> physicalCharacteristics?.let {
+                    resolveRawCaptureOutput(it, requestedPhysicalCameraId)?.format
+                } ?: imageReader?.takeIf { isRawCaptureReader(it) }?.imageFormat
+                    ?: ImageFormat.RAW_SENSOR
                 state.useP010 -> ImageFormat.YCBCR_P010
                 else -> ImageFormat.YUV_420_888
             }
         }
-        val usablePhysicalCameraId = requestedPhysicalCameraId
-            ?.takeUnless { isPhysicalOutputProfileFailed(it, outputFormat) }
-        val physicalCharacteristics = usablePhysicalCameraId?.let {
-            getCameraCharacteristicsOrNull(it, "$reason physical output")
+        val usablePhysicalCharacteristics = physicalCharacteristics?.takeUnless {
+            requestedPhysicalCameraId == null ||
+                isPhysicalOutputProfileFailed(requestedPhysicalCameraId, outputFormat)
         }
-        return physicalCharacteristics
+        return usablePhysicalCharacteristics
             ?: fallbackCharacteristics
-            ?: getCameraCharacteristicsOrNull(openCameraId, reason)
+            ?: getCameraCharacteristicsCached(openCameraId)
     }
 
     /**
