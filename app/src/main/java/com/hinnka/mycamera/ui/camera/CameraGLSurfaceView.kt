@@ -78,8 +78,12 @@ class CameraGLSurfaceView @JvmOverloads constructor(
 
     fun getStandbyCameraSurfaceTexture(): SurfaceTexture? = renderer.getStandbyCameraSurfaceTexture()
 
-    fun setActivePreviewSource(useStandby: Boolean) {
+    fun setActivePreviewSource(
+        useStandby: Boolean,
+        initialPreviewScale: Float? = null
+    ) {
         queueEvent {
+            initialPreviewScale?.let(renderer::setPreviewTransitionScale)
             renderer.setActivePreviewSource(useStandby)
             requestRender()
         }
