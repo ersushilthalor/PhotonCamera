@@ -300,7 +300,7 @@ class Camera2Controller(private val context: Context) {
     private var imageReader: ImageReader? = null
     @Volatile private var alternatePreviewSurface: Surface? = null
     private var alternatePreviewSurfaceTexture: SurfaceTexture? = null
-    @Volatile private var onAlternatePreviewSourceChanged: ((Boolean) -> Unit)? = null
+    @Volatile private var onAlternatePreviewSourceChanged: ((Boolean, Float?) -> Unit)? = null
     private var onAlternatePreviewSizeChanged: ((Int, Int) -> Unit)? = null
     @Volatile private var activeLogicalDualPreviewPlan: LogicalDualPreviewPlan? = null
     @Volatile private var pendingLogicalPreviewSourceResetGeneration: Long? = null
@@ -2572,7 +2572,7 @@ class Camera2Controller(private val context: Context) {
     fun setAlternatePreviewSurface(
         surface: Surface?,
         surfaceTexture: SurfaceTexture?,
-        onSourceChanged: ((Boolean) -> Unit)?,
+        onSourceChanged: ((Boolean, Float?) -> Unit)?,
         onPreviewSizeChanged: ((Int, Int) -> Unit)?,
     ) {
         val action = {
@@ -2586,7 +2586,7 @@ class Camera2Controller(private val context: Context) {
             if (changed) {
                 activeLogicalDualPreviewPlan = null
                 pendingLogicalPreviewSourceResetGeneration = null
-                onSourceChanged?.invoke(false)
+                onSourceChanged?.invoke(false, 1f)
                 if (validSurface != null &&
                     cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN &&
                     cameraDevice != null &&
@@ -4369,7 +4369,7 @@ class Camera2Controller(private val context: Context) {
                     "Target preview session configured (generation=$sessionGeneration); " +
                         "waiting for its first primary GL frame before source reset",
                 )
-                onAlternatePreviewSourceChanged?.invoke(false)
+                onAlternatePreviewSourceChanged?.invoke(false, null)
             }
             if (logicalDualPreviewPlan != null) {
                 PLog.i(
@@ -6302,7 +6302,7 @@ class Camera2Controller(private val context: Context) {
     /**
      * 切换到指定的相机 ID
      */
-    fun switchToCameraId(cameraId: String) {
+    fun switchToCameraId(cameraId: String, previewTransitionScale: Float = 1f) {
         val cameras = _state.value.availableCameras
         val targetCamera = cameras.find { it.cameraId == cameraId }
 
@@ -6321,17 +6321,17 @@ class Camera2Controller(private val context: Context) {
                 // onSessionConfigured() will do so only after the target sensor's session
                 // is installed; the renderer then waits for that session's first GL frame.
                 pendingLogicalPreviewSourceResetGeneration = previewSessionGeneration + 1L
-                onAlternatePreviewSourceChanged?.invoke(true)
+                onAlternatePreviewSourceChanged?.invoke(true, previewTransitionScale)
                 PLog.i(TAG, "Instant preview source swap to alternate physical lens: $cameraId")
             }
             livePlan?.activeCameraId == cameraId -> {
                 pendingLogicalPreviewSourceResetGeneration = null
-                onAlternatePreviewSourceChanged?.invoke(false)
+                onAlternatePreviewSourceChanged?.invoke(false, 1f)
                 PLog.i(TAG, "Instant preview source swap back to primary physical lens: $cameraId")
             }
             canUsePrewarmedStandby -> {
                 pendingLogicalPreviewSourceResetGeneration = previewSessionGeneration + 1L
-                onAlternatePreviewSourceChanged?.invoke(true)
+                onAlternatePreviewSourceChanged?.invoke(true, previewTransitionScale)
                 PLog.i(TAG, "Instant preview source swap to warmed standby CameraDevice: $cameraId")
             }
         }
