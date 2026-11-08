@@ -6302,7 +6302,9 @@ class Camera2Controller(private val context: Context) {
     /**
      * 切换到指定的相机 ID
      */
-    fun switchToCameraId(cameraId: String, previewTransitionScale: Float = 1f) {
+    fun switchToCameraId(cameraId: String) = switchToCameraId(cameraId, 1f)
+
+    fun switchToCameraId(cameraId: String, previewTransitionScale: Float) {
         val cameras = _state.value.availableCameras
         val targetCamera = cameras.find { it.cameraId == cameraId }
 
