@@ -4394,6 +4394,9 @@ class Camera2Controller(private val context: Context) {
                     previewSize = standbyPreviewSize,
                     captureMode = standbyState.captureMode,
                     photoCaptureSize = standbyPhotoCaptureSize,
+                    videoConfig = standbyState.videoConfig.takeIf {
+                        standbyState.captureMode == CaptureMode.VIDEO
+                    },
                     callbackHandler = standbyHandler,
                     previewSurface = alternatePreviewSurface,
                     previewSurfaceTexture = alternatePreviewSurfaceTexture,
