@@ -517,17 +517,14 @@ fun CameraScreen(
     fun cancelZoomStopAnimation() {
         zoomStopAnimationJob?.cancel()
         zoomStopAnimationJob = null
+        viewModel.glSurfaceView?.setPreviewTransitionScale(1f)
     }
 
-    fun animateCurrentLensToZoomStop(
-        targetZoom: Float,
-        onComplete: (() -> Unit)? = null
-    ) {
+    fun animateCurrentLensToZoomStop(targetZoom: Float) {
         cancelZoomStopAnimation()
         val startZoom = viewModel.zoomRatioByMain
         if (abs(startZoom - targetZoom) <= ZoomStopAnimationCompletionThreshold) {
             viewModel.setZoomRatio(targetZoom)
-            onComplete?.invoke()
             return
         }
         zoomStopAnimationJob = scope.launch {
@@ -548,7 +545,51 @@ fun CameraScreen(
                 )
             }
             viewModel.setZoomRatio(targetZoom)
-            onComplete?.invoke()
+        }
+    }
+
+    fun animateInstantLensZoomTransition(
+        targetZoom: Float,
+        onComplete: () -> Unit
+    ) {
+        cancelZoomStopAnimation()
+        val startZoom = viewModel.zoomRatioByMain
+        val previewView = viewModel.glSurfaceView
+        if (previewView == null || targetZoom <= startZoom + ZoomStopAnimationCompletionThreshold) {
+            // Zooming out to a wider sensor still uses the immediate warmed handoff.
+            onComplete()
+            return
+        }
+
+        val targetScale = targetZoom / startZoom
+        if (!targetScale.isFinite() || targetScale <= 1f) {
+            onComplete()
+            return
+        }
+
+        // Crop the live ultra-wide preview rather than changing Camera2 zoom. This
+        // deliberately avoids triggering a physical-sensor/session handoff between .5x
+        // and 1x; the warmed target source is selected only after the visual ramp ends.
+        zoomStopAnimationJob = scope.launch {
+            val progress = Animatable(0f)
+            progress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = resolveZoomStopAnimationDurationMillis(startZoom, targetZoom),
+                    easing = FastOutSlowInEasing
+                )
+            ) {
+                previewView.setPreviewTransitionScale(
+                    interpolateZoomRatio(
+                        startZoom = 1f,
+                        targetZoom = targetScale,
+                        progress = value
+                    )
+                )
+            }
+            onComplete()
+            // Queue this after the source swap so the target lens is not double-cropped.
+            previewView.setPreviewTransitionScale(1f)
         }
     }
 
@@ -583,7 +624,7 @@ fun CameraScreen(
             // the field of view with the same logarithmic ramp as 1x -> 2x, then swap the
             // already-ready lens without reopening it cold.
             lensSwitchTransition.cancel()
-            animateCurrentLensToZoomStop(targetZoom) {
+            animateInstantLensZoomTransition(targetZoom) {
                 viewModel.switchToLens(cameraId)
             }
         } else {
@@ -615,7 +656,7 @@ fun CameraScreen(
             if (viewModel.canInstantlySwitchLens(camera.cameraId)) {
                 // Preserve the instant warmed handoff, but do not skip the visible zoom ramp.
                 lensSwitchTransition.cancel()
-                animateCurrentLensToZoomStop(targetZoom) {
+                animateInstantLensZoomTransition(targetZoom) {
                     viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
                 }
             } else {
@@ -648,7 +689,7 @@ fun CameraScreen(
             if (viewModel.canInstantlySwitchLens(camera.cameraId)) {
                 // Preserve the instant warmed handoff, but do not skip the visible zoom ramp.
                 lensSwitchTransition.cancel()
-                animateCurrentLensToZoomStop(targetZoom) {
+                animateInstantLensZoomTransition(targetZoom) {
                     viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
                 }
             } else {
