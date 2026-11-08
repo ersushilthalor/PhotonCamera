@@ -85,6 +85,13 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         }
     }
 
+    fun setPreviewTransitionScale(scale: Float) {
+        queueEvent {
+            renderer.setPreviewTransitionScale(scale)
+            requestRender()
+        }
+    }
+
     fun setStandbyPreviewSize(width: Int, height: Int) {
         queueEvent {
             renderer.setStandbyPreviewSize(width, height)
