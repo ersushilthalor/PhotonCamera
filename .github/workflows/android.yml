@@ -50,7 +50,7 @@ jobs:
           grep -Fq 'fun landscapeRearCameraCropRemainsUnchanged()' "$test_file"
           grep -Fq 'return resolveOutputQuadCropRect(' "$renderer_file"
           grep -Fq 'val shouldFlipEncodedFrame = isCurrentCameraFrontFacing()' "$controller_file"
-          grep -Fq 'if (oesFrameUpdated) {' "$preview_renderer_file"
+          grep -Fq 'if (oesFrameUpdated) useCurrentOesFrame()' "$preview_renderer_file"
           grep -Fq 'val oesFrameUpdated = frameAvailable.getAndSet(false) && acquireLatestCameraFrame()' "$preview_renderer_file"
           grep -Fq 'cameraManager.openCamera(openCameraId, cameraStateCallback, cameraHandler)' "$controller_file"
           ! grep -Fq 'StandbyCameraController' "$controller_file"
