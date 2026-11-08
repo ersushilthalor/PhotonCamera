@@ -68,7 +68,6 @@ fun ZoomControlBar(
     currentCameraId: String,
     onZoomChange: (Float) -> Unit,
     onZoomStopClick: (Float) -> Unit,
-    onContinuousZoomChange: (Float) -> Unit = onZoomChange,
     onLensSwitch: (String) -> Unit,
     onFilterClick: () -> Unit,
     onFilterButtonBoundsChanged: (Rect) -> Unit = {},
@@ -172,27 +171,18 @@ fun ZoomControlBar(
                             val newZoom = (internalZoomRatio * exp(-dragAmount.toDouble() * sensitivity).toFloat()).coerceIn(minZoom, maxZoom)
                             internalZoomRatio = newZoom
                             
-                            onContinuousZoomChange(newZoom)
+                            onZoomChange(newZoom)
                         }
                     },
                     onDragEnd = {
-                        val continuousZoomWasActive = isContinuousZooming
                         isDragging = false
                         dragAccumulated = 0f
                         lastInteractionTime = System.currentTimeMillis()
-                        if (continuousZoomWasActive) {
-                            // Commit lens selection once after live per-frame zoom updates.
-                            onZoomChange(internalZoomRatio)
-                        }
                     },
                     onDragCancel = {
-                        val continuousZoomWasActive = isContinuousZooming
                         isDragging = false
                         dragAccumulated = 0f
                         lastInteractionTime = System.currentTimeMillis()
-                        if (continuousZoomWasActive) {
-                            onZoomChange(internalZoomRatio)
-                        }
                     }
                 )
             },
