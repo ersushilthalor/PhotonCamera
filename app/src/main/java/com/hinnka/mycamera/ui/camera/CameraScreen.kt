@@ -517,7 +517,14 @@ fun CameraScreen(
 
     fun switchToLensWithPreviewTransition(cameraId: String) {
         if (cameraId == state.getCurrentCameraInfo()?.cameraId) return
-        if (viewModel.isVideoLensLocked()) return
+        val targetCamera = state.availableCameras.firstOrNull { it.cameraId == cameraId }
+        val targetZoom = targetCamera?.displayIntrinsicZoomRatio?.takeIf { it > 0f }
+            ?: targetCamera?.intrinsicZoomRatio?.takeIf { it > 0f }
+            ?: 1f
+        if (viewModel.isVideoLensLocked()) {
+            viewModel.setZoomRatio(targetZoom)
+            return
+        }
         viewModel.switchToLens(cameraId)
     }
 
