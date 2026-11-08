@@ -3420,14 +3420,18 @@ class Camera2Controller(private val context: Context) {
     private fun resolveLogicalDualPreviewPlan(): LogicalDualPreviewPlan? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
         val state = _state.value
+        val isActiveVideoRecording = state.captureMode == CaptureMode.VIDEO &&
+            state.videoRecordingState.shouldAttachCameraInput() &&
+            !state.videoConfig.shouldLockLens(
+                captureMode = state.captureMode,
+                isRecording = state.videoRecordingState.isRecording,
+            )
         if (
-            state.captureMode != CaptureMode.PHOTO ||
-            state.useRaw ||
-            state.useP010 ||
-            state.isCapturing ||
-            state.videoRecordingState.isRecording ||
+            (state.captureMode != CaptureMode.PHOTO && !isActiveVideoRecording) ||
+            (state.captureMode == CaptureMode.PHOTO &&
+                (state.useRaw || state.useP010 || state.isCapturing ||
+                    state.photoPreviewStabilizationEnabled)) ||
             state.videoRecordingState.isProcessing ||
-            state.photoPreviewStabilizationEnabled ||
             shouldUseAlgorithmicStabilization()
         ) {
             return null
@@ -3509,7 +3513,14 @@ class Camera2Controller(private val context: Context) {
             )
         ) ?: return null
 
+        val modeKey = if (state.captureMode == CaptureMode.VIDEO) {
+            "VIDEO_${state.videoConfig.resolution.name}_${state.videoConfig.fps.name}_" +
+                "${state.videoConfig.logProfile.name}_${state.videoConfig.stabilizationMode.name}"
+        } else {
+            "PHOTO"
+        }
         val key = listOf(
+            modeKey,
             openCameraId,
             activeCamera.cameraId,
             alternateCamera.cameraId,
@@ -3691,6 +3702,14 @@ class Camera2Controller(private val context: Context) {
                             }
                             PLog.e(TAG, "Video session configuration failed")
                             safeCloseCaptureSession(session, "video configure failure")
+                            if (retryPreviewSessionWithoutLogicalDualPreview(
+                                    "video configure failed",
+                                    openGeneration,
+                                    logicalDualPreviewPlan,
+                                )
+                            ) {
+                                return
+                            }
                             if (retryVideoSessionWithoutCameraHlg(openGeneration)) return
                             if (vendorSessionParametersApplied &&
                                 retryPreviewSessionWithoutVendorSessionParameters(
