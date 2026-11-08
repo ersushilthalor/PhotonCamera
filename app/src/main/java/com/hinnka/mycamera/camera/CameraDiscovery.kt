@@ -416,6 +416,11 @@ class CameraDiscovery(private val context: Context) {
             PLog.d(TAG, "Logical multi-camera auto discovery disabled")
         }
 
+        // Discover only a back main + ultra-wide pair when the logical camera itself advertises
+        // a zoom-ratio range spanning both lenses. This is a HAL-driven, single-device handoff;
+        // it does not open a second CameraDevice or add another preview Surface.
+        discoverSeamlessBackMainUltraWideBindings(bindings)
+
         // Apply the manual whitelist after automatic filtering so explicitly configured
         // physical cameras are not subject to automatic-discovery heuristics.
         applyForcedLogicalCameraBindings(
@@ -424,6 +429,82 @@ class CameraDiscovery(private val context: Context) {
         )
 
         return bindings
+    }
+
+    private fun discoverSeamlessBackMainUltraWideBindings(
+        bindings: MutableMap<String, LogicalCameraBinding>
+    ) {
+        for (logicalCameraId in getRawCameraIdList()) {
+            try {
+                val logicalCharacteristics = getCameraCharacteristics(logicalCameraId)
+                val capabilities = logicalCharacteristics.get(
+                    CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES
+                ) ?: continue
+                if (!capabilities.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)) {
+                    continue
+                }
+                if (logicalCharacteristics.get(CameraCharacteristics.LENS_FACING) !=
+                    CameraCharacteristics.LENS_FACING_BACK
+                ) {
+                    continue
+                }
+
+                val zoomRange = logicalCharacteristics.readMetadataOrNull(
+                    CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE
+                ) ?: continue
+                if (zoomRange.lower >= 1f || zoomRange.upper < 1f) continue
+
+                val physicalCameras = logicalCharacteristics.physicalCameraIds.mapNotNull { physicalCameraId ->
+                    createPhysicalCameraCandidate(
+                        logicalCameraId = logicalCameraId,
+                        physicalCameraId = physicalCameraId
+                    )
+                }.filterNot { physicalCamera ->
+                    isMacroLens(getCameraCharacteristics(physicalCamera.cameraId))
+                }
+                val mainCamera = physicalCameras
+                    .filter { abs(it.intrinsicZoomRatio - 1f) <= 0.15f }
+                    .minByOrNull { abs(it.intrinsicZoomRatio - 1f) }
+                    ?: continue
+                val ultraWideCamera = physicalCameras
+                    .filter { isUltraWideZoomRatio(it.intrinsicZoomRatio) }
+                    .minByOrNull { it.intrinsicZoomRatio }
+                    ?: continue
+
+                // The logical device must be able to represent the ultra-wide's native
+                // field of view and the main camera's 1x field of view without session rebinding.
+                if (zoomRange.lower > ultraWideCamera.intrinsicZoomRatio + 0.03f ||
+                    zoomRange.upper < 1f ||
+                    !logicalCharacteristics.physicalCameraIds.contains(mainCamera.cameraId) ||
+                    !logicalCharacteristics.physicalCameraIds.contains(ultraWideCamera.cameraId)
+                ) {
+                    continue
+                }
+
+                for (physicalCamera in listOf(mainCamera, ultraWideCamera)) {
+                    val existing = bindings[physicalCamera.cameraId]
+                    if (existing == null || existing.logicalCameraId == logicalCameraId) {
+                        bindings[physicalCamera.cameraId] = LogicalCameraBinding(
+                            logicalCameraId = logicalCameraId,
+                            physicalCameras = listOf(physicalCamera)
+                        )
+                    }
+                }
+
+                PLog.i(
+                    TAG,
+                    "Seamless back lens zoom available: logical=${logicalCameraId}, " +
+                        "main=${mainCamera.cameraId}, ultraWide=${ultraWideCamera.cameraId}, " +
+                        "zoomRange=${zoomRange.lower}..${zoomRange.upper}"
+                )
+            } catch (error: Exception) {
+                PLog.w(
+                    TAG,
+                    "Failed to inspect logical camera $logicalCameraId for seamless main/ultra-wide zoom",
+                    error
+                )
+            }
+        }
     }
 
     private fun discoverAutomaticLogicalCameraBindings(
