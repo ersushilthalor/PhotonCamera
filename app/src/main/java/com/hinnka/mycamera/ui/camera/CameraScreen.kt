@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.paint
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
@@ -113,6 +114,7 @@ private enum class CameraShootingMode {
 
 private const val InitialPreviewTransitionDelayMillis = 150L
 private const val PreviewTransitionRevealDurationMillis = 800
+private const val LensZoomTransitionPreviewWaitMillis = 2500L
 private const val RawCaptureTapDebounceMillis = 1000L
 private const val DefaultShutterSpeedNs = 1_000_000_000f / 60f
 private const val DefaultIso = 100f
@@ -300,6 +302,19 @@ fun CameraScreen(
     var previewTransitionSawPause by remember { mutableStateOf(false) }
     var hasPlayedInitialPreviewTransition by remember { mutableStateOf(false) }
     var rawCaptureTapLocked by remember { mutableStateOf(false) }
+    var lensZoomTransitionScale by remember { mutableFloatStateOf(1f) }
+    var lensZoomTransitionTargetCameraId by remember { mutableStateOf<String?>(null) }
+    var lensZoomTransitionStartFrameTimestampNs by remember { mutableStateOf<Long?>(null) }
+    var lensZoomTransitionAnimationFinished by remember { mutableStateOf(false) }
+    var lensZoomTransitionToken by remember { mutableIntStateOf(0) }
+    var lensZoomTransitionJob by remember { mutableStateOf<Job?>(null) }
+
+    fun clearLensZoomTransition() {
+        lensZoomTransitionScale = 1f
+        lensZoomTransitionTargetCameraId = null
+        lensZoomTransitionStartFrameTimestampNs = null
+        lensZoomTransitionAnimationFinished = false
+    }
     fun discardTransientLookEdits() {
         previewRecipeParamsOverride = null
     }
@@ -307,6 +322,43 @@ fun CameraScreen(
     LaunchedEffect(activeRecipeParams) {
         if (previewRecipeParamsOverride?.isSameAs(activeRecipeParams) == true) {
             previewRecipeParamsOverride = null
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { lensZoomTransitionJob?.cancel() }
+    }
+
+    LaunchedEffect(
+        lensZoomTransitionTargetCameraId,
+        lensZoomTransitionAnimationFinished,
+        lensZoomTransitionStartFrameTimestampNs,
+        state.currentCameraId,
+        state.isPreviewActive,
+        state.previewFirstFrameTimestampNs
+    ) {
+        val targetCameraId = lensZoomTransitionTargetCameraId ?: return@LaunchedEffect
+        val frameTimestampNs = state.previewFirstFrameTimestampNs ?: return@LaunchedEffect
+        if (!lensZoomTransitionAnimationFinished ||
+            state.currentCameraId != targetCameraId ||
+            !state.isPreviewActive ||
+            frameTimestampNs == lensZoomTransitionStartFrameTimestampNs
+        ) {
+            return@LaunchedEffect
+        }
+
+        withFrameNanos { }
+        if (lensZoomTransitionTargetCameraId == targetCameraId) {
+            clearLensZoomTransition()
+        }
+    }
+
+    LaunchedEffect(lensZoomTransitionToken) {
+        val token = lensZoomTransitionToken
+        if (token == 0) return@LaunchedEffect
+        delay(LensZoomTransitionPreviewWaitMillis)
+        if (token == lensZoomTransitionToken && lensZoomTransitionTargetCameraId != null) {
+            clearLensZoomTransition()
         }
     }
 
@@ -516,7 +568,8 @@ fun CameraScreen(
     }
 
     fun switchToLensWithPreviewTransition(cameraId: String) {
-        if (cameraId == state.getCurrentCameraInfo()?.cameraId) return
+        val currentCamera = state.getCurrentCameraInfo() ?: return
+        if (cameraId == currentCamera.cameraId) return
         val targetCamera = state.availableCameras.firstOrNull { it.cameraId == cameraId } ?: return
         val targetZoom = targetCamera.displayIntrinsicZoomRatio.takeIf { it > 0f }
             ?: targetCamera.intrinsicZoomRatio.takeIf { it > 0f }
@@ -525,7 +578,56 @@ fun CameraScreen(
             viewModel.setZoomRatio(targetZoom)
             return
         }
+
+        val currentZoom = viewModel.zoomRatioByMain.takeIf { it.isFinite() && it > 0f }
+            ?: currentCamera.displayIntrinsicZoomRatio.takeIf { it > 0f }
+            ?: 1f
+        val isUltraWideMainTransition =
+            (currentZoom < 0.9f && abs(targetZoom - 1f) <= 0.05f) ||
+                (abs(currentZoom - 1f) <= 0.05f && targetZoom < 0.9f)
+
+        lensZoomTransitionJob?.cancel()
+        lensZoomTransitionToken += 1
+        clearLensZoomTransition()
+
+        if (!isUltraWideMainTransition) {
+            viewModel.switchToLens(cameraId)
+            return
+        }
+
+        val transitionToken = lensZoomTransitionToken
+        lensZoomTransitionTargetCameraId = cameraId
+        lensZoomTransitionStartFrameTimestampNs = state.previewFirstFrameTimestampNs
+        lensZoomTransitionAnimationFinished = false
+        lensZoomTransitionScale = 1f
+
+        // Keep the regular Camera2 lens switch untouched. The preview surface is transformed
+        // by Compose while Camera2 reopens, so the UI animation never waits for camera startup
+        // or performs a GL readback/capture on the switch path.
         viewModel.switchToLens(cameraId)
+
+        val targetScale = (targetZoom / currentZoom).coerceAtLeast(0.01f)
+        lensZoomTransitionJob = scope.launch {
+            val progress = Animatable(0f)
+            progress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = resolveZoomStopAnimationDurationMillis(currentZoom, targetZoom),
+                    easing = FastOutSlowInEasing
+                )
+            ) {
+                if (transitionToken == lensZoomTransitionToken) {
+                    lensZoomTransitionScale = interpolateZoomRatio(
+                        startZoom = 1f,
+                        targetZoom = targetScale,
+                        progress = value
+                    )
+                }
+            }
+            if (transitionToken == lensZoomTransitionToken) {
+                lensZoomTransitionAnimationFinished = true
+            }
+        }
     }
 
     fun setZoomWithPreviewTransition(targetZoom: Float) {
@@ -1158,7 +1260,16 @@ fun CameraScreen(
 
                     // 相机准备完成后再创建 Surface，首次只打开最终选中的镜头。
                     if (isCameraPrepared) {
-                        CameraPreviewGL(
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clipToBounds()
+                                .graphicsLayer {
+                                    scaleX = lensZoomTransitionScale
+                                    scaleY = lensZoomTransitionScale
+                                }
+                        ) {
+                            CameraPreviewGL(
                             aspectRatio = previewAspectRatio,
                             previewSize = previewSize,
                             captureSize = state.currentCaptureSize,
@@ -1253,8 +1364,9 @@ fun CameraScreen(
                                 state.videoConfig.enhancedStabilizationStrength,
                             videoPreviewStabilizationLookahead =
                                 state.videoConfig.enhancedStabilizationLookahead,
-                            modifier = Modifier.fillMaxSize()
-                        )
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
                     }
 
                     Box(
