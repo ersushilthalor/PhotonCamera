@@ -56,7 +56,6 @@ fun ZoomControlBarVerticel(
     currentCameraId: String,
     onZoomChange: (Float) -> Unit,
     onZoomStopClick: (Float) -> Unit,
-    onContinuousZoomChange: (Float) -> Unit = onZoomChange,
     onLensSwitch: (String) -> Unit,
     onFilterClick: () -> Unit,
     onFilterButtonBoundsChanged: (Rect) -> Unit = {},
@@ -184,7 +183,7 @@ fun ZoomControlBarVerticel(
                             val newZoom = (internalZoomRatio * exp(-dragAmount.toDouble() * sensitivity).toFloat()).coerceIn(minZoom, maxZoom)
                             internalZoomRatio = newZoom
 
-                            onContinuousZoomChange(newZoom)
+                            onZoomChange(newZoom)
                         }
                     },
                     onDragEnd = {
@@ -193,8 +192,6 @@ fun ZoomControlBarVerticel(
                         dragAccumulated = 0f
                         lastInteractionTime = System.currentTimeMillis()
                         if (shouldCloseContinuousZoomBar) {
-                            // Select the best optical lens once the live drag has finished.
-                            onZoomChange(internalZoomRatio)
                             closeContinuousZoomBar()
                         }
                     },
@@ -204,7 +201,6 @@ fun ZoomControlBarVerticel(
                         dragAccumulated = 0f
                         lastInteractionTime = System.currentTimeMillis()
                         if (shouldCloseContinuousZoomBar) {
-                            onZoomChange(internalZoomRatio)
                             closeContinuousZoomBar()
                         }
                     }
