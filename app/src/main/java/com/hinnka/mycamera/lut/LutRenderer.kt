@@ -574,6 +574,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         standbyFrameAvailable.set(false)
         standbyHasFrame = false
         useStandbyPreviewSource = false
+        previewTransitionScale = 1f
         switchToPrimaryWhenFrameReady = false
         standbyPreviewWidth = previewWidth
         standbyPreviewHeight = previewHeight
