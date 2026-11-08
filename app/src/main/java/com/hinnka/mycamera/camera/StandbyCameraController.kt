@@ -407,11 +407,10 @@ class StandbyCameraController(context: Context) {
             }.onFailure {
                 PLog.w(TAG, "Could not resolve target-lens video input size for $outputCameraId", it)
             }.getOrNull()
-            targetVideoSnapshot?.capabilities
-                ?.cameraInputSizesByResolution
-                ?.get(targetVideoSnapshot.config.resolution)
-                ?: targetVideoSnapshot?.previewSize
-                ?: previewSize
+            targetVideoSnapshot?.let { snapshot ->
+                snapshot.capabilities.cameraInputSizesByResolution[snapshot.config.resolution]
+                    ?: snapshot.previewSize
+            } ?: previewSize
         } else {
             previewSize
         }
