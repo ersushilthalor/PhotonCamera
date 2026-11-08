@@ -4376,11 +4376,24 @@ class Camera2Controller(private val context: Context) {
                 !standbyState.videoRecordingState.isRecording &&
                 !standbyState.videoRecordingState.isProcessing
             ) {
+                val standbyPreviewSize = when (standbyState.captureMode) {
+                    CaptureMode.PHOTO -> standbyState.currentPreviewSize
+                    CaptureMode.VIDEO -> standbyState.videoCapabilities
+                        .cameraInputSizesByResolution[standbyState.videoConfig.resolution]
+                        ?: standbyState.currentPreviewSize
+                }
+                val standbyPhotoCaptureSize = if (standbyState.captureMode == CaptureMode.PHOTO) {
+                    standbyState.currentCaptureSize.takeIf { it.width > 0 && it.height > 0 }
+                } else {
+                    null
+                }
                 standbyCameraController.prepare(
                     activeCamera = standbyState.getCurrentCameraInfo(),
                     availableCameras = standbyState.availableCameras,
                     activeOpenCameraId = activeOpenCameraId,
-                    previewSize = standbyState.currentPreviewSize,
+                    previewSize = standbyPreviewSize,
+                    captureMode = standbyState.captureMode,
+                    photoCaptureSize = standbyPhotoCaptureSize,
                     callbackHandler = standbyHandler,
                     previewSurface = alternatePreviewSurface,
                     previewSurfaceTexture = alternatePreviewSurfaceTexture,
