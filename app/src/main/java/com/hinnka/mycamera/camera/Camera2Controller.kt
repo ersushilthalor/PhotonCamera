@@ -304,6 +304,8 @@ class Camera2Controller(private val context: Context) {
     private var cachedCharacteristicsCameraId: String = ""
     private var activeOpenCameraId: String = ""
     private var activeOutputPhysicalCameraId: String? = null
+    @Volatile
+    private var seamlessLogicalLensZoomEnabled: Boolean = false
     private val failedPhysicalOutputProfiles = mutableSetOf<PhysicalOutputFailureKey>()
     private var cachedSensorOrientation: Int = 0
     private var cachedLensFacing: Int = CameraCharacteristics.LENS_FACING_BACK
@@ -1168,6 +1170,12 @@ class Camera2Controller(private val context: Context) {
 
             if (session === captureSession && _state.value.previewFirstFrameTimestampNs == null) {
                 result.get(CaptureResult.SENSOR_TIMESTAMP)?.let { timestamp ->
+                    PLog.i(
+                        TAG,
+                        "First preview capture result: sensorNs=$timestamp, " +
+                            "physical=${result.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)}, " +
+                            "atNs=${SystemClock.elapsedRealtimeNanos()}"
+                    )
                     _state.update { it.copy(previewFirstFrameTimestampNs = timestamp) }
                 }
             }
@@ -2585,8 +2593,29 @@ class Camera2Controller(private val context: Context) {
         val cameraId = _state.value.currentCameraId
         val selectedCamera = _state.value.getCurrentCameraInfo()
         val openCameraId = selectedCamera?.getOpenCameraId() ?: cameraId
-        val targetZoomRatioByMain = getTargetZoomRatioByMain(_state.value, selectedCamera)
         val captureMode = _state.value.captureMode
+        val wasSameLogicalOpenDevice = seamlessLogicalLensZoomEnabled &&
+            activeOpenCameraId == openCameraId
+        seamlessLogicalLensZoomEnabled = canUseSeamlessLogicalLensZoom(
+            state = _state.value,
+            camera = selectedCamera,
+            openCameraId = openCameraId
+        )
+        if (seamlessLogicalLensZoomEnabled) {
+            val logicalZoomRatio = if (wasSameLogicalOpenDevice) {
+                _state.value.zoomRatio
+            } else {
+                selectedCamera?.let { it.intrinsicZoomRatio * _state.value.zoomRatio }
+                    ?: _state.value.zoomRatio
+            }
+            _state.update { it.copy(zoomRatio = logicalZoomRatio) }
+            PLog.i(
+                TAG,
+                "Using single-device logical zoom for main/ultra-wide: open=$openCameraId, " +
+                    "zoom=$logicalZoomRatio, atNs=${SystemClock.elapsedRealtimeNanos()}"
+            )
+        }
+        val targetZoomRatioByMain = getTargetZoomRatioByMain(_state.value, selectedCamera)
         if (cameraId.isEmpty()) {
             handleCameraOpenFailure(
                 cameraId = cameraId,
@@ -2598,7 +2627,11 @@ class Camera2Controller(private val context: Context) {
         }
 
         activeOpenCameraId = openCameraId
-        val requestedPhysicalCameraId = resolveRequestedPhysicalCameraId(_state.value, selectedCamera)
+        val requestedPhysicalCameraId = if (seamlessLogicalLensZoomEnabled) {
+            null
+        } else {
+            resolveRequestedPhysicalCameraId(_state.value, selectedCamera)
+        }
         var outputPhysicalCameraId = requestedPhysicalCameraId
         activeOutputPhysicalCameraId = outputPhysicalCameraId
 
@@ -2612,7 +2645,11 @@ class Camera2Controller(private val context: Context) {
                     closeCameraDeviceAndAwait(camera, "stale camera open", blocksLifecycle = false)
                     return
                 }
-                PLog.d(TAG, "Camera opened: ${camera.id}")
+                PLog.i(
+                    TAG,
+                    "Camera opened: ${camera.id}, atNs=${SystemClock.elapsedRealtimeNanos()}, " +
+                        "logicalZoom=$seamlessLogicalLensZoomEnabled"
+                )
                 cameraDeviceLifecycle = CameraDeviceLifecycle.OPEN
                 cameraDevice = camera
                 if (restartCameraForRawCaptureOutputMismatch("camera opened")) {
@@ -3808,11 +3845,69 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    fun usesSeamlessLogicalLensZoom(camera: CameraInfo?): Boolean {
+        val logicalCameraId = camera?.logicalCameraId ?: return false
+        return seamlessLogicalLensZoomEnabled &&
+            logicalCameraId == activeOpenCameraId &&
+            camera.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+            !camera.isVirtualIszLens &&
+            (camera.lensType == LensType.BACK_MAIN || camera.lensType == LensType.BACK_ULTRA_WIDE)
+    }
+
+    private fun canUseSeamlessLogicalLensZoom(
+        state: CameraState,
+        camera: CameraInfo?,
+        openCameraId: String
+    ): Boolean {
+        if (camera == null ||
+            camera.logicalCameraId != openCameraId ||
+            camera.lensFacing != CameraCharacteristics.LENS_FACING_BACK ||
+            camera.isVirtualIszLens ||
+            (camera.lensType != LensType.BACK_MAIN && camera.lensType != LensType.BACK_ULTRA_WIDE)
+        ) {
+            return false
+        }
+
+        val mainCamera = state.availableCameras.firstOrNull {
+            it.logicalCameraId == openCameraId &&
+                it.lensType == LensType.BACK_MAIN &&
+                !it.isVirtualIszLens
+        } ?: return false
+        val ultraWideCamera = state.availableCameras.firstOrNull {
+            it.logicalCameraId == openCameraId &&
+                it.lensType == LensType.BACK_ULTRA_WIDE &&
+                !it.isVirtualIszLens
+        } ?: return false
+
+        val logicalCharacteristics = getCameraCharacteristicsOrNull(
+            openCameraId,
+            "logical main/ultra-wide zoom"
+        ) ?: return false
+        val zoomRange = logicalCharacteristics.readMetadataOrNull(
+            CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE
+        ) ?: return false
+        val logicalCapabilities = logicalCharacteristics.get(
+            CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES
+        ) ?: return false
+
+        return logicalCapabilities.contains(
+            CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA
+        ) &&
+            logicalCharacteristics.physicalCameraIds.contains(mainCamera.cameraId) &&
+            logicalCharacteristics.physicalCameraIds.contains(ultraWideCamera.cameraId) &&
+            zoomRange.lower <= ultraWideCamera.intrinsicZoomRatio + 0.03f &&
+            zoomRange.upper >= 1f
+    }
+
     private fun getTargetZoomRatioByMain(
         state: CameraState,
         camera: CameraInfo?
     ): Float {
-        return camera?.let { it.intrinsicZoomRatio * state.zoomRatio } ?: state.zoomRatio
+        return if (usesSeamlessLogicalLensZoom(camera)) {
+            state.zoomRatio
+        } else {
+            camera?.let { it.intrinsicZoomRatio * state.zoomRatio } ?: state.zoomRatio
+        }
     }
 
     private fun resolveRequestedPhysicalCameraId(
@@ -3827,6 +3922,7 @@ class Camera2Controller(private val context: Context) {
         state: CameraState = _state.value,
         camera: CameraInfo? = state.getCurrentCameraInfo()
     ): String? {
+        if (usesSeamlessLogicalLensZoom(camera)) return null
         if (state.videoConfig.shouldLockLens(
                 captureMode = state.captureMode,
                 isRecording = state.videoRecordingState.isRecording
@@ -3925,6 +4021,12 @@ class Camera2Controller(private val context: Context) {
         }
         captureSession = session
         _state.update { it.copy(previewFirstFrameTimestampNs = null) }
+        PLog.i(
+            TAG,
+            "Preview session configured: id=${System.identityHashCode(session)}, " +
+                "open=$activeOpenCameraId, physical=$activeOutputPhysicalCameraId, " +
+                "atNs=${SystemClock.elapsedRealtimeNanos()}"
+        )
 
         try {
             // 根据测光模式设置默认 AE 区域
@@ -5852,7 +5954,10 @@ class Camera2Controller(private val context: Context) {
     /**
      * 切换到指定的相机 ID
      */
-    fun switchToCameraId(cameraId: String) {
+    fun switchToCameraId(
+        cameraId: String,
+        resetPreviewFirstFrameTimestamp: Boolean = false
+    ) {
         val cameras = _state.value.availableCameras
         val targetCamera = cameras.find { it.cameraId == cameraId }
 
@@ -5861,7 +5966,12 @@ class Camera2Controller(private val context: Context) {
             _state.value = _state.value.copy(
                 currentCameraId = cam.cameraId,
                 currentLensType = cam.lensType,
-                zoomRatio = 1f
+                zoomRatio = 1f,
+                previewFirstFrameTimestampNs = if (resetPreviewFirstFrameTimestamp) {
+                    null
+                } else {
+                    _state.value.previewFirstFrameTimestampNs
+                }
             )
         } ?: PLog.w(TAG, "Camera with ID $cameraId not found")
     }
@@ -6674,6 +6784,73 @@ class Camera2Controller(private val context: Context) {
 
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to set zoom", e)
+        }
+    }
+
+    /**
+     * Apply a zoom-animation step without copying the complete CameraState or changing
+     * the selected physical output. The logical main/ultra-wide path keeps one CameraDevice
+     * and one preview session active for the whole transition.
+     */
+    fun setZoomRatioDuringLensTransition(ratio: Float) {
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { setZoomRatioDuringLensTransition(ratio) }
+            return
+        }
+
+        val requestedRatio = sanitizeZoomRatio(ratio)
+        val builder = previewRequestBuilder ?: return
+        val openCameraId = activeOpenCameraId.takeIf { it.isNotEmpty() } ?: return
+        val selectedOpenCameraId = _state.value.getCurrentCameraInfo()?.let {
+            runCatching { it.getOpenCameraId() }.getOrNull()
+        }
+        if (selectedOpenCameraId != null && selectedOpenCameraId != openCameraId) {
+            PLog.v(
+                TAG,
+                "Ignoring stale lens-transition zoom: selected=$selectedOpenCameraId, active=$openCameraId"
+            )
+            return
+        }
+
+        try {
+            val characteristics = resolveZoomRequestCharacteristics(openCameraId)
+            val maxZoom = characteristics.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f
+            val zoomRatioRange = characteristics.readMetadataOrNull(
+                CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE
+            )
+            val minZoom = zoomRatioRange?.lower ?: 1f
+            val maxSupportedZoom = zoomRatioRange?.upper ?: maxZoom
+            val clampedRatio = requestedRatio.coerceIn(minZoom, maxSupportedZoom)
+            val currentState = _state.value
+            val activeRect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+
+            builder.apply {
+                applyZoomRequestSettings(
+                    builder = this,
+                    zoomRatio = clampedRatio,
+                    activeRect = activeRect,
+                    zoomRatioRange = zoomRatioRange,
+                    resetCropAtUnitZoom = true,
+                    panX = currentState.zoomPanX,
+                    panY = currentState.zoomPanY,
+                    useFreeformPan = currentState.zoomPanEnabled &&
+                        currentState.getCurrentCameraInfo()?.supportsFreeformZoomPan == true,
+                )
+            }
+            if (cameraDevice != null && captureSession != null) {
+                updatePreview()
+            }
+
+            PLog.v(
+                TAG,
+                "lensTransitionZoom requested=$requestedRatio applied=$clampedRatio, " +
+                    "mode=${if (shouldUseControlZoomRatio(zoomRatioRange)) "CONTROL_ZOOM_RATIO" else "SCALER_CROP_REGION"}, " +
+                    "physical=$activeOutputPhysicalCameraId, " +
+                    "atNs=${SystemClock.elapsedRealtimeNanos()}"
+            )
+        } catch (error: Exception) {
+            PLog.e(TAG, "Failed to apply lens-transition zoom step", error)
         }
     }
 
@@ -9449,6 +9626,12 @@ class Camera2Controller(private val context: Context) {
         preserveVideoRecording: Boolean,
         clearPendingOpen: Boolean,
     ) {
+        val closeStartedAtNs = SystemClock.elapsedRealtimeNanos()
+        PLog.i(
+            TAG,
+            "closeCameraInternal begin: lifecycle=$cameraDeviceLifecycle, " +
+                "device=${cameraDevice?.id}, atNs=$closeStartedAtNs"
+        )
         if (clearPendingOpen) {
             pendingCameraOpenRequest = null
         }
@@ -9514,6 +9697,12 @@ class Camera2Controller(private val context: Context) {
         } catch (e: Exception) {
             PLog.e(TAG, "Error closing camera", e)
         }
+        PLog.i(
+            TAG,
+            "closeCameraInternal end: lifecycle=$cameraDeviceLifecycle, " +
+                "elapsedNs=${SystemClock.elapsedRealtimeNanos() - closeStartedAtNs}, " +
+                "atNs=${SystemClock.elapsedRealtimeNanos()}"
+        )
     }
 
     private fun invalidateCaptureSession(session: CameraCaptureSession?, reason: String) {
