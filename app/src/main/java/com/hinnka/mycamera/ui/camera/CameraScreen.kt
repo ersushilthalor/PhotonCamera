@@ -79,6 +79,7 @@ import com.hinnka.mycamera.model.LutSelectorMode
 import com.hinnka.mycamera.raw.SpectralFilmSelection
 import com.hinnka.mycamera.ui.components.*
 import com.hinnka.mycamera.utils.OrientationObserver
+import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.viewmodel.CameraViewModel
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
 import com.hinnka.mycamera.video.CaptureMode
@@ -356,7 +357,7 @@ fun CameraScreen(
                 )
             ) {
                 if (transitionToken == lensZoomTransitionToken) {
-                    viewModel.setZoomRatio(
+                    viewModel.setLensTransitionZoomRatio(
                         interpolateZoomRatio(
                             startZoom = cameraZoomPath.first,
                             targetZoom = cameraZoomPath.second,
@@ -409,9 +410,16 @@ fun CameraScreen(
         // The first capture result only says the sensor produced the frame. Until the GL
         // renderer has drawn it, the screen still shows the previous lens, so resetting the
         // preview scale or starting the zoom now would flash the wrong crop for a frame or two.
-        withTimeoutOrNull(LensZoomTransitionFrameRenderTimeoutMillis) {
+        val glWaitStartedAtNs = SystemClock.elapsedRealtimeNanos()
+        val glFrameRendered = withTimeoutOrNull(LensZoomTransitionFrameRenderTimeoutMillis) {
             viewModel.glSurfaceView?.awaitPreviewFrame(frameTimestampNs)
-        }
+        } != null
+        PLog.i(
+            "LensZoomTransition",
+            "first GL frame target=$targetCameraId, sensorNs=$frameTimestampNs, " +
+                "rendered=$glFrameRendered, waitNs=${SystemClock.elapsedRealtimeNanos() - glWaitStartedAtNs}, " +
+                "atNs=${SystemClock.elapsedRealtimeNanos()}"
+        )
         if (
             transitionToken != lensZoomTransitionToken ||
             lensZoomTransitionTargetCameraId != targetCameraId
@@ -704,6 +712,13 @@ fun CameraScreen(
         lensZoomTransitionStartFrameTimestampNs = state.previewFirstFrameTimestampNs
         lensZoomTransitionDurationMillis = durationMillis
         lensZoomTransitionCameraZoomPath = currentZoom to targetZoom
+        PLog.i(
+            "LensZoomTransition",
+            "start current=${currentCamera.cameraId}(${currentCamera.lensType}) " +
+                "target=${targetCamera.cameraId}(${targetCamera.lensType}), " +
+                "zoom=$currentZoom->$targetZoom, durationMs=$durationMillis, " +
+                "atNs=${SystemClock.elapsedRealtimeNanos()}"
+        )
 
         // Keep the regular Camera2 lens-switch implementation unchanged. Only the order
         // of the zoom animation and the existing switch call differs by direction.
@@ -715,18 +730,21 @@ fun CameraScreen(
                 durationMillis = durationMillis,
                 cameraZoomPath = currentZoom to targetZoom,
                 onFinished = {
-                    if (requestedTargetZoom != null) {
-                        viewModel.switchToLensAndSetZoomRatio(cameraId, targetZoom)
-                    } else {
-                        viewModel.switchToLens(cameraId)
+                    if (!viewModel.switchToLensForZoomTransition(cameraId, targetZoom)) {
+                        if (requestedTargetZoom != null) {
+                            viewModel.switchToLensAndSetZoomRatio(cameraId, targetZoom)
+                        } else {
+                            viewModel.switchToLens(cameraId)
+                        }
                     }
                 }
             )
         } else {
-            // 1x -> 0.5x: open the ultra-wide at the current 1x-equivalent crop. Once its first
-            // frame is rendered, the effect animates the real camera zoom from currentZoom
-            // down to targetZoom, so the preview ends exactly on the ultra-wide's native view.
-            viewModel.switchToLensAndSetZoomRatio(cameraId, currentZoom)
+            // 1x -> 0.5x: keep the logical Camera2 stream alive when the device supports it.
+            // The first target-lens frame is rendered before the zoom-out animation begins.
+            if (!viewModel.switchToLensForZoomTransition(cameraId, currentZoom)) {
+                viewModel.switchToLensAndSetZoomRatio(cameraId, currentZoom)
+            }
         }
     }
 
