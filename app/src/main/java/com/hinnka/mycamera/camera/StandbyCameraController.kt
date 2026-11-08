@@ -19,6 +19,10 @@ import android.os.Looper
 import android.util.Size
 import android.view.Surface
 import com.hinnka.mycamera.utils.PLog
+import com.hinnka.mycamera.video.CaptureMode
+import com.hinnka.mycamera.video.VideoCapabilitiesResolver
+import com.hinnka.mycamera.video.VideoConfig
+import com.hinnka.mycamera.video.VideoStabilizationMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -198,6 +202,10 @@ class StandbyCameraController(context: Context) {
         availableCameras: List<CameraInfo>,
         activeOpenCameraId: String,
         previewSize: Size,
+        captureMode: CaptureMode,
+        videoConfig: VideoConfig,
+        photoAspectRatio: AspectRatio,
+        photoCaptureFormat: Int,
         callbackHandler: Handler,
         previewSurface: Surface? = null,
         previewSurfaceTexture: SurfaceTexture? = null,
@@ -215,6 +223,10 @@ class StandbyCameraController(context: Context) {
                 availableCameras = availableCameras,
                 activeOpenCameraId = activeOpenCameraId,
                 previewSize = previewSize,
+                captureMode = captureMode,
+                videoConfig = videoConfig,
+                photoAspectRatio = photoAspectRatio,
+                photoCaptureFormat = photoCaptureFormat,
             )
         }
     }
@@ -265,12 +277,20 @@ class StandbyCameraController(context: Context) {
         availableCameras: List<CameraInfo>,
         activeOpenCameraId: String,
         previewSize: Size,
+        captureMode: CaptureMode,
+        videoConfig: VideoConfig,
+        photoAspectRatio: AspectRatio,
+        photoCaptureFormat: Int,
     ) {
         val plan = resolvePlan(
             activeCamera = activeCamera,
             availableCameras = availableCameras,
             activeOpenCameraId = activeOpenCameraId,
             previewSize = previewSize,
+            captureMode = captureMode,
+            videoConfig = videoConfig,
+            photoAspectRatio = photoAspectRatio,
+            photoCaptureFormat = photoCaptureFormat,
         ) ?: run {
             pendingPlan = null
             releaseResources("standby plan unavailable", resetStatus = false)
@@ -295,6 +315,10 @@ class StandbyCameraController(context: Context) {
         availableCameras: List<CameraInfo>,
         activeOpenCameraId: String,
         previewSize: Size,
+        captureMode: CaptureMode,
+        videoConfig: VideoConfig,
+        photoAspectRatio: AspectRatio,
+        photoCaptureFormat: Int,
     ): StandbyPlan? {
         if (activeCamera == null || activeOpenCameraId.isBlank()) {
             publishUnavailable(StandbyCameraPhase.NO_TARGET_LENS, "Active camera information unavailable")
@@ -371,17 +395,53 @@ class StandbyCameraController(context: Context) {
             )
         }
 
-        val ratio = if (previewSize.width > 0 && previewSize.height > 0) {
-            previewSize.width.toFloat() / previewSize.height.toFloat()
+        val standbyOutputCameraId = standbyPhysicalId ?: standbyOpenCameraId
+        val standbyCharacteristics = runCatching {
+            cameraManager.getCameraCharacteristics(standbyOutputCameraId)
+        }.getOrNull()
+        val standbyOutputTargetSize = standbyCharacteristics?.let { characteristics ->
+            runCatching {
+                when (captureMode) {
+                    CaptureMode.VIDEO -> {
+                        val snapshot = VideoCapabilitiesResolver.resolve(
+                            characteristics = characteristics,
+                            requestedConfig = videoConfig,
+                        )
+                        val resolvedResolution = videoConfig.resolution.takeIf {
+                            snapshot.capabilities.cameraInputSizesByResolution.containsKey(it)
+                        } ?: snapshot.config.resolution
+                        val enhancedInput = if (videoConfig.stabilizationMode == VideoStabilizationMode.ENHANCED) {
+                            snapshot.capabilities.enhancedStabilizationInputSizesByResolution[resolvedResolution]
+                        } else {
+                            null
+                        }
+                        enhancedInput
+                            ?: snapshot.capabilities.cameraInputSizesByResolution[resolvedResolution]
+                            ?: snapshot.previewSize
+                    }
+                    CaptureMode.PHOTO -> CameraUtils.getBestCaptureSize(
+                        characteristics,
+                        photoAspectRatio,
+                        photoCaptureFormat,
+                    )
+                }
+            }.getOrElse { error ->
+                PLog.w(TAG, "Could not resolve selected standby output size for $standbyOutputCameraId", error)
+                previewSize
+            }
+        } ?: previewSize
+        val ratio = if (standbyOutputTargetSize.width > 0 && standbyOutputTargetSize.height > 0) {
+            standbyOutputTargetSize.width.toFloat() / standbyOutputTargetSize.height.toFloat()
         } else {
             4f / 3f
         }
         val livePreviewSurface = resolveStandbyPreviewSurface(
-            cameraId = standbyPhysicalId ?: standbyOpenCameraId,
-            requestedSize = previewSize,
+            cameraId = standbyOutputCameraId,
+            requestedSize = standbyOutputTargetSize,
         )
+
         val livePreviewSizeKey = if (livePreviewSurface != null) {
-            "${previewSize.width}x${previewSize.height}"
+            "${standbyOutputTargetSize.width}x${standbyOutputTargetSize.height}"
         } else {
             "reader-only"
         }
@@ -400,7 +460,7 @@ class StandbyCameraController(context: Context) {
             standbyCameraId = targetCamera.cameraId,
             lensType = targetCamera.lensType,
             aspectRatio = ratio,
-            previewSize = previewSize,
+            previewSize = standbyOutputTargetSize,
             previewSurface = livePreviewSurface,
         )
     }
