@@ -73,6 +73,26 @@ class CameraDiscovery(private val context: Context) {
             lensIdBlacklist = lensIdBlacklist
         )
 
+        if (loadQuickLensSwitchEnabled()) {
+            val quickCamera = discoverQuickLensSwitchCamera(
+                lensIdBlacklist = lensIdBlacklist,
+                preferredMainCameraId = preferredMainCameraId
+            )
+            if (quickCamera != null) {
+                PLog.i(TAG, "Quick Lens Switch active: logical camera=${quickCamera.cameraId}, zoom=0.5x-10x")
+                return buildList {
+                    add(quickCamera)
+                    discoveredCameras.frontCamera
+                        ?.takeIf { !lensIdBlacklist.contains(it.cameraId) }
+                        ?.let(::add)
+                }
+            }
+            PLog.w(
+                TAG,
+                "Quick Lens Switch requested but no rear logical camera exposes exactly an ultra-wide/main pair and the full 0.5x-10x zoom range; keeping the regular lens system"
+            )
+        }
+
         val iszVirtualCameras = createIszVirtualCameraCandidates(discoveredCameras.backCameras)
             .filterNot { camera ->
                 val isBlacklisted = lensIdBlacklist.contains(camera.info.cameraId)
@@ -114,6 +134,102 @@ class CameraDiscovery(private val context: Context) {
         }
 
         return uniqueCameras
+    }
+
+    private fun discoverQuickLensSwitchCamera(
+        lensIdBlacklist: Set<String>,
+        preferredMainCameraId: String?
+    ): CameraInfo? {
+        val logicalCameraIds = try {
+            getRawCameraIdList()
+        } catch (error: Exception) {
+            PLog.w(TAG, "Cannot enumerate logical cameras for Quick Lens Switch", error)
+            return null
+        }
+
+        for (logicalCameraId in logicalCameraIds) {
+            if (lensIdBlacklist.contains(logicalCameraId)) continue
+            try {
+                val logicalCharacteristics = getCameraCharacteristics(logicalCameraId)
+                if (logicalCharacteristics.get(CameraCharacteristics.LENS_FACING) !=
+                    CameraCharacteristics.LENS_FACING_BACK
+                ) continue
+
+                val capabilities = logicalCharacteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+                    ?: continue
+                if (!capabilities.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)) {
+                    continue
+                }
+
+                // Do not use a logical group with a third sensor: without pinning a physical
+                // output, the HAL must be free to choose between exactly these two lenses.
+                val physicalIds = logicalCharacteristics.physicalCameraIds.toList()
+                if (physicalIds.size != 2 || physicalIds.any(lensIdBlacklist::contains)) continue
+
+                val physicalCameras = physicalIds.mapNotNull { physicalCameraId ->
+                    createPhysicalCameraCandidate(logicalCameraId, physicalCameraId)
+                }.filter { camera ->
+                    getCameraCharacteristicsOrNull(camera.cameraId, "Quick Lens Switch physical member")
+                        ?.get(CameraCharacteristics.LENS_FACING) != CameraCharacteristics.LENS_FACING_FRONT
+                }
+                if (physicalCameras.size != 2) continue
+
+                val ultraWide = physicalCameras
+                    .filter { it.intrinsicZoomRatio >= 0.25f && it.intrinsicZoomRatio < 0.9f }
+                    .minByOrNull { it.intrinsicZoomRatio }
+                    ?: continue
+                val mainCandidates = physicalCameras.filter {
+                    abs(it.intrinsicZoomRatio - 1f) <= 0.12f
+                }
+                val main = mainCandidates.firstOrNull { it.cameraId == preferredMainCameraId }
+                    ?: mainCandidates.minByOrNull { abs(it.intrinsicZoomRatio - 1f) }
+                    ?: continue
+                if (main.cameraId == ultraWide.cameraId) continue
+
+                val zoomRange = logicalCharacteristics.readMetadataOrNull(
+                    CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE
+                ) ?: continue
+                if (zoomRange.lower > 0.5f || zoomRange.upper < 10f) {
+                    PLog.d(
+                        TAG,
+                        "Logical camera $logicalCameraId does not cover Quick Lens Switch zoom range: $zoomRange"
+                    )
+                    continue
+                }
+
+                val camera = createCameraInfo(
+                    cameraId = logicalCameraId,
+                    characteristics = logicalCharacteristics,
+                    lensFacing = CameraCharacteristics.LENS_FACING_BACK,
+                    intrinsicZoomRatio = 1f,
+                    isCustomLensId = false,
+                    logicalBinding = null
+                ).copy(
+                    logicalCameraId = logicalCameraId,
+                    physicalCameras = listOf(ultraWide, main),
+                    physicalCameraIds = listOf(ultraWide.cameraId, main.cameraId),
+                    lensType = LensType.BACK_MAIN,
+                    minZoom = 0.5f,
+                    maxZoom = 10f,
+                    focalLength = main.focalLength,
+                    focalLength35mmEquivalent = main.focalLength35mmEquivalent,
+                    zoomSteps = listOf(0.5f, 1f, 2f, 3f, 5f, 10f),
+                    intrinsicZoomRatio = 1f,
+                    displayIntrinsicZoomRatio = 1f,
+                    isQuickLensSwitchVirtualCamera = true
+                )
+                PLog.i(
+                    TAG,
+                    "Quick Lens Switch logical camera=$logicalCameraId, " +
+                        "ultraWide=${ultraWide.cameraId} (${ultraWide.intrinsicZoomRatio}x), " +
+                        "main=${main.cameraId} (${main.intrinsicZoomRatio}x), zoomRange=$zoomRange"
+                )
+                return camera
+            } catch (error: Exception) {
+                PLog.w(TAG, "Failed to inspect logical camera $logicalCameraId for Quick Lens Switch", error)
+            }
+        }
+        return null
     }
 
     fun discoverMainCameraIdOptions(): List<String> {
@@ -863,6 +979,17 @@ class CameraDiscovery(private val context: Context) {
         } catch (e: Exception) {
             PLog.w(TAG, "Failed to load preferred macro camera ID", e)
             null
+        }
+    }
+
+    private fun loadQuickLensSwitchEnabled(): Boolean {
+        return try {
+            runBlocking {
+                userPreferencesRepository.userPreferences.firstOrNull()?.quickLensSwitchEnabled ?: false
+            }
+        } catch (error: Exception) {
+            PLog.w(TAG, "Failed to load Quick Lens Switch preference", error)
+            false
         }
     }
 
