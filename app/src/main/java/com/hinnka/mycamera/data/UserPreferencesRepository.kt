@@ -281,6 +281,7 @@ data class UserPreferences(
     val preferredMacroCameraId: String? = null, // 用户选择的微距镜头 ID
     val enableLogicalMultiCameraDiscovery: Boolean = false, // 是否自动探测逻辑多摄物理镜头绑定
     val logicalCameraBindingWhitelist: List<String> = emptyList(), // 强制启用的逻辑/物理镜头绑定，格式 logical/physical
+    val quickLensSwitchEnabled: Boolean = false, // 用单个原生逻辑相机替代应用层镜头切换
     val hiddenFocalLengths: List<Float> = emptyList(), // 隐藏的焦段 (35mm等效)
     val referencePhotoUrl: String? = null,
     val deleteExported: Boolean = true,
@@ -569,6 +570,7 @@ class UserPreferencesRepository(private val context: Context) {
         private val PREFERRED_MACRO_CAMERA_ID = stringPreferencesKey("preferred_macro_camera_id")
         private val ENABLE_LOGICAL_MULTI_CAMERA_DISCOVERY = booleanPreferencesKey("enable_logical_multi_camera_discovery")
         private val LOGICAL_CAMERA_BINDING_WHITELIST = stringPreferencesKey("logical_camera_binding_whitelist")
+        private val QUICK_LENS_SWITCH_ENABLED = booleanPreferencesKey("quick_lens_switch_enabled")
         private val HIDDEN_FOCAL_LENGTHS = stringPreferencesKey("hidden_focal_lengths")
         private val USE_HDR_SCREEN_MODE = booleanPreferencesKey("use_hdr_screen_mode")
         private val REFERENCE_PHOTO_URL = stringPreferencesKey("reference_photo_url")
@@ -949,6 +951,7 @@ class UserPreferencesRepository(private val context: Context) {
                 logicalCameraBindingWhitelist = parseLogicalCameraBindingWhitelist(
                     preferences[LOGICAL_CAMERA_BINDING_WHITELIST]
                 ),
+                quickLensSwitchEnabled = preferences[QUICK_LENS_SWITCH_ENABLED] ?: false,
                 hiddenFocalLengths = preferences[HIDDEN_FOCAL_LENGTHS]
                     ?.split(",")?.filter { it.isNotEmpty() }
                     ?.mapNotNull { it.toFloatOrNull() }
@@ -2071,6 +2074,12 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun saveEnableLogicalMultiCameraDiscovery(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[ENABLE_LOGICAL_MULTI_CAMERA_DISCOVERY] = enabled
+        }
+    }
+
+    suspend fun saveQuickLensSwitchEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[QUICK_LENS_SWITCH_ENABLED] = enabled
         }
     }
 
