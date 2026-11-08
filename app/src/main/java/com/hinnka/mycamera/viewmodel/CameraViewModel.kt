@@ -3825,6 +3825,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 切换到指定的镜头类型
      */
     fun switchToLens(cameraId: String) {
+        PLog.i(
+            TAG,
+            "switchToLens requested: target=$cameraId, current=${state.value.currentCameraId}, " +
+                "atNs=${SystemClock.elapsedRealtimeNanos()}"
+        )
         if (isVideoLensLocked()) return
         val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId }
         syncVendorCaptureSettingsToController()
@@ -3877,6 +3882,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun switchToLensAndSetZoomRatio(cameraId: String, ratio: Float) {
+        PLog.i(
+            TAG,
+            "switchToLensAndSetZoomRatio requested: target=$cameraId, ratio=$ratio, " +
+                "current=${state.value.currentCameraId}, atNs=${SystemClock.elapsedRealtimeNanos()}"
+        )
         if (isVideoLensLocked()) {
             setZoomRatio(ratio)
             return
