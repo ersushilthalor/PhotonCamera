@@ -2940,17 +2940,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             isInitialized.first { it }
             if (currentSurfaceTexture !== surfaceTexture) return@launch
             syncVendorCaptureSettingsToController()
-            val previewView = glSurfaceView
-            cameraController.setAlternatePreviewSurface(
-                surface = previewView?.standbyCameraInputSurface,
-                surfaceTexture = previewView?.getStandbyCameraSurfaceTexture(),
-                onSourceChanged = { useStandby ->
-                    previewView?.setActivePreviewSource(useStandby)
-                },
-                onPreviewSizeChanged = { width, height ->
-                    previewView?.setStandbyPreviewSize(width, height)
-                },
-            )
             cameraController.openCamera(
                 surfaceTexture = surfaceTexture,
                 preserveVideoRecording = preserveVideoRecording,
@@ -2989,12 +2978,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         cameraReopenJob?.cancel()
         cameraOpenInFlight = false
         currentSurfaceTexture = null
-        cameraController.setAlternatePreviewSurface(
-            surface = null,
-            surfaceTexture = null,
-            onSourceChanged = null,
-            onPreviewSizeChanged = null,
-        )
         cameraController.closeCamera(expectedSurfaceTexture = surfaceTexture)
     }
 
@@ -3836,12 +3819,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             preserveVideoRecording = true
         )
         zoomRatioByMain = 1f
-    }
-
-    fun canInstantlySwitchLens(cameraId: String): Boolean {
-        val previewView = glSurfaceView ?: return false
-        return cameraController.canSwitchToInstantPreview(cameraId) &&
-            previewView.hasStandbyPreviewFrame
     }
 
     /**
