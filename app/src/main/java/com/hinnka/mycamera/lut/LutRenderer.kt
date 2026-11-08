@@ -224,6 +224,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private val standbyMvpMatrix = FloatArray(16)
     private val stabilizationMvpMatrix = FloatArray(16)
     private val eisFallbackMvpMatrix = FloatArray(16)
+    private val previewTransitionMvpMatrix = FloatArray(16)
 
     // Primary and alternate physical-lens Camera2 inputs.
     private var surfaceTexture: SurfaceTexture? = null
@@ -237,6 +238,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private var standbyPreviewWidth: Int = 1920
     private var standbyPreviewHeight: Int = 1080
     @Volatile private var useStandbyPreviewSource: Boolean = false
+    @Volatile private var previewTransitionScale: Float = 1f
     private var switchToPrimaryWhenFrameReady: Boolean = false
     private var stabilizationCoordinator: RealtimeStabilizationCoordinator? = null
     @Volatile
@@ -1158,7 +1160,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 fboId = fboId,
                 width = currentWidth,
                 height = currentHeight,
-                targetMvpMatrix = currentPreviewMvpMatrix(),
+                targetMvpMatrix = currentDisplayPreviewMvpMatrix(),
                 preferBaselineLayer = hasDualLayer,
                 suppressBaselineLayer = suppressBaselineLayerForVideoLog
             )
@@ -1331,7 +1333,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 fboId = 0,
                 width = viewportWidth,
                 height = viewportHeight,
-                targetMvpMatrix = currentPreviewMvpMatrix(),
+                targetMvpMatrix = currentDisplayPreviewMvpMatrix(),
                 suppressBaselineLayer = suppressBaselineLayerForVideoLog
             )
             capturePendingPreviewFrames(
@@ -1386,6 +1388,25 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         }
     }
 
+    private fun currentDisplayPreviewMvpMatrix(): FloatArray {
+        val baseMatrix = currentPreviewMvpMatrix()
+        val scale = previewTransitionScale
+        if (!scale.isFinite() || scale <= 1.0001f) return baseMatrix
+
+        // Apply this temporary crop only to the visible preview. Camera2 requests,
+        // metering, captures, and the sensor handoff remain on their original zoom.
+        Matrix.scaleM(
+            previewTransitionMvpMatrix,
+            0,
+            baseMatrix,
+            0,
+            scale,
+            scale,
+            1f,
+        )
+        return previewTransitionMvpMatrix
+    }
+
     private fun useCurrentOesFrame() {
         currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
         currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
@@ -1433,6 +1454,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         currentCameraTextureId = standbyCameraTextureId
         currentCameraTextureMatrix = standbyStMatrix
         currentFrameTimestampNs = standbySurfaceTexture?.timestamp ?: 0L
+    }
+
+    fun setPreviewTransitionScale(scale: Float) {
+        previewTransitionScale = if (scale.isFinite()) scale.coerceIn(1f, 4f) else 1f
     }
 
     fun setActivePreviewSource(useStandby: Boolean) {
