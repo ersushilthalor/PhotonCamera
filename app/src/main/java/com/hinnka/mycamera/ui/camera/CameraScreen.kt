@@ -1464,9 +1464,9 @@ fun CameraScreen(
                             availableCameras = state.availableCameras,
                             currentCameraId = state.getCurrentCameraInfo()?.cameraId ?: "0",
                             onZoomChange = { setZoomWithPreviewTransition(it) },
-                    onPreviewZoomChange = viewModel::setZoomRatio,
-                            onZoomStopClick = { setZoomWithPreviewTransition(it) }
-                                    onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
+                            onPreviewZoomChange = viewModel::setZoomRatio,
+                            onZoomStopClick = { setZoomWithPreviewTransition(it) },
+                            onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
                             onFilterClick = {
                                 if (isVideoMode) {
                                     // Open the regular LUT selector; its Edit action opens adjustments.
