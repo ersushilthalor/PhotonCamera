@@ -912,7 +912,7 @@ fun CameraScreen(
                     availableCameras = state.availableCameras,
                     currentCameraId = state.getCurrentCameraInfo()?.cameraId ?: "0",
                     onZoomChange = { setZoomWithPreviewTransition(it) },
-                    onZoomStopClick = { setZoomWithPreviewTransition(it) }
+                    onZoomStopClick = { setZoomWithPreviewTransition(it) },
                     onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
                     onFilterClick = {
                         if (isVideoMode) {
