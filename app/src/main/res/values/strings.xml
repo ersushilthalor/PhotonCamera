@@ -885,6 +885,8 @@
     <string name="settings_macro_camera_id_auto">Auto</string>
     <string name="settings_logical_multi_camera_discovery">Logical Multi-Camera Discovery</string>
     <string name="settings_logical_multi_camera_discovery_description">Detect physical lenses exposed by logical multi-camera IDs. Off by default for compatibility.</string>
+    <string name="settings_quick_lens_switch">Quick Lens Switch</string>
+    <string name="settings_quick_lens_switch_description">Use one native logical camera for seamless 0.5x–10x zoom without reopening or prewarming separate lenses. Requires a logical camera that exposes exactly the ultra-wide and main lenses and advertises the full zoom range; otherwise the existing lens system stays active.</string>
     <string name="settings_logical_camera_binding_whitelist">Logical/Physical Camera Whitelist</string>
     <string name="settings_logical_camera_binding_whitelist_description">Force logical/physical bindings such as 0/2,0/3. These bindings apply even when automatic discovery is off.</string>
     <string name="settings_custom_lens_ids">Custom Lens IDs</string>
