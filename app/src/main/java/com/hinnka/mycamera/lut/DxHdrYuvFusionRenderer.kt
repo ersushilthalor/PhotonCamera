@@ -2,11 +2,11 @@ package com.hinnka.mycamera.lut
 
 import android.media.Image
 import android.opengl.GLES30
+import android.opengl.GLES31
 import com.hinnka.mycamera.utils.PLog
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
-import kotlin.math.ceil
 
 /**
  * Fuses a timestamp-matched long/short YUV_420_888 pair into a display-referred RGB texture.
@@ -175,7 +175,7 @@ void main() {
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
             GLES30.glDisableVertexAttribArray(positionLocation)
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
-            GLES30.glMemoryBarrier(GLES30.GL_FRAMEBUFFER_BARRIER_BIT or GLES30.GL_TEXTURE_FETCH_BARRIER_BIT)
+            GLES31.glMemoryBarrier(GLES31.GL_FRAMEBUFFER_BARRIER_BIT or GLES31.GL_TEXTURE_FETCH_BARRIER_BIT)
             for (unit in 0 until PLANE_COUNT) {
                 GLES30.glActiveTexture(GLES30.GL_TEXTURE0 + unit)
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
