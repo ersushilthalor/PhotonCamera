@@ -87,6 +87,7 @@ class RealtimeVideoRenderer(
     private val filmGrainGl = FilmGrainGl(TAG)
     private val mgcEisHardwareBufferRenderer = MgcEisHardwareBufferRenderer(TAG)
     private val mgcEisYuvRenderer = MgcEisYuvRenderer(TAG)
+    private val dxHdrYuvFusionRenderer = DxHdrYuvFusionRenderer(TAG)
     private val filmGrainAmount: Float
         get() = layers.lastOrNull { it.params.filmGrain > 0.001f }?.params?.filmGrain ?: 0f
     private val finalFilmGrainEnabled: Boolean
@@ -377,6 +378,103 @@ class RealtimeVideoRenderer(
         if (!EGL14.eglSwapBuffers(eglDisplay, encoderEglSurface)) {
             throw IllegalStateException(
                 "Realtime video eglSwapBuffers failed: 0x${Integer.toHexString(EGL14.eglGetError())}"
+            )
+        }
+        return presentationTimeNs
+    }
+
+    /**
+     * Fuses one long/short exposure pair and passes the result through the exact same
+     * color-recipe, LUT, log-profile and encoder output stages as ordinary video frames.
+     * Images are consumed by the fusion renderer and closed on every path.
+     */
+    fun renderDualExposureFrame(
+        longExposure: android.media.Image,
+        shortExposure: android.media.Image,
+        exposureRatio: Float,
+        mapPresentationTimeNs: (cameraTimestampNs: Long) -> Long,
+    ): Long? {
+        if (!initialized || !makeCurrent()) {
+            longExposure.close()
+            shortExposure.close()
+            return null
+        }
+        val timestampNs = longExposure.timestamp
+        if (timestampNs <= 0L) {
+            longExposure.close()
+            shortExposure.close()
+            return null
+        }
+        val fusedTextureId = dxHdrYuvFusionRenderer.render(
+            longExposure,
+            shortExposure,
+            exposureRatio,
+        ) ?: return null
+
+        val presentationMatrix = resolveCameraPresentationMatrix(identityMatrix)
+        updateCameraTransformGeometry(presentationMatrix)
+        val presentationTimeNs = mapPresentationTimeNs(timestampNs)
+        if (presentationTimeNs <= 0L) return null
+
+        val firstLayer = layers.first()
+        val grainEnabled = finalFilmGrainEnabled
+        val firstTargetFbo = if (layers.size > 1 || grainEnabled) intermediateFboId else 0
+        drawLayer(
+            layer = firstLayer,
+            targetFboId = firstTargetFbo,
+            textureSource = PreviewColorTextureSource.TEXTURE_2D,
+            textureTarget = GLES30.GL_TEXTURE_2D,
+            textureId = fusedTextureId,
+            sourceStMatrix = presentationMatrix,
+            cropRect = cameraCropRect,
+            mvpMatrix = firstPassMvpMatrix,
+            enableVideoLog = videoLogProfile.isEnabled && !cameraInputAlreadyHlg10,
+            presentationTimeNs = timestampNs,
+        )
+
+        if (layers.size > 1) {
+            layers.drop(1).forEachIndexed { index, layer ->
+                val isLast = index == layers.lastIndex - 1
+                drawLayer(
+                    layer = layer,
+                    targetFboId = if (isLast) {
+                        if (grainEnabled) finalColorFboId else 0
+                    } else {
+                        intermediateFboId
+                    },
+                    textureSource = PreviewColorTextureSource.TEXTURE_2D,
+                    textureTarget = GLES30.GL_TEXTURE_2D,
+                    textureId = intermediateTextureId,
+                    sourceStMatrix = identityMatrix,
+                    cropRect = fullCropRect,
+                    mvpMatrix = identityMatrix,
+                    enableVideoLog = false,
+                    presentationTimeNs = timestampNs,
+                )
+            }
+        }
+
+        if (grainEnabled) {
+            val sourceTextureId = if (layers.size > 1) finalColorTextureId else intermediateTextureId
+            check(
+                filmGrainGl.drawToFramebuffer(
+                    targetFramebufferId = 0,
+                    sourceTextureId = sourceTextureId,
+                    width = encoderOutputSize.width,
+                    height = encoderOutputSize.height,
+                    amount = filmGrainAmount,
+                    frameSeed = FilmGrainShaders.frameSeed(timestampNs),
+                    drawQuad = ::drawSimpleQuad,
+                )
+            ) {
+                "Realtime video DX-HDR film grain pass failed"
+            }
+        }
+
+        EGLExt.eglPresentationTimeANDROID(eglDisplay, encoderEglSurface, presentationTimeNs)
+        if (!EGL14.eglSwapBuffers(eglDisplay, encoderEglSurface)) {
+            throw IllegalStateException(
+                "Realtime video DX-HDR eglSwapBuffers failed: 0x${Integer.toHexString(EGL14.eglGetError())}"
             )
         }
         return presentationTimeNs
@@ -1071,6 +1169,7 @@ class RealtimeVideoRenderer(
         filmGrainGl.release()
         mgcEisHardwareBufferRenderer.release()
         mgcEisYuvRenderer.release()
+        dxHdrYuvFusionRenderer.release()
         colorProgramCache.release()
         basicToneTextures.release()
 
