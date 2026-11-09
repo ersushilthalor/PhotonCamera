@@ -1422,4 +1422,7 @@
     <string name="oppo_refocus_plane_count">Plane %1$d of %2$d</string>
     <string name="oppo_refocus_near">Near</string>
     <string name="oppo_refocus_far">Far</string>
+    <string name="dx_hdr">DX-HDR</string>
+    <string name="dx_hdr_unavailable">DX-HDR needs manual sensor exposure and a 1080p60 YUV stream on this lens.</string>
+    <string name="dx_hdr_stop_recording">Stop recording before changing DX-HDR.</string>
 </resources>
