@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="open_floating_window">Open floating camera controls</string>
+    <string name="close_floating_window">Close floating camera controls</string>
+    <string name="floating_window_controls">Floating camera controls</string>
+    <string name="floating_window_zoom">Zoom</string>
+    <string name="floating_window_blur">Blur · %1$d</string>
+    <string name="floating_window_transparency">Transparency · %1$d%%</string>
+</resources>

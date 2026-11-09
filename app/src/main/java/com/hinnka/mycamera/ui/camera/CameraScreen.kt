@@ -231,6 +231,8 @@ fun CameraScreen(
     val scope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
     val uiStyle by viewModel.uiStyle.collectAsState()
+    val floatingWindowTransparency by viewModel.floatingWindowTransparency.collectAsState()
+    val floatingWindowBlurStrength by viewModel.floatingWindowBlurStrength.collectAsState()
     val isCameraInitialized by viewModel.isInitialized.collectAsState()
     val latestPhoto by galleryViewModel.latestPhoto.collectAsState()
     val showLevelIndicator by viewModel.showLevelIndicator.collectAsState(initial = false)
@@ -469,9 +471,14 @@ fun CameraScreen(
 
     // UI State
     var activePanel by remember { mutableStateOf(ActivePanel.NONE) }
+    var floatingZoomWindowOpen by remember { mutableStateOf(false) }
+    var floatingPreviewView by remember { mutableStateOf<CameraGLSurfaceView?>(null) }
     var selectedParameter by remember { mutableStateOf(CameraParameter.EXPOSURE_COMPENSATION) }
     var showParameterRuler by remember(state.captureMode, state.useRaw) { mutableStateOf(false) }
     val isXpan = state.aspectRatio == AspectRatio.XPAN
+    LaunchedEffect(activePanel, isXpan) {
+        if (activePanel != ActivePanel.NONE || isXpan) floatingZoomWindowOpen = false
+    }
     val burstCapturingCount = viewModel.burstImageCount
 
     var isGhostPermissionFlowActive by remember { mutableStateOf(false) }
@@ -981,6 +988,23 @@ fun CameraScreen(
 
         val isVideoMode = state.captureMode == CaptureMode.VIDEO
         val isPhotoStyleMode = state.captureMode != CaptureMode.VIDEO
+        val floatingZoomLimits = remember(state.availableCameras, state.currentCameraId) {
+            val activeCamera = state.getCurrentCameraInfo()
+            val candidates = state.availableCameras.filter { camera ->
+                if (activeCamera?.lensType == LensType.FRONT) {
+                    camera.lensType == LensType.FRONT
+                } else {
+                    camera.lensType != LensType.FRONT && camera.lensType != LensType.BACK_MACRO
+                }
+            }
+            val minimum = candidates.minOfOrNull {
+                it.minZoom * it.displayIntrinsicZoomRatio
+            }?.coerceAtLeast(0.1f) ?: 1f
+            val maximum = candidates.maxOfOrNull {
+                it.maxZoom * it.displayIntrinsicZoomRatio
+            }?.coerceAtLeast(minimum + 0.01f) ?: 20f
+            minimum to maxOf(maximum, minimum + 0.01f)
+        }
         val zoomJoystickSupported =
             !state.useRaw &&
                 (state.captureMode == CaptureMode.PHOTO || state.captureMode == CaptureMode.VIDEO) &&
@@ -1397,6 +1421,9 @@ fun CameraScreen(
                                 previewSurfaceTexture = surfaceTexture
                             },
                             onSurfaceDestroyed = { surfaceTexture ->
+                                if (floatingPreviewView?.getSurfaceTexture() === surfaceTexture) {
+                                    floatingPreviewView = null
+                                }
                                 if (previewSurfaceTexture === surfaceTexture) {
                                     previewSurfaceTexture = null
                                 }
@@ -1433,6 +1460,7 @@ fun CameraScreen(
                             },
                             onFirstPreviewFrame = viewModel::onFirstPreviewFrame,
                             onGLSurfaceViewReady = {
+                                floatingPreviewView = it
                                 viewModel.glSurfaceView = it
                             },
                             livePhotoRecorder = viewModel.livePhotoRecorder,
@@ -1789,7 +1817,7 @@ fun CameraScreen(
                 contentAlignment = Alignment.Center
             ) {
                 viewfinder()
-                if (uiStyle == "OPPO" && activePanel == ActivePanel.NONE && !isXpan) {
+                if (uiStyle == "OPPO" && activePanel == ActivePanel.NONE && !isXpan && !floatingZoomWindowOpen) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
@@ -1800,6 +1828,48 @@ fun CameraScreen(
                     ) {
                         zoomBar()
                     }
+                }
+
+                if (activePanel == ActivePanel.NONE && !isXpan && !floatingZoomWindowOpen) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = 12.dp)
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.72f))
+                            .border(1.dp, Color.White.copy(alpha = 0.62f), CircleShape)
+                            .clickable { floatingZoomWindowOpen = true },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = AppIcons.Tune,
+                            contentDescription = stringResource(R.string.open_floating_window),
+                            tint = Color.White,
+                            modifier = Modifier.size(21.dp)
+                        )
+                    }
+                }
+                if (floatingZoomWindowOpen && activePanel == ActivePanel.NONE && !isXpan) {
+                    FloatingZoomGlassWindow(
+                        previewView = floatingPreviewView,
+                        previewBounds = viewfinderAreaBounds,
+                        zoomRatio = viewModel.zoomRatioByMain,
+                        minZoomRatio = floatingZoomLimits.first,
+                        maxZoomRatio = floatingZoomLimits.second,
+                        blurStrength = floatingWindowBlurStrength,
+                        transparency = floatingWindowTransparency,
+                        onBlurStrengthChange = viewModel::setFloatingWindowBlurStrength,
+                        onTransparencyChange = viewModel::setFloatingWindowTransparency,
+                        onZoomPreviewChange = { zoom ->
+                            cancelLensZoomTransition()
+                            viewModel.setZoomRatio(zoom)
+                        },
+                        onZoomCommit = { zoom -> setZoomWithPreviewTransition(zoom) },
+                        onClose = { floatingZoomWindowOpen = false },
+                        zoomControls = { zoomBar() },
+                        modifier = Modifier.align(Alignment.Center).padding(horizontal = 10.dp)
+                    )
                 }
                 if (canShowZoomJoystick) {
                     Box(
@@ -1840,12 +1910,16 @@ fun CameraScreen(
                     // Panel visibility changes the zoom content, not the space used to
                     // position the parameter row beneath it. XPAN has no horizontal bar.
                     if (uiStyle != "OPPO" || isXpan) {
-                        Box(
-                            modifier = if (isXpan) Modifier else Modifier
-                                .fillMaxWidth()
-                                .height(CameraControlsLayoutDefaults.ZoomBarHeight)
-                        ) {
-                            zoomBar()
+                        if (floatingZoomWindowOpen && !isXpan) {
+                            Spacer(modifier = Modifier.height(CameraControlsLayoutDefaults.ZoomBarHeight))
+                        } else {
+                            Box(
+                                modifier = if (isXpan) Modifier else Modifier
+                                    .fillMaxWidth()
+                                    .height(CameraControlsLayoutDefaults.ZoomBarHeight)
+                            ) {
+                                zoomBar()
+                            }
                         }
                     } else {
                         Spacer(modifier = Modifier.height(0.dp))

@@ -7139,6 +7139,30 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch { userPreferencesRepository.saveUiStyle(style) }
     }
 
+    val floatingWindowTransparency: StateFlow<Float> =
+        userPreferencesRepository.userPreferences
+            .map { it.floatingWindowTransparency }
+            .distinctUntilChanged()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, 0.55f)
+
+    val floatingWindowBlurStrength: StateFlow<Float> =
+        userPreferencesRepository.userPreferences
+            .map { it.floatingWindowBlurStrength }
+            .distinctUntilChanged()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, 22f)
+
+    fun setFloatingWindowTransparency(value: Float) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveFloatingWindowTransparency(value)
+        }
+    }
+
+    fun setFloatingWindowBlurStrength(value: Float) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveFloatingWindowBlurStrength(value)
+        }
+    }
+
     fun setBackgroundImage(image: String) {
         viewModelScope.launch {
             userPreferencesRepository.saveBackgroundImage(image)

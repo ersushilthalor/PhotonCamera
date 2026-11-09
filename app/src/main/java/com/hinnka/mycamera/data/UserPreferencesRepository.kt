@@ -226,6 +226,8 @@ data class UserPreferences(
     val developAnimationStyle: DevelopAnimationStyle = DevelopAnimationStyle.FILM,
     val backgroundImage: String = "camera_bg_black", // Default to solid black background
     val uiStyle: String = "ORIGINAL",
+    val floatingWindowTransparency: Float = 0.55f,
+    val floatingWindowBlurStrength: Float = 22f,
     val accentColor: Int = AppAppearance.DEFAULT_ACCENT_COLOR,
     val captureButtonStyle: CaptureButtonStyle = CaptureButtonStyle.DEFAULT,
     val captureButtonColor: Int = 0xFFFFFFFF.toInt(),
@@ -505,6 +507,8 @@ class UserPreferencesRepository(private val context: Context) {
         private val DEVELOP_ANIMATION_STYLE = stringPreferencesKey("develop_animation_style")
         private val BACKGROUND_IMAGE = stringPreferencesKey("background_image")
         private val UI_STYLE = stringPreferencesKey("ui_style")
+        private val FLOATING_WINDOW_TRANSPARENCY = floatPreferencesKey("floating_window_transparency")
+        private val FLOATING_WINDOW_BLUR_STRENGTH = floatPreferencesKey("floating_window_blur_strength")
         private val CAPTURE_BUTTON_STYLE = stringPreferencesKey("capture_button_style")
         private val CAPTURE_BUTTON_COLOR = intPreferencesKey("capture_button_color")
         private val ACCENT_COLOR = intPreferencesKey("ui_accent_color")
@@ -860,6 +864,8 @@ class UserPreferencesRepository(private val context: Context) {
                 } ?: DevelopAnimationStyle.FILM,
                 backgroundImage = preferences[BACKGROUND_IMAGE] ?: "camera_bg_black",
                 uiStyle = preferences[UI_STYLE] ?: "ORIGINAL",
+                floatingWindowTransparency = (preferences[FLOATING_WINDOW_TRANSPARENCY] ?: 0.55f).coerceIn(0f, 1f),
+                floatingWindowBlurStrength = (preferences[FLOATING_WINDOW_BLUR_STRENGTH] ?: 22f).coerceIn(0f, 50f),
                 captureButtonStyle = CaptureButtonStyle.fromPersistedName(
                     preferences[CAPTURE_BUTTON_STYLE]
                 ),
@@ -2796,4 +2802,17 @@ class UserPreferencesRepository(private val context: Context) {
             preferences[DELETED_BUILT_IN_IDS] = ids
         }
     }
+
+    suspend fun saveFloatingWindowTransparency(value: Float) {
+        context.dataStore.edit { preferences ->
+            preferences[FLOATING_WINDOW_TRANSPARENCY] = value.coerceIn(0f, 1f)
+        }
+    }
+
+    suspend fun saveFloatingWindowBlurStrength(value: Float) {
+        context.dataStore.edit { preferences ->
+            preferences[FLOATING_WINDOW_BLUR_STRENGTH] = value.coerceIn(0f, 50f)
+        }
+    }
+
 }
