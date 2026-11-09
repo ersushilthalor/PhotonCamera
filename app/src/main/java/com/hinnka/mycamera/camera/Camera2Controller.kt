@@ -7625,6 +7625,7 @@ class Camera2Controller(private val context: Context) {
         val state = _state.value
         return state.captureMode == CaptureMode.VIDEO &&
             state.dxHdrEnabled &&
+            state.dxHdrSupported &&
             state.videoRecordingState.isRecording &&
             !state.videoRecordingState.isProcessing
     }
@@ -7722,7 +7723,14 @@ class Camera2Controller(private val context: Context) {
 
             val incoming = DxHdrPendingFrame(image, metadata)
             if (metadata.isLongExposure) {
-                dxHdrExposureController?.updateFromLongFrame(image)
+                val exposureChanged = dxHdrExposureController?.updateFromLongFrame(image) == true
+                if (exposureChanged &&
+                    SystemClock.elapsedRealtime() - dxHdrLastExposureUpdateElapsedMs >=
+                        DX_HDR_AE_UPDATE_INTERVAL_MS
+                ) {
+                    dxHdrLastExposureUpdateElapsedMs = SystemClock.elapsedRealtime()
+                    startDxHdrRepeatingBurst(captureSession)
+                }
                 dxHdrWaitingLong?.image?.let { runCatching { it.close() } }
                 dxHdrWaitingLong = incoming
             } else {
@@ -7752,23 +7760,6 @@ class Camera2Controller(private val context: Context) {
             }
         }
 
-        val now = SystemClock.elapsedRealtime()
-        if (now - dxHdrLastExposureUpdateElapsedMs >= DX_HDR_AE_UPDATE_INTERVAL_MS &&
-            dxHdrExposureController != null
-        ) {
-            val lastLong = dxHdrWaitingLong
-            if (lastLong != null && isDxHdrRecordingSelected()) {
-                val exposure = dxHdrExposureController!!
-                // Histogram sampling is done only on A frames. Updating the repeating sequence
-                // after a stable interval avoids rebuilding it for every image.
-                if (exposure.longExposureNs != lastLong.metadata.exposureTimeNs ||
-                    exposure.longIso != lastLong.metadata.sensitivityIso
-                ) {
-                    dxHdrLastExposureUpdateElapsedMs = now
-                    startDxHdrRepeatingBurst(captureSession)
-                }
-            }
-        }
     }
 
     private fun handleDxHdrCaptureCompleted(
@@ -7798,7 +7789,11 @@ class Camera2Controller(private val context: Context) {
         if (activeSession !== captureSession || !isDxHdrRecordingSelected()) return
         val device = cameraDevice ?: return
         val reader = dxHdrImageReader ?: return
-        val characteristics = getActiveOpenCameraCharacteristics() ?: return
+        val characteristics = activeOutputPhysicalCameraId
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { getCameraCharacteristicsOrNull(it, "DX-HDR exposure request") }
+            ?: getActiveOpenCameraCharacteristics()
+            ?: return
         val exposureController = dxHdrExposureController ?: run {
             val exposureRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
                 ?: return
@@ -7830,6 +7825,7 @@ class Camera2Controller(private val context: Context) {
                     addTarget(previewSurface ?: return@apply)
                     addTarget(reader.surface)
                     applyBaseCameraSettings(this, isCapture = false)
+                    applyFrozenCaptureFocus(this)
                     set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
                     set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
                     set(CaptureRequest.SENSOR_FRAME_DURATION, DX_HDR_FRAME_DURATION_NS)
