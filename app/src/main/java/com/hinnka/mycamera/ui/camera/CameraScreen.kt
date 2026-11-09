@@ -935,6 +935,7 @@ fun CameraScreen(
                             state.videoRecordingState.isRecording ||
                                 state.videoRecordingState.isProcessing ->
                                 context.getString(R.string.dx_hdr_stop_recording)
+                            state.dxHdrEnabled -> null
                             !state.dxHdrSupported ->
                                 state.dxHdrUnavailableReason
                                     ?: context.getString(R.string.dx_hdr_unavailable)
