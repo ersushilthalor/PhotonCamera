@@ -2521,6 +2521,8 @@ class Camera2Controller(private val context: Context) {
         val resolvedConfig = enhancedFallbackMode?.let { fallbackMode ->
             snapshot.config.copy(stabilizationMode = fallbackMode)
         } ?: snapshot.config
+        val (dxHdrSize, dxHdrReason) = resolveDxHdrCapability(resolvedCharacteristics)
+        dxHdrCaptureSize = dxHdrSize
         _state.value = _state.value.copy(
             videoConfig = resolvedConfig,
             videoCapabilities = snapshot.capabilities,
@@ -2528,7 +2530,9 @@ class Camera2Controller(private val context: Context) {
                 snapshot.previewSize
             } else {
                 _state.value.currentPreviewSize
-            }
+            },
+            dxHdrSupported = dxHdrSize != null,
+            dxHdrUnavailableReason = dxHdrReason,
         )
         if (enhancedFallbackMode != null) {
             previousVideoStabilizationMode = enhancedFallbackMode
@@ -7499,6 +7503,318 @@ class Camera2Controller(private val context: Context) {
             if (_state.value.useLivePhoto) {
                 livePhotoRecorder.startRecording()
             }
+        }
+    }
+
+    private fun resolveDxHdrCapability(
+        openCharacteristics: CameraCharacteristics,
+    ): Pair<Size?, String?> {
+        val sensorCharacteristics = activeOutputPhysicalCameraId
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { getCameraCharacteristicsOrNull(it, "DX-HDR physical sensor capability") }
+            ?: openCharacteristics
+
+        if (!DxHdrExposureController.sensorSupportsDxHdr(sensorCharacteristics)) {
+            return null to "Manual sensor exposure is not supported by this lens"
+        }
+        if (_state.value.videoConfig.stabilizationMode == VideoStabilizationMode.ENHANCED) {
+            return null to "DX-HDR is not available with EIS+"
+        }
+
+        val streamMap = sensorCharacteristics.get(
+            CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
+        ) ?: return null to "Camera does not expose stream configuration for DX-HDR"
+
+        val size = streamMap.getOutputSizes(ImageFormat.YUV_420_888)
+            ?.filter { it.width > 0 && it.height > 0 }
+            ?.firstOrNull { maxOf(it.width, it.height) == 1920 && minOf(it.width, it.height) >= 1080 }
+            ?: return null to "This lens has no 1080p YUV capture stream"
+
+        val minimumFrameDurationNs = runCatching {
+            streamMap.getOutputMinFrameDuration(ImageFormat.YUV_420_888, size)
+        }.getOrDefault(0L)
+        if (minimumFrameDurationNs <= 0L || minimumFrameDurationNs > DX_HDR_FRAME_DURATION_NS) {
+            return null to "This lens cannot deliver 1080p60 YUV frames"
+        }
+
+        val fpsRanges = sensorCharacteristics.get(
+            CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES
+        ) ?: return null to "This lens does not advertise 60fps capture"
+        if (fpsRanges.none { it.lower <= 60 && it.upper >= 60 }) {
+            return null to "This lens does not advertise a 60fps capture range"
+        }
+
+        return size to null
+    }
+
+    private fun setDxHdrUnavailable(reason: String, session: CameraCaptureSession? = captureSession) {
+        PLog.w(TAG, "DX-HDR unavailable: $reason")
+        _state.update {
+            it.copy(
+                dxHdrSupported = false,
+                dxHdrUnavailableReason = reason,
+            )
+        }
+        if (session != null && session === captureSession &&
+            cameraDevice != null && previewSurface != null
+        ) {
+            stopDxHdrCapture(reason)
+            createPreviewSession(openGeneration = cameraOpenGeneration)
+        }
+    }
+
+    fun setDxHdrEnabled(enabled: Boolean) {
+        val current = _state.value
+        if (current.videoRecordingState.isRecording || current.videoRecordingState.isProcessing) {
+            _state.update {
+                it.copy(dxHdrUnavailableReason = "Stop recording before changing DX-HDR")
+            }
+            return
+        }
+        if (enabled && !current.dxHdrSupported) return
+        if (current.dxHdrEnabled == enabled) return
+
+        _state.update { it.copy(dxHdrEnabled = enabled) }
+        if (!enabled) {
+            stopDxHdrCapture("DX-HDR disabled")
+        }
+        PLog.i(TAG, "DX-HDR preference changed: enabled=$enabled")
+    }
+
+    private fun isDxHdrRecordingSelected(): Boolean {
+        val state = _state.value
+        return state.captureMode == CaptureMode.VIDEO &&
+            state.dxHdrEnabled &&
+            state.videoRecordingState.isRecording &&
+            !state.videoRecordingState.isProcessing
+    }
+
+    private fun ensureDxHdrImageReader(): ImageReader? {
+        val handler = cameraHandler ?: return null
+        val size = dxHdrCaptureSize ?: return null
+        dxHdrImageReader?.let { existing ->
+            if (existing.width == size.width && existing.height == size.height) {
+                return existing
+            }
+            closeDxHdrImageReader()
+        }
+
+        return runCatching {
+            ImageReader.newInstance(
+                size.width,
+                size.height,
+                ImageFormat.YUV_420_888,
+                DX_HDR_IMAGE_READER_MAX_IMAGES,
+            ).also { reader ->
+                reader.setOnImageAvailableListener({ source ->
+                    while (true) {
+                        val image = try {
+                            source.acquireNextImage()
+                        } catch (error: IllegalStateException) {
+                            PLog.w(TAG, "DX-HDR could not acquire YUV frame: ${error.message}")
+                            null
+                        } ?: break
+                        if (!isDxHdrRecordingSelected()) {
+                            image.close()
+                            continue
+                        }
+                        dxHdrPendingImages[image.timestamp] = image
+                        trimDxHdrPendingQueues()
+                        processDxHdrFramePairs()
+                    }
+                }, handler)
+                dxHdrImageReader = reader
+                PLog.i(TAG, "DX-HDR YUV stream prepared: ${size.width}x${size.height}")
+            }
+        }.onFailure {
+            PLog.e(TAG, "Failed to create DX-HDR YUV ImageReader", it)
+        }.getOrNull()
+    }
+
+    private fun closeDxHdrImageReader() {
+        dxHdrPendingImages.values.forEach { runCatching { it.close() } }
+        dxHdrPendingImages.clear()
+        dxHdrPendingResults.clear()
+        dxHdrWaitingLong?.image?.let { runCatching { it.close() } }
+        dxHdrWaitingLong = null
+        dxHdrWaitingShort?.image?.let { runCatching { it.close() } }
+        dxHdrWaitingShort = null
+        dxHdrImageReader?.let { reader ->
+            reader.setOnImageAvailableListener(null, null)
+            reader.close()
+        }
+        dxHdrImageReader = null
+        dxHdrExposureController = null
+    }
+
+    private fun stopDxHdrCapture(reason: String) {
+        dxHdrGeneration += 1L
+        dxHdrLastExposureUpdateElapsedMs = 0L
+        closeDxHdrImageReader()
+        PLog.d(TAG, "DX-HDR capture stopped: $reason")
+    }
+
+    private fun trimDxHdrPendingQueues() {
+        while (dxHdrPendingImages.size > DX_HDR_PENDING_FRAME_LIMIT) {
+            val first = dxHdrPendingImages.entries.firstOrNull() ?: break
+            dxHdrPendingImages.remove(first.key)?.close()
+        }
+        while (dxHdrPendingResults.size > DX_HDR_PENDING_FRAME_LIMIT) {
+            val firstKey = dxHdrPendingResults.keys.firstOrNull() ?: break
+            dxHdrPendingResults.remove(firstKey)
+        }
+    }
+
+    private fun processDxHdrFramePairs() {
+        val commonTimestamps = dxHdrPendingImages.keys
+            .filter { it in dxHdrPendingResults }
+            .sorted()
+        commonTimestamps.forEach { timestamp ->
+            val image = dxHdrPendingImages.remove(timestamp) ?: return@forEach
+            val metadata = dxHdrPendingResults.remove(timestamp) ?: run {
+                image.close()
+                return@forEach
+            }
+            if (metadata.generation != dxHdrGeneration || !isDxHdrRecordingSelected()) {
+                image.close()
+                return@forEach
+            }
+
+            val incoming = DxHdrPendingFrame(image, metadata)
+            if (metadata.isLongExposure) {
+                dxHdrExposureController?.updateFromLongFrame(image)
+                dxHdrWaitingLong?.image?.let { runCatching { it.close() } }
+                dxHdrWaitingLong = incoming
+            } else {
+                dxHdrWaitingShort?.image?.let { runCatching { it.close() } }
+                dxHdrWaitingShort = incoming
+            }
+
+            val longFrame = dxHdrWaitingLong
+            val shortFrame = dxHdrWaitingShort
+            if (longFrame != null && shortFrame != null) {
+                if (longFrame.image.timestamp < shortFrame.image.timestamp) {
+                    dxHdrWaitingLong = null
+                    dxHdrWaitingShort = null
+                    videoRecorder.submitDxHdrFramePair(
+                        longExposure = longFrame.image,
+                        shortExposure = shortFrame.image,
+                        longExposureNs = longFrame.metadata.exposureTimeNs,
+                        longIso = longFrame.metadata.sensitivityIso,
+                        shortExposureNs = shortFrame.metadata.exposureTimeNs,
+                        shortIso = shortFrame.metadata.sensitivityIso,
+                    )
+                } else {
+                    // A short frame without its preceding A frame is not a valid exposure pair.
+                    dxHdrWaitingShort = null
+                    shortFrame.image.close()
+                }
+            }
+        }
+
+        val now = SystemClock.elapsedRealtime()
+        if (now - dxHdrLastExposureUpdateElapsedMs >= DX_HDR_AE_UPDATE_INTERVAL_MS &&
+            dxHdrExposureController != null
+        ) {
+            val lastLong = dxHdrWaitingLong
+            if (lastLong != null && isDxHdrRecordingSelected()) {
+                val exposure = dxHdrExposureController!!
+                // Histogram sampling is done only on A frames. Updating the repeating sequence
+                // after a stable interval avoids rebuilding it for every image.
+                if (exposure.longExposureNs != lastLong.metadata.exposureTimeNs ||
+                    exposure.longIso != lastLong.metadata.sensitivityIso
+                ) {
+                    dxHdrLastExposureUpdateElapsedMs = now
+                    startDxHdrRepeatingBurst(captureSession)
+                }
+            }
+        }
+    }
+
+    private fun handleDxHdrCaptureCompleted(
+        session: CameraCaptureSession,
+        request: CaptureRequest,
+        result: TotalCaptureResult,
+    ) {
+        if (session !== captureSession) return
+        val tag = request.tag as? DxHdrRequestTag ?: return
+        if (tag.generation != dxHdrGeneration || !isDxHdrRecordingSelected()) return
+        val timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP) ?: return
+        val exposure = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: tag.exposureTimeNs
+        val iso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: tag.sensitivityIso
+        dxHdrPendingResults[timestamp] = DxHdrFrameMetadata(
+            generation = tag.generation,
+            isLongExposure = tag.isLongExposure,
+            exposureTimeNs = exposure,
+            sensitivityIso = iso,
+        )
+        trimDxHdrPendingQueues()
+        processDxHdrFramePairs()
+    }
+
+    private fun startDxHdrRepeatingBurst(session: CameraCaptureSession?) {
+        val activeSession = session ?: return
+        val handler = cameraHandler ?: return
+        if (activeSession !== captureSession || !isDxHdrRecordingSelected()) return
+        val device = cameraDevice ?: return
+        val reader = dxHdrImageReader ?: return
+        val characteristics = getActiveOpenCameraCharacteristics() ?: return
+        val exposureController = dxHdrExposureController ?: run {
+            val exposureRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+                ?: return
+            val sensitivityRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+                ?: return
+            DxHdrExposureController(
+                exposureRange = exposureRange,
+                sensitivityRange = sensitivityRange,
+                initialIso = sensitivityRange.lower,
+            ).also { dxHdrExposureController = it }
+        }
+
+        val fpsRange = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+            ?.filter { it.lower <= 60 && it.upper >= 60 }
+            ?.maxByOrNull { it.upper } ?: run {
+            setDxHdrUnavailable("The active lens no longer supports 60fps", activeSession)
+            return
+        }
+
+        try {
+            fun buildRequest(isLongExposure: Boolean): CaptureRequest {
+                val exposureNs = if (isLongExposure) {
+                    exposureController.longExposureNs
+                } else {
+                    exposureController.shortExposureNs
+                }
+                val iso = if (isLongExposure) exposureController.longIso else exposureController.shortIso
+                return device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
+                    addTarget(previewSurface ?: return@apply)
+                    addTarget(reader.surface)
+                    applyBaseCameraSettings(this, isCapture = false)
+                    set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                    set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
+                    set(CaptureRequest.SENSOR_FRAME_DURATION, DX_HDR_FRAME_DURATION_NS)
+                    set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNs)
+                    set(CaptureRequest.SENSOR_SENSITIVITY, iso)
+                    tag = DxHdrRequestTag(
+                        generation = dxHdrGeneration,
+                        isLongExposure = isLongExposure,
+                        exposureTimeNs = exposureNs,
+                        sensitivityIso = iso,
+                    )
+                }.build()
+            }
+
+            val requests = listOf(
+                buildRequest(isLongExposure = true),
+                buildRequest(isLongExposure = false),
+            )
+            activeSession.setRepeatingBurst(requests, previewCallback, handler)
+        } catch (error: Exception) {
+            PLog.e(TAG, "Failed to start DX-HDR A/B repeating burst", error)
+            setDxHdrUnavailable(
+                "The camera rejected the 1080p60 DX-HDR request: ${error.localizedMessage ?: "unsupported request"}",
+                activeSession,
+            )
         }
     }
 
