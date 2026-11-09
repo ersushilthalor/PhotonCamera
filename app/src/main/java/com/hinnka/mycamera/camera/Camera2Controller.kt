@@ -224,6 +224,25 @@ class Camera2Controller(private val context: Context) {
         val isAePrecaptureTrigger: Boolean = false,
     )
 
+    private data class DxHdrRequestTag(
+        val generation: Long,
+        val isLongExposure: Boolean,
+        val exposureTimeNs: Long,
+        val sensitivityIso: Int,
+    )
+
+    private data class DxHdrFrameMetadata(
+        val generation: Long,
+        val isLongExposure: Boolean,
+        val exposureTimeNs: Long,
+        val sensitivityIso: Int,
+    )
+
+    private data class DxHdrPendingFrame(
+        val image: Image,
+        val metadata: DxHdrFrameMetadata,
+    )
+
     private enum class WhiteBalanceControlPath {
         CCT,
         MATRIX,
@@ -285,6 +304,18 @@ class Camera2Controller(private val context: Context) {
     private var previewSurfaceTexture: SurfaceTexture? = null
     private var imageReader: ImageReader? = null
     private var stabilizationImageReader: StabilizationImageReader? = null
+
+    // DX-HDR owns a dedicated 1080p YUV stream. It deliberately does not share the normal
+    // SurfaceTexture target so the existing OES/LUT recording path remains unchanged.
+    private var dxHdrImageReader: ImageReader? = null
+    private var dxHdrCaptureSize: Size? = null
+    private var dxHdrExposureController: DxHdrExposureController? = null
+    private var dxHdrGeneration: Long = 0L
+    private var dxHdrLastExposureUpdateElapsedMs: Long = 0L
+    private val dxHdrPendingImages = LinkedHashMap<Long, Image>()
+    private val dxHdrPendingResults = LinkedHashMap<Long, DxHdrFrameMetadata>()
+    private var dxHdrWaitingLong: DxHdrPendingFrame? = null
+    private var dxHdrWaitingShort: DxHdrPendingFrame? = null
 
     // 降噪等级 (0=Off, 1=Fast, 2=High Quality, 3=ZSL, 4=Minimal)
     private var nrLevel = NoiseReductionLevel.DEFAULT
