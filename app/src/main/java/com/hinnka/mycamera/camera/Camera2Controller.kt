@@ -3223,11 +3223,15 @@ class Camera2Controller(private val context: Context) {
 
                 try {
                     applyExposureSettings(builder, _state.value, false)
-                    session.setRepeatingRequest(
-                        builder.build(),
-                        previewCallback,
-                        cameraHandler
-                    )
+                    if (isDxHdrRecordingSelected()) {
+                        startDxHdrRepeatingBurst(session)
+                    } else {
+                        session.setRepeatingRequest(
+                            builder.build(),
+                            previewCallback,
+                            cameraHandler
+                        )
+                    }
                 } catch (e: CameraAccessException) {
                     PLog.e(TAG, "Failed to update exposure: ${e.message}")
                 } catch (e: IllegalStateException) {
@@ -3367,6 +3371,15 @@ class Camera2Controller(private val context: Context) {
                             }
                             PLog.e(TAG, "Video session configuration failed")
                             safeCloseCaptureSession(session, "video configure failure")
+                            if (dxHdrActive) {
+                                setDxHdrUnavailable(
+                                    "The camera rejected the DX-HDR preview/YUV session",
+                                    null,
+                                )
+                                stopDxHdrCapture("DX-HDR session configure failed")
+                                createPreviewSession(openGeneration = openGeneration)
+                                return
+                            }
                             if (retryVideoSessionWithoutCameraHlg(openGeneration)) return
                             if (vendorSessionParametersApplied &&
                                 retryPreviewSessionWithoutVendorSessionParameters(
@@ -7603,6 +7616,10 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    fun restoreDxHdrPreference(enabled: Boolean) {
+        _state.update { it.copy(dxHdrEnabled = enabled) }
+    }
+
     fun setDxHdrEnabled(enabled: Boolean) {
         val current = _state.value
         if (current.videoRecordingState.isRecording || current.videoRecordingState.isProcessing) {
@@ -8315,8 +8332,9 @@ class Camera2Controller(private val context: Context) {
 
     fun pauseVideoRecording() {
         if (!_state.value.videoRecordingState.isRecording || _state.value.videoRecordingState.isPaused) return
+        val dxHdrPause = isDxHdrRecordingSelected()
         videoRecorder.pauseRecording()
-        if (videoRecorder.usesDedicatedCameraInput) {
+        if (videoRecorder.usesDedicatedCameraInput && !dxHdrPause) {
             updateDedicatedVideoRepeatingTarget(includeVideoSurface = false)
         }
         videoRecordingPauseStartElapsedMs = SystemClock.elapsedRealtime()
@@ -8327,7 +8345,8 @@ class Camera2Controller(private val context: Context) {
 
     fun resumeVideoRecording() {
         if (!_state.value.videoRecordingState.isRecording || !_state.value.videoRecordingState.isPaused) return
-        if (videoRecorder.usesDedicatedCameraInput &&
+        val dxHdrResume = isDxHdrRecordingSelected()
+        if (videoRecorder.usesDedicatedCameraInput && !dxHdrResume &&
             !updateDedicatedVideoRepeatingTarget(includeVideoSurface = true)
         ) {
             PLog.e(TAG, "Cannot resume dedicated video input because the recording surface is unavailable")
@@ -8342,6 +8361,7 @@ class Camera2Controller(private val context: Context) {
 
     fun stopVideoRecording() {
         if (!_state.value.videoRecordingState.isRecording) return
+        val wasDxHdrRecording = isDxHdrRecordingSelected()
         videoCaptureStatsWindowStartMs = 0L
         videoCaptureStatsFrames = 0
         videoCaptureStatsFirstTimestampNs = 0L
@@ -8353,7 +8373,12 @@ class Camera2Controller(private val context: Context) {
                 isProcessing = videoRecorder.usesDedicatedCameraInput
             )
         )
-        if (videoRecorder.usesDedicatedCameraInput && !_state.value.videoRecordingState.isPaused) {
+        if (wasDxHdrRecording) {
+            stopDxHdrCapture("DX-HDR recording stopped")
+            if (cameraDevice != null && previewSurface != null) {
+                createPreviewSession(openGeneration = cameraOpenGeneration)
+            }
+        } else if (videoRecorder.usesDedicatedCameraInput && !_state.value.videoRecordingState.isPaused) {
             updateDedicatedVideoRepeatingTarget(includeVideoSurface = false)
         } else {
             previewRequestBuilder?.apply {
@@ -8401,7 +8426,11 @@ class Camera2Controller(private val context: Context) {
                 applyBaseCameraSettings(this, isCapture = false)
             }
             previewRequestBuilder = builder
-            session.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
+            if (isDxHdrRecordingSelected()) {
+                startDxHdrRepeatingBurst(session)
+            } else {
+                session.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
+            }
             true
         } catch (e: Exception) {
             PLog.e(
@@ -8613,7 +8642,11 @@ class Camera2Controller(private val context: Context) {
 
         if (submitted) {
             try {
-                session.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
+                if (isDxHdrRecordingSelected()) {
+                    startDxHdrRepeatingBurst(session)
+                } else {
+                    session.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
+                }
             } catch (e: Exception) {
                 // The one-shot request is already queued and its callback can still complete the lock.
                 PLog.w(TAG, "Unable to resume IDLE repeating request after $reason AF trigger", e)
@@ -9660,7 +9693,11 @@ class Camera2Controller(private val context: Context) {
                 builder,
                 CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_IDLE,
             )
-            session.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
+            if (isDxHdrRecordingSelected()) {
+                startDxHdrRepeatingBurst(session)
+            } else {
+                session.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
+            }
             PLog.i(TAG, "Capture preview restored: cancelledAfMode=$afTriggerModeToCancel " +
                 "previewAfMode=${builder.get(CaptureRequest.CONTROL_AF_MODE)}")
         } catch (e: Exception) {
