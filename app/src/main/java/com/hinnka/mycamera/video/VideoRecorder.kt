@@ -416,13 +416,13 @@ class VideoRecorder(
             return
         }
         if (!dxHdrFramePending.compareAndSet(false, true)) {
-            statsReplacedPendingFrames += 1
+            synchronized(realtimeFrameLock) { statsReplacedPendingFrames += 1 }
             longExposure.close()
             shortExposure.close()
             return
         }
 
-        statsIncomingFrames += 1
+        synchronized(realtimeFrameLock) { statsIncomingFrames += 1 }
         scope.launch(renderDispatcher) {
             try {
                 if (!isRecording || stopRequested || isPaused) {
@@ -461,6 +461,10 @@ class VideoRecorder(
                 errorCallback?.invoke(message)
                 if (!stopRequested) forceStop()
             } finally {
+                // Image.close() is idempotent on Android. Close here as a final safety net for
+                // exceptions thrown before the fusion renderer takes ownership of the pair.
+                runCatching { longExposure.close() }
+                runCatching { shortExposure.close() }
                 dxHdrFramePending.set(false)
             }
         }
