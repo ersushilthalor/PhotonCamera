@@ -3276,7 +3276,7 @@ class Camera2Controller(private val context: Context) {
             createPreviewSession(openGeneration = openGeneration)
             return
         }
-        if (!dxHdrActive && dxHdrImageReader != null) {
+        if (!dxHdrSessionRequested && dxHdrImageReader != null) {
             stopDxHdrCapture("DX-HDR session no longer active")
         }
         val stabilizationReader = if (dxHdrSessionRequested) null else ensureStabilizationImageReader()
