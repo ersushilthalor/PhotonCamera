@@ -312,6 +312,7 @@ class Camera2Controller(private val context: Context) {
     // DX-HDR owns a dedicated 1080p YUV stream. It deliberately does not share the normal
     // SurfaceTexture target so the existing OES/LUT recording path remains unchanged.
     private var dxHdrImageReader: ImageReader? = null
+    private val retiredDxHdrImageReaders = mutableListOf<ImageReader>()
     private var dxHdrCaptureSize: Size? = null
     private var dxHdrExposureController: DxHdrExposureController? = null
     private var dxHdrGeneration: Long = 0L
@@ -4006,6 +4007,7 @@ class Camera2Controller(private val context: Context) {
             return
         }
         captureSession = session
+        releaseRetiredDxHdrImageReaders()
         _state.update { it.copy(previewFirstFrameTimestampNs = null) }
 
         try {
@@ -7700,10 +7702,24 @@ class Camera2Controller(private val context: Context) {
         dxHdrWaitingShort = null
         dxHdrImageReader?.let { reader ->
             reader.setOnImageAvailableListener(null, null)
-            reader.close()
+            retiredDxHdrImageReaders += reader
         }
         dxHdrImageReader = null
         dxHdrExposureController = null
+    }
+
+    /** The previous CameraCaptureSession is retired before its ImageReader surface is destroyed. */
+    private fun releaseRetiredDxHdrImageReaders() {
+        retiredDxHdrImageReaders.forEach { reader ->
+            runCatching { reader.close() }
+                .onFailure { PLog.w(TAG, "Unable to close retired DX-HDR ImageReader", it) }
+        }
+        retiredDxHdrImageReaders.clear()
+    }
+
+    private fun closeAllDxHdrImageReaders() {
+        closeDxHdrImageReader()
+        releaseRetiredDxHdrImageReaders()
     }
 
     private fun stopDxHdrCapture(reason: String) {
@@ -8381,9 +8397,12 @@ class Camera2Controller(private val context: Context) {
             )
         )
         if (wasDxHdrRecording) {
-            stopDxHdrCapture("DX-HDR recording stopped")
             if (cameraDevice != null && previewSurface != null) {
+                // The replacement preview session retires the DX-HDR reader after the old
+                // session is finished using its surface.
                 createPreviewSession(openGeneration = cameraOpenGeneration)
+            } else {
+                stopDxHdrCapture("DX-HDR recording stopped without an active preview")
             }
         } else if (videoRecorder.usesDedicatedCameraInput && !_state.value.videoRecordingState.isPaused) {
             updateDedicatedVideoRepeatingTarget(includeVideoSurface = false)
@@ -9935,6 +9954,7 @@ class Camera2Controller(private val context: Context) {
             }
 
             clearCameraSessionState(reason = "closeCamera")
+            closeAllDxHdrImageReaders()
             val deviceToClose = cameraDevice
             cameraDevice = null
             clearCameraCapabilityCache()
