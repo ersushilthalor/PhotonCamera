@@ -117,7 +117,6 @@ private enum class CameraShootingMode {
 private const val InitialPreviewTransitionDelayMillis = 150L
 private const val PreviewTransitionRevealDurationMillis = 800
 private const val RawCaptureTapDebounceMillis = 1000L
-private const val LensZoomTransitionHandoffHoldMillis = 10L
 private const val LensZoomTransitionFrameRenderTimeoutMillis = 300L
 private const val DefaultShutterSpeedNs = 1_000_000_000f / 60f
 private const val DefaultIso = 100f
@@ -419,10 +418,9 @@ fun CameraScreen(
             return@LaunchedEffect
         }
 
-        // On 1x -> 0.5x, hold the matched ultra-wide crop briefly after its first
-        // rendered frame, then zoom the ultra-wide out to its native field of view.
+        // On 1x -> 0.5x, start the zoom-out as soon as the matched ultra-wide crop
+        // has been rendered, without an additional handoff hold.
         if (!lensZoomTransitionAnimationStarted) {
-            delay(LensZoomTransitionHandoffHoldMillis)
             if (
                 transitionToken != lensZoomTransitionToken ||
                 lensZoomTransitionTargetCameraId != targetCameraId ||
