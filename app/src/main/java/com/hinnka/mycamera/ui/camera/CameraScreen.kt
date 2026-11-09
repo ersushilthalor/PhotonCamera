@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -1833,8 +1834,8 @@ fun CameraScreen(
                 if (activePanel == ActivePanel.NONE && !isXpan && !floatingZoomWindowOpen) {
                     Box(
                         modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = 12.dp)
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 12.dp, bottom = 12.dp)
                             .size(42.dp)
                             .clip(CircleShape)
                             .background(Color.Black.copy(alpha = 0.72f))
@@ -1868,7 +1869,7 @@ fun CameraScreen(
                         onZoomCommit = { zoom -> setZoomWithPreviewTransition(zoom) },
                         onClose = { floatingZoomWindowOpen = false },
                         zoomControls = { zoomBar() },
-                        modifier = Modifier.align(Alignment.Center).padding(horizontal = 10.dp)
+                        modifier = Modifier.align(Alignment.Center).zIndex(4f).padding(horizontal = 10.dp)
                     )
                 }
                 if (canShowZoomJoystick) {
