@@ -408,6 +408,9 @@ data class CameraState(
     val videoConfig: VideoConfig = VideoConfig(),
     val videoCapabilities: VideoCapabilities = VideoCapabilities(),
     val videoRecordingState: VideoRecordingState = VideoRecordingState(),
+    val dxHdrEnabled: Boolean = false,
+    val dxHdrSupported: Boolean = false,
+    val dxHdrUnavailableReason: String? = null,
     // Joystick pan is stored as normalized sensor-crop displacement (-1..1).
     val zoomPanX: Float = 0f,
     val zoomPanY: Float = 0f,
