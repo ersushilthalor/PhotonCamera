@@ -3270,7 +3270,7 @@ class Camera2Controller(private val context: Context) {
             _state.value.dxHdrSupported
         val dxHdrActive = isDxHdrRecordingSelected()
         val dxHdrReader = if (dxHdrSessionRequested) ensureDxHdrImageReader() else null
-        if (dxHdrActive && dxHdrReader == null) {
+        if (dxHdrSessionRequested && dxHdrReader == null) {
             setDxHdrUnavailable("Unable to create the required 1080p YUV input", null)
             stopDxHdrCapture("YUV input creation failed")
             createPreviewSession(openGeneration = openGeneration)
