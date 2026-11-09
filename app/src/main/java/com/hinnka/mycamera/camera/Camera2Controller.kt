@@ -7640,10 +7640,9 @@ class Camera2Controller(private val context: Context) {
         if (current.dxHdrEnabled == enabled) return
 
         if (enabled && current.captureMode != CaptureMode.VIDEO) return
+        // All ImageReader queues and camera session resources are owned by cameraHandler.
+        // createPreviewSession() marshals itself onto that handler before retiring the reader.
         _state.update { it.copy(dxHdrEnabled = enabled) }
-        if (!enabled) {
-            stopDxHdrCapture("DX-HDR disabled")
-        }
         PLog.i(TAG, "DX-HDR preference changed: enabled=$enabled")
         if (cameraDevice != null && previewSurface != null &&
             current.captureMode == CaptureMode.VIDEO
