@@ -3265,8 +3265,11 @@ class Camera2Controller(private val context: Context) {
         invalidateCaptureSession(captureSession, "preview session replacement")
         val captureMode = _state.value.captureMode
         val reader = imageReader
+        val dxHdrSessionRequested = captureMode == CaptureMode.VIDEO &&
+            _state.value.dxHdrEnabled &&
+            _state.value.dxHdrSupported
         val dxHdrActive = isDxHdrRecordingSelected()
-        val dxHdrReader = if (dxHdrActive) ensureDxHdrImageReader() else null
+        val dxHdrReader = if (dxHdrSessionRequested) ensureDxHdrImageReader() else null
         if (dxHdrActive && dxHdrReader == null) {
             setDxHdrUnavailable("Unable to create the required 1080p YUV input", null)
             stopDxHdrCapture("YUV input creation failed")
@@ -3276,13 +3279,13 @@ class Camera2Controller(private val context: Context) {
         if (!dxHdrActive && dxHdrImageReader != null) {
             stopDxHdrCapture("DX-HDR session no longer active")
         }
-        val stabilizationReader = if (dxHdrActive) null else ensureStabilizationImageReader()
-        val useEnhancedStabilization = !dxHdrActive && shouldUseVideoEnhancedStabilization()
+        val stabilizationReader = if (dxHdrSessionRequested) null else ensureStabilizationImageReader()
+        val useEnhancedStabilization = !dxHdrSessionRequested && shouldUseVideoEnhancedStabilization()
         val videoSurface = if (
             captureMode == CaptureMode.VIDEO &&
             _state.value.videoRecordingState.shouldAttachCameraInput() &&
             !useEnhancedStabilization &&
-            !dxHdrActive
+            !dxHdrSessionRequested
         ) {
             videoRecorder.cameraInputSurface
         } else {
@@ -3374,7 +3377,7 @@ class Camera2Controller(private val context: Context) {
                             }
                             PLog.e(TAG, "Video session configuration failed")
                             safeCloseCaptureSession(session, "video configure failure")
-                            if (dxHdrActive) {
+                            if (dxHdrSessionRequested) {
                                 setDxHdrUnavailable(
                                     "The camera rejected the DX-HDR preview/YUV session",
                                     null,
@@ -3399,7 +3402,7 @@ class Camera2Controller(private val context: Context) {
                         }
                     }
                 )
-                if (dxHdrActive && !runCatching {
+                if (dxHdrSessionRequested && !runCatching {
                         device.isSessionConfigurationSupported(sessionConfig)
                     }.getOrDefault(false)
                 ) {
@@ -7636,11 +7639,19 @@ class Camera2Controller(private val context: Context) {
         if (enabled && !current.dxHdrSupported) return
         if (current.dxHdrEnabled == enabled) return
 
+        if (enabled && current.captureMode != CaptureMode.VIDEO) return
         _state.update { it.copy(dxHdrEnabled = enabled) }
         if (!enabled) {
             stopDxHdrCapture("DX-HDR disabled")
         }
         PLog.i(TAG, "DX-HDR preference changed: enabled=$enabled")
+        if (cameraDevice != null && previewSurface != null &&
+            current.captureMode == CaptureMode.VIDEO
+        ) {
+            // Validate and attach the YUV output immediately; the preview request itself
+            // continues to target only the preview surface until recording begins.
+            createPreviewSession(openGeneration = cameraOpenGeneration)
+        }
     }
 
     private fun isDxHdrRecordingSelected(): Boolean {
