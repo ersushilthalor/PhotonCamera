@@ -8107,7 +8107,17 @@ class Camera2Controller(private val context: Context) {
             return
         }
 
-        if (_state.value.videoCapabilities.availableFps.isEmpty()) {
+        val dxHdrRequested = _state.value.dxHdrEnabled
+        if (dxHdrRequested && !_state.value.dxHdrSupported) {
+            onCameraError?.invoke(
+                -1,
+                _state.value.dxHdrUnavailableReason
+                    ?: "DX-HDR is not supported by the active camera",
+                false,
+            )
+            return
+        }
+        if (_state.value.videoCapabilities.availableFps.isEmpty() && !dxHdrRequested) {
             onCameraError?.invoke(
                 -1,
                 context.getString(com.hinnka.mycamera.R.string.camera_video_fps_unavailable),
@@ -8115,12 +8125,18 @@ class Camera2Controller(private val context: Context) {
             )
             return
         }
+        val useDxHdr = dxHdrRequested
+        val dxHdrInputSize = if (useDxHdr) dxHdrCaptureSize else null
+        if (useDxHdr && dxHdrInputSize == null) {
+            onCameraError?.invoke(-1, "DX-HDR has no compatible 1080p YUV input", false)
+            return
+        }
 
         videoCaptureStatsWindowStartMs = 0L
         videoCaptureStatsFrames = 0
         videoCaptureStatsFirstTimestampNs = 0L
-        val useEnhancedStabilization = shouldUseVideoEnhancedStabilization()
-        val cameraInputSize = if (useEnhancedStabilization) {
+        val useEnhancedStabilization = !useDxHdr && shouldUseVideoEnhancedStabilization()
+        val cameraInputSize = dxHdrInputSize ?: if (useEnhancedStabilization) {
             _state.value.videoCapabilities.enhancedStabilizationInputSizesByResolution[
                 _state.value.videoConfig.resolution
             ]
@@ -8129,7 +8145,12 @@ class Camera2Controller(private val context: Context) {
                 _state.value.videoConfig.resolution
             ]
         } ?: _state.value.currentPreviewSize
-        val outputSize = _state.value.videoConfig.resolveOutputSize(
+        val outputConfig = if (useDxHdr) {
+            _state.value.videoConfig.copy(resolution = VideoResolutionPreset.FHD_1080P)
+        } else {
+            _state.value.videoConfig
+        }
+        val outputSize = outputConfig.resolveOutputSize(
             _state.value.videoCapabilities.openGatePortraitAspectRatio,
             cameraInputSize
         )
@@ -8150,7 +8171,8 @@ class Camera2Controller(private val context: Context) {
                 add(VideoColorEffectLayer(recordingLut, recordingRecipe))
             }
         }
-        val cameraInputIsHlg10 = logProfile == VideoLogProfile.HLG10 &&
+        val cameraInputIsHlg10 = !useDxHdr &&
+            logProfile == VideoLogProfile.HLG10 &&
             !useEnhancedStabilization &&
             colorLayers.isEmpty() &&
             supportsCameraHlg10Input()
@@ -8164,7 +8186,7 @@ class Camera2Controller(private val context: Context) {
         val started = videoRecorder.startRecording(
             size = outputSize,
             cameraInputSize = cameraInputSize,
-            fps = _state.value.videoConfig.fps.fps,
+            fps = if (useDxHdr) VideoFpsPreset.FPS_30.fps else _state.value.videoConfig.fps.fps,
             bitrateMbps = _state.value.videoConfig.bitrate.bitrateMbps,
             codecMime = _state.value.videoConfig.codec.mimeType,
             colorConfig = VideoEncoderColorRequest(
@@ -8209,6 +8231,18 @@ class Camera2Controller(private val context: Context) {
         _state.value = _state.value.copy(
             videoRecordingState = VideoRecordingState(isRecording = true, elapsedMs = 0L)
         )
+        if (useDxHdr) {
+            dxHdrGeneration += 1L
+            dxHdrPendingImages.values.forEach { runCatching { it.close() } }
+            dxHdrPendingImages.clear()
+            dxHdrPendingResults.clear()
+            dxHdrWaitingLong?.image?.let { runCatching { it.close() } }
+            dxHdrWaitingLong = null
+            dxHdrWaitingShort?.image?.let { runCatching { it.close() } }
+            dxHdrWaitingShort = null
+            dxHdrExposureController = null
+            dxHdrLastExposureUpdateElapsedMs = 0L
+        }
         videoRecordingPausedMs = 0L
 
         createPreviewSession(openGeneration = cameraOpenGeneration)
