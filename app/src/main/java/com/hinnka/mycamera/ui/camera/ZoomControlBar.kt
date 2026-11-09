@@ -248,22 +248,32 @@ fun ZoomControlBar(
                 .align(Alignment.CenterEnd)
                 .offset(y = (-32).dp)
         ) {
-            IconButton(
-                onClick = onDxHdrClick,
-                modifier = Modifier.size(32.dp),
-            ) {
-                Icon(
-                    imageVector = AppIcons.BurstMode,
-                    contentDescription = stringResource(R.string.dx_hdr),
-                    modifier = Modifier
-                        .size(32.dp)
-                        .padding(8.dp),
-                    tint = when {
-                        !cameraState.dxHdrSupported -> Color.White.copy(alpha = 0.32f)
-                        cameraState.dxHdrEnabled -> AccentColor
-                        else -> Color.White
-                    },
-                )
+            Box(modifier = Modifier.size(32.dp)) {
+                IconButton(
+                    onClick = onDxHdrClick,
+                    enabled = cameraState.dxHdrSupported,
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = AppIcons.BurstMode,
+                        contentDescription = stringResource(R.string.dx_hdr),
+                        modifier = Modifier
+                            .size(32.dp)
+                            .padding(8.dp),
+                        tint = when {
+                            !cameraState.dxHdrSupported -> Color.White.copy(alpha = 0.32f)
+                            cameraState.dxHdrEnabled -> AccentColor
+                            else -> Color.White
+                        },
+                    )
+                }
+                if (!cameraState.dxHdrSupported) {
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .clickable(onClick = onDxHdrClick)
+                    )
+                }
             }
         }
 
