@@ -96,6 +96,10 @@ class Camera2Controller(private val context: Context) {
 
     companion object {
         private const val TAG = "Camera2Controller"
+        private const val DX_HDR_FRAME_DURATION_NS = 16_666_667L
+        private const val DX_HDR_IMAGE_READER_MAX_IMAGES = 8
+        private const val DX_HDR_PENDING_FRAME_LIMIT = 12
+        private const val DX_HDR_AE_UPDATE_INTERVAL_MS = 250L
 
         // 自定义错误代码
         const val ERROR_CAMERA_DISCONNECTED = 1000
@@ -1202,6 +1206,7 @@ class Camera2Controller(private val context: Context) {
                     _state.update { it.copy(previewFirstFrameTimestampNs = timestamp) }
                 }
             }
+            handleDxHdrCaptureCompleted(session, request, result)
             // Only the currently active CameraCaptureSession may feed the EIS timeline.
             // Results from a retired session can arrive after a physical-output handoff; using
             // the new global physical-camera ID for those old frames mixes two sensors' metadata.
@@ -3254,12 +3259,24 @@ class Camera2Controller(private val context: Context) {
         invalidateCaptureSession(captureSession, "preview session replacement")
         val captureMode = _state.value.captureMode
         val reader = imageReader
-        val stabilizationReader = ensureStabilizationImageReader()
-        val useEnhancedStabilization = shouldUseVideoEnhancedStabilization()
+        val dxHdrActive = isDxHdrRecordingSelected()
+        val dxHdrReader = if (dxHdrActive) ensureDxHdrImageReader() else null
+        if (dxHdrActive && dxHdrReader == null) {
+            setDxHdrUnavailable("Unable to create the required 1080p YUV input", null)
+            stopDxHdrCapture("YUV input creation failed")
+            createPreviewSession(openGeneration = openGeneration)
+            return
+        }
+        if (!dxHdrActive && dxHdrImageReader != null) {
+            stopDxHdrCapture("DX-HDR session no longer active")
+        }
+        val stabilizationReader = if (dxHdrActive) null else ensureStabilizationImageReader()
+        val useEnhancedStabilization = !dxHdrActive && shouldUseVideoEnhancedStabilization()
         val videoSurface = if (
             captureMode == CaptureMode.VIDEO &&
             _state.value.videoRecordingState.shouldAttachCameraInput() &&
-            !useEnhancedStabilization
+            !useEnhancedStabilization &&
+            !dxHdrActive
         ) {
             videoRecorder.cameraInputSurface
         } else {
@@ -3288,6 +3305,7 @@ class Camera2Controller(private val context: Context) {
                 addTarget(surface)
                 stabilizationReader?.surface?.let(::addTarget)
                 videoSurface?.let(::addTarget)
+                dxHdrReader?.surface?.let(::addTarget)
 
                 // 应用所有相机参数（曝光、白平衡、闪光灯、变焦）
                 applyBaseCameraSettings(this, isCapture = false)
@@ -3321,6 +3339,9 @@ class Camera2Controller(private val context: Context) {
                                 encoderSurface,
                                 useHlg10 = videoCameraHlg10InputActive
                             ))
+                        }
+                        dxHdrReader?.surface?.let { hdrSurface ->
+                            add(createOutputConfiguration(hdrSurface))
                         }
                     },
                     Executor { handler.post(it) },
@@ -3362,6 +3383,18 @@ class Camera2Controller(private val context: Context) {
                         }
                     }
                 )
+                if (dxHdrActive && !runCatching {
+                        device.isSessionConfigurationSupported(sessionConfig)
+                    }.getOrDefault(false)
+                ) {
+                    setDxHdrUnavailable(
+                        "This camera cannot run preview and 1080p60 YUV together",
+                        null,
+                    )
+                    stopDxHdrCapture("unsupported camera output combination")
+                    createPreviewSession(openGeneration = openGeneration)
+                    return
+                }
                 vendorSessionParametersApplied = applyInitialSessionParameters(
                     sessionConfig = sessionConfig,
                     device = device,
@@ -3969,6 +4002,9 @@ class Camera2Controller(private val context: Context) {
             // 关键修复: 不再动态添加 surface，因为已经在创建 builder 时添加了
             previewRequestBuilder?.let { builder ->
                 session.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
+            }
+            if (isDxHdrRecordingSelected()) {
+                startDxHdrRepeatingBurst(session)
             }
             if (shouldUseAlgorithmicStabilization()) {
                 scheduleEnhancedStabilizationInputWatchdog(sessionGeneration)
@@ -6609,6 +6645,10 @@ class Camera2Controller(private val context: Context) {
 
         try {
             applyFrozenCaptureFocus(builder)
+            if (isDxHdrRecordingSelected()) {
+                startDxHdrRepeatingBurst(session)
+                return
+            }
             session.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
         } catch (e: CameraAccessException) {
             PLog.e(TAG, "Failed to update preview", e)
