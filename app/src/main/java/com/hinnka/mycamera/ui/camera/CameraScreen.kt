@@ -930,6 +930,26 @@ fun CameraScreen(
                     onFilterButtonBoundsChanged = { bounds ->
                         filterButtonBounds = bounds
                     },
+                    onDxHdrClick = {
+                        val message = when {
+                            state.videoRecordingState.isRecording ||
+                                state.videoRecordingState.isProcessing ->
+                                context.getString(R.string.dx_hdr_stop_recording)
+                            !state.dxHdrSupported ->
+                                state.dxHdrUnavailableReason
+                                    ?: context.getString(R.string.dx_hdr_unavailable)
+                            else -> null
+                        }
+                        if (message != null) {
+                            android.widget.Toast.makeText(
+                                context,
+                                message,
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            viewModel.setDxHdrEnabled(!state.dxHdrEnabled)
+                        }
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .onGloballyPositioned { coordinates ->
