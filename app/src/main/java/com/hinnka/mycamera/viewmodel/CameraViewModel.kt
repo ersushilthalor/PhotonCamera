@@ -2546,6 +2546,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 cameraController.setCaptureMode(prefs.captureMode)
                 cameraController.setVideoResolution(prefs.videoResolution)
                 cameraController.setVideoFps(prefs.videoFps)
+                cameraController.restoreDxHdrPreference(prefs.dxHdrEnabled)
                 cameraController.setVideoAspectRatio(prefs.videoAspectRatio)
                 cameraController.setVideoLogProfile(prefs.videoLogProfile)
                 cameraController.setVideoLogLutMode(prefs.videoLogLutMode)
@@ -4055,6 +4056,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     useRaw = useRaw?.let(::SettingValue),
                 )
             )
+        }
+    }
+
+    fun setDxHdrEnabled(enabled: Boolean) {
+        if (state.value.videoRecordingState.isRecording ||
+            state.value.videoRecordingState.isProcessing
+        ) {
+            return
+        }
+        cameraController.setDxHdrEnabled(enabled)
+        val resolvedEnabled = state.value.dxHdrEnabled
+        viewModelScope.launch {
+            userPreferencesRepository.saveDxHdrEnabled(resolvedEnabled)
         }
     }
 
