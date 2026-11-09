@@ -239,6 +239,7 @@ data class UserPreferences(
     val useP3ColorSpace: Boolean = false,
     val videoResolution: VideoResolutionPreset = VideoResolutionPreset.FHD_1080P,
     val videoFps: VideoFpsPreset = VideoFpsPreset.FPS_30,
+    val dxHdrEnabled: Boolean = false,
     val videoAspectRatio: VideoAspectRatio = VideoAspectRatio.RATIO_16_9,
     val videoLogProfile: VideoLogProfile = VideoLogProfile.OFF,
     val videoLogLutMode: VideoLogLutMode = VideoLogLutMode.MONITOR_ONLY,
@@ -517,6 +518,7 @@ class UserPreferencesRepository(private val context: Context) {
         private val USE_P3_COLOR_SPACE = booleanPreferencesKey("use_p3_color_space")
         private val VIDEO_RESOLUTION = stringPreferencesKey("video_resolution")
         private val VIDEO_FPS = stringPreferencesKey("video_fps")
+        private val DX_HDR_ENABLED = booleanPreferencesKey("dx_hdr_enabled")
         private val VIDEO_ASPECT_RATIO = stringPreferencesKey("video_aspect_ratio")
         private val VIDEO_LOG_PROFILE = stringPreferencesKey("video_log_profile")
         private val VIDEO_LOG_LUT_MODE = stringPreferencesKey("video_log_lut_mode")
@@ -876,6 +878,7 @@ class UserPreferencesRepository(private val context: Context) {
                 useP3ColorSpace = preferences[USE_P3_COLOR_SPACE] ?: false,
                 videoResolution = storedVideoResolution,
                 videoFps = storedVideoFps,
+                dxHdrEnabled = preferences[DX_HDR_ENABLED] ?: false,
                 videoAspectRatio = VideoAspectRatio.valueOf(
                     preferences[VIDEO_ASPECT_RATIO] ?: VideoAspectRatio.RATIO_16_9.name
                 ),
@@ -2373,6 +2376,12 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun saveVideoFps(fps: VideoFpsPreset) {
         context.dataStore.edit { preferences ->
             preferences[VIDEO_FPS] = fps.name
+        }
+    }
+
+    suspend fun saveDxHdrEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[DX_HDR_ENABLED] = enabled
         }
     }
 
