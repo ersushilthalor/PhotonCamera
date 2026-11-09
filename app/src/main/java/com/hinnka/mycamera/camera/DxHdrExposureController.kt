@@ -22,7 +22,10 @@ internal class DxHdrExposureController(
     private val sensorExposureRange = exposureRange
     private val sensorSensitivityRange = sensitivityRange
 
-    var longExposureNs: Long = PREFERRED_LONG_EXPOSURE_NS
+    var longExposureNs: Long = PREFERRED_LONG_EXPOSURE_NS.coerceIn(
+        exposureRange.lower,
+        minOf(exposureRange.upper, MAX_LONG_EXPOSURE_NS),
+    )
         private set
     var longIso: Int = (initialIso ?: sensitivityRange.lower)
         .coerceIn(sensitivityRange.lower, sensitivityRange.upper)
@@ -48,7 +51,6 @@ internal class DxHdrExposureController(
         val sampleY = (image.height / HISTOGRAM_SAMPLE_HEIGHT).coerceAtLeast(1)
         val histogram = IntArray(HISTOGRAM_BINS)
         var samples = 0
-        var sum = 0L
 
         var y = sampleY / 2
         while (y < image.height) {
@@ -59,7 +61,6 @@ internal class DxHdrExposureController(
                 if (index < limit) {
                     val value = source.get(index).toInt() and 0xff
                     histogram[value * HISTOGRAM_BINS / 256]++
-                    sum += value
                     samples++
                 }
                 x += sampleX
