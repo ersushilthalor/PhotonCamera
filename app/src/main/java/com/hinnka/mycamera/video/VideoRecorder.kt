@@ -14,6 +14,7 @@ import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.media.MediaRecorder
+import android.media.Image
 import android.net.Uri
 import android.os.SystemClock
 import android.util.Size
@@ -40,6 +41,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 class VideoRecorder(
     private val context: Context,
@@ -96,6 +98,7 @@ class VideoRecorder(
     private val muxerLock = Any()
     private val timelineLock = Any()
     private val realtimeFrameLock = Any()
+    private val dxHdrFramePending = AtomicBoolean(false)
     private val videoCodecLock = Any()
     private val audioCodecLock = Any()
 
@@ -392,6 +395,75 @@ class VideoRecorder(
         }
         PLog.d(TAG, "Dedicated Camera2 recording input started")
         return true
+    }
+
+    /**
+     * Submit one already timestamp-matched DX-HDR exposure pair. The EGL render dispatcher
+     * serializes fusion with ordinary renderer lifecycle operations. Dropped pairs are closed
+     * immediately rather than accumulating camera ImageReader buffers.
+     */
+    fun submitDxHdrFramePair(
+        longExposure: Image,
+        shortExposure: Image,
+        longExposureNs: Long,
+        longIso: Int,
+        shortExposureNs: Long,
+        shortIso: Int,
+    ) {
+        if (!isRecording || stopRequested || isPaused || !cameraInputStarted) {
+            longExposure.close()
+            shortExposure.close()
+            return
+        }
+        if (!dxHdrFramePending.compareAndSet(false, true)) {
+            statsReplacedPendingFrames += 1
+            longExposure.close()
+            shortExposure.close()
+            return
+        }
+
+        statsIncomingFrames += 1
+        scope.launch(renderDispatcher) {
+            try {
+                if (!isRecording || stopRequested || isPaused) {
+                    longExposure.close()
+                    shortExposure.close()
+                    return@launch
+                }
+                val videoRenderer = renderer ?: run {
+                    longExposure.close()
+                    shortExposure.close()
+                    return@launch
+                }
+                val exposureRatio = (
+                    longExposureNs.toDouble() * longIso.coerceAtLeast(1).toDouble()
+                    / (shortExposureNs.coerceAtLeast(1L).toDouble() * shortIso.coerceAtLeast(1).toDouble())
+                ).toFloat().coerceIn(1f, 256f)
+                val renderStartMs = SystemClock.elapsedRealtime()
+                val presentationTimeNs = videoRenderer.renderDualExposureFrame(
+                    longExposure = longExposure,
+                    shortExposure = shortExposure,
+                    exposureRatio = exposureRatio,
+                    mapPresentationTimeNs = ::mapCameraTimestampToBoottimeNs,
+                ) ?: return@launch
+                establishTimelineOrigin(presentationTimeNs / 1_000L)
+                val renderCostMs = (SystemClock.elapsedRealtime() - renderStartMs).coerceAtLeast(0L)
+                statsAcceptedFrames += 1
+                statsRenderedFrames += 1
+                statsRenderTimeTotalMs += renderCostMs
+                if (renderCostMs > statsRenderTimeMaxMs) {
+                    statsRenderTimeMaxMs = renderCostMs
+                }
+                logRenderStatsIfNeeded()
+            } catch (error: Exception) {
+                val message = "Failed to fuse/render a DX-HDR exposure pair: ${error.localizedMessage ?: "Unknown error"}"
+                PLog.e(TAG, message, error)
+                errorCallback?.invoke(message)
+                if (!stopRequested) forceStop()
+            } finally {
+                dxHdrFramePending.set(false)
+            }
+        }
     }
 
     fun stopRecording() {
