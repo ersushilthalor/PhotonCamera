@@ -144,7 +144,8 @@ internal class DxHdrExposureController(
         private const val HISTOGRAM_SAMPLE_WIDTH = 160
         private const val HISTOGRAM_SAMPLE_HEIGHT = 90
         private const val MIN_HISTOGRAM_SAMPLES = 32
-        private const val TARGET_MEDIAN_LUMA = 0.18f
+        // YUV luma is gamma encoded; 18% scene-linear gray is roughly 0.45 in sRGB/Y.
+        private const val TARGET_MEDIAN_LUMA = 0.45f
         private const val MIN_EXPOSURE_FACTOR = 0.5f
         private const val MAX_EXPOSURE_FACTOR = 2f
         private const val AE_SMOOTHING_POWER = 0.4
