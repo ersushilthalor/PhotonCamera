@@ -316,6 +316,7 @@ class Camera2Controller(private val context: Context) {
     private var dxHdrExposureController: DxHdrExposureController? = null
     private var dxHdrGeneration: Long = 0L
     private var dxHdrLastExposureUpdateElapsedMs: Long = 0L
+    private var dxHdrExposureNeedsApply: Boolean = false
     private val dxHdrPendingImages = LinkedHashMap<Long, Image>()
     private val dxHdrPendingResults = LinkedHashMap<Long, DxHdrFrameMetadata>()
     private var dxHdrWaitingLong: DxHdrPendingFrame? = null
@@ -7708,6 +7709,7 @@ class Camera2Controller(private val context: Context) {
     private fun stopDxHdrCapture(reason: String) {
         dxHdrGeneration += 1L
         dxHdrLastExposureUpdateElapsedMs = 0L
+        dxHdrExposureNeedsApply = false
         closeDxHdrImageReader()
         PLog.d(TAG, "DX-HDR capture stopped: $reason")
     }
@@ -7741,12 +7743,8 @@ class Camera2Controller(private val context: Context) {
             val incoming = DxHdrPendingFrame(image, metadata)
             if (metadata.isLongExposure) {
                 val exposureChanged = dxHdrExposureController?.updateFromLongFrame(image) == true
-                if (exposureChanged &&
-                    SystemClock.elapsedRealtime() - dxHdrLastExposureUpdateElapsedMs >=
-                        DX_HDR_AE_UPDATE_INTERVAL_MS
-                ) {
-                    dxHdrLastExposureUpdateElapsedMs = SystemClock.elapsedRealtime()
-                    startDxHdrRepeatingBurst(captureSession)
+                if (exposureChanged) {
+                    dxHdrExposureNeedsApply = true
                 }
                 dxHdrWaitingLong?.image?.let { runCatching { it.close() } }
                 dxHdrWaitingLong = incoming
@@ -7769,6 +7767,14 @@ class Camera2Controller(private val context: Context) {
                         shortExposureNs = shortFrame.metadata.exposureTimeNs,
                         shortIso = shortFrame.metadata.sensitivityIso,
                     )
+                    if (dxHdrExposureNeedsApply &&
+                        SystemClock.elapsedRealtime() - dxHdrLastExposureUpdateElapsedMs >=
+                            DX_HDR_AE_UPDATE_INTERVAL_MS
+                    ) {
+                        dxHdrExposureNeedsApply = false
+                        dxHdrLastExposureUpdateElapsedMs = SystemClock.elapsedRealtime()
+                        startDxHdrRepeatingBurst(captureSession)
+                    }
                 } else {
                     // A short frame without its preceding A frame is not a valid exposure pair.
                     dxHdrWaitingShort = null
@@ -8259,6 +8265,7 @@ class Camera2Controller(private val context: Context) {
             dxHdrWaitingShort = null
             dxHdrExposureController = null
             dxHdrLastExposureUpdateElapsedMs = 0L
+            dxHdrExposureNeedsApply = false
         }
         videoRecordingPausedMs = 0L
 
