@@ -7583,7 +7583,7 @@ class Camera2Controller(private val context: Context) {
 
         val size = streamMap.getOutputSizes(ImageFormat.YUV_420_888)
             ?.filter { it.width > 0 && it.height > 0 }
-            ?.firstOrNull { maxOf(it.width, it.height) == 1920 && minOf(it.width, it.height) >= 1080 }
+            ?.firstOrNull { maxOf(it.width, it.height) == 1920 && minOf(it.width, it.height) == 1080 }
             ?: return null to "This lens has no 1080p YUV capture stream"
 
         val minimumFrameDurationNs = runCatching {
@@ -7870,11 +7870,13 @@ class Camera2Controller(private val context: Context) {
                     set(CaptureRequest.SENSOR_FRAME_DURATION, DX_HDR_FRAME_DURATION_NS)
                     set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNs)
                     set(CaptureRequest.SENSOR_SENSITIVITY, iso)
-                    tag = DxHdrRequestTag(
-                        generation = dxHdrGeneration,
-                        isLongExposure = isLongExposure,
-                        exposureTimeNs = exposureNs,
-                        sensitivityIso = iso,
+                    setTag(
+                        DxHdrRequestTag(
+                            generation = dxHdrGeneration,
+                            isLongExposure = isLongExposure,
+                            exposureTimeNs = exposureNs,
+                            sensitivityIso = iso,
+                        )
                     )
                 }.build()
             }
