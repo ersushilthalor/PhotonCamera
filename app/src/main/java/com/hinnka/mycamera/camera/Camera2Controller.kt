@@ -3311,8 +3311,9 @@ class Camera2Controller(private val context: Context) {
                 addTarget(surface)
                 stabilizationReader?.surface?.let(::addTarget)
                 videoSurface?.let(::addTarget)
-                dxHdrReader?.surface?.let(::addTarget)
 
+                // DX-HDR's dedicated YUV surface is targeted only by tagged A/B requests.
+                // Keep the default preview request free of untagged ImageReader frames.
                 // 应用所有相机参数（曝光、白平衡、闪光灯、变焦）
                 applyBaseCameraSettings(this, isCapture = false)
             }
@@ -7605,6 +7606,7 @@ class Camera2Controller(private val context: Context) {
 
     private fun setDxHdrUnavailable(reason: String, session: CameraCaptureSession? = captureSession) {
         PLog.w(TAG, "DX-HDR unavailable: $reason")
+        onCameraError?.invoke(-1, reason, false)
         _state.update {
             it.copy(
                 dxHdrSupported = false,
@@ -7861,7 +7863,11 @@ class Camera2Controller(private val context: Context) {
                 }
                 val iso = if (isLongExposure) exposureController.longIso else exposureController.shortIso
                 return device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
-                    addTarget(previewSurface ?: return@apply)
+                    // Keep preview on the A cadence only (30fps) so the viewfinder does not
+                    // alternate between the long and short exposure brightness.
+                    if (isLongExposure) {
+                        addTarget(previewSurface ?: return@apply)
+                    }
                     addTarget(reader.surface)
                     applyBaseCameraSettings(this, isCapture = false)
                     applyFrozenCaptureFocus(this)
