@@ -19,8 +19,7 @@ internal class DxHdrYuvFusionRenderer(private val tag: String) {
         private const val TEXTURE_COUNT = 7
         private const val PLANE_COUNT = 6
         private const val ATTR_POSITION = "aPosition"
-        private const val FRAGMENT_SHADER = """
-#version 300 es
+        private const val FRAGMENT_SHADER = """#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2D;
@@ -83,8 +82,7 @@ void main() {
     outColor = vec4(clamp(srgb, 0.0, 1.0), 1.0);
 }
 """
-        private const val VERTEX_SHADER = """
-#version 300 es
+        private const val VERTEX_SHADER = """#version 300 es
 in vec2 aPosition;
 out vec2 vUv;
 void main() {
@@ -175,7 +173,17 @@ void main() {
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
             GLES30.glDisableVertexAttribArray(positionLocation)
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
-            GLES31.glMemoryBarrier(GLES31.GL_FRAMEBUFFER_BARRIER_BIT or GLES31.GL_TEXTURE_FETCH_BARRIER_BIT)
+            val glVersion = GLES30.glGetString(GLES30.GL_VERSION).orEmpty()
+            val glVersionParts = Regex("""OpenGL ES (\d+)\.(\d+)""")
+                .find(glVersion)
+                ?.groupValues
+            val glMajor = glVersionParts?.getOrNull(1)?.toIntOrNull() ?: 3
+            val glMinor = glVersionParts?.getOrNull(2)?.toIntOrNull() ?: 0
+            if (glMajor > 3 || (glMajor == 3 && glMinor >= 1)) {
+                GLES31.glMemoryBarrier(
+                    GLES31.GL_FRAMEBUFFER_BARRIER_BIT or GLES31.GL_TEXTURE_FETCH_BARRIER_BIT
+                )
+            }
             for (unit in 0 until PLANE_COUNT) {
                 GLES30.glActiveTexture(GLES30.GL_TEXTURE0 + unit)
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
@@ -304,12 +312,26 @@ void main() {
         val source = plane.buffer.duplicate()
         val base = source.position()
         val limit = source.limit()
-        for (row in 0 until planeHeight) {
-            val rowOffset = base + row * plane.rowStride
-            for (column in 0 until planeWidth) {
-                val index = rowOffset + column * plane.pixelStride
-                require(index < limit) { "YUV plane stride exceeds the source buffer" }
-                output.put(source.get(index))
+        if (plane.pixelStride == 1) {
+            // Luma and some chroma planes are contiguous. Copy full rows instead of
+            // performing a per-pixel JNI-backed absolute get on every 1080p frame.
+            for (row in 0 until planeHeight) {
+                val rowOffset = base + row * plane.rowStride
+                val rowEnd = rowOffset + planeWidth
+                require(rowEnd <= limit) { "YUV plane row exceeds the source buffer" }
+                source.position(rowOffset)
+                source.limit(rowEnd)
+                output.put(source)
+                source.limit(limit)
+            }
+        } else {
+            for (row in 0 until planeHeight) {
+                val rowOffset = base + row * plane.rowStride
+                for (column in 0 until planeWidth) {
+                    val index = rowOffset + column * plane.pixelStride
+                    require(index < limit) { "YUV plane stride exceeds the source buffer" }
+                    output.put(source.get(index))
+                }
             }
         }
         output.flip()
