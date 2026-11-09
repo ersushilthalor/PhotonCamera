@@ -184,6 +184,7 @@ void main() {
                     GLES31.GL_FRAMEBUFFER_BARRIER_BIT or GLES31.GL_TEXTURE_FETCH_BARRIER_BIT
                 )
             }
+            GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 4)
             for (unit in 0 until PLANE_COUNT) {
                 GLES30.glActiveTexture(GLES30.GL_TEXTURE0 + unit)
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
@@ -225,8 +226,10 @@ void main() {
         requestedChromaWidth: Int,
         requestedChromaHeight: Int,
     ): Boolean {
-        if (requestedWidth > GLES30.glGetInteger(GLES30.GL_MAX_TEXTURE_SIZE) ||
-            requestedHeight > GLES30.glGetInteger(GLES30.GL_MAX_TEXTURE_SIZE)
+        val maximumTextureSize = IntArray(1)
+        GLES30.glGetIntegerv(GLES30.GL_MAX_TEXTURE_SIZE, maximumTextureSize, 0)
+        if (requestedWidth > maximumTextureSize[0] ||
+            requestedHeight > maximumTextureSize[0]
         ) return false
 
         if (programId == 0) {
