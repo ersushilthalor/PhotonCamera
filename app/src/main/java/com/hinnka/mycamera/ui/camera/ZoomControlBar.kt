@@ -72,6 +72,7 @@ fun ZoomControlBar(
     onLensSwitch: (String) -> Unit,
     onFilterClick: () -> Unit,
     onFilterButtonBoundsChanged: (Rect) -> Unit = {},
+    onDxHdrClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val displayMode by viewModel.zoomDisplayMode.collectAsState()
@@ -235,6 +236,33 @@ fun ZoomControlBar(
                         .size(32.dp)
                         .padding(8.dp),
                     tint = AccentColor
+                )
+            }
+        }
+
+        AnimatedVisibility(
+            visible = !isContinuousZooming && cameraState.captureMode == CaptureMode.VIDEO,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .offset(y = (-32).dp)
+        ) {
+            IconButton(
+                onClick = onDxHdrClick,
+                modifier = Modifier.size(32.dp),
+            ) {
+                Icon(
+                    imageVector = AppIcons.BurstMode,
+                    contentDescription = stringResource(R.string.dx_hdr),
+                    modifier = Modifier
+                        .size(32.dp)
+                        .padding(8.dp),
+                    tint = when {
+                        !cameraState.dxHdrSupported -> Color.White.copy(alpha = 0.32f)
+                        cameraState.dxHdrEnabled -> AccentColor
+                        else -> Color.White
+                    },
                 )
             }
         }
