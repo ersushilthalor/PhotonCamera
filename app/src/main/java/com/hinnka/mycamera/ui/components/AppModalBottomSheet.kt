@@ -137,11 +137,14 @@ fun AppModalBottomSheet(
 ) {
     // Read in the host composition, where the insets belong to the host window.
     val hostStatusBarsVisible = WindowInsets.areStatusBarsVisible
-    // A caller-specified container is a deliberate material of its own: it keeps its color and gets
-    // no backdrop blur, and a frosted sheet falls back to Material's scrim unless one is specified.
+    val liquidGlassEnabled = LocalLiquidGlassEnabled.current
+    // Liquid Glass uses the native cross-window blur path for every shared modal sheet.
     val usesSheetMaterial = containerColor == null
-    val blurSupported = usesSheetMaterial && style == AppSheetStyle.Frosted && rememberCrossWindowBlurEnabled()
+    val blurSupported = usesSheetMaterial &&
+        (style == AppSheetStyle.Frosted || liquidGlassEnabled) &&
+        rememberCrossWindowBlurEnabled()
     val tintAlpha = when {
+        liquidGlassEnabled -> 0.18f
         style == AppSheetStyle.Translucent -> AppPanelMaterial.TranslucentAlpha
         blurSupported -> FrostedTintAlpha
         else -> FrostedTintAlphaWithoutBlur
@@ -156,10 +159,11 @@ fun AppModalBottomSheet(
         modifier = modifier,
         sheetState = sheetState,
         shape = shape ?: SheetShape,
-        containerColor = containerColor ?: AppPanelMaterial.Tint.copy(alpha = tintAlpha),
+        containerColor = containerColor ?: if (liquidGlassEnabled) Color(0xFFBBD5F6).copy(alpha = tintAlpha) else AppPanelMaterial.Tint.copy(alpha = tintAlpha),
         contentColor = contentColor,
         tonalElevation = 0.dp,
         scrimColor = scrimColor ?: when {
+            liquidGlassEnabled -> Color.Black.copy(alpha = 0.22f)
             style == AppSheetStyle.Translucent -> Color.Transparent
             usesSheetMaterial -> FrostedScrimColor
             else -> BottomSheetDefaults.ScrimColor
@@ -185,7 +189,7 @@ fun AppModalBottomSheet(
             onDispose { }
         }
         if (window != null && usesSheetMaterial && style == AppSheetStyle.Frosted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val maxBlurRadiusPx = with(LocalDensity.current) { FrostedBlurRadius.toPx() }
+            val maxBlurRadiusPx = with(LocalDensity.current) { (if (liquidGlassEnabled) 48.dp else FrostedBlurRadius).toPx() }
             LaunchedEffect(window, maxBlurRadiusPx) {
                 window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
                 snapshotFlow { (maxBlurRadiusPx * blurProgress).roundToInt() }
@@ -198,6 +202,10 @@ fun AppModalBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .liquidGlassSurface(
+                    shape = shape ?: SheetShape,
+                    fallbackColor = Color.Transparent
+                )
                 .layout { measurable, constraints ->
                     val maxHeight = if (constraints.hasBoundedHeight) {
                         (constraints.maxHeight - topGapPx).coerceAtLeast(0)
