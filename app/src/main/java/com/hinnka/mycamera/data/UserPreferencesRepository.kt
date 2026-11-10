@@ -266,6 +266,8 @@ data class UserPreferences(
     val mirrorFrontCamera: Boolean = true,
     val widgetTheme: WidgetTheme = WidgetTheme.FOLLOW_SYSTEM,
     val saveLocation: Boolean = false,
+    val floatingUiTransparencyPercent: Int = 20,
+    val floatingUiBlurIntensityPercent: Int = 100,
     val openAIApiKey: String? = null,
     val openAIBaseUrl: String? = null,
     val openAIModel: String? = null,
@@ -556,6 +558,8 @@ class UserPreferencesRepository(private val context: Context) {
         private val MIRROR_FRONT_CAMERA = booleanPreferencesKey("mirror_front_camera")
         private val WIDGET_THEME = stringPreferencesKey("widget_theme")
         private val SAVE_LOCATION = booleanPreferencesKey("save_location")
+        private val FLOATING_UI_TRANSPARENCY_PERCENT = intPreferencesKey("floating_ui_transparency_percent")
+        private val FLOATING_UI_BLUR_INTENSITY_PERCENT = intPreferencesKey("floating_ui_blur_intensity_percent")
         private val OPENAI_BASE_URL = stringPreferencesKey("openai_base_url")
         private val OPENAI_MODEL = stringPreferencesKey("openai_model")
         private val USE_BUILT_IN_AI_SERVICE = booleanPreferencesKey("use_built_in_ai_service")
@@ -928,6 +932,8 @@ class UserPreferencesRepository(private val context: Context) {
                 mirrorFrontCamera = preferences[MIRROR_FRONT_CAMERA] ?: true,
                 widgetTheme = WidgetTheme.valueOf(preferences[WIDGET_THEME] ?: WidgetTheme.FOLLOW_SYSTEM.name),
                 saveLocation = preferences[SAVE_LOCATION] ?: false,
+                floatingUiTransparencyPercent = (preferences[FLOATING_UI_TRANSPARENCY_PERCENT] ?: 20).coerceIn(0, 100),
+                floatingUiBlurIntensityPercent = (preferences[FLOATING_UI_BLUR_INTENSITY_PERCENT] ?: 100).coerceIn(0, 100),
                 openAIApiKey = preferences[ENCRYPTED_OPEN_AI_API_KEY_PREFERENCE]?.let { encryptedApiKey ->
                     runCatching { openAiApiKeyCipher.decrypt(encryptedApiKey) }.getOrNull()
                 },
@@ -2515,6 +2521,18 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun saveSaveLocation(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[SAVE_LOCATION] = enabled
+        }
+    }
+
+    suspend fun saveFloatingUiTransparencyPercent(value: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[FLOATING_UI_TRANSPARENCY_PERCENT] = value.coerceIn(0, 100)
+        }
+    }
+
+    suspend fun saveFloatingUiBlurIntensityPercent(value: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[FLOATING_UI_BLUR_INTENSITY_PERCENT] = value.coerceIn(0, 100)
         }
     }
 
