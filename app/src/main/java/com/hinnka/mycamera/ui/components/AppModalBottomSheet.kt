@@ -188,7 +188,7 @@ fun AppModalBottomSheet(
             }
             onDispose { }
         }
-        if (window != null && usesSheetMaterial && style == AppSheetStyle.Frosted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (window != null && usesSheetMaterial && (style == AppSheetStyle.Frosted || liquidGlassEnabled) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val maxBlurRadiusPx = with(LocalDensity.current) { (if (liquidGlassEnabled) 48.dp else FrostedBlurRadius).toPx() }
             LaunchedEffect(window, maxBlurRadiusPx) {
                 window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
