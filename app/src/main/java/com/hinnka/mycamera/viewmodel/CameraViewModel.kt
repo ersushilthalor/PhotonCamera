@@ -2661,6 +2661,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun setFloatingUiTransparencyPercent(value: Int) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveFloatingUiTransparencyPercent(value.coerceIn(0, 100))
+        }
+    }
+
+    fun setFloatingUiBlurIntensityPercent(value: Int) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveFloatingUiBlurIntensityPercent(value.coerceIn(0, 100))
+        }
+    }
+
     fun setRawDcpId(dcpId: String?) {
         viewModelScope.launch {
             applyCameraFeatureUpdate(
