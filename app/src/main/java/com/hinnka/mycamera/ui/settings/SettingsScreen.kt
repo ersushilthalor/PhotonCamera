@@ -1014,7 +1014,7 @@ fun SettingsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(if (userPreferences.liquidGlassEnabled) Color.Black.copy(alpha = 0.38f) else SettingsBackgroundScrim)
+                    .background(if (userPreferences.liquidGlassEnabled) Color.Black.copy(alpha = 0.24f) else Color.Transparent)
                     .navigationBarsPadding()
             ) {
             // 顶部标题栏
@@ -2552,6 +2552,13 @@ private fun SettingsCategoryOverview(
     }
 
     SettingsSection(title = stringResource(R.string.settings_tab_camera)) {
+        NavigationSettingItem(
+            title = stringResource(R.string.settings_section_interface),
+            onClick = { onPageSelected(SettingsPage.INTERFACE) }
+        )
+
+        SettingsCategoryDivider()
+
         NavigationSettingItem(
             title = stringResource(R.string.settings_section_assist),
             description = listOf(

@@ -28,6 +28,7 @@ import com.hinnka.mycamera.viewmodel.CameraViewModel
 
 /** App-wide switch for the Liquid Glass material, provided above the navigation host. */
 val LocalLiquidGlassEnabled = compositionLocalOf { false }
+val LocalLiquidGlassBackdrop = compositionLocalOf<LiquidGlassBackdrop?> { null }
 
 /**
  * Reusable Liquid Glass surface with a cool translucent tint, specular edge and soft depth.
@@ -126,6 +127,7 @@ fun AppBackground(
     transparency: Float? = null,
     blurRadius: Float? = null,
 ) {
+    val backdrop = LocalLiquidGlassBackdrop.current
     val userPreferences by viewModel.userPreferences.collectAsState()
     // Liquid Glass replaces the manual background opacity/blur values while enabled.
     val effectiveTransparency = if (userPreferences.liquidGlassEnabled) {
@@ -136,9 +138,7 @@ fun AppBackground(
             ?.coerceIn(0f, 100f)
             ?: 0f
     }
-    val effectiveBlur = if (userPreferences.liquidGlassEnabled) {
-        18f
-    } else {
+    val effectiveBlur = if (userPreferences.liquidGlassEnabled) 0f else {
         (blurRadius ?: userPreferences.backgroundBlur)
             .takeIf { it.isFinite() }
             ?.coerceIn(0f, 30f)
@@ -150,6 +150,8 @@ fun AppBackground(
         contentDescription = null,
         contentScale = ContentScale.Crop,
         alpha = 1f - effectiveTransparency / 100f,
-        modifier = modifier.blur(effectiveBlur.dp),
+        modifier = modifier
+            .then(backdrop?.let { Modifier.liquidGlassBackdropSource(it) } ?: Modifier)
+            .blur(effectiveBlur.dp),
     )
 }
