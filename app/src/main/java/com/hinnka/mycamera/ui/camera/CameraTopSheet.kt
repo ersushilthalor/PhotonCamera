@@ -40,6 +40,7 @@ import com.hinnka.mycamera.raw.RawRenderingEngine
 import com.hinnka.mycamera.raw.RawToneMappingParameters
 import com.hinnka.mycamera.raw.SpectralFilmSelection
 import com.hinnka.mycamera.ui.components.AppModalBottomSheet
+import com.hinnka.mycamera.ui.components.FloatingUiMaterialSurface
 import com.hinnka.mycamera.ui.components.RawDcpLensOption
 import com.hinnka.mycamera.ui.components.RawRenderingEngineSettingsPanel
 import com.hinnka.mycamera.video.*
@@ -143,23 +144,28 @@ fun CameraTopSheet(
         exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
         modifier = modifier
     ) {
-        Column(
+        FloatingUiMaterialSurface(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
-                .background(Color.Black.copy(alpha = 0.8f))
-                // Keep the screen's top inset fixed, but measure content and side padding
-                // in the rotated viewport so landscape controls stay inside the sheet.
-                .padding(top = contentTopPadding)
-                .autoRotate(matchParentSize = true)
-                .padding(horizontal = 24.dp)
+                .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)),
+            cornerRadius = 0.dp,
+            baseColor = Color.Black,
         ) {
             Column(
                 modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
+                    .fillMaxSize()
+                    // Keep the screen's top inset fixed, but measure content and side padding
+                    // in the rotated viewport so landscape controls stay inside the sheet.
+                    .padding(top = contentTopPadding)
+                    .autoRotate(matchParentSize = true)
+                    .padding(horizontal = 24.dp)
             ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                ) {
                 if (captureMode == CaptureMode.PHOTO) {
                     val isProfessionalMode = useRaw && isRawSupported
                     SectionLabel(title = stringResource(R.string.aspect_ratio))
