@@ -1,8 +1,6 @@
 package com.hinnka.mycamera.ui.components
 
 import com.hinnka.mycamera.ui.theme.AccentColor
-import com.hinnka.mycamera.ui.components.liquidGlassSurface
-import com.hinnka.mycamera.ui.components.LocalLiquidGlassEnabled
 import com.hinnka.mycamera.ui.theme.OnAccentColor
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
