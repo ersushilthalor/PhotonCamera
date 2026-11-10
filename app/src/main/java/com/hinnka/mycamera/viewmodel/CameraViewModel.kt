@@ -7159,6 +7159,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun setLiquidGlassEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveLiquidGlassEnabled(enabled)
+        }
+    }
+
     /**
      * 保存从外部选择的背景图
      */
