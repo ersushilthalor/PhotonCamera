@@ -79,7 +79,6 @@ private val SheetShape = RoundedCornerShape(topStart = SheetCornerRadius, topEnd
 private const val FrostedTintAlpha = 0.6f
 private const val FrostedTintAlphaWithoutBlur = 0.92f
 private val FrostedScrimColor = Color.Black.copy(alpha = 0.28f)
-private val FrostedBlurRadius = 36.dp
 private const val BlurAnimationMillis = 280
 
 /**
@@ -138,19 +137,35 @@ fun AppModalBottomSheet(
     // Read in the host composition, where the insets belong to the host window.
     val hostStatusBarsVisible = WindowInsets.areStatusBarsVisible
     val liquidGlassEnabled = LocalLiquidGlassEnabled.current
+    val sharedBackdropAvailable = LocalLiquidGlassBackdrop.current != null
+    val backgroundSettings = LocalBackgroundSurfaceSettings.current
+    val backgroundTransparency = if (liquidGlassEnabled) {
+        0f
+    } else {
+        backgroundSettings.transparency.takeIf { it.isFinite() }?.coerceIn(0f, 100f) ?: 0f
+    }
+    val panelOpacity = 1f - backgroundTransparency / 100f
+    val requestedBlurRadius = if (liquidGlassEnabled) {
+        12.dp
+    } else {
+        backgroundSettings.blurRadius.takeIf { it.isFinite() }
+            ?.coerceIn(0f, 30f)
+            ?.dp ?: 0.dp
+    }
     // Liquid Glass intentionally overrides caller-specific sheet colors so every floating
     // window follows the selected app-wide material.
     val usesSheetMaterial = containerColor == null || liquidGlassEnabled
     val crossWindowBlurEnabled = rememberCrossWindowBlurEnabled()
     val blurSupported = usesSheetMaterial &&
-        (style == AppSheetStyle.Frosted || liquidGlassEnabled) &&
-        crossWindowBlurEnabled
-    val tintAlpha = when {
+        requestedBlurRadius > 0.dp &&
+        (sharedBackdropAvailable || crossWindowBlurEnabled)
+    val baseTintAlpha = when {
         liquidGlassEnabled -> 0.18f
         style == AppSheetStyle.Translucent -> AppPanelMaterial.TranslucentAlpha
         blurSupported -> FrostedTintAlpha
         else -> FrostedTintAlphaWithoutBlur
     }
+    val tintAlpha = baseTintAlpha * panelOpacity
     val blurProgress by animateFloatAsState(
         targetValue = if (blurSupported && sheetState.targetValue != SheetValue.Hidden) 1f else 0f,
         animationSpec = tween(BlurAnimationMillis),
@@ -166,7 +181,7 @@ fun AppModalBottomSheet(
         tonalElevation = 0.dp,
         scrimColor = if (liquidGlassEnabled) Color.Black.copy(alpha = 0.22f) else scrimColor ?: when {
             style == AppSheetStyle.Translucent -> Color.Transparent
-            usesSheetMaterial -> FrostedScrimColor
+            usesSheetMaterial -> FrostedScrimColor.copy(alpha = FrostedScrimColor.alpha * panelOpacity)
             else -> BottomSheetDefaults.ScrimColor
         },
         dragHandle = dragHandle,
@@ -189,8 +204,11 @@ fun AppModalBottomSheet(
             }
             onDispose { }
         }
-        if (window != null && usesSheetMaterial && (style == AppSheetStyle.Frosted || liquidGlassEnabled) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val maxBlurRadiusPx = with(LocalDensity.current) { (if (liquidGlassEnabled) 48.dp else FrostedBlurRadius).toPx() }
+        if (window != null && !sharedBackdropAvailable && usesSheetMaterial &&
+            (style == AppSheetStyle.Frosted || liquidGlassEnabled) &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+        ) {
+            val maxBlurRadiusPx = with(LocalDensity.current) { requestedBlurRadius.toPx() }
             LaunchedEffect(window, maxBlurRadiusPx) {
                 window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
                 snapshotFlow { (maxBlurRadiusPx * blurProgress).roundToInt() }

@@ -18,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
@@ -41,6 +42,7 @@ import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -80,6 +82,7 @@ data class LiquidGlassStyle(
 @Stable
 class LiquidGlassBackdrop internal constructor(internal val layer: GraphicsLayer) {
     internal var positionInRoot by mutableStateOf(Offset.Unspecified)
+    internal var positionOnScreen by mutableStateOf(Offset.Unspecified)
     internal var size by mutableStateOf(IntSize.Zero)
 }
 
@@ -95,12 +98,126 @@ fun Modifier.liquidGlassBackdropSource(backdrop: LiquidGlassBackdrop): Modifier 
     return this
         .onGloballyPositioned {
             backdrop.positionInRoot = it.positionInRoot()
+            backdrop.positionOnScreen = it.positionOnScreen()
             backdrop.size = it.size
         }
         .drawWithContent {
             backdrop.layer.record { this@drawWithContent.drawContent() }
             drawLayer(backdrop.layer)
         }
+}
+
+/**
+ * Modifier counterpart of [LiquidGlassSurface], used by existing panel call sites without
+ * wrapping their content in another composable. The captured GraphicsLayer is sampled by
+ * RenderEffect on the RenderThread: no bitmap readback or camera-preview frame allocation.
+ */
+fun Modifier.liquidGlassBackdropEffect(
+    backdrop: LiquidGlassBackdrop,
+    style: LiquidGlassStyle,
+    cornerRadius: Dp = 20.dp,
+): Modifier {
+    if (!BACKDROP_SUPPORTED) return this
+    return composed {
+        var surfacePosition by remember { mutableStateOf(Offset.Unspecified) }
+        val shaders = remember { if (LENS_SUPPORTED) GlassShaders() else null }
+        this
+            .onGloballyPositioned { surfacePosition = it.positionOnScreen() }
+            .drawWithCache {
+                val width = size.width
+                val height = size.height
+                val radius = cornerRadius.toPx().coerceAtMost(minOf(width, height) / 2f)
+                val highlightStroke = ceil(
+                    minOf(style.highlightWidth.toPx(), minOf(width, height) / 2f)
+                ) * 2f
+                val refractionHeight = style.refractionHeight.toPx()
+                val outline = Path().apply {
+                    addRoundRect(
+                        RoundRect(
+                            rect = Rect(0f, 0f, width, height),
+                            topLeft = CornerRadius(radius),
+                            topRight = CornerRadius(radius),
+                            bottomRight = CornerRadius(radius),
+                            bottomLeft = CornerRadius(radius),
+                        )
+                    )
+                }
+
+                val backdropPosition = backdrop.positionOnScreen
+                val backdropSize = backdrop.size
+                if (!surfacePosition.isSpecified || !backdropPosition.isSpecified ||
+                    backdropSize == IntSize.Zero || width <= 0f || height <= 0f
+                ) {
+                    return@drawWithCache onDrawBehind {}
+                }
+
+                val blurRadius = style.blurRadius.toPx()
+                val padding = blurRadius * 2f
+                val backdropOrigin = backdropPosition - surfacePosition
+                val captureRect = Rect(-padding, -padding, width + padding, height + padding)
+                    .intersect(Rect(backdropOrigin, backdropSize.toSize()))
+                val layerOffset = IntOffset(
+                    floor(captureRect.left).toInt(),
+                    floor(captureRect.top).toInt(),
+                )
+                val layerSize = IntSize(
+                    ceil(captureRect.right).toInt() - layerOffset.x,
+                    ceil(captureRect.bottom).toInt() - layerOffset.y,
+                )
+                if (layerSize.width <= 0 || layerSize.height <= 0) {
+                    return@drawWithCache onDrawBehind {}
+                }
+
+                val glassLayer = obtainGraphicsLayer().apply {
+                    topLeft = layerOffset
+                    renderEffect = glassEffect(
+                        style = style,
+                        blurRadius = blurRadius,
+                        refractionHeight = refractionHeight,
+                        refractionAmount = style.refractionAmount.toPx(),
+                        shapeOffset = Offset(-layerOffset.x.toFloat(), -layerOffset.y.toFloat()),
+                        shapeWidth = width,
+                        shapeHeight = height,
+                        radius = radius,
+                        bottomRadius = radius,
+                        shaders = shaders,
+                    ).asComposeRenderEffect()
+                    record(size = layerSize) {
+                        translate(backdropOrigin.x - layerOffset.x, backdropOrigin.y - layerOffset.y) {
+                            drawLayer(backdrop.layer)
+                        }
+                    }
+                }
+                val highlightPaint = Paint().apply {
+                    this.style = PaintingStyle.Stroke
+                    strokeWidth = highlightStroke
+                    blendMode = BlendMode.Plus
+                    if (shaders != null) {
+                        shaders.setHighlightUniforms(width, height, radius, radius, style.highlightAlpha)
+                        shader = shaders.highlight
+                    } else {
+                        color = Color.White.copy(alpha = style.highlightAlpha)
+                    }
+                    val highlightBlur = style.highlightBlur.toPx()
+                    if (highlightBlur > 0f && style.highlightAlpha > 0f) {
+                        asFrameworkPaint().maskFilter =
+                            BlurMaskFilter(highlightBlur, BlurMaskFilter.Blur.NORMAL)
+                    }
+                }
+
+                onDrawBehind {
+                    clipRect {
+                        clipPath(outline) {
+                            drawLayer(glassLayer)
+                            if (style.tint.alpha > 0f) drawRect(style.tint)
+                            if (highlightStroke > 0f && style.highlightAlpha > 0f) {
+                                drawIntoCanvas { it.drawPath(outline, highlightPaint) }
+                            }
+                        }
+                    }
+                }
+            }
+    }
 }
 
 /**

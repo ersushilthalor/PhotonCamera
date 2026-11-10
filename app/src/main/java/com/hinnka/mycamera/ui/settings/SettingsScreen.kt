@@ -159,6 +159,8 @@ import com.hinnka.mycamera.ui.components.LogViewerDialog
 import com.hinnka.mycamera.ui.components.PaymentDialog
 import com.hinnka.mycamera.ui.components.DepthModelDownloadDialog
 import com.hinnka.mycamera.ui.components.SliderSettingItem
+import com.hinnka.mycamera.ui.components.BackgroundSurfaceSettings
+import com.hinnka.mycamera.ui.components.LocalBackgroundSurfaceSettings
 import com.hinnka.mycamera.ui.components.LocalLiquidGlassEnabled
 import com.hinnka.mycamera.ui.components.liquidGlassSurface
 
@@ -214,7 +216,6 @@ private val APP_LANGUAGE_OPTIONS = listOf(
 )
 
 private val SettingsBackgroundColor = Color(0xFF151515)
-private val SettingsBackgroundScrim = Color.Black.copy(alpha = 0.62f)
 private val SettingsRippleAlpha = RippleAlpha(
     pressedAlpha = 0.04f,
     focusedAlpha = 0.06f,
@@ -999,7 +1000,13 @@ fun SettingsScreen(
     }
     val settingsScrollState = if (selectedPage == null) overviewScrollState else detailScrollState
 
-    CompositionLocalProvider(LocalRippleConfiguration provides settingsRippleConfiguration) {
+    CompositionLocalProvider(
+        LocalRippleConfiguration provides settingsRippleConfiguration,
+        LocalBackgroundSurfaceSettings provides BackgroundSurfaceSettings(
+            transparency = backgroundTransparencyUi,
+            blurRadius = backgroundBlurUi,
+        ),
+    ) {
         Box(
             modifier = modifier
                 .fillMaxSize()
@@ -1014,7 +1021,18 @@ fun SettingsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(if (userPreferences.liquidGlassEnabled) Color.Black.copy(alpha = 0.24f) else Color.Transparent)
+                    .background(
+                        if (userPreferences.liquidGlassEnabled) {
+                            val scrimOpacity = if (userPreferences.liquidGlassEnabled) {
+                                1f
+                            } else {
+                                1f - backgroundTransparencyUi.coerceIn(0f, 100f) / 100f
+                            }
+                            Color.Black.copy(alpha = 0.24f * scrimOpacity)
+                        } else {
+                            Color.Transparent
+                        }
+                    )
                     .navigationBarsPadding()
             ) {
             // 顶部标题栏

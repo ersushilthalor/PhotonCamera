@@ -1155,6 +1155,9 @@ fun CameraScreen(
                         state.useRaw &&
                         state.isRawSupported
 
+                    // CameraPreviewGL creates CameraGLSurfaceView, a GLSurfaceView/SurfaceView.
+                    // Its independent surface is not recorded by Compose GraphicsLayer: glass samples
+                    // the wallpaper only and does not add work to the live camera render loop.
                     // 相机准备完成后再创建 Surface，首次只打开最终选中的镜头。
                     if (isCameraPrepared) {
                         CameraPreviewGL(

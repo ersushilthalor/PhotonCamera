@@ -91,6 +91,8 @@ import com.hinnka.mycamera.ui.settings.SettingsScreen
 import com.hinnka.mycamera.ui.settings.PresetEditorScreen
 import com.hinnka.mycamera.ui.settings.PresetManagementScreen
 import com.hinnka.mycamera.ui.theme.PhotonCameraTheme
+import com.hinnka.mycamera.ui.components.BackgroundSurfaceSettings
+import com.hinnka.mycamera.ui.components.LocalBackgroundSurfaceSettings
 import com.hinnka.mycamera.ui.components.LocalLiquidGlassEnabled
 import com.hinnka.mycamera.ui.components.LocalLiquidGlassBackdrop
 import com.hinnka.mycamera.ui.components.rememberLiquidGlassBackdrop
@@ -302,17 +304,18 @@ class MainActivity : AppCompatActivity() {
 
             PhotonCameraTheme {
                 val userPreferences by cameraViewModel.userPreferences.collectAsState()
-                val liquidGlassBackdrop = if (
-                    userPreferences.liquidGlassEnabled &&
-                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-                ) {
+                val liquidGlassBackdrop = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     rememberLiquidGlassBackdrop()
                 } else {
                     null
                 }
                 CompositionLocalProvider(
                     LocalLiquidGlassEnabled provides userPreferences.liquidGlassEnabled,
-                    LocalLiquidGlassBackdrop provides liquidGlassBackdrop
+                    LocalLiquidGlassBackdrop provides liquidGlassBackdrop,
+                    LocalBackgroundSurfaceSettings provides BackgroundSurfaceSettings(
+                        transparency = userPreferences.backgroundTransparency,
+                        blurRadius = userPreferences.backgroundBlur,
+                    ),
                 ) {
                     Surface(
                         modifier = Modifier.fillMaxSize(),
