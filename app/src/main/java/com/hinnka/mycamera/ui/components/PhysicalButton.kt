@@ -46,7 +46,8 @@ fun PhysicalButton(
 
     Box(
         modifier = modifier
-            .liquidGlassSurface(shape = shape, fallbackColor = backgroundColor)
+            .clip(shape)
+            .background(backgroundColor)
             .then(clickModifier),
         contentAlignment = contentAlignment
     ) {

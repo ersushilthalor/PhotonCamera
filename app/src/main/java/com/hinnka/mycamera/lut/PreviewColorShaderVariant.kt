@@ -47,7 +47,7 @@ internal data class PreviewColorShaderVariant(
                 // Match the shader's activation threshold, including negative (softening) values.
                 includeSharpening = abs(params.sharpness) > 0.0001f,
                 includeChromaticAberration = params.chromaticAberration > 0.001f,
-                includeColorRecipe = !params.isDefault(),
+                includeColorRecipe = !params.isDefault(includeWashedOutRecovery = false),
             )
         }
 

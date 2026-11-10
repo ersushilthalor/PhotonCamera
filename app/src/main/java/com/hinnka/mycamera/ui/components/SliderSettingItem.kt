@@ -46,18 +46,6 @@ fun SliderSettingItem(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .then(
-                if (LocalLiquidGlassEnabled.current) {
-                    Modifier
-                        .liquidGlassSurface(
-                            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-                            fallbackColor = Color.Transparent
-                        )
-                        .padding(horizontal = 10.dp)
-                } else {
-                    Modifier
-                }
-            )
             .padding(vertical = 8.dp)
     ) {
         Row(

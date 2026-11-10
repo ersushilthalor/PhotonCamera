@@ -37,6 +37,7 @@ internal data class ColorPassLocations(
     val uBasicToneLutLocation: Int,
     val uBasicToneIntensityLocation: Int,
     val uVignetteLocation: Int,
+    val uWashedOutRecoveryLocation: Int,
     val uFlashLocation: Int,
     val uBleachBypassLocation: Int,
     val uChromaticAberrationLocation: Int,
@@ -57,8 +58,6 @@ internal data class ColorPassLocations(
     val uTexelSizeLocation: Int,
     val uCurveTextureLocation: Int,
     val uCurveEnabledLocation: Int,
-    val uBrightnessLutLocation: Int,
-    val uBrightnessEnabledLocation: Int,
     val aPositionLocation: Int,
     val aTexCoordLocation: Int,
 )
@@ -146,6 +145,7 @@ internal class PreviewColorProgramCache {
             uBasicToneLutLocation = GLES30.glGetUniformLocation(program, "uBasicToneLut"),
             uBasicToneIntensityLocation = GLES30.glGetUniformLocation(program, "uBasicToneIntensity"),
             uVignetteLocation = GLES30.glGetUniformLocation(program, "uVignette"),
+            uWashedOutRecoveryLocation = GLES30.glGetUniformLocation(program, "uWashedOutRecovery"),
             uFlashLocation = GLES30.glGetUniformLocation(program, "uFlash"),
             uBleachBypassLocation = GLES30.glGetUniformLocation(program, "uBleachBypass"),
             uChromaticAberrationLocation = GLES30.glGetUniformLocation(program, "uChromaticAberration"),
@@ -169,8 +169,6 @@ internal class PreviewColorProgramCache {
             uTexelSizeLocation = GLES30.glGetUniformLocation(program, "uTexelSize"),
             uCurveTextureLocation = GLES30.glGetUniformLocation(program, "uCurveTexture"),
             uCurveEnabledLocation = GLES30.glGetUniformLocation(program, "uCurveEnabled"),
-            uBrightnessLutLocation = GLES30.glGetUniformLocation(program, "uBrightnessLut"),
-            uBrightnessEnabledLocation = GLES30.glGetUniformLocation(program, "uBrightnessEnabled"),
             aPositionLocation = GLES30.glGetAttribLocation(program, "aPosition"),
             aTexCoordLocation = GLES30.glGetAttribLocation(program, "aTexCoord"),
         )

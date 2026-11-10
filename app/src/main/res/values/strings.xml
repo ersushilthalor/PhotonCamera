@@ -478,15 +478,6 @@
     <string name="settings_use_jpeg_444_export_description">Export JPEGs with 4:4:4 chroma sampling for maximum color detail. Files are larger, HEIC export is disabled, and Ultra HDR gain maps are preserved when available.</string>
     <string name="settings_background">Background</string>
     <string name="settings_background_description">Change the app background image</string>
-    <string name="settings_background_transparency">Background transparency</string>
-    <string name="settings_background_transparency_description">Make the selected background image more or less transparent. The camera preview stays unchanged.</string>
-    <string name="settings_background_transparency_value">%1$d%%</string>
-    <string name="settings_background_blur">Background blur</string>
-    <string name="settings_background_blur_description">Apply GPU blur to the selected background image behind the camera controls.</string>
-    <string name="settings_background_blur_value">%1$d dp</string>
-    <string name="settings_liquid_glass">iOS Liquid Glass UI</string>
-    <string name="settings_liquid_glass_description">Use translucent, frosted glass surfaces across the camera interface, zoom controls, floating panels and sliders.</string>
-    <string name="settings_background_glass_override">Liquid Glass is active. Transparency and background blur sliders are paused; your saved values will return when Liquid Glass is turned off.</string>
     <string name="settings_custom_background">Custom...</string>
     <string name="settings_capture_button">Capture Button</string>
     <string name="settings_capture_button_description">Customize the capture button with the default design, a color, or an image. Video controls keep their standard red appearance.</string>
@@ -1396,8 +1387,9 @@
     <string name="settings_raw_leica_color_matrix_m9">M9</string>
     <string name="camera_focus_point_label">Focus</string>
     <string name="camera_metering_point_label">Metering</string>
-    <!-- Video editor: post-processed luminance tone curve -->
-    <string name="video_brightness">Brightness</string>
+    <!-- Video editor: independent color recovery with contrast preserved -->
+    <string name="video_washed_out_recovery">Washed-Out Recovery</string>
+    <string name="video_washed_out_recovery_description">Restore faded color in bright tones while preserving image luminance and the existing contrast setting.</string>
 
     <string name="oppo_auto_hdr">Auto HDR</string>
     <string name="oppo_fast_shutter">Fast Shutter</string>

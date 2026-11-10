@@ -144,6 +144,7 @@ private class VideoLutShaderProgram(
             
             uniform float uChromaticAberration; // 0.0 ~ 1.0
             uniform float uClarity; // -1.0 ~ 1.0
+            uniform float uWashedOutRecovery; // 0.0 ~ 1.0; chroma-only recovery
             uniform float uSoftLight; // 0.0 ~ 1.0
             uniform float uSharpening;
             uniform vec2 uTexelSize;
@@ -156,8 +157,6 @@ private class VideoLutShaderProgram(
                 vec3 weights = (uInputColorSpace == 1) ? vec3(0.2290, 0.6917, 0.0793) : vec3(0.2126, 0.7152, 0.0722);
                 return dot(color, weights);
             }
-
-            ${VideoBrightnessToneCurve.GLSL}
 
             float log10(float x) { return log(x) * 0.4342944819; }
             vec3 log10(vec3 x) { return log(x) * 0.4342944819; }
@@ -725,7 +724,26 @@ private class VideoLutShaderProgram(
                     );
                 }
 
-                color.rgb = applyVideoBrightness(color.rgb);
+                // Recover faded chroma in brighter tones as an independent final pass. Scaling
+                // RGB deviations around the pixel's luminance preserves its luminance and the
+                // contrast curve already applied above.
+                if (uWashedOutRecovery > 0.001) {
+                    vec3 recoveryBase = clamp(color.rgb, 0.0, 1.0);
+                    float recoveryLuma = getLuma(recoveryBase);
+                    float recoveryMask = smoothstep(0.34, 0.70, recoveryLuma) *
+                        (1.0 - smoothstep(0.88, 0.99, recoveryLuma));
+                    vec3 recoveryDelta = recoveryBase - vec3(recoveryLuma);
+                    float scaleLimit = 1000.0;
+                    if (recoveryDelta.r > 0.00001) scaleLimit = min(scaleLimit, (1.0 - recoveryLuma) / recoveryDelta.r);
+                    else if (recoveryDelta.r < -0.00001) scaleLimit = min(scaleLimit, recoveryLuma / -recoveryDelta.r);
+                    if (recoveryDelta.g > 0.00001) scaleLimit = min(scaleLimit, (1.0 - recoveryLuma) / recoveryDelta.g);
+                    else if (recoveryDelta.g < -0.00001) scaleLimit = min(scaleLimit, recoveryLuma / -recoveryDelta.g);
+                    if (recoveryDelta.b > 0.00001) scaleLimit = min(scaleLimit, (1.0 - recoveryLuma) / recoveryDelta.b);
+                    else if (recoveryDelta.b < -0.00001) scaleLimit = min(scaleLimit, recoveryLuma / -recoveryDelta.b);
+                    float requestedScale = 1.0 + uWashedOutRecovery * 1.5 * recoveryMask;
+                    float chromaScale = min(requestedScale, max(1.0, scaleLimit));
+                    color.rgb = vec3(recoveryLuma) + recoveryDelta * chromaScale;
+                }
 
                 fragColor = clamp(color, 0.0, 1.0);
             }
@@ -756,13 +774,11 @@ private class VideoLutShaderProgram(
 
     private var lutTextureId = 0
     private var curveTextureId = 0
-    private var brightnessTextureId = 0
     private val basicToneTextures = BasicToneGlTextures()
     private val logInput = LogInputGl()
     private val highlightDiffusion = VideoHighlightDiffusionGl(TAG)
     private var lastLutConfig: LutConfig? = null
     private var lastRecipeParams: ColorRecipeParams? = null
-    private var lastBrightnessValue = -1f
 
     @Volatile
     private var hasPendingUpdate = false
@@ -857,18 +873,6 @@ private class VideoLutShaderProgram(
         }
 
         // 检查并上传色彩曲线纹理
-        val brightnessAmount = currentRecipeParams?.videoBrightness
-            ?.takeIf { it.isFinite() }
-            ?.coerceIn(0f, 100f) ?: 0f
-        if (brightnessAmount != lastBrightnessValue) {
-            lastBrightnessValue = brightnessAmount
-            if (brightnessAmount > 0f) {
-                uploadBrightnessTexture(brightnessAmount)
-            } else {
-                deleteBrightnessTexture()
-            }
-        }
-
         val masterPts = currentRecipeParams?.masterCurvePoints
         val redPts = currentRecipeParams?.redCurvePoints
         val greenPts = currentRecipeParams?.greenCurvePoints
@@ -927,21 +931,6 @@ private class VideoLutShaderProgram(
             GLES30.glUniform1i(GLES30.glGetUniformLocation(programId, "uCurveEnabled"), 0)
         }
 
-        val brightnessEnabled = brightnessAmount > 0f && brightnessTextureId != 0
-        GLES30.glActiveTexture(GLES30.GL_TEXTURE5)
-        GLES30.glBindTexture(
-            GLES30.GL_TEXTURE_2D,
-            if (brightnessEnabled) brightnessTextureId else 0,
-        )
-        GLES30.glUniform1i(
-            GLES30.glGetUniformLocation(programId, "uBrightnessLut"),
-            5,
-        )
-        GLES30.glUniform1i(
-            GLES30.glGetUniformLocation(programId, "uBrightnessEnabled"),
-            if (brightnessEnabled) 1 else 0,
-        )
-
         basicToneTextures.bind(
             context = context.applicationContext,
             textureUnit = 2,
@@ -950,9 +939,10 @@ private class VideoLutShaderProgram(
             amount = currentRecipeParams?.tonality ?: 0f,
         )
 
-        // Keep the tone-curve pass independent so a brightness-only edit does not enable
-        // unrelated recipe processing.
-        val colorRecipeEnabled = currentRecipeParams != null && !currentRecipeParams.isDefault(includeVideoBrightness = false)
+        // 设置色彩配方 uniforms
+        // Recovery is a final independent shader pass; do not enable unrelated recipe processing
+        // merely because the recovery slider is non-zero.
+        val colorRecipeEnabled = currentRecipeParams != null && !currentRecipeParams.isDefault(includeWashedOutRecovery = false)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(programId, "uColorRecipeEnabled"), if (colorRecipeEnabled) 1 else 0)
         GLES30.glUniform1f(
             GLES30.glGetUniformLocation(programId, "uFilmGrain"),
@@ -1066,6 +1056,10 @@ private class VideoLutShaderProgram(
             GLES30.glGetUniformLocation(programId, "uSoftLight"),
             currentRecipeParams?.softLight?.coerceIn(0f, 1f) ?: 0f,
         )
+        GLES30.glUniform1f(
+            GLES30.glGetUniformLocation(programId, "uWashedOutRecovery"),
+            currentRecipeParams?.washedOutRecovery?.coerceIn(0f, 1f) ?: 0f,
+        )
         GLES30.glUniform2f(
             GLES30.glGetUniformLocation(programId, "uTexelSize"),
             1f / inputWidth.coerceAtLeast(1).toFloat(),
@@ -1162,45 +1156,6 @@ private class VideoLutShaderProgram(
         }
     }
 
-    private fun uploadBrightnessTexture(brightness: Float) {
-        if (brightnessTextureId == 0) {
-            val textures = IntArray(1)
-            GLES30.glGenTextures(1, textures, 0)
-            brightnessTextureId = textures[0]
-        }
-
-        GLES30.glActiveTexture(GLES30.GL_TEXTURE5)
-        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, brightnessTextureId)
-        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
-        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
-        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
-        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
-
-        val buffer = VideoBrightnessToneCurve.createRgbaBuffer(brightness)
-
-        GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 1)
-        GLES30.glTexImage2D(
-            GLES30.GL_TEXTURE_2D,
-            0,
-            GLES30.GL_RGBA8,
-            256,
-            1,
-            0,
-            GLES30.GL_RGBA,
-            GLES30.GL_UNSIGNED_BYTE,
-            buffer,
-        )
-        GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 4)
-        checkGlError("uploadBrightnessTexture")
-    }
-
-    private fun deleteBrightnessTexture() {
-        if (brightnessTextureId != 0) {
-            GLES30.glDeleteTextures(1, intArrayOf(brightnessTextureId), 0)
-            brightnessTextureId = 0
-        }
-    }
-
     private fun uploadCurveTexture(
         master: FloatArray?,
         red: FloatArray?,
@@ -1244,7 +1199,6 @@ private class VideoLutShaderProgram(
     private fun releaseOwnedResources() {
         deleteLutTexture()
         deleteCurveTexture()
-        deleteBrightnessTexture()
         basicToneTextures.release()
         logInput.release()
         highlightDiffusion.release()

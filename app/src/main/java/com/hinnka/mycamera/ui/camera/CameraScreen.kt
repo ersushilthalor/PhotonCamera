@@ -776,6 +776,7 @@ fun CameraScreen(
             }
     ) {
 
+        val backgroundPainter = rememberBackgroundPainter(viewModel)
 
         val isVideoMode = state.captureMode == CaptureMode.VIDEO
         val isPhotoStyleMode = state.captureMode != CaptureMode.VIDEO
@@ -1558,11 +1559,9 @@ fun CameraScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black)
+                .paint(backgroundPainter, contentScale = ContentScale.Crop)
                 .navigationBarsPadding(),
         ) {
-            AppBackground(viewModel = viewModel, modifier = Modifier.matchParentSize())
-
             // The viewfinder is always the bottom layer. Its selected aspect ratio is fitted
             // to the full available area before camera controls are overlaid.
             Box(
@@ -1872,7 +1871,6 @@ fun CameraScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(start = 6.dp, top = 10.dp, end = 6.dp)
-                        .liquidGlassSurface(RoundedCornerShape(22.dp), Color.Transparent)
                 )
             }
         }
@@ -1883,7 +1881,7 @@ fun CameraScreen(
                 initialParams = effectiveRecipeParams,
                 onParamsPreviewChange = { previewRecipeParamsOverride = it },
                 showEffects = true,
-                replaceVignetteWithVideoBrightness = state.captureMode == CaptureMode.VIDEO,
+                replaceVignetteWithWashedOutRecovery = state.captureMode == CaptureMode.VIDEO,
                 videoOnly = state.captureMode == CaptureMode.VIDEO,
                 onDismiss = {
                     // Keep the Video preview override until the separate recipe reaches DataStore.
@@ -2499,17 +2497,12 @@ private fun CaptureModeSwitcher(
         modifier = Modifier
             .width(228.dp)
             .height(CameraControlsLayoutDefaults.ModeSwitcherHeight)
-            .liquidGlassSurface(
-                shape = RoundedCornerShape(18.dp),
-                fallbackColor = if (oppoStyle) Color(0xFF202020) else Color.Black.copy(alpha = 0.28f)
-            )
-            .then(
-                if (LocalLiquidGlassEnabled.current) Modifier
-                else Modifier.border(
-                    width = 0.5.dp,
-                    color = if (oppoStyle) Color(0xFF333333) else Color.White.copy(alpha = 0.18f),
-                    shape = RoundedCornerShape(18.dp)
-                )
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (oppoStyle) Color(0xFF202020) else Color.Black.copy(alpha = 0.28f))
+            .border(
+                width = 0.5.dp,
+                color = if (oppoStyle) Color(0xFF333333) else Color.White.copy(alpha = 0.18f),
+                shape = RoundedCornerShape(18.dp)
             )
             .padding(3.dp)
     ) {
@@ -2522,9 +2515,8 @@ private fun CaptureModeSwitcher(
             animationSpec = tween(durationMillis = 220),
             label = "modeSwitcher"
         )
-        val liquidGlassEnabled = LocalLiquidGlassEnabled.current
         val selectedBackground by animateColorAsState(
-            targetValue = if (liquidGlassEnabled) Color.White.copy(alpha = 0.22f) else if (oppoStyle) Color(0xFF303030) else Color.White,
+            targetValue = if (oppoStyle) Color(0xFF303030) else Color.White,
             animationSpec = tween(durationMillis = 220),
             label = "modeSwitcherColor"
         )
@@ -2547,7 +2539,7 @@ private fun CaptureModeSwitcher(
                 enabled = enabled,
                 onClick = { onModeSelected(CameraShootingMode.PHOTO) },
                 modifier = Modifier.weight(1f),
-                selectedContentColor = if (liquidGlassEnabled) Color.White else if (oppoStyle) Color(0xFFFF9A32) else Color.Black
+                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.Black
             )
             ModeSwitcherItem(
                 label = stringResource(R.string.capture_mode_video) +
@@ -2556,7 +2548,7 @@ private fun CaptureModeSwitcher(
                 enabled = enabled,
                 onClick = { onModeSelected(CameraShootingMode.VIDEO) },
                 modifier = Modifier.weight(1f),
-                selectedContentColor = if (liquidGlassEnabled) Color.White else if (oppoStyle) Color(0xFFFF9A32) else Color.Black
+                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.Black
             )
         }
     }

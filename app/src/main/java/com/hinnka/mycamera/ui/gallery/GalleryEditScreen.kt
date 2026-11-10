@@ -377,7 +377,7 @@ fun GalleryEditScreen(
     val editPanelScrollState = rememberScrollState()
 
     // This scroll state is shared by every edit tab and media item. Reset it when either
-    // changes so video-only controls at the top (such as video Brightness) remain visible.
+    // changes so video-only controls at the top (such as Washed-Out Recovery) remain visible.
     LaunchedEffect(currentPhoto?.id, editTab) {
         editPanelScrollState.scrollTo(0)
     }
@@ -1566,7 +1566,7 @@ fun GalleryEditScreen(
                                                 effects.applyTo(latestRecipe)
                                             )
                                         },
-                                        replaceVignetteWithVideoBrightness = currentPhoto.isVideo,
+                                        replaceVignetteWithWashedOutRecovery = currentPhoto.isVideo,
                                         headerControls = if (
                                             editLutId != null || currentPhoto.isMotionPhoto
                                         ) {

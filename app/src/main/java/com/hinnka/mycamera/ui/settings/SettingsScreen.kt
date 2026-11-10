@@ -159,12 +159,10 @@ import com.hinnka.mycamera.ui.components.LogViewerDialog
 import com.hinnka.mycamera.ui.components.PaymentDialog
 import com.hinnka.mycamera.ui.components.DepthModelDownloadDialog
 import com.hinnka.mycamera.ui.components.SliderSettingItem
-import com.hinnka.mycamera.ui.components.LocalLiquidGlassEnabled
-import com.hinnka.mycamera.ui.components.liquidGlassSurface
 
 import com.hinnka.mycamera.ui.components.RawDngMetadataCorrectionSettings
 import com.hinnka.mycamera.ui.components.rawDcpLensOptions
-import com.hinnka.mycamera.ui.components.AppBackground
+import com.hinnka.mycamera.ui.components.rememberBackgroundPainter
 import com.hinnka.mycamera.update.AppUpdateManager
 import com.hinnka.mycamera.utils.DeviceUtil
 import com.hinnka.mycamera.viewmodel.CameraViewModel
@@ -314,8 +312,6 @@ fun SettingsScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val userPreferences by viewModel.userPreferences.collectAsState()
-    var backgroundTransparencyUi by rememberSaveable { mutableStateOf(userPreferences.backgroundTransparency) }
-    var backgroundBlurUi by rememberSaveable { mutableStateOf(userPreferences.backgroundBlur) }
     val showLevelIndicator by viewModel.showLevelIndicator.collectAsState(initial = false)
     val focusPeakingEnabled by viewModel.focusPeakingEnabled.collectAsState(initial = true)
     val eyeFocusEnabled by viewModel.eyeFocusEnabled.collectAsState()
@@ -519,14 +515,6 @@ fun SettingsScreen(
         }.getOrElse {
             emptyList()
         }
-    }
-
-    LaunchedEffect(userPreferences.backgroundTransparency) {
-        backgroundTransparencyUi = userPreferences.backgroundTransparency
-    }
-
-    LaunchedEffect(userPreferences.backgroundBlur) {
-        backgroundBlurUi = userPreferences.backgroundBlur
     }
 
     LaunchedEffect(windowScreenBrightness) {
@@ -967,6 +955,7 @@ fun SettingsScreen(
         }
     }
 
+    val backgroundPainter = rememberBackgroundPainter(viewModel)
     val settingsRippleConfiguration = remember {
         RippleConfiguration(
             color = Color.White,
@@ -1000,23 +989,14 @@ fun SettingsScreen(
     val settingsScrollState = if (selectedPage == null) overviewScrollState else detailScrollState
 
     CompositionLocalProvider(LocalRippleConfiguration provides settingsRippleConfiguration) {
-        Box(
+        Column(
             modifier = modifier
                 .fillMaxSize()
                 .background(SettingsBackgroundColor)
+                .paint(backgroundPainter, contentScale = ContentScale.Crop)
+                .background(SettingsBackgroundScrim)
+                .navigationBarsPadding()
         ) {
-            AppBackground(
-                viewModel = viewModel,
-                modifier = Modifier.matchParentSize(),
-                transparency = backgroundTransparencyUi,
-                blurRadius = backgroundBlurUi,
-            )
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(if (userPreferences.liquidGlassEnabled) Color.Black.copy(alpha = 0.24f) else Color.Transparent)
-                    .navigationBarsPadding()
-            ) {
             // 顶部标题栏
             TopAppBar(
                 title = {
@@ -1879,41 +1859,6 @@ fun SettingsScreen(
                                 }
                             }
                         )
-
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
-
-                        LiquidGlassModeSetting(
-                            enabled = userPreferences.liquidGlassEnabled,
-                            onEnabledChange = viewModel::setLiquidGlassEnabled
-                        )
-
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
-
-                        BackgroundSetting(
-                            viewModel = viewModel,
-                            transparency = backgroundTransparencyUi,
-                            blurRadius = backgroundBlurUi,
-                            onTransparencyChange = { backgroundTransparencyUi = it },
-                            onBlurChange = { backgroundBlurUi = it },
-                            onTransparencyChangeFinished = {
-                                viewModel.setBackgroundTransparency(backgroundTransparencyUi)
-                            },
-                            onBlurChangeFinished = {
-                                viewModel.setBackgroundBlur(backgroundBlurUi)
-                            },
-                            modifier = Modifier.padding(bottom = 16.dp)
-                        )
-
-                        HorizontalDivider(
-                            color = Color.White.copy(alpha = 0.1f),
-                            modifier = Modifier.padding(vertical = 12.dp)
-                        )
                     }
                 }
 
@@ -1932,6 +1877,12 @@ fun SettingsScreen(
 
                         UiStyleSetting(currentStyle = userPreferences.uiStyle, onStyleSelected = viewModel::setUiStyle)
 
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.1f), modifier = Modifier.padding(vertical = 12.dp))
+
+                        BackgroundSetting(
+                            viewModel = viewModel,
+                            modifier = Modifier.padding(bottom = 16.dp)
+                        )
 
                         HorizontalDivider(
                             color = Color.White.copy(alpha = 0.1f),
@@ -2537,7 +2488,6 @@ fun SettingsScreen(
             )
         }
     }
-        }
 }
 
 @Composable
@@ -2552,14 +2502,6 @@ private fun SettingsCategoryOverview(
     }
 
     SettingsSection(title = stringResource(R.string.settings_tab_camera)) {
-        NavigationSettingItem(
-            title = stringResource(R.string.settings_section_interface),
-            description = stringResource(R.string.settings_background_description),
-            onClick = { onPageSelected(SettingsPage.INTERFACE) }
-        )
-
-        SettingsCategoryDivider()
-
         NavigationSettingItem(
             title = stringResource(R.string.settings_section_assist),
             description = listOf(
@@ -5581,62 +5523,11 @@ private fun UiStyleSetting(currentStyle: String, onStyleSelected: (String) -> Un
 }
 
 @Composable
-private fun LiquidGlassModeSetting(
-    enabled: Boolean,
-    onEnabledChange: (Boolean) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .liquidGlassSurface(
-                shape = RoundedCornerShape(18.dp),
-                fallbackColor = Color.Transparent
-            )
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = stringResource(R.string.settings_liquid_glass),
-                color = Color.White,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = stringResource(R.string.settings_liquid_glass_description),
-                color = Color.White.copy(alpha = 0.62f),
-                fontSize = 12.sp,
-                lineHeight = 17.sp,
-            )
-        }
-        Switch(
-            checked = enabled,
-            onCheckedChange = onEnabledChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = OnAccentColor,
-                checkedTrackColor = AccentColor,
-                uncheckedThumbColor = Color.Gray,
-                uncheckedTrackColor = Color.White.copy(alpha = 0.2f),
-                uncheckedBorderColor = Color.Transparent,
-            )
-        )
-    }
-}
-
-@Composable
 fun BackgroundSetting(
     viewModel: CameraViewModel,
-    transparency: Float,
-    blurRadius: Float,
-    onTransparencyChange: (Float) -> Unit,
-    onBlurChange: (Float) -> Unit,
-    onTransparencyChangeFinished: () -> Unit,
-    onBlurChangeFinished: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val currentBg by viewModel.backgroundImage.collectAsState()
-    val liquidGlassActive = LocalLiquidGlassEnabled.current
     val context = androidx.compose.ui.platform.LocalContext.current
 
     val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -5676,58 +5567,7 @@ fun BackgroundSetting(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
-
-        val transparencyValueFormat = stringResource(R.string.settings_background_transparency_value)
-        SliderSettingItem(
-            title = stringResource(R.string.settings_background_transparency),
-            description = stringResource(R.string.settings_background_transparency_description),
-            value = transparency,
-            valueRange = 0f..100f,
-            enabled = !liquidGlassActive,
-            resetValue = 0f,
-            onResetValue = { value ->
-                onTransparencyChange(value)
-                viewModel.setBackgroundTransparency(value)
-            },
-            onValueChange = onTransparencyChange,
-            onValueChangeFinished = onTransparencyChangeFinished,
-            valueTextFormatter = { value ->
-                String.format(transparencyValueFormat, value.roundToInt())
-            },
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        val blurValueFormat = stringResource(R.string.settings_background_blur_value)
-        SliderSettingItem(
-            title = stringResource(R.string.settings_background_blur),
-            description = stringResource(R.string.settings_background_blur_description),
-            value = blurRadius,
-            valueRange = 0f..30f,
-            enabled = !liquidGlassActive,
-            resetValue = 0f,
-            onResetValue = { value ->
-                onBlurChange(value)
-                viewModel.setBackgroundBlur(value)
-            },
-            onValueChange = onBlurChange,
-            onValueChangeFinished = onBlurChangeFinished,
-            valueTextFormatter = { value ->
-                String.format(blurValueFormat, value.roundToInt())
-            },
-        )
-
-        if (liquidGlassActive) {
-            Text(
-                text = stringResource(R.string.settings_background_glass_override),
-                color = Color(0xFFD7E8FF),
-                fontSize = 12.sp,
-                modifier = Modifier.padding(bottom = 10.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         Text(
             text = stringResource(R.string.settings_background_description),

@@ -40,7 +40,6 @@ import com.hinnka.mycamera.raw.RawRenderingEngine
 import com.hinnka.mycamera.raw.RawToneMappingParameters
 import com.hinnka.mycamera.raw.SpectralFilmSelection
 import com.hinnka.mycamera.ui.components.AppModalBottomSheet
-import com.hinnka.mycamera.ui.components.liquidGlassSurface
 import com.hinnka.mycamera.ui.components.RawDcpLensOption
 import com.hinnka.mycamera.ui.components.RawRenderingEngineSettingsPanel
 import com.hinnka.mycamera.video.*
@@ -148,10 +147,8 @@ fun CameraTopSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .liquidGlassSurface(
-                    shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp),
-                    fallbackColor = Color.Black.copy(alpha = 0.8f)
-                )
+                .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
+                .background(Color.Black.copy(alpha = 0.8f))
                 // Keep the screen's top inset fixed, but measure content and side padding
                 // in the rotated viewport so landscape controls stay inside the sheet.
                 .padding(top = contentTopPadding)

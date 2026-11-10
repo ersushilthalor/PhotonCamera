@@ -99,14 +99,14 @@ private enum class BasicRecipeControl(
     HIGHLIGHTS(R.string.recipe_param_highlights, recipeParam = RecipeParam.HIGHLIGHTS),
     SHADOWS(R.string.recipe_param_shadows, recipeParam = RecipeParam.SHADOWS),
     VIGNETTE(R.string.recipe_param_vignette, effectType = EffectType.VIGNETTE),
-    VIDEO_BRIGHTNESS(R.string.video_brightness),
+    WASHED_OUT_RECOVERY(R.string.video_washed_out_recovery),
     FILM_GRAIN(R.string.recipe_param_film_grain, effectType = EffectType.FILM_GRAIN),
     CLARITY(R.string.recipe_param_clarity, effectType = EffectType.CLARITY),
     SHARPNESS(R.string.recipe_param_sharpness, recipeParam = RecipeParam.SHARPNESS),
 }
 
 private val basicRecipeControls = BasicRecipeControl.entries.filterNot {
-    it == BasicRecipeControl.VIDEO_BRIGHTNESS
+    it == BasicRecipeControl.WASHED_OUT_RECOVERY
 }
 
 /** 曝光参数常见 1/3 EV 档位列表 */
@@ -137,7 +137,7 @@ fun ColorRecipePanel(
     headerControls: (@Composable () -> Unit)? = null,
     containerShape: Shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
     modifier: Modifier = Modifier,
-    replaceVignetteWithVideoBrightness: Boolean = false
+    replaceVignetteWithWashedOutRecovery: Boolean = false
 ) {
     val isBakeable: (RecipeParam) -> Boolean = { param ->
         param != RecipeParam.VIGNETTE &&
@@ -164,11 +164,11 @@ fun ColorRecipePanel(
     }
     var selectedTab by remember { mutableStateOf(RecipePanelTab.CURVE) }
     var selectedBasicControl by remember { mutableStateOf(BasicRecipeControl.EXPOSURE) }
-    val visibleBasicControls = remember(replaceVignetteWithVideoBrightness) {
-        if (replaceVignetteWithVideoBrightness) {
+    val visibleBasicControls = remember(replaceVignetteWithWashedOutRecovery) {
+        if (replaceVignetteWithWashedOutRecovery) {
             basicRecipeControls.map { control ->
                 if (control == BasicRecipeControl.VIGNETTE) {
-                    BasicRecipeControl.VIDEO_BRIGHTNESS
+                    BasicRecipeControl.WASHED_OUT_RECOVERY
                 } else {
                     control
                 }
@@ -344,10 +344,10 @@ fun ColorRecipePanel(
         onParamsChange(
             resetParams(
                 currentParams.copy(
-                    videoBrightness = if (replaceVignetteWithVideoBrightness) {
+                    washedOutRecovery = if (replaceVignetteWithWashedOutRecovery) {
                         0f
                     } else {
-                        currentParams.videoBrightness
+                        currentParams.washedOutRecovery
                     },
                     masterCurvePoints = null,
                     redCurvePoints = null,
@@ -361,8 +361,8 @@ fun ColorRecipePanel(
     }
 
     fun basicRawValue(control: BasicRecipeControl): Float {
-        if (control == BasicRecipeControl.VIDEO_BRIGHTNESS) {
-            return currentParams.videoBrightness.coerceIn(0f, 100f)
+        if (control == BasicRecipeControl.WASHED_OUT_RECOVERY) {
+            return currentParams.washedOutRecovery.coerceIn(0f, 1f)
         }
         control.effectType?.let { effect ->
             return currentEffects?.let(effect::getValue)
@@ -372,8 +372,8 @@ fun ColorRecipePanel(
     }
 
     fun setBasicRawValue(control: BasicRecipeControl, value: Float) {
-        if (control == BasicRecipeControl.VIDEO_BRIGHTNESS) {
-            onParamsChange(currentParams.copy(videoBrightness = value.coerceIn(0f, 100f)))
+        if (control == BasicRecipeControl.WASHED_OUT_RECOVERY) {
+            onParamsChange(currentParams.copy(washedOutRecovery = value.coerceIn(0f, 1f)))
             return
         }
         control.effectType?.let { effect ->
@@ -664,7 +664,7 @@ fun ColorRecipePanel(
 }
 
 private fun basicDefaultRawValue(control: BasicRecipeControl): Float = when (control) {
-    BasicRecipeControl.VIDEO_BRIGHTNESS -> 0f
+    BasicRecipeControl.WASHED_OUT_RECOVERY -> 0f
     else -> control.effectType?.defaultValue ?: checkNotNull(control.recipeParam).defaultValue
 }
 
@@ -672,14 +672,14 @@ private fun basicDisplayRange(
     control: BasicRecipeControl,
 ): ClosedFloatingPointRange<Float> = when (control) {
     BasicRecipeControl.EXPOSURE -> RecipeParam.EXPOSURE.minValue..RecipeParam.EXPOSURE.maxValue
-    BasicRecipeControl.VIDEO_BRIGHTNESS -> 0f..100f
+    BasicRecipeControl.WASHED_OUT_RECOVERY -> 0f..10f
     BasicRecipeControl.FILM_GRAIN -> 0f..10f
     else -> -10f..10f
 }
 
 private fun basicDisplayValue(control: BasicRecipeControl, rawValue: Float): Float = when (control) {
     BasicRecipeControl.EXPOSURE -> RecipeParam.EXPOSURE.clamp(rawValue)
-    BasicRecipeControl.VIDEO_BRIGHTNESS -> rawValue.coerceIn(0f, 100f).roundToInt().toFloat()
+    BasicRecipeControl.WASHED_OUT_RECOVERY -> (rawValue.coerceIn(0f, 1f) * 10f).roundToInt().toFloat()
     else -> {
         val param = control.effectType?.recipeParam ?: checkNotNull(control.recipeParam)
         param.toDisplayValue(rawValue).roundToInt().toFloat()
@@ -688,7 +688,7 @@ private fun basicDisplayValue(control: BasicRecipeControl, rawValue: Float): Flo
 
 private fun basicRawValue(control: BasicRecipeControl, displayValue: Float): Float = when (control) {
     BasicRecipeControl.EXPOSURE -> RecipeParam.EXPOSURE.clamp(displayValue)
-    BasicRecipeControl.VIDEO_BRIGHTNESS -> displayValue.coerceIn(0f, 100f).roundToInt().toFloat()
+    BasicRecipeControl.WASHED_OUT_RECOVERY -> (displayValue.coerceIn(0f, 10f) / 10f).coerceIn(0f, 1f)
     else -> {
         val param = control.effectType?.recipeParam ?: checkNotNull(control.recipeParam)
         param.fromDisplayValue(displayValue)
@@ -762,7 +762,7 @@ private fun getBasicControlColor(control: BasicRecipeControl): Color = when (con
     BasicRecipeControl.HIGHLIGHTS -> Color(0xFFFF8D74)
     BasicRecipeControl.SHADOWS -> Color(0xFF748FFF)
     BasicRecipeControl.VIGNETTE -> Color(0xFFB38A74)
-    BasicRecipeControl.VIDEO_BRIGHTNESS -> Color(0xFF4DD0E1)
+    BasicRecipeControl.WASHED_OUT_RECOVERY -> Color(0xFF4DD0E1)
     BasicRecipeControl.FILM_GRAIN -> Color(0xFFB7B7B7)
     BasicRecipeControl.CLARITY -> Color(0xFF55D6C2)
     BasicRecipeControl.SHARPNESS -> Color(0xFF7BD7FF)
@@ -952,7 +952,7 @@ private fun BasicRecipeTile(
                 fontSize = 10.sp,
                 fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
                 textAlign = TextAlign.Center,
-                maxLines = if (control == BasicRecipeControl.VIDEO_BRIGHTNESS) 2 else 1,
+                maxLines = if (control == BasicRecipeControl.WASHED_OUT_RECOVERY) 2 else 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
