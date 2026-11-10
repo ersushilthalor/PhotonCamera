@@ -158,7 +158,7 @@ fun LutEditBottomSheet(
                     null
                 },
                 modifier = Modifier.fillMaxWidth(),
-                replaceVignetteWithWashedOutRecovery = replaceVignetteWithWashedOutRecovery
+                replaceVignetteWithVideoBrightness = replaceVignetteWithWashedOutRecovery
             )
         }
     }
