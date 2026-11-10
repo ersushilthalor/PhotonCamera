@@ -317,8 +317,6 @@ private fun ZoomPresetPill(
 
     Row(
         modifier = modifier
-            .clip(CircleShape)
-            .background(Color(0xFF25242C))
             .padding(horizontal = 4.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -337,7 +335,7 @@ private fun ZoomPresetPill(
                         modifier = Modifier
                             .size(29.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF484651))
+                            .background(Color.Transparent)
                     )
                 }
                 val label = when {
