@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.ui.theme.AccentColor
+import com.hinnka.mycamera.ui.components.liquidGlassSurface
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.CameraState
 import com.hinnka.mycamera.camera.CameraUtils
@@ -41,7 +42,8 @@ fun CameraParameterBar(
     modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp)
+            .liquidGlassSurface(RoundedCornerShape(18.dp), Color.Transparent),
         verticalAlignment = Alignment.CenterVertically
     ) {
         cameraParameterItems(state).forEach { item ->
