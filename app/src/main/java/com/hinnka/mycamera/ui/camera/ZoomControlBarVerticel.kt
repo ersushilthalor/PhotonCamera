@@ -46,6 +46,8 @@ import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.roundToInt
 import com.hinnka.mycamera.ui.icons.AppIcons
+import com.hinnka.mycamera.ui.components.FloatingUiMaterialSurface
+import com.hinnka.mycamera.ui.components.LocalFloatingUiMaterialSettings
 
 
 @Composable
@@ -63,6 +65,7 @@ fun ZoomControlBarVerticel(
     modifier: Modifier = Modifier
 ) {
     val displayMode by viewModel.zoomDisplayMode.collectAsState()
+    val floatingUiOpacity = LocalFloatingUiMaterialSettings.current.surfaceAlpha
 
     val currentCameraIdState by rememberUpdatedState(currentCameraId)
 
@@ -226,7 +229,7 @@ fun ZoomControlBarVerticel(
                     imageVector = AppIcons.SwapHoriz,
                     contentDescription = stringResource(R.string.toggle_display_mode),
                     modifier = Modifier.size(32.dp)
-                        .background(Color.Black.copy(alpha = 0.3f), CircleShape)
+                        .background(Color.Black.copy(alpha = 0.3f * floatingUiOpacity), CircleShape)
                         .padding(8.dp),
                     tint = Color.White
                 )
@@ -252,7 +255,7 @@ fun ZoomControlBarVerticel(
                     imageVector = if (isLogVideo) AppIcons.Palette else AppIcons.AutoAwesome,
                     contentDescription = stringResource(if (isLogVideo) R.string.filter else R.string.filters_panel),
                     modifier = Modifier.size(32.dp)
-                        .background(Color.Black.copy(alpha = 0.3f), CircleShape)
+                        .background(Color.Black.copy(alpha = 0.3f * floatingUiOpacity), CircleShape)
                         .padding(8.dp),
                     tint = AccentColor
                 )
@@ -362,14 +365,16 @@ private fun ZoomRulerVertical(
             separatorCount = if (hasMacroSeparator) 1 else 0
         )
 
-        Column(
-            modifier = Modifier
-                .height(adaptiveMetrics.rulerLength)
-                .fillMaxWidth()
-                .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(16.dp)),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(adaptiveMetrics.spacing, Alignment.CenterVertically)
+        FloatingUiMaterialSurface(
+            modifier = Modifier.height(adaptiveMetrics.rulerLength).fillMaxWidth(),
+            cornerRadius = 16.dp,
+            baseColor = Color.Black.copy(alpha = 0.3f),
         ) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(adaptiveMetrics.spacing, Alignment.CenterVertically)
+            ) {
             val isCurrentMacro = macroCameras.any { it.cameraId == currentCameraId }
             val selectedStopIndex = if (isCurrentMacro) -1 else stopsState.indices.minByOrNull {
                 val item = stopsState[it]
@@ -478,6 +483,7 @@ private fun ZoomRulerVertical(
                     }
                 }
             }
+            }
         }
     }
 }
@@ -497,11 +503,13 @@ fun ZoomContinuousRulerVertical(
     val accentColor = AccentColor
     val textMeasurer = rememberTextMeasurer()
 
-    Box(
-        modifier = modifier
-            .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
+    FloatingUiMaterialSurface(
+        modifier = modifier,
+        cornerRadius = 16.dp,
+        baseColor = Color.Black.copy(alpha = 0.3f),
     ) {
-        Canvas(modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 24.dp)) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Canvas(modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 24.dp)) {
             val width = size.width
             val height = size.height
             val accent = accentColor
@@ -624,6 +632,7 @@ fun ZoomContinuousRulerVertical(
                 )
             )
         }
+    }
     }
 }
 
