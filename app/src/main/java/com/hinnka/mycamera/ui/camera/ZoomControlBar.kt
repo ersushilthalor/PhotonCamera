@@ -42,6 +42,7 @@ import kotlin.math.ln
 import kotlin.math.roundToInt
 import com.hinnka.mycamera.ui.icons.AppIcons
 import com.hinnka.mycamera.ui.components.FloatingUiMaterialSurface
+import com.hinnka.mycamera.ui.components.LocalFloatingUiMaterialSettings
 
 /**
  * 显示模式：变焦倍率 or 35mm等效焦距
@@ -312,6 +313,7 @@ private fun ZoomPresetPill(
     onPresetClick: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val floatingUiOpacity = LocalFloatingUiMaterialSettings.current.surfaceAlpha
     val basePresets = listOf(0.6f, 1f, 2f, 3f)
     val visiblePresets = if (zoomRatio >= 3f) basePresets + listOf(5f, 10f) else basePresets
     val selectedPreset = visiblePresets.firstOrNull { abs(it - zoomRatio) <= 0.05f }
@@ -340,7 +342,7 @@ private fun ZoomPresetPill(
                         modifier = Modifier
                             .size(29.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF484651))
+                            .background(Color(0xFF484651).copy(alpha = floatingUiOpacity))
                     )
                 }
                 val label = when {
@@ -378,6 +380,7 @@ fun ZoomContinuousRuler(
     modifier: Modifier = Modifier
 ) {
     val rulerYellow = Color(0xFFFFD52A)
+    val floatingUiOpacity = LocalFloatingUiMaterialSettings.current.surfaceAlpha
     val closeDescription = stringResource(R.string.close)
     val currentText = when (displayMode) {
         ZoomDisplayMode.ZOOM_RATIO -> formatZoomRatioLabel(zoomRatio)
@@ -446,7 +449,7 @@ fun ZoomContinuousRuler(
                     .padding(end = 6.dp)
                     .size(25.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF3A3A3A))
+                    .background(Color(0xFF3A3A3A).copy(alpha = floatingUiOpacity))
                     .clickable(onClick = onClose)
                     .semantics { contentDescription = closeDescription },
                 contentAlignment = Alignment.Center
