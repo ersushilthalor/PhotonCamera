@@ -164,8 +164,7 @@ fun AppModalBottomSheet(
         containerColor = if (liquidGlassEnabled) Color(0xFFBBD5F6).copy(alpha = tintAlpha) else containerColor ?: AppPanelMaterial.Tint.copy(alpha = tintAlpha),
         contentColor = contentColor,
         tonalElevation = 0.dp,
-        scrimColor = scrimColor ?: when {
-            liquidGlassEnabled -> Color.Black.copy(alpha = 0.22f)
+        scrimColor = if (liquidGlassEnabled) Color.Black.copy(alpha = 0.22f) else scrimColor ?: when {
             style == AppSheetStyle.Translucent -> Color.Transparent
             usesSheetMaterial -> FrostedScrimColor
             else -> BottomSheetDefaults.ScrimColor
