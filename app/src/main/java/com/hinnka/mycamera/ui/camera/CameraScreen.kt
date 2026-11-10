@@ -1872,6 +1872,7 @@ fun CameraScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(start = 6.dp, top = 10.dp, end = 6.dp)
+                        .liquidGlassSurface(RoundedCornerShape(22.dp), Color.Transparent)
                 )
             }
         }
