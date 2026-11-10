@@ -1308,6 +1308,5 @@
     <string name="camera_focus_point_label">對焦框</string>
     <string name="camera_metering_point_label">測光點</string>
     <!-- Video editor: independent color recovery with contrast preserved -->
-    <string name="video_washed_out_recovery">褪色恢復</string>
-    <string name="video_washed_out_recovery_description">恢復明亮區域中褪淡的色彩，同時保持影像亮度與現有對比設定。</string>
+    <string name="video_brightness">亮度</string>
 </resources>

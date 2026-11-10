@@ -359,6 +359,5 @@
     <string name="camera_focus_point_label">Foco</string>
     <string name="camera_metering_point_label">Medição</string>
     <!-- Video editor: independent color recovery with contrast preserved -->
-    <string name="video_washed_out_recovery">Recuperação de cores desbotadas</string>
-    <string name="video_washed_out_recovery_description">Recupere cores desbotadas nos tons claros sem alterar a luminância da imagem nem a configuração de contraste existente.</string>
+    <string name="video_brightness">Brilho</string>
 </resources>
