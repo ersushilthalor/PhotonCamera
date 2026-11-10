@@ -162,7 +162,7 @@ import com.hinnka.mycamera.ui.components.SliderSettingItem
 
 import com.hinnka.mycamera.ui.components.RawDngMetadataCorrectionSettings
 import com.hinnka.mycamera.ui.components.rawDcpLensOptions
-import com.hinnka.mycamera.ui.components.rememberBackgroundPainter
+import com.hinnka.mycamera.ui.components.AppBackground
 import com.hinnka.mycamera.update.AppUpdateManager
 import com.hinnka.mycamera.utils.DeviceUtil
 import com.hinnka.mycamera.viewmodel.CameraViewModel
@@ -312,6 +312,8 @@ fun SettingsScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val userPreferences by viewModel.userPreferences.collectAsState()
+    var backgroundTransparencyUi by rememberSaveable { mutableStateOf(userPreferences.backgroundTransparency) }
+    var backgroundBlurUi by rememberSaveable { mutableStateOf(userPreferences.backgroundBlur) }
     val showLevelIndicator by viewModel.showLevelIndicator.collectAsState(initial = false)
     val focusPeakingEnabled by viewModel.focusPeakingEnabled.collectAsState(initial = true)
     val eyeFocusEnabled by viewModel.eyeFocusEnabled.collectAsState()
@@ -515,6 +517,14 @@ fun SettingsScreen(
         }.getOrElse {
             emptyList()
         }
+    }
+
+    LaunchedEffect(userPreferences.backgroundTransparency) {
+        backgroundTransparencyUi = userPreferences.backgroundTransparency
+    }
+
+    LaunchedEffect(userPreferences.backgroundBlur) {
+        backgroundBlurUi = userPreferences.backgroundBlur
     }
 
     LaunchedEffect(windowScreenBrightness) {
@@ -955,7 +965,6 @@ fun SettingsScreen(
         }
     }
 
-    val backgroundPainter = rememberBackgroundPainter(viewModel)
     val settingsRippleConfiguration = remember {
         RippleConfiguration(
             color = Color.White,
@@ -989,14 +998,23 @@ fun SettingsScreen(
     val settingsScrollState = if (selectedPage == null) overviewScrollState else detailScrollState
 
     CompositionLocalProvider(LocalRippleConfiguration provides settingsRippleConfiguration) {
-        Column(
+        Box(
             modifier = modifier
                 .fillMaxSize()
                 .background(SettingsBackgroundColor)
-                .paint(backgroundPainter, contentScale = ContentScale.Crop)
-                .background(SettingsBackgroundScrim)
-                .navigationBarsPadding()
         ) {
+            AppBackground(
+                viewModel = viewModel,
+                modifier = Modifier.matchParentSize(),
+                transparency = backgroundTransparencyUi,
+                blurRadius = backgroundBlurUi,
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(SettingsBackgroundScrim)
+                    .navigationBarsPadding()
+            ) {
             // 顶部标题栏
             TopAppBar(
                 title = {
@@ -1881,6 +1899,16 @@ fun SettingsScreen(
 
                         BackgroundSetting(
                             viewModel = viewModel,
+                            transparency = backgroundTransparencyUi,
+                            blurRadius = backgroundBlurUi,
+                            onTransparencyChange = { backgroundTransparencyUi = it },
+                            onBlurChange = { backgroundBlurUi = it },
+                            onTransparencyChangeFinished = {
+                                viewModel.setBackgroundTransparency(backgroundTransparencyUi)
+                            },
+                            onBlurChangeFinished = {
+                                viewModel.setBackgroundBlur(backgroundBlurUi)
+                            },
                             modifier = Modifier.padding(bottom = 16.dp)
                         )
 
@@ -2488,6 +2516,7 @@ fun SettingsScreen(
             )
         }
     }
+        }
 }
 
 @Composable
@@ -5525,6 +5554,12 @@ private fun UiStyleSetting(currentStyle: String, onStyleSelected: (String) -> Un
 @Composable
 fun BackgroundSetting(
     viewModel: CameraViewModel,
+    transparency: Float,
+    blurRadius: Float,
+    onTransparencyChange: (Float) -> Unit,
+    onBlurChange: (Float) -> Unit,
+    onTransparencyChangeFinished: () -> Unit,
+    onBlurChangeFinished: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val currentBg by viewModel.backgroundImage.collectAsState()
@@ -5567,7 +5602,47 @@ fun BackgroundSetting(
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(20.dp))
+
+        val transparencyValueFormat = stringResource(R.string.settings_background_transparency_value)
+        SliderSettingItem(
+            title = stringResource(R.string.settings_background_transparency),
+            description = stringResource(R.string.settings_background_transparency_description),
+            value = transparency,
+            valueRange = 0f..100f,
+            resetValue = 0f,
+            onResetValue = { value ->
+                onTransparencyChange(value)
+                viewModel.setBackgroundTransparency(value)
+            },
+            onValueChange = onTransparencyChange,
+            onValueChangeFinished = onTransparencyChangeFinished,
+            valueTextFormatter = { value ->
+                String.format(transparencyValueFormat, value.roundToInt())
+            },
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        val blurValueFormat = stringResource(R.string.settings_background_blur_value)
+        SliderSettingItem(
+            title = stringResource(R.string.settings_background_blur),
+            description = stringResource(R.string.settings_background_blur_description),
+            value = blurRadius,
+            valueRange = 0f..30f,
+            resetValue = 0f,
+            onResetValue = { value ->
+                onBlurChange(value)
+                viewModel.setBackgroundBlur(value)
+            },
+            onValueChange = onBlurChange,
+            onValueChangeFinished = onBlurChangeFinished,
+            valueTextFormatter = { value ->
+                String.format(blurValueFormat, value.roundToInt())
+            },
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         Text(
             text = stringResource(R.string.settings_background_description),
