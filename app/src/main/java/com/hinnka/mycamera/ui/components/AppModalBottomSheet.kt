@@ -140,12 +140,11 @@ fun AppModalBottomSheet(
     // A caller-specified container is a deliberate material of its own: it keeps its color and gets
     // no backdrop blur, and a frosted sheet falls back to Material's scrim unless one is specified.
     val usesSheetMaterial = containerColor == null
-    val blurSupported = usesSheetMaterial && style == AppSheetStyle.Frosted && rememberCrossWindowBlurEnabled()
-    val tintAlpha = when {
-        style == AppSheetStyle.Translucent -> AppPanelMaterial.TranslucentAlpha
-        blurSupported -> FrostedTintAlpha
-        else -> FrostedTintAlphaWithoutBlur
-    }
+    val floatingUiMaterial = LocalFloatingUiMaterialSettings.current
+    val blurSupported = usesSheetMaterial &&
+        floatingUiMaterial.blurIntensityPercent > 0 &&
+        rememberCrossWindowBlurEnabled()
+    val tintAlpha = floatingUiMaterial.surfaceAlpha
     val blurProgress by animateFloatAsState(
         targetValue = if (blurSupported && sheetState.targetValue != SheetValue.Hidden) 1f else 0f,
         animationSpec = tween(BlurAnimationMillis),
@@ -184,8 +183,8 @@ fun AppModalBottomSheet(
             }
             onDispose { }
         }
-        if (window != null && usesSheetMaterial && style == AppSheetStyle.Frosted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val maxBlurRadiusPx = with(LocalDensity.current) { FrostedBlurRadius.toPx() }
+        if (window != null && usesSheetMaterial && blurSupported && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val maxBlurRadiusPx = with(LocalDensity.current) { floatingUiMaterial.blurRadius.toPx() }
             LaunchedEffect(window, maxBlurRadiusPx) {
                 window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
                 snapshotFlow { (maxBlurRadiusPx * blurProgress).roundToInt() }
