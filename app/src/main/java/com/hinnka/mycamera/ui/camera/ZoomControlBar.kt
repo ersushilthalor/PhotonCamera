@@ -335,7 +335,7 @@ private fun ZoomPresetPill(
                         modifier = Modifier
                             .size(29.dp)
                             .clip(CircleShape)
-                            .background(Color.Transparent)
+                            .background(Color.Black.copy(alpha = 0.5f))
                     )
                 }
                 val label = when {
@@ -347,7 +347,7 @@ private fun ZoomPresetPill(
                     style = TextStyle(
                         fontSize = if (selected) 14.sp else 13.sp,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                        color = Color.White,
+                        color = if (selected) Color(0xFFFFD52A) else Color.White,
                         textAlign = TextAlign.Center
                     ),
                     maxLines = 1,
