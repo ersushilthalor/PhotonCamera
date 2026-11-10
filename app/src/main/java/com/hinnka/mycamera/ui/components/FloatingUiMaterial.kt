@@ -46,7 +46,7 @@ fun FloatingUiMaterialSurface(
 ) {
     val settings = LocalFloatingUiMaterialSettings.current
     val backdrop = LocalFloatingUiBackdrop.current
-    val tint = baseColor.copy(alpha = settings.surfaceAlpha)
+    val tint = baseColor.copy(alpha = (baseColor.alpha * settings.surfaceAlpha).coerceIn(0f, 1f))
     val shape = RoundedCornerShape(cornerRadius)
 
     if (backdrop != null && settings.blurIntensityPercent > 0) {
