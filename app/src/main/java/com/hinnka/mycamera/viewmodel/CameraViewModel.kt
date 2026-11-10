@@ -626,6 +626,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val isAlgorithmicStabilizationSupported: Boolean
         get() = cameraController.realtimeStabilizationCoordinator.isGyroscopeAvailable
 
+    private val _floatingUiTransparencyPercent = MutableStateFlow(20)
+    val floatingUiTransparencyPercent: StateFlow<Int> = _floatingUiTransparencyPercent.asStateFlow()
+    private val _floatingUiBlurIntensityPercent = MutableStateFlow(100)
+    val floatingUiBlurIntensityPercent: StateFlow<Int> = _floatingUiBlurIntensityPercent.asStateFlow()
+    private var floatingUiTransparencySaveJob: Job? = null
+    private var floatingUiBlurSaveJob: Job? = null
+
     init {
         viewModelScope.launch {
             oppoPhotoSettings.collect { settings ->
@@ -635,6 +642,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     enabled = settings.refocusEnabled,
                     frameCount = settings.refocusFrameCount,
                 )
+            }
+        }
+        viewModelScope.launch {
+            userPreferencesRepository.userPreferences.collect { preferences ->
+                _floatingUiTransparencyPercent.value = preferences.floatingUiTransparencyPercent
+                _floatingUiBlurIntensityPercent.value = preferences.floatingUiBlurIntensityPercent
             }
         }
     }
@@ -2662,14 +2675,22 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setFloatingUiTransparencyPercent(value: Int) {
-        viewModelScope.launch {
-            userPreferencesRepository.saveFloatingUiTransparencyPercent(value.coerceIn(0, 100))
+        val safeValue = value.coerceIn(0, 100)
+        _floatingUiTransparencyPercent.value = safeValue
+        floatingUiTransparencySaveJob?.cancel()
+        floatingUiTransparencySaveJob = viewModelScope.launch {
+            delay(180)
+            userPreferencesRepository.saveFloatingUiTransparencyPercent(safeValue)
         }
     }
 
     fun setFloatingUiBlurIntensityPercent(value: Int) {
-        viewModelScope.launch {
-            userPreferencesRepository.saveFloatingUiBlurIntensityPercent(value.coerceIn(0, 100))
+        val safeValue = value.coerceIn(0, 100)
+        _floatingUiBlurIntensityPercent.value = safeValue
+        floatingUiBlurSaveJob?.cancel()
+        floatingUiBlurSaveJob = viewModelScope.launch {
+            delay(180)
+            userPreferencesRepository.saveFloatingUiBlurIntensityPercent(safeValue)
         }
     }
 
