@@ -918,7 +918,7 @@ fun CameraScreen(
                             zoomBarBounds = coordinates.boundsInRoot()
                         }
                         .clip(zoomPanelShape)
-                        .background(AppPanelMaterial.Tint.copy(alpha = 0.88f))
+                        .background(AppPanelMaterial.Tint)
                         .border(1.dp, AppPanelMaterial.EdgeHighlight, zoomPanelShape)
                 ) {
                     ZoomControlBar(

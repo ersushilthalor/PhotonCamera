@@ -1,7 +1,6 @@
 package com.hinnka.mycamera.ui.camera
 
 import com.hinnka.mycamera.ui.components.AppModalBottomSheet
-import com.hinnka.mycamera.ui.components.AppSheetStyle
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -109,8 +108,6 @@ fun LutEditBottomSheet(
 
     AppModalBottomSheet(
         containerColor = if (videoOnly) null else containerColor,
-        style = if (videoOnly) AppSheetStyle.CameraFrosted else AppSheetStyle.Translucent,
-        scrimColor = if (videoOnly) Color.Transparent else null,
         onDismissRequest = {
             flushLutSave()
             onDismiss()

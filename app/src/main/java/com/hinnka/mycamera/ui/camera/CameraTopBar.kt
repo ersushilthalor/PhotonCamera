@@ -1,7 +1,5 @@
 package com.hinnka.mycamera.ui.camera
 
-import android.view.Gravity
-import android.view.WindowManager
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -21,24 +19,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionOnScreen
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.ui.components.PhysicalButton
-import com.hinnka.mycamera.ui.components.AppPanelMaterial
-import com.hinnka.mycamera.ui.components.FrostedDialogWindowEffect
-import com.hinnka.mycamera.ui.components.findFrostedDialogWindow
 import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VideoCapabilities
@@ -47,7 +36,6 @@ import com.hinnka.mycamera.video.VideoLogProfile
 import com.hinnka.mycamera.video.VideoResolutionPreset
 import com.hinnka.mycamera.video.VideoStabilizationMode
 import com.hinnka.mycamera.ui.icons.AppIcons
-import kotlin.math.roundToInt
 
 @Composable
 fun CameraTopBar(
@@ -191,9 +179,6 @@ private fun VideoTopBar(
     modifier: Modifier = Modifier
 ) {
     var stabilizationMenuExpanded by remember { mutableStateOf(false) }
-    var stabilizationAnchorRightPx by remember { mutableIntStateOf(0) }
-    var stabilizationAnchorBottomPx by remember { mutableIntStateOf(0) }
-    val density = LocalDensity.current
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -254,16 +239,32 @@ private fun VideoTopBar(
                                 onClick = { stabilizationMenuExpanded = true },
                                 contentDescription = stringResource(
                                     R.string.settings_video_stabilization_default
-                                ),
-                                modifier = Modifier.onGloballyPositioned { coordinates ->
-                                    val position = coordinates.positionOnScreen()
-                                    stabilizationAnchorRightPx =
-                                        (position.x + coordinates.size.width).roundToInt()
-                                    stabilizationAnchorBottomPx =
-                                        (position.y + coordinates.size.height).roundToInt() +
-                                            with(density) { 4.dp.roundToPx() }
-                                }
+                                )
                             )
+                            DropdownMenu(
+                                expanded = stabilizationMenuExpanded,
+                                onDismissRequest = { stabilizationMenuExpanded = false }
+                            ) {
+                                videoCapabilities.availableStabilizationModes.forEach { mode ->
+                                    DropdownMenuItem(
+                                        text = { Text(videoStabilizationModeLabel(mode)) },
+                                        onClick = {
+                                            stabilizationMenuExpanded = false
+                                            onVideoStabilizationModeChange(mode)
+                                        },
+                                        trailingIcon = if (mode == videoConfig.stabilizationMode) {
+                                            {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = null
+                                                )
+                                            }
+                                        } else {
+                                            null
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -280,76 +281,7 @@ private fun VideoTopBar(
         }
     }
 
-    if (stabilizationMenuExpanded) {
-        Dialog(
-            onDismissRequest = { stabilizationMenuExpanded = false },
-            properties = DialogProperties(
-                dismissOnBackPress = true,
-                dismissOnClickOutside = true,
-                usePlatformDefaultWidth = false
-            )
-        ) {
-            val menuWidth = 184.dp
-            val menuWidthPx = with(density) { menuWidth.roundToPx() }
-            val dialogWindow = LocalView.current.findFrostedDialogWindow()
-            val blurSupported = FrostedDialogWindowEffect(
-                window = dialogWindow,
-                blurRadius = 28.dp,
-                gravity = Gravity.TOP or Gravity.LEFT,
-                x = (stabilizationAnchorRightPx - menuWidthPx).coerceAtLeast(0),
-                y = stabilizationAnchorBottomPx,
-                width = menuWidthPx,
-                height = WindowManager.LayoutParams.WRAP_CONTENT
-            )
-            val menuShape = RoundedCornerShape(16.dp)
-            Column(
-                modifier = Modifier
-                    .width(menuWidth)
-                    .clip(menuShape)
-                    .background(AppPanelMaterial.Tint.copy(alpha = if (blurSupported) 0.62f else 0.88f))
-                    .border(1.dp, AppPanelMaterial.EdgeHighlight, menuShape)
-                    .padding(vertical = 6.dp)
-            ) {
-                videoCapabilities.availableStabilizationModes.forEachIndexed { index, mode ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(44.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable {
-                                stabilizationMenuExpanded = false
-                                onVideoStabilizationModeChange(mode)
-                            }
-                            .padding(horizontal = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = videoStabilizationModeLabel(mode),
-                            color = Color.White,
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                        Spacer(modifier = Modifier.weight(1f))
-                        if (mode == videoConfig.stabilizationMode) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = null,
-                                tint = AccentColor,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                    if (index != videoCapabilities.availableStabilizationModes.lastIndex) {
-                        Spacer(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(1.dp)
-                                .background(AppPanelMaterial.EdgeHighlight)
-                        )
-                    }
-                }
-            }
-        }
-    }
+
 }
 
 @Composable

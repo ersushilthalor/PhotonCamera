@@ -73,8 +73,6 @@ data class FrameLayout(
     val designSize: FrameDesignSize = FrameDesignSize(),
     val heightPx: Float = 240.0f,
     val backgroundColor: Int = Color.WHITE,
-    val backgroundType: FrameBackgroundType = FrameBackgroundType.COLOR,
-    val backgroundBlurRadiusPx: Float = 96.0f,
     val borderColor: Int = backgroundColor, // 边框颜色，默认与背景色相同
     val elementSpacingPx: Float = 24.0f,
     val lineSpacingPx: Float = 24.0f, // 行间距
@@ -90,20 +88,7 @@ data class FrameLayout(
     val photoShadowColor: Int = 0xCC000000.toInt(),
     val imageResName: String? = null,  // 边框图片资源名称（仅 IMAGE 模式使用，内置资源）
     val imagePath: String? = null  // 边框图片文件路径（仅 IMAGE 模式使用，外部导入）
-) {
-    val effectiveBackgroundType: FrameBackgroundType get() = backgroundType.forPosition(position)
-}
-
-enum class FrameBackgroundType {
-    COLOR,
-    GAUSSIAN_BLUR,
-    LIQUID_GLASS;
-
-    val usesPhoto: Boolean get() = this != COLOR
-
-    fun forPosition(position: FramePosition): FrameBackgroundType =
-        if (this == LIQUID_GLASS && position != FramePosition.OVERLAY) COLOR else this
-}
+)
 
 /**
  * 边框位置

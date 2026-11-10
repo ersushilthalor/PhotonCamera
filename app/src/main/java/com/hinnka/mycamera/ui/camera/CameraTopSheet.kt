@@ -5,7 +5,6 @@ import android.graphics.drawable.ColorDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewParent
-import android.view.Window
 import android.view.WindowManager
 import android.media.AudioDeviceInfo
 import android.os.Build
@@ -42,8 +41,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
-import java.util.function.Consumer
-import kotlin.math.roundToInt
 import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.ui.theme.OnAccentColor
 import com.hinnka.mycamera.R
@@ -168,8 +165,6 @@ fun CameraTopSheet(
             val dialogWindow = remember(dialogView) {
                 dialogView.findCameraTopSheetDialogWindowProvider()?.window
             }
-            val blurSupported = rememberCameraTopSheetBlurEnabled()
-            val blurRadiusPx = with(LocalDensity.current) { 28.dp.toPx().roundToInt() }
 
             DisposableEffect(dialogWindow) {
                 dialogWindow?.apply {
@@ -184,19 +179,6 @@ fun CameraTopSheet(
                     }
                 }
                 onDispose {
-                    dialogWindow?.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
-                    dialogWindow?.setCameraTopSheetBackgroundBlurRadius(0)
-                }
-            }
-
-            LaunchedEffect(dialogWindow, blurSupported, blurRadiusPx) {
-                if (dialogWindow != null) {
-                    // Background blur is constrained to this dialog window. Blur-behind
-                    // would blur the entire camera viewfinder behind the dialog.
-                    dialogWindow.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
-                    dialogWindow.setCameraTopSheetBackgroundBlurRadius(
-                        if (blurSupported) blurRadiusPx else 0
-                    )
                 }
             }
 
@@ -216,9 +198,7 @@ fun CameraTopSheet(
                             .aspectRatio(1f)
                             .clip(sheetShape)
                             .background(
-                                AppPanelMaterial.Tint.copy(
-                                    alpha = if (blurSupported) 0.62f else 0.88f
-                                )
+                                AppPanelMaterial.Tint
                             )
                             .border(1.dp, AppPanelMaterial.EdgeHighlight, sheetShape)
                 // Keep the screen's top inset fixed, but measure content and side padding
@@ -1224,20 +1204,6 @@ fun QuickSettingToggle(
 }
 
 
-@Composable
-private fun rememberCameraTopSheetBlurEnabled(): Boolean {
-    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return false
-    val windowManager = LocalContext.current.getSystemService(WindowManager::class.java)
-        ?: return false
-    var enabled by remember(windowManager) { mutableStateOf(windowManager.isCrossWindowBlurEnabled) }
-    DisposableEffect(windowManager) {
-        val listener = Consumer<Boolean> { enabled = it }
-        windowManager.addCrossWindowBlurEnabledListener(listener)
-        onDispose { windowManager.removeCrossWindowBlurEnabledListener(listener) }
-    }
-    return enabled
-}
-
 private fun View.findCameraTopSheetDialogWindowProvider(): DialogWindowProvider? {
     if (this is DialogWindowProvider) return this
     var currentParent: ViewParent? = parent
@@ -1248,7 +1214,3 @@ private fun View.findCameraTopSheetDialogWindowProvider(): DialogWindowProvider?
     return null
 }
 
-private fun Window.setCameraTopSheetBackgroundBlurRadius(radius: Int) {
-    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return
-    setBackgroundBlurRadius(radius.coerceAtLeast(0))
-}

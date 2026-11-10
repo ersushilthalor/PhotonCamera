@@ -1,7 +1,6 @@
 package com.hinnka.mycamera.ui.common
 
 import com.hinnka.mycamera.ui.components.AppModalBottomSheet
-import com.hinnka.mycamera.ui.components.AppSheetStyle
 import com.hinnka.mycamera.ui.components.rememberAppModalBottomSheetState
 
 import android.net.Uri
@@ -70,7 +69,6 @@ fun WatermarkEditSheet(
     }
 
     AppModalBottomSheet(
-        style = AppSheetStyle.Translucent,
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         contentColor = Color.White,

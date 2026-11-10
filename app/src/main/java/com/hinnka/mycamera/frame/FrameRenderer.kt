@@ -156,12 +156,8 @@ class FrameRenderer(
             }
         }
         if (layout.position != FramePosition.OVERLAY) {
-            if (layout.effectiveBackgroundType.usesPhoto) {
-                drawPhotoBackground(canvas, originalBitmap, layout, outputWidth, outputHeight, dimensions)
-            } else {
-                backgroundPaint.color = layout.backgroundColor
-                canvas.drawRect(0f, 0f, outputWidth.toFloat(), outputHeight.toFloat(), backgroundPaint)
-            }
+            backgroundPaint.color = layout.backgroundColor
+            canvas.drawRect(0f, 0f, outputWidth.toFloat(), outputHeight.toFloat(), backgroundPaint)
         }
         drawPhotoBorder(
             canvas = canvas,
@@ -237,58 +233,26 @@ class FrameRenderer(
             }
 
             FramePosition.OVERLAY -> {
-                // 叠加模式只在底部水印区域绘制背景。
+                // Keep the standard watermark gradient; photo blur and glass materials are removed.
                 val overlayTop = (photoHeight - frameHeight).toFloat()
+                val gradientShader = LinearGradient(
+                    0f, overlayTop,
+                    0f, outputHeight.toFloat(),
+                    Color.TRANSPARENT,
+                    layout.backgroundColor,
+                    Shader.TileMode.CLAMP
+                )
+                backgroundPaint.shader = gradientShader
+                canvas.drawRect(0f, overlayTop, outputWidth.toFloat(), outputHeight.toFloat(), backgroundPaint)
+                backgroundPaint.shader = null
 
-                val glassBounds = if (layout.effectiveBackgroundType == FrameBackgroundType.LIQUID_GLASS) {
-                    FrameGlassOverlay.bounds(
-                        outputWidth.toFloat(), outputHeight.toFloat(), frameHeight.toFloat(),
-                        dimensions
-                    )
-                } else null
-
-                if (glassBounds != null) {
-                    drawPhotoBackground(canvas, originalBitmap, layout, outputWidth, outputHeight, dimensions)
-                } else if (layout.effectiveBackgroundType.usesPhoto) {
-                    if (frameHeight > 0) canvas.withSave {
-                        clipRect(0f, overlayTop, outputWidth.toFloat(), outputHeight.toFloat())
-                        drawPhotoBackground(this, originalBitmap, layout, outputWidth, outputHeight, dimensions)
-                    }
-                } else {
-                    // 创建线性渐变：从顶部全透明到底部半透明
-                    val gradientShader = LinearGradient(
-                        0f, overlayTop,
-                        0f, outputHeight.toFloat(),
-                        Color.TRANSPARENT,
-                        layout.backgroundColor,
-                        Shader.TileMode.CLAMP
-                    )
-                    backgroundPaint.shader = gradientShader
-                    canvas.drawRect(0f, overlayTop, outputWidth.toFloat(), outputHeight.toFloat(), backgroundPaint)
-                    backgroundPaint.shader = null
-                }
-
-
-                // 胶囊内的文字与背景共同上移；圆角外的照片不被文字覆盖。
-                if (glassBounds != null) {
-                    val contentBounds = FrameGlassOverlay.contentBounds(glassBounds, padding, verticalPadding)
-                    if (!contentBounds.isEmpty) canvas.withSave {
-                        clipPath(FrameGlassOverlay.outline(glassBounds))
-                        drawFrameContent(
-                            this, template.elements, metadata, layout,
-                            contentBounds.left, contentBounds.top, contentBounds.right, contentBounds.bottom,
-                            dimensions, previewSelection,
-                        )
-                    }
-                } else {
-                    drawFrameContent(
-                        canvas, template.elements, metadata, layout,
-                        left = padding, top = overlayTop + verticalPadding,
-                        right = outputWidth - padding, bottom = outputHeight.toFloat() - verticalPadding,
-                        dimensions = dimensions,
-                        previewSelection = previewSelection,
-                    )
-                }
+                drawFrameContent(
+                    canvas, template.elements, metadata, layout,
+                    left = padding, top = overlayTop + verticalPadding,
+                    right = outputWidth - padding, bottom = outputHeight.toFloat() - verticalPadding,
+                    dimensions = dimensions,
+                    previewSelection = previewSelection,
+                )
             }
 
             FramePosition.BORDER -> {
@@ -400,31 +364,6 @@ class FrameRenderer(
         }
     }
 
-    private fun drawPhotoBackground(
-        canvas: Canvas,
-        photo: Bitmap,
-        layout: FrameLayout,
-        width: Int,
-        height: Int,
-        dimensions: FrameDimensions,
-    ) {
-        val blurRadius = layout.backgroundBlurRadiusPx.coerceAtLeast(0f)
-        val frameHeight = dimensions.toPixels(layout.heightPx).toInt().toFloat()
-        val materialBounds = if (layout.effectiveBackgroundType == FrameBackgroundType.LIQUID_GLASS) {
-            FrameGlassOverlay.bounds(width.toFloat(), height.toFloat(), frameHeight, dimensions)
-        } else {
-            RectF(0f, 0f, width.toFloat(), height.toFloat()).apply {
-                if (layout.position == FramePosition.OVERLAY) top = (height - frameHeight).coerceAtLeast(0f)
-            }
-        }
-        FrameBackgroundRenderer.draw(
-            context, canvas, photo, layout, width, height,
-            sigma = dimensions.toPixels(blurRadius),
-            materialBounds = materialBounds,
-            unitScale = dimensions.toPixels(3.0f),
-        )
-    }
-
     @RequiresApi(34)
     fun renderGainmapContents(
         originalBitmap: Bitmap,
@@ -445,15 +384,12 @@ class FrameRenderer(
 
         val geometry = calculateFrameGeometry(originalBitmap, template.layout) ?: return gainmapContents
         val layout = template.layout
-        val photoBackground = layout.effectiveBackgroundType.usesPhoto
         val photoHeight = originalBitmap.height
         val photoWidth = originalBitmap.width
         val dimensions = FrameDimensions(photoWidth, photoHeight, layout.designSize, layout.elementSpacingPx)
-        val frameHeight = dimensions.toPixels(layout.heightPx).toInt()
-        val replacedOverlay = photoBackground && layout.position == FramePosition.OVERLAY && frameHeight > 0
         val cornerRadius = dimensions.toPixels(layout.photoCornerRadiusPx.coerceAtLeast(0f))
         if (
-            placedElements(template).isEmpty() && !replacedOverlay && cornerRadius == 0f &&
+            placedElements(template).isEmpty() && cornerRadius == 0f &&
             geometry.outputWidth == originalBitmap.width &&
             geometry.outputHeight == originalBitmap.height &&
             geometry.photoRect.left == 0f &&
@@ -471,34 +407,6 @@ class FrameRenderer(
             neutralColor = neutralColor,
             photoCornerRadius = cornerRadius,
         )
-        if (replacedOverlay) {
-            // The replacement background is SDR; original sharp gain samples must not survive there.
-            val canvas = Canvas(output)
-            canvas.scale(
-                output.width.toFloat() / geometry.outputWidth,
-                output.height.toFloat() / geometry.outputHeight
-            )
-            val designWidth = geometry.outputWidth
-            val designHeight = geometry.outputHeight
-            val neutralPaint = Paint().apply {
-                color = neutralColor
-                blendMode = BlendMode.SRC
-                isAntiAlias = layout.effectiveBackgroundType == FrameBackgroundType.LIQUID_GLASS
-            }
-            val bounds = RectF(
-                0f, (photoHeight - frameHeight).coerceAtLeast(0).toFloat(),
-                designWidth.toFloat(), designHeight.toFloat()
-            )
-            if (layout.effectiveBackgroundType == FrameBackgroundType.LIQUID_GLASS) {
-                val capsule = FrameGlassOverlay.bounds(
-                    designWidth.toFloat(), designHeight.toFloat(), frameHeight.toFloat(),
-                    dimensions
-                )
-                if (!capsule.isEmpty) canvas.drawPath(FrameGlassOverlay.outline(capsule), neutralPaint)
-            } else {
-                canvas.drawRect(bounds, neutralPaint)
-            }
-        }
         return compositePlacedGainmap(output, gainmap, framedSdr, template, metadata, dimensions, geometry)
     }
 
@@ -676,7 +584,6 @@ class FrameRenderer(
         outputWidth: Float
     ) {
         if (borderWidth <= 0 && borderHeight <= 0) return
-        if (layout.effectiveBackgroundType.usesPhoto) return
         if (layout.position != FramePosition.BORDER && layout.position != FramePosition.BOTH) return
 
         backgroundPaint.color = layout.borderColor
