@@ -138,8 +138,9 @@ fun AppModalBottomSheet(
     // Read in the host composition, where the insets belong to the host window.
     val hostStatusBarsVisible = WindowInsets.areStatusBarsVisible
     val liquidGlassEnabled = LocalLiquidGlassEnabled.current
-    // Liquid Glass uses the native cross-window blur path for every shared modal sheet.
-    val usesSheetMaterial = containerColor == null
+    // Liquid Glass intentionally overrides caller-specific sheet colors so every floating
+    // window follows the selected app-wide material.
+    val usesSheetMaterial = containerColor == null || liquidGlassEnabled
     val crossWindowBlurEnabled = rememberCrossWindowBlurEnabled()
     val blurSupported = usesSheetMaterial &&
         (style == AppSheetStyle.Frosted || liquidGlassEnabled) &&
@@ -160,7 +161,7 @@ fun AppModalBottomSheet(
         modifier = modifier,
         sheetState = sheetState,
         shape = shape ?: SheetShape,
-        containerColor = containerColor ?: if (liquidGlassEnabled) Color(0xFFBBD5F6).copy(alpha = tintAlpha) else AppPanelMaterial.Tint.copy(alpha = tintAlpha),
+        containerColor = if (liquidGlassEnabled) Color(0xFFBBD5F6).copy(alpha = tintAlpha) else containerColor ?: AppPanelMaterial.Tint.copy(alpha = tintAlpha),
         contentColor = contentColor,
         tonalElevation = 0.dp,
         scrimColor = scrimColor ?: when {
