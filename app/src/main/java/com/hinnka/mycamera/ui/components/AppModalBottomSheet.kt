@@ -68,8 +68,8 @@ enum class AppSheetStyle {
     Frosted,
 
     /**
-     * Live-adjustment sheet: no scrim and no blur, so the content behind stays visible while the
-     * panel is used; the panel itself is translucent.
+     * Live-adjustment sheet: no scrim; backdrop blur is controlled by the shared floating UI
+     * blur slider while the panel remains translucent.
      */
     Translucent,
 }
