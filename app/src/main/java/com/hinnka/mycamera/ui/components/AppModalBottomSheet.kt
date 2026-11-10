@@ -183,12 +183,23 @@ fun AppModalBottomSheet(
             }
             onDispose { }
         }
-        if (window != null && usesSheetMaterial && blurSupported && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (window != null && usesSheetMaterial && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val maxBlurRadiusPx = with(LocalDensity.current) { floatingUiMaterial.blurRadius.toPx() }
-            LaunchedEffect(window, maxBlurRadiusPx) {
-                window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
-                snapshotFlow { (maxBlurRadiusPx * blurProgress).roundToInt() }
-                    .collect { radius -> window.setBlurBehindRadius(radius) }
+            LaunchedEffect(window, maxBlurRadiusPx, blurSupported) {
+                if (blurSupported) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                    snapshotFlow { (maxBlurRadiusPx * blurProgress).roundToInt() }
+                        .collect { radius -> window.setBlurBehindRadius(radius) }
+                } else {
+                    window.setBlurBehindRadius(0)
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                }
+            }
+            DisposableEffect(window) {
+                onDispose {
+                    window.setBlurBehindRadius(0)
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                }
             }
         }
         val topGapPx = WindowInsets.statusBarsIgnoringVisibility
