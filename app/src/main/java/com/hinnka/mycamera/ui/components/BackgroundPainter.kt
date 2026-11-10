@@ -151,7 +151,13 @@ fun AppBackground(
         contentScale = ContentScale.Crop,
         alpha = 1f - effectiveTransparency / 100f,
         modifier = modifier
-            .then(backdrop?.let { Modifier.liquidGlassBackdropSource(it) } ?: Modifier)
+            .then(
+                if (userPreferences.liquidGlassEnabled) {
+                    backdrop?.let { Modifier.liquidGlassBackdropSource(it) } ?: Modifier
+                } else {
+                    Modifier
+                }
+            )
             .blur(effectiveBlur.dp),
     )
 }

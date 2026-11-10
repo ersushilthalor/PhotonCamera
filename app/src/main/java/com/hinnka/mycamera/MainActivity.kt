@@ -302,7 +302,14 @@ class MainActivity : AppCompatActivity() {
 
             PhotonCameraTheme {
                 val userPreferences by cameraViewModel.userPreferences.collectAsState()
-                val liquidGlassBackdrop = rememberLiquidGlassBackdrop()
+                val liquidGlassBackdrop = if (
+                    userPreferences.liquidGlassEnabled &&
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                ) {
+                    rememberLiquidGlassBackdrop()
+                } else {
+                    null
+                }
                 CompositionLocalProvider(
                     LocalLiquidGlassEnabled provides userPreferences.liquidGlassEnabled,
                     LocalLiquidGlassBackdrop provides liquidGlassBackdrop
