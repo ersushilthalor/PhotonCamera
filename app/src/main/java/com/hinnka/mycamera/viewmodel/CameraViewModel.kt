@@ -7145,6 +7145,20 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun setBackgroundTransparency(value: Float) {
+        val normalized = if (value.isFinite()) value.coerceIn(0f, 100f) else 0f
+        viewModelScope.launch {
+            userPreferencesRepository.saveBackgroundTransparency(normalized)
+        }
+    }
+
+    fun setBackgroundBlur(value: Float) {
+        val normalized = if (value.isFinite()) value.coerceIn(0f, 30f) else 0f
+        viewModelScope.launch {
+            userPreferencesRepository.saveBackgroundBlur(normalized)
+        }
+    }
+
     /**
      * 保存从外部选择的背景图
      */
