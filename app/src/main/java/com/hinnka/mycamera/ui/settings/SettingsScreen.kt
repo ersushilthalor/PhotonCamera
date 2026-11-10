@@ -1877,6 +1877,41 @@ fun SettingsScreen(
                                     }
                                     null -> Unit
                                 }
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+
+                        LiquidGlassModeSetting(
+                            enabled = userPreferences.liquidGlassEnabled,
+                            onEnabledChange = viewModel::setLiquidGlassEnabled
+                        )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+
+                        BackgroundSetting(
+                            viewModel = viewModel,
+                            transparency = backgroundTransparencyUi,
+                            blurRadius = backgroundBlurUi,
+                            onTransparencyChange = { backgroundTransparencyUi = it },
+                            onBlurChange = { backgroundBlurUi = it },
+                            onTransparencyChangeFinished = {
+                                viewModel.setBackgroundTransparency(backgroundTransparencyUi)
+                            },
+                            onBlurChangeFinished = {
+                                viewModel.setBackgroundBlur(backgroundBlurUi)
+                            },
+                            modifier = Modifier.padding(bottom = 16.dp)
+                        )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+
                             }
                         )
                     }
@@ -1897,29 +1932,6 @@ fun SettingsScreen(
 
                         UiStyleSetting(currentStyle = userPreferences.uiStyle, onStyleSelected = viewModel::setUiStyle)
 
-                        HorizontalDivider(color = Color.White.copy(alpha = 0.1f), modifier = Modifier.padding(vertical = 12.dp))
-
-                        LiquidGlassModeSetting(
-                            enabled = userPreferences.liquidGlassEnabled,
-                            onEnabledChange = viewModel::setLiquidGlassEnabled
-                        )
-
-                        HorizontalDivider(color = Color.White.copy(alpha = 0.1f), modifier = Modifier.padding(vertical = 12.dp))
-
-                        BackgroundSetting(
-                            viewModel = viewModel,
-                            transparency = backgroundTransparencyUi,
-                            blurRadius = backgroundBlurUi,
-                            onTransparencyChange = { backgroundTransparencyUi = it },
-                            onBlurChange = { backgroundBlurUi = it },
-                            onTransparencyChangeFinished = {
-                                viewModel.setBackgroundTransparency(backgroundTransparencyUi)
-                            },
-                            onBlurChangeFinished = {
-                                viewModel.setBackgroundBlur(backgroundBlurUi)
-                            },
-                            modifier = Modifier.padding(bottom = 16.dp)
-                        )
 
                         HorizontalDivider(
                             color = Color.White.copy(alpha = 0.1f),
