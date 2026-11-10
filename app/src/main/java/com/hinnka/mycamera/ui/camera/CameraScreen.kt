@@ -940,7 +940,8 @@ fun CameraScreen(
                             x = 0,
                             y = zoomBarWindowY,
                             width = WindowManager.LayoutParams.MATCH_PARENT,
-                            height = WindowManager.LayoutParams.WRAP_CONTENT
+                            height = WindowManager.LayoutParams.WRAP_CONTENT,
+                            allowOutsideTouches = true
                         )
                         val zoomPanelShape = RoundedCornerShape(18.dp)
                         Box(

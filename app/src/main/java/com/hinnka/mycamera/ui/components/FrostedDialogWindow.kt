@@ -33,6 +33,7 @@ fun FrostedDialogWindowEffect(
     y: Int,
     width: Int,
     height: Int,
+    allowOutsideTouches: Boolean = false,
 ): Boolean {
     val blurEnabled = rememberCrossWindowBlurSupported()
     val blurRadiusPx = with(LocalDensity.current) { blurRadius.toPx().roundToInt() }
@@ -45,11 +46,12 @@ fun FrostedDialogWindowEffect(
         }
         onDispose {
             window?.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
             window?.setFrostedBackgroundBlurRadius(0)
         }
     }
 
-    LaunchedEffect(window, blurEnabled, blurRadiusPx, gravity, x, y, width, height) {
+    LaunchedEffect(window, blurEnabled, blurRadiusPx, gravity, x, y, width, height, allowOutsideTouches) {
         val dialogWindow = window ?: return@LaunchedEffect
         dialogWindow.setBackgroundDrawable(ColorDrawable(AndroidColor.TRANSPARENT))
         dialogWindow.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
@@ -64,6 +66,11 @@ fun FrostedDialogWindowEffect(
         // Background blur is limited to this compact dialog window. Blur-behind would
         // blur the entire camera preview behind the dialog.
         dialogWindow.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+        if (allowOutsideTouches) {
+            dialogWindow.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+        } else {
+            dialogWindow.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+        }
         dialogWindow.setFrostedBackgroundBlurRadius(if (blurEnabled) blurRadiusPx else 0)
     }
     return blurEnabled
