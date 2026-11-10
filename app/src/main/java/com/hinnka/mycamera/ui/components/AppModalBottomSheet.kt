@@ -1,5 +1,7 @@
 package com.hinnka.mycamera.ui.components
 
+import android.graphics.Color as AndroidColor
+import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.view.View
 import android.view.ViewParent
@@ -71,6 +73,7 @@ enum class AppSheetStyle {
      * Live-adjustment sheet: no scrim and no blur, so the content behind stays visible while the
      * panel is used; the panel itself is translucent.
      */
+    CameraFrosted,
     Translucent,
 }
 
@@ -80,6 +83,7 @@ private const val FrostedTintAlpha = 0.6f
 private const val FrostedTintAlphaWithoutBlur = 0.92f
 private val FrostedScrimColor = Color.Black.copy(alpha = 0.28f)
 private val FrostedBlurRadius = 36.dp
+private val CameraFrostedBlurRadius = 28.dp
 private const val BlurAnimationMillis = 280
 
 /**
@@ -140,10 +144,14 @@ fun AppModalBottomSheet(
     // A caller-specified container is a deliberate material of its own: it keeps its color and gets
     // no backdrop blur, and a frosted sheet falls back to Material's scrim unless one is specified.
     val usesSheetMaterial = containerColor == null
-    val blurSupported = usesSheetMaterial && style == AppSheetStyle.Frosted && rememberCrossWindowBlurEnabled()
+    val usesFrostedMaterial = usesSheetMaterial && style != AppSheetStyle.Translucent
+    val isCameraFrosted = style == AppSheetStyle.CameraFrosted
+    val blurSupported = usesFrostedMaterial && rememberCrossWindowBlurEnabled()
     val tintAlpha = when {
         style == AppSheetStyle.Translucent -> AppPanelMaterial.TranslucentAlpha
+        isCameraFrosted && blurSupported -> 0.62f
         blurSupported -> FrostedTintAlpha
+        isCameraFrosted -> 0.88f
         else -> FrostedTintAlphaWithoutBlur
     }
     val blurProgress by animateFloatAsState(
@@ -160,7 +168,7 @@ fun AppModalBottomSheet(
         contentColor = contentColor,
         tonalElevation = 0.dp,
         scrimColor = scrimColor ?: when {
-            style == AppSheetStyle.Translucent -> Color.Transparent
+            style == AppSheetStyle.Translucent || isCameraFrosted -> Color.Transparent
             usesSheetMaterial -> FrostedScrimColor
             else -> BottomSheetDefaults.ScrimColor
         },
@@ -171,7 +179,7 @@ fun AppModalBottomSheet(
     ) {
         // Everything below runs in the dialog composition, where the insets belong to the dialog.
         val window = LocalView.current.findDialogWindowProvider()?.window
-        DisposableEffect(window, hostStatusBarsVisible) {
+        DisposableEffect(window, hostStatusBarsVisible, isCameraFrosted) {
             if (window != null) {
                 WindowCompat.getInsetsController(window, window.decorView).apply {
                     systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -181,15 +189,30 @@ fun AppModalBottomSheet(
                         hide(WindowInsetsCompat.Type.statusBars())
                     }
                 }
+                if (isCameraFrosted) {
+                    window.setBackgroundDrawable(ColorDrawable(AndroidColor.TRANSPARENT))
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                }
             }
-            onDispose { }
+            onDispose {
+                if (isCameraFrosted) window?.setCameraFrostedBackgroundBlurRadius(0)
+            }
         }
-        if (window != null && usesSheetMaterial && style == AppSheetStyle.Frosted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val maxBlurRadiusPx = with(LocalDensity.current) { FrostedBlurRadius.toPx() }
-            LaunchedEffect(window, maxBlurRadiusPx) {
-                window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+        if (window != null && usesFrostedMaterial && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val blurRadius = if (isCameraFrosted) CameraFrostedBlurRadius else FrostedBlurRadius
+            val maxBlurRadiusPx = with(LocalDensity.current) { blurRadius.toPx() }
+            LaunchedEffect(window, maxBlurRadiusPx, blurProgress, isCameraFrosted) {
                 snapshotFlow { (maxBlurRadiusPx * blurProgress).roundToInt() }
-                    .collect { radius -> window.setBlurBehindRadius(radius) }
+                    .collect { radius ->
+                        if (isCameraFrosted) {
+                            window.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                            window.setCameraFrostedBackgroundBlurRadius(radius)
+                        } else {
+                            window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                            window.setBlurBehindRadius(radius)
+                        }
+                    }
             }
         }
         val topGapPx = WindowInsets.statusBarsIgnoringVisibility
@@ -233,6 +256,11 @@ private fun rememberCrossWindowBlurEnabled(): Boolean {
         onDispose { windowManager.removeCrossWindowBlurEnabledListener(listener) }
     }
     return enabled
+}
+
+private fun Window.setCameraFrostedBackgroundBlurRadius(radius: Int) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+    setBackgroundBlurRadius(radius.coerceAtLeast(0))
 }
 
 private fun Window.setBlurBehindRadius(radius: Int) {
