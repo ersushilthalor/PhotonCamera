@@ -1633,7 +1633,9 @@ fun CameraScreen(
                 }
             }
 
-            topBar()
+            CompositionLocalProvider(LocalFloatingUiBackdrop provides floatingUiBackdrop) {
+                topBar()
+            }
 
             CameraBottomControlsLayout(
                 viewfinderBottom = viewfinderTop + cardHeight,
