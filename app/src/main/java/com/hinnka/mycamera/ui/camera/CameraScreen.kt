@@ -1658,7 +1658,7 @@ fun CameraScreen(
             PanelDismissPreviewOverlay(
                 bounds = panelDismissBounds,
                 parentBounds = cameraScreenBounds,
-                dimBackground = activePanel == ActivePanel.SETTINGS,
+                dimBackground = false,
                 onDismiss = { activePanel = ActivePanel.NONE }
             )
         }
@@ -1749,6 +1749,7 @@ fun CameraScreen(
             oppoPhotoSettings = oppoPhotoSettings,
             onOppoPhotoSettingsChange = viewModel::updateOppoPhotoSettings,
             refocusAvailable = state.minimumFocusDistance > 0f,
+            onDismissRequest = { activePanel = ActivePanel.NONE },
             contentTopPadding = CameraTopBarBaseTopPadding + topSafePadding
         )
 
