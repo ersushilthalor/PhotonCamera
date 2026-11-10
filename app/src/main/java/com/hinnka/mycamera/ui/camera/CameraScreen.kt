@@ -9,7 +9,6 @@ import android.graphics.SurfaceTexture
 import android.os.Environment
 import android.os.SystemClock
 import android.provider.Settings
-import android.view.Gravity
 import android.view.WindowManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -47,10 +46,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -60,8 +57,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -293,7 +288,6 @@ fun CameraScreen(
     var zoomJoystickOpen by remember { mutableStateOf(false) }
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
     var zoomBarBounds by remember { mutableStateOf<Rect?>(null) }
-    var zoomBarWindowY by remember { mutableIntStateOf(-1) }
     var filterButtonBounds by remember { mutableStateOf<Rect?>(null) }
     var captureButtonBounds by remember { mutableStateOf<Rect?>(null) }
     var parameterRulerBounds by remember { mutableStateOf<Rect?>(null) }
@@ -912,81 +906,52 @@ fun CameraScreen(
 
         val zoomBar = @Composable {
             if (activePanel == ActivePanel.NONE && !isXpan) {
-                // Keep the original layout slot and hit-test bounds in the camera window.
-                // The controls are drawn in a slim dialog to constrain background blur to this strip.
+                // Keep the zoom controls in the activity window. A separate always-on Dialog
+                // window can crash during camera startup on some Android/OEM window managers.
+                // The frosted tint and border are retained without creating another window.
+                val zoomPanelShape = RoundedCornerShape(18.dp)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(CameraControlsLayoutDefaults.ZoomBarHeight)
                         .onGloballyPositioned { coordinates ->
                             zoomBarBounds = coordinates.boundsInRoot()
-                            zoomBarWindowY = coordinates.positionOnScreen().y.roundToInt()
                         }
-                )
-                if (zoomBarWindowY >= 0) {
-                    Dialog(
-                        onDismissRequest = {},
-                        properties = DialogProperties(
-                            dismissOnBackPress = false,
-                            dismissOnClickOutside = false,
-                            usePlatformDefaultWidth = false
-                        )
-                    ) {
-                        val dialogWindow = LocalView.current.findFrostedDialogWindow()
-                        val blurSupported = FrostedDialogWindowEffect(
-                            window = dialogWindow,
-                            blurRadius = 28.dp,
-                            gravity = Gravity.TOP or Gravity.LEFT,
-                            x = 0,
-                            y = zoomBarWindowY,
-                            width = WindowManager.LayoutParams.MATCH_PARENT,
-                            height = WindowManager.LayoutParams.WRAP_CONTENT,
-                            allowOutsideTouches = true
-                        )
-                        val zoomPanelShape = RoundedCornerShape(18.dp)
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(CameraControlsLayoutDefaults.ZoomBarHeight)
-                                .clip(zoomPanelShape)
-                                .background(AppPanelMaterial.Tint.copy(alpha = if (blurSupported) 0.62f else 0.88f))
-                                .border(1.dp, AppPanelMaterial.EdgeHighlight, zoomPanelShape)
-                        ) {
-                            ZoomControlBar(
-                                viewModel = viewModel,
-                                zoomRatio = viewModel.zoomRatioByMain,
-                                availableCameras = state.availableCameras,
-                                currentCameraId = state.getCurrentCameraInfo()?.cameraId ?: "0",
-                                onZoomChange = { setZoomWithPreviewTransition(it) },
-                                onPreviewZoomChange = viewModel::setZoomRatio,
-                                onZoomStopClick = { setZoomWithPreviewTransition(it) },
-                                onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
-                                onFilterClick = {
-                                    if (isVideoMode) {
-                                        // Open the regular LUT selector; its Edit action opens adjustments.
-                                        activePanel = if (activePanel == ActivePanel.FILTERS) {
-                                            ActivePanel.NONE
-                                        } else {
-                                            ActivePanel.FILTERS
-                                        }
-                                    } else {
-                                        activePanel = if (activePanel == ActivePanel.EDIT) ActivePanel.NONE else ActivePanel.EDIT
-                                    }
-                                },
-                                onFilterButtonBoundsChanged = { bounds ->
-                                    val rootTop = zoomBarBounds?.top ?: 0f
-                                    filterButtonBounds = Rect(bounds.left, bounds.top + rootTop, bounds.right, bounds.bottom + rootTop)
-                                },
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-                    }
+                        .clip(zoomPanelShape)
+                        .background(AppPanelMaterial.Tint.copy(alpha = 0.88f))
+                        .border(1.dp, AppPanelMaterial.EdgeHighlight, zoomPanelShape)
+                ) {
+                    ZoomControlBar(
+                        viewModel = viewModel,
+                        zoomRatio = viewModel.zoomRatioByMain,
+                        availableCameras = state.availableCameras,
+                        currentCameraId = state.getCurrentCameraInfo()?.cameraId ?: "0",
+                        onZoomChange = { setZoomWithPreviewTransition(it) },
+                        onPreviewZoomChange = viewModel::setZoomRatio,
+                        onZoomStopClick = { setZoomWithPreviewTransition(it) },
+                        onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
+                        onFilterClick = {
+                            if (isVideoMode) {
+                                // Open the regular LUT selector; its Edit action opens adjustments.
+                                activePanel = if (activePanel == ActivePanel.FILTERS) {
+                                    ActivePanel.NONE
+                                } else {
+                                    ActivePanel.FILTERS
+                                }
+                            } else {
+                                activePanel = if (activePanel == ActivePanel.EDIT) ActivePanel.NONE else ActivePanel.EDIT
+                            }
+                        },
+                        onFilterButtonBoundsChanged = { bounds ->
+                            filterButtonBounds = bounds
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
             } else {
                 SideEffect {
                     zoomBarBounds = null
                     filterButtonBounds = null
-                    zoomBarWindowY = -1
                 }
             }
         }
