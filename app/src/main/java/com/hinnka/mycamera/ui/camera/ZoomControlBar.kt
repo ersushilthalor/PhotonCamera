@@ -317,6 +317,8 @@ private fun ZoomPresetPill(
 
     Row(
         modifier = modifier
+            .clip(CircleShape)
+            .background(Color(0xFF25242C))
             .padding(horizontal = 4.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -335,7 +337,7 @@ private fun ZoomPresetPill(
                         modifier = Modifier
                             .size(29.dp)
                             .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.5f))
+                            .background(Color(0xFF484651))
                     )
                 }
                 val label = when {
@@ -347,7 +349,7 @@ private fun ZoomPresetPill(
                     style = TextStyle(
                         fontSize = if (selected) 14.sp else 13.sp,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                        color = if (selected) Color(0xFFFFD52A) else Color.White,
+                        color = Color.White,
                         textAlign = TextAlign.Center
                     ),
                     maxLines = 1,
@@ -384,7 +386,7 @@ fun ZoomContinuousRuler(
             modifier = Modifier
                 .fillMaxSize()
                 .clip(CircleShape)
-                .background(Color.Transparent)
+                .background(Color(0xFF292929))
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val safeZoom = zoomRatio.coerceAtLeast(0.001f).toDouble()

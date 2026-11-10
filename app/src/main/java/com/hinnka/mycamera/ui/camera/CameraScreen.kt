@@ -906,52 +906,39 @@ fun CameraScreen(
 
         val zoomBar = @Composable {
             if (activePanel == ActivePanel.NONE && !isXpan) {
-                // Keep the zoom controls in the activity window. A separate always-on Dialog
-                // window can crash during camera startup on some Android/OEM window managers.
-                // The frosted tint and border are retained without creating another window.
-                val zoomPanelShape = RoundedCornerShape(18.dp)
-                Box(
+                ZoomControlBar(
+                    viewModel = viewModel,
+                    zoomRatio = viewModel.zoomRatioByMain,
+                    availableCameras = state.availableCameras,
+                    currentCameraId = state.getCurrentCameraInfo()?.cameraId ?: "0",
+                    onZoomChange = { setZoomWithPreviewTransition(it) },
+                    onPreviewZoomChange = viewModel::setZoomRatio,
+                    onZoomStopClick = { setZoomWithPreviewTransition(it) },
+                    onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
+                    onFilterClick = {
+                        if (isVideoMode) {
+                            // Open the regular LUT selector; its Edit action opens adjustments.
+                            activePanel = if (activePanel == ActivePanel.FILTERS) {
+                                ActivePanel.NONE
+                            } else {
+                                ActivePanel.FILTERS
+                            }
+                        } else {
+                            activePanel = if (activePanel == ActivePanel.EDIT) ActivePanel.NONE else ActivePanel.EDIT
+                        }
+                    },
+                    onFilterButtonBoundsChanged = { bounds ->
+                        filterButtonBounds = bounds
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(CameraControlsLayoutDefaults.ZoomBarHeight)
                         .onGloballyPositioned { coordinates ->
                             zoomBarBounds = coordinates.boundsInRoot()
                         }
-                        .clip(zoomPanelShape)
-                        .background(AppPanelMaterial.Tint)
-                        .border(1.dp, AppPanelMaterial.EdgeHighlight, zoomPanelShape)
-                ) {
-                    ZoomControlBar(
-                        viewModel = viewModel,
-                        zoomRatio = viewModel.zoomRatioByMain,
-                        availableCameras = state.availableCameras,
-                        currentCameraId = state.getCurrentCameraInfo()?.cameraId ?: "0",
-                        onZoomChange = { setZoomWithPreviewTransition(it) },
-                        onPreviewZoomChange = viewModel::setZoomRatio,
-                        onZoomStopClick = { setZoomWithPreviewTransition(it) },
-                        onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
-                        onFilterClick = {
-                            if (isVideoMode) {
-                                // Open the regular LUT selector; its Edit action opens adjustments.
-                                activePanel = if (activePanel == ActivePanel.FILTERS) {
-                                    ActivePanel.NONE
-                                } else {
-                                    ActivePanel.FILTERS
-                                }
-                            } else {
-                                activePanel = if (activePanel == ActivePanel.EDIT) ActivePanel.NONE else ActivePanel.EDIT
-                            }
-                        },
-                        onFilterButtonBoundsChanged = { bounds ->
-                            filterButtonBounds = bounds
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
+                )
             } else {
                 SideEffect {
                     zoomBarBounds = null
-                    filterButtonBounds = null
                 }
             }
         }
@@ -1671,7 +1658,7 @@ fun CameraScreen(
             PanelDismissPreviewOverlay(
                 bounds = panelDismissBounds,
                 parentBounds = cameraScreenBounds,
-                dimBackground = false,
+                dimBackground = activePanel == ActivePanel.SETTINGS,
                 onDismiss = { activePanel = ActivePanel.NONE }
             )
         }
@@ -1762,7 +1749,6 @@ fun CameraScreen(
             oppoPhotoSettings = oppoPhotoSettings,
             onOppoPhotoSettingsChange = viewModel::updateOppoPhotoSettings,
             refocusAvailable = state.minimumFocusDistance > 0f,
-            onDismissRequest = { activePanel = ActivePanel.NONE },
             contentTopPadding = CameraTopBarBaseTopPadding + topSafePadding
         )
 

@@ -1319,12 +1319,19 @@
     <string name="settings_retain_capture_settings_description">Restore exposure compensation, shutter speed, ISO, focus and white balance, including auto/manual modes, when reopening the camera. Turning this off clears saved settings.</string>
     <string name="settings_raw_digital_zoom_resampling">Restore digital zoom resolution</string>
     <string name="settings_raw_digital_zoom_resampling_description">Resamples digital zoom photos to the current physical lens resolution, then applies the output scale.</string>
+    <string name="frame_editor_background_type">Background</string>
+    <string name="frame_editor_background_color">Solid Color</string>
+    <string name="frame_editor_background_blur">Gaussian Blur</string>
     <string name="frame_editor_layout_vertical_padding">Vertical Padding (px)</string>
     <string name="frame_editor_layout_border_height">Top Border Height (px)</string>
     <string name="frame_editor_design_width">Design width (px)</string>
     <string name="frame_editor_design_height">Design height (px)</string>
     <string name="frame_editor_dimension_hint">All dimensions are pixels on the design canvas. Frames, text and logos scale uniformly by actual photo width ÷ design width; the photo area adapts to the actual height.</string>
     <string name="frame_editor_element_spacing">Element Spacing (px)</string>
+    <string name="frame_editor_background_blur_radius">Blur Amount (px)</string>
+    <string name="frame_editor_background_blur_hint">Fill the background with a blurred copy of the photo. In overlay mode, only the watermark area is blurred.</string>
+    <string name="frame_editor_background_glass">Liquid Glass</string>
+    <string name="frame_editor_background_glass_hint">Overlay a liquid glass capsule near the bottom of the photo, with space on both sides and below.</string>
     <string name="settings_accent_color">Highlight color</string>
     <string name="settings_accent_color_description">Use one highlight color for controls, camera parameters, capture progress, and Professional mode.</string>
     <string name="settings_accent_color_reset">Restore default</string>
@@ -1380,9 +1387,9 @@
     <string name="settings_raw_leica_color_matrix_m9">M9</string>
     <string name="camera_focus_point_label">Focus</string>
     <string name="camera_metering_point_label">Metering</string>
-    <!-- Video editor: post-processing brightness with highlight protection -->
-    <string name="video_brightness">Brightness</string>
-    <string name="video_brightness_description">Brighten the overall video with a midtone-lifting tone curve and soft highlight roll-off. Does not change exposure, ISO, or shutter.</string>
+    <!-- Video editor: independent color recovery with contrast preserved -->
+    <string name="video_washed_out_recovery">Washed-Out Recovery</string>
+    <string name="video_washed_out_recovery_description">Restore faded color in bright tones while preserving image luminance and the existing contrast setting.</string>
 
     <string name="oppo_auto_hdr">Auto HDR</string>
     <string name="oppo_fast_shutter">Fast Shutter</string>

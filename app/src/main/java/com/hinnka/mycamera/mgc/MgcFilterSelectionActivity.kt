@@ -1,6 +1,7 @@
 package com.hinnka.mycamera.mgc
 
 import com.hinnka.mycamera.ui.components.AppModalBottomSheet
+import com.hinnka.mycamera.ui.components.AppSheetStyle
 
 import android.app.Activity
 import android.content.Intent
@@ -175,7 +176,8 @@ private fun MgcFilterSelectionRoute(
     if (editingLutId == null) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         AppModalBottomSheet(
-            containerColor = Color(0xFF1C1C1E),
+            containerColor = Color.Black.copy(alpha = 0.8f),
+            style = AppSheetStyle.Translucent,
             onDismissRequest = onDismiss,
             sheetState = sheetState,
         ) {

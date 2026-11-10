@@ -94,6 +94,7 @@ import com.hinnka.mycamera.frame.DividerOrientation
 import com.hinnka.mycamera.frame.ElementAlignment
 import com.hinnka.mycamera.frame.FontWeight as FrameFontWeight
 import com.hinnka.mycamera.frame.FrameEditorDraft
+import com.hinnka.mycamera.frame.FrameBackgroundType
 import com.hinnka.mycamera.frame.FrameElementDraft
 import com.hinnka.mycamera.frame.FramePosition
 import com.hinnka.mycamera.frame.FramePlacement
@@ -555,6 +556,7 @@ private fun FrameBasicTab(
                     onSelected = { position ->
                         onDraftChange(draft.copy(layout = draft.layout.copy(
                             position = position,
+                            backgroundType = draft.layout.backgroundType.forPosition(position)
                         )))
                     }
                 )
@@ -612,20 +614,48 @@ private fun FrameBasicTab(
                             }
                         )
                     }
-                    ColorField(
-                        label = stringResource(R.string.frame_editor_layout_background),
-                        value = draft.layout.backgroundColor,
-                        onValueChange = {
-                            onDraftChange(draft.copy(layout = draft.layout.copy(backgroundColor = it)))
-                        }
+                    DropdownSelectionField(
+                        label = stringResource(R.string.frame_editor_background_type),
+                        currentLabel = frameBackgroundTypeLabel(draft.layout.backgroundType),
+                        options = FrameBackgroundType.entries.filter { it.forPosition(draft.layout.position) == it },
+                        optionLabel = { frameBackgroundTypeLabel(it) },
+                        onSelected = { onDraftChange(draft.copy(layout = draft.layout.copy(backgroundType = it))) }
                     )
-                    ColorField(
-                        label = stringResource(R.string.frame_editor_layout_border_color),
-                        value = draft.layout.borderColor,
-                        onValueChange = {
-                            onDraftChange(draft.copy(layout = draft.layout.copy(borderColor = it)))
-                        }
-                    )
+                    if (draft.layout.backgroundType == FrameBackgroundType.GAUSSIAN_BLUR) {
+                        Text(
+                            text = stringResource(R.string.frame_editor_background_blur_hint),
+                            color = Color.White.copy(alpha = 0.65f),
+                            fontSize = 12.sp
+                        )
+                        NumberField(
+                            label = stringResource(R.string.frame_editor_background_blur_radius),
+                            value = draft.layout.backgroundBlurRadiusPx,
+                            onValueChange = {
+                                onDraftChange(draft.copy(layout = draft.layout.copy(backgroundBlurRadiusPx = it)))
+                            }
+                        )
+                    } else if (draft.layout.backgroundType == FrameBackgroundType.LIQUID_GLASS) {
+                        Text(
+                            text = stringResource(R.string.frame_editor_background_glass_hint),
+                            color = Color.White.copy(alpha = 0.65f),
+                            fontSize = 12.sp
+                        )
+                    } else {
+                        ColorField(
+                            label = stringResource(R.string.frame_editor_layout_background),
+                            value = draft.layout.backgroundColor,
+                            onValueChange = {
+                                onDraftChange(draft.copy(layout = draft.layout.copy(backgroundColor = it)))
+                            }
+                        )
+                        ColorField(
+                            label = stringResource(R.string.frame_editor_layout_border_color),
+                            value = draft.layout.borderColor,
+                            onValueChange = {
+                                onDraftChange(draft.copy(layout = draft.layout.copy(borderColor = it)))
+                            }
+                        )
+                    }
                     NumberField(
                         label = stringResource(R.string.frame_editor_layout_line_spacing),
                         value = draft.layout.lineSpacingPx,
@@ -2310,6 +2340,13 @@ private fun frameElementTypeLabel(type: FrameElementType): String = when (type) 
     FrameElementType.LOGO -> stringResource(R.string.frame_editor_element_logo)
     FrameElementType.DIVIDER -> stringResource(R.string.frame_editor_element_divider)
     FrameElementType.SPACER -> stringResource(R.string.frame_editor_element_spacer)
+}
+
+@Composable
+private fun frameBackgroundTypeLabel(type: FrameBackgroundType): String = when (type) {
+    FrameBackgroundType.COLOR -> stringResource(R.string.frame_editor_background_color)
+    FrameBackgroundType.GAUSSIAN_BLUR -> stringResource(R.string.frame_editor_background_blur)
+    FrameBackgroundType.LIQUID_GLASS -> stringResource(R.string.frame_editor_background_glass)
 }
 
 @Composable

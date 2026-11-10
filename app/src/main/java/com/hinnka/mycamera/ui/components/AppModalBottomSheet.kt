@@ -1,7 +1,12 @@
 package com.hinnka.mycamera.ui.components
 
+import android.os.Build
 import android.view.View
 import android.view.ViewParent
+import android.view.Window
+import android.view.WindowManager
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -19,13 +24,21 @@ import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetState
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
@@ -33,15 +46,41 @@ import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import java.util.function.Consumer
+import kotlin.math.roundToInt
 
-/** Opaque panel colors shared by sheets and in-window camera panels. */
+/** Panel material shared by sheets and in-window camera panels. */
 object AppPanelMaterial {
     val Tint = Color(0xFF1C1C1E)
-    val EdgeHighlight = Color(0xFF39393B)
+
+    /** Tint alpha of a translucent panel that keeps the content behind it visible. */
+    const val TranslucentAlpha = 0.78f
+
+    /** Hairline that separates a translucent panel from bright content behind it. */
+    val EdgeHighlight = Color.White.copy(alpha = 0.10f)
+
+    val TranslucentColor: Color get() = Tint.copy(alpha = TranslucentAlpha)
+}
+
+/** Background material of an [AppModalBottomSheet]. */
+enum class AppSheetStyle {
+    /** Modal sheet: the whole screen behind it is dimmed and blurred, the panel is translucent. */
+    Frosted,
+
+    /**
+     * Live-adjustment sheet: no scrim and no blur, so the content behind stays visible while the
+     * panel is used; the panel itself is translucent.
+     */
+    Translucent,
 }
 
 private val SheetCornerRadius = 28.dp
 private val SheetShape = RoundedCornerShape(topStart = SheetCornerRadius, topEnd = SheetCornerRadius)
+private const val FrostedTintAlpha = 0.6f
+private const val FrostedTintAlphaWithoutBlur = 0.92f
+private val FrostedScrimColor = Color.Black.copy(alpha = 0.28f)
+private val FrostedBlurRadius = 36.dp
+private const val BlurAnimationMillis = 280
 
 /**
  * Sheet state used by [AppModalBottomSheet]. The half-expanded anchor is skipped so the anchor set
@@ -56,8 +95,11 @@ fun rememberAppModalBottomSheetState(): SheetState =
  * Project-wide [ModalBottomSheet] owning the sheet material and a sheet geometry that does not
  * change while it is dragged.
  *
- * Material: callers may select fully opaque [containerColor], [scrimColor] and [shape] values.
- * Translucent fills and scrims fall back to opaque defaults.
+ * Material: callers may pin [containerColor], [scrimColor] and [shape] for scenes with a dedicated
+ * look; otherwise [AppSheetStyle.Frosted] blurs the screen behind the dialog window through cross-window
+ * blur (Android 12+) and animates the blur radius with the sheet visibility. When cross-window blur
+ * is unavailable or disabled at runtime (e.g. battery saver), the panel tint becomes nearly opaque
+ * to keep content legible.
  *
  * Geometry: Material3's sheet drives drags coming from nested scrolling through `dispatchRawDelta`,
  * which does not hold the drag mutex. Whenever the sheet height or the available height changes
@@ -83,28 +125,45 @@ fun AppModalBottomSheet(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
     sheetState: SheetState = rememberAppModalBottomSheetState(),
+    style: AppSheetStyle = AppSheetStyle.Frosted,
     containerColor: Color? = null,
     scrimColor: Color? = null,
     shape: Shape? = null,
     contentColor: Color = Color.White,
     dragHandle: @Composable (() -> Unit)? = {
-        BottomSheetDefaults.DragHandle(color = Color(0xFF777777))
+        BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.28f))
     },
     content: @Composable ColumnScope.() -> Unit,
 ) {
     // Read in the host composition, where the insets belong to the host window.
     val hostStatusBarsVisible = WindowInsets.areStatusBarsVisible
-    val resolvedContainerColor = containerColor?.takeIf { it.alpha >= 1f } ?: AppPanelMaterial.Tint
-    val resolvedScrimColor = scrimColor?.takeIf { it.alpha >= 1f } ?: BottomSheetDefaults.ScrimColor
+    // A caller-specified container is a deliberate material of its own: it keeps its color and gets
+    // no backdrop blur, and a frosted sheet falls back to Material's scrim unless one is specified.
+    val usesSheetMaterial = containerColor == null
+    val blurSupported = usesSheetMaterial && style == AppSheetStyle.Frosted && rememberCrossWindowBlurEnabled()
+    val tintAlpha = when {
+        style == AppSheetStyle.Translucent -> AppPanelMaterial.TranslucentAlpha
+        blurSupported -> FrostedTintAlpha
+        else -> FrostedTintAlphaWithoutBlur
+    }
+    val blurProgress by animateFloatAsState(
+        targetValue = if (blurSupported && sheetState.targetValue != SheetValue.Hidden) 1f else 0f,
+        animationSpec = tween(BlurAnimationMillis),
+        label = "sheetBackdropBlur"
+    )
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         modifier = modifier,
         sheetState = sheetState,
         shape = shape ?: SheetShape,
-        containerColor = resolvedContainerColor,
+        containerColor = containerColor ?: AppPanelMaterial.Tint.copy(alpha = tintAlpha),
         contentColor = contentColor,
         tonalElevation = 0.dp,
-        scrimColor = resolvedScrimColor,
+        scrimColor = scrimColor ?: when {
+            style == AppSheetStyle.Translucent -> Color.Transparent
+            usesSheetMaterial -> FrostedScrimColor
+            else -> BottomSheetDefaults.ScrimColor
+        },
         dragHandle = dragHandle,
         contentWindowInsets = {
             WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)
@@ -122,9 +181,16 @@ fun AppModalBottomSheet(
                         hide(WindowInsetsCompat.Type.statusBars())
                     }
                 }
-
             }
             onDispose { }
+        }
+        if (window != null && usesSheetMaterial && style == AppSheetStyle.Frosted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val maxBlurRadiusPx = with(LocalDensity.current) { FrostedBlurRadius.toPx() }
+            LaunchedEffect(window, maxBlurRadiusPx) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                snapshotFlow { (maxBlurRadiusPx * blurProgress).roundToInt() }
+                    .collect { radius -> window.setBlurBehindRadius(radius) }
+            }
         }
         val topGapPx = WindowInsets.statusBarsIgnoringVisibility
             .union(WindowInsets.displayCutout)
@@ -149,6 +215,30 @@ fun AppModalBottomSheet(
             content = content
         )
     }
+}
+
+/**
+ * Whether the system currently renders cross-window blur. It can change at runtime, e.g. when
+ * battery saver or tunnelled video playback disables it.
+ */
+@Composable
+private fun rememberCrossWindowBlurEnabled(): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
+    val windowManager = LocalContext.current.getSystemService(WindowManager::class.java)
+        ?: return false
+    var enabled by remember(windowManager) { mutableStateOf(windowManager.isCrossWindowBlurEnabled) }
+    DisposableEffect(windowManager) {
+        val listener = Consumer<Boolean> { enabled = it }
+        windowManager.addCrossWindowBlurEnabledListener(listener)
+        onDispose { windowManager.removeCrossWindowBlurEnabledListener(listener) }
+    }
+    return enabled
+}
+
+private fun Window.setBlurBehindRadius(radius: Int) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+    if (attributes.blurBehindRadius == radius) return
+    attributes = attributes.apply { blurBehindRadius = radius }
 }
 
 private fun View.findDialogWindowProvider(): DialogWindowProvider? {

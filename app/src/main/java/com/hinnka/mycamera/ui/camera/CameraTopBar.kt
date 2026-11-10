@@ -3,7 +3,6 @@ package com.hinnka.mycamera.ui.camera
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.Arrangement
@@ -243,16 +242,22 @@ private fun VideoTopBar(
                             )
                             DropdownMenu(
                                 expanded = stabilizationMenuExpanded,
-                                onDismissRequest = { stabilizationMenuExpanded = false }
+                                onDismissRequest = {
+                                    stabilizationMenuExpanded = false
+                                }
                             ) {
                                 videoCapabilities.availableStabilizationModes.forEach { mode ->
                                     DropdownMenuItem(
-                                        text = { Text(videoStabilizationModeLabel(mode)) },
+                                        text = {
+                                            Text(videoStabilizationModeLabel(mode))
+                                        },
                                         onClick = {
                                             stabilizationMenuExpanded = false
                                             onVideoStabilizationModeChange(mode)
                                         },
-                                        trailingIcon = if (mode == videoConfig.stabilizationMode) {
+                                        trailingIcon = if (
+                                            mode == videoConfig.stabilizationMode
+                                        ) {
                                             {
                                                 Icon(
                                                     imageVector = Icons.Default.Check,
@@ -280,8 +285,6 @@ private fun VideoTopBar(
             }
         }
     }
-
-
 }
 
 @Composable
@@ -291,9 +294,9 @@ private fun VideoParameterCluster(
     onFpsClick: () -> Unit
 ) {
     Surface(
-        color = Color(0xFF1C1C1E),
+        color = Color.Black.copy(alpha = 0.35f),
         shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, Color(0xFF39393B))
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -354,13 +357,11 @@ private fun VideoActionIcon(
     active: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
-    contentDescription: String,
-    modifier: Modifier = Modifier
+    contentDescription: String
 ) {
     IconButton(
         onClick = onClick,
-        enabled = enabled,
-        modifier = modifier
+        enabled = enabled
     ) {
         Icon(
             imageVector = icon,

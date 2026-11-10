@@ -1,6 +1,7 @@
 package com.hinnka.mycamera.ui.camera
 
 import com.hinnka.mycamera.ui.components.AppModalBottomSheet
+import com.hinnka.mycamera.ui.components.AppSheetStyle
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -38,7 +39,7 @@ fun LutEditBottomSheet(
     imageHistogram: ImageHistogram? = null,
     showEffects: Boolean = false,
     editorTarget: LutEditorTarget = LutEditorTarget.CREATIVE_GLOBAL,
-    containerColor: Color? = Color.Transparent,
+    containerColor: Color = Color.Transparent,
     modifier: Modifier = Modifier,
     replaceVignetteWithWashedOutRecovery: Boolean = false,
     videoOnly: Boolean = false
@@ -107,7 +108,8 @@ fun LutEditBottomSheet(
     }
 
     AppModalBottomSheet(
-        containerColor = if (videoOnly) null else containerColor,
+        containerColor = containerColor,
+        style = AppSheetStyle.Translucent,
         onDismissRequest = {
             flushLutSave()
             onDismiss()
@@ -155,7 +157,7 @@ fun LutEditBottomSheet(
                     null
                 },
                 modifier = Modifier.fillMaxWidth(),
-                replaceVignetteWithVideoBrightness = replaceVignetteWithWashedOutRecovery
+                replaceVignetteWithWashedOutRecovery = replaceVignetteWithWashedOutRecovery
             )
         }
     }

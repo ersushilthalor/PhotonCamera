@@ -172,6 +172,7 @@ object FrameTemplateParser {
             put("verticalPadding", optDouble("verticalPadding", optDouble("padding", 16.0)) * legacyScale)
             put("borderHeight", optDouble("borderHeight", optDouble("borderWidth", 0.0)) * legacyScale)
             convert("height", 80.0)
+            convert("backgroundBlurRadius", 32.0)
             convert("elementSpacing", 8.0)
             convert("lineSpacing", 8.0)
             convert("padding", 16.0)
@@ -225,6 +226,8 @@ object FrameTemplateParser {
                 })
                 put("height", template.layout.heightPx)
                 put("backgroundColor", colorToHex(template.layout.backgroundColor))
+                put("backgroundType", template.layout.effectiveBackgroundType.name)
+                put("backgroundBlurRadius", template.layout.backgroundBlurRadiusPx)
                 put("borderColor", colorToHex(template.layout.borderColor))
                 put("elementSpacing", template.layout.elementSpacingPx)
                 put("lineSpacing", template.layout.lineSpacingPx)
@@ -286,6 +289,7 @@ object FrameTemplateParser {
             validateDimension(lineSpacingPx, "layout.lineSpacing", errors)
             validateDimension(paddingPx, "layout.padding", errors)
             validateDimension(verticalPaddingPx, "layout.verticalPadding", errors)
+            validateDimension(backgroundBlurRadiusPx, "layout.backgroundBlurRadius", errors)
             validateDimension(borderWidthPx, "layout.borderWidth", errors)
             validateDimension(borderHeightPx, "layout.borderHeight", errors)
             validateDimension(photoCornerRadiusPx, "layout.photoCornerRadius", errors)
@@ -398,6 +402,8 @@ object FrameTemplateParser {
             designSize = designSize,
             heightPx = obj.optDouble("height", 240.0).toFloat(),
             backgroundColor = backgroundColor,
+            backgroundType = FrameBackgroundType.valueOf(obj.optString("backgroundType", "COLOR")).forPosition(position),
+            backgroundBlurRadiusPx = obj.optDouble("backgroundBlurRadius", 96.0).toFloat(),
             borderColor = parseColor(obj.optString("borderColor", colorToHex(backgroundColor))),
             elementSpacingPx = obj.optDouble("elementSpacing", 24.0).toFloat(),
             lineSpacingPx = obj.optDouble("lineSpacing", 24.0).toFloat(),
