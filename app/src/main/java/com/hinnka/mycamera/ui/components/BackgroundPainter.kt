@@ -1,13 +1,18 @@
 package com.hinnka.mycamera.ui.components
 
+import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.painterResource
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.viewmodel.CameraViewModel
@@ -52,4 +57,31 @@ fun rememberBackgroundPainter(viewModel: CameraViewModel): Painter {
             painterResource(R.drawable.camera_bg)
         }
     }
+}
+
+
+@Composable
+fun AppBackground(
+    viewModel: CameraViewModel,
+    modifier: Modifier = Modifier,
+    transparency: Float? = null,
+    blurRadius: Float? = null,
+) {
+    val userPreferences by viewModel.userPreferences.collectAsState()
+    val effectiveTransparency = (transparency ?: userPreferences.backgroundTransparency)
+        .takeIf { it.isFinite() }
+        ?.coerceIn(0f, 100f)
+        ?: 0f
+    val effectiveBlur = (blurRadius ?: userPreferences.backgroundBlur)
+        .takeIf { it.isFinite() }
+        ?.coerceIn(0f, 30f)
+        ?: 0f
+
+    Image(
+        painter = rememberBackgroundPainter(viewModel),
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        alpha = 1f - effectiveTransparency / 100f,
+        modifier = modifier.blur(effectiveBlur.dp),
+    )
 }
