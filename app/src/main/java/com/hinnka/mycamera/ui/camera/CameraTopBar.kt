@@ -291,9 +291,9 @@ private fun VideoParameterCluster(
     onFpsClick: () -> Unit
 ) {
     Surface(
-        color = Color.Black.copy(alpha = 0.35f),
+        color = Color(0xFF1C1C1E),
         shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+        border = BorderStroke(1.dp, Color(0xFF39393B))
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),

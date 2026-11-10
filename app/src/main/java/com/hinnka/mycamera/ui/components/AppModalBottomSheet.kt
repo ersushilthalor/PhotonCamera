@@ -53,8 +53,8 @@ fun rememberAppModalBottomSheetState(): SheetState =
  * Project-wide [ModalBottomSheet] owning the sheet material and a sheet geometry that does not
  * change while it is dragged.
  *
- * Material: callers may select a fully opaque [containerColor] and [shape] for scenes with a dedicated
- * look; the default panel fill and modal scrim are opaque.
+ * Material: callers may select fully opaque [containerColor], [scrimColor] and [shape] values.
+ * Translucent fills and scrims fall back to opaque defaults.
  *
  * Geometry: Material3's sheet drives drags coming from nested scrolling through `dispatchRawDelta`,
  * which does not hold the drag mutex. Whenever the sheet height or the available height changes
@@ -81,16 +81,18 @@ fun AppModalBottomSheet(
     modifier: Modifier = Modifier,
     sheetState: SheetState = rememberAppModalBottomSheetState(),
     containerColor: Color? = null,
+    scrimColor: Color? = null,
     shape: Shape? = null,
     contentColor: Color = Color.White,
     dragHandle: @Composable (() -> Unit)? = {
-        BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.28f))
+        BottomSheetDefaults.DragHandle(color = Color(0xFF777777))
     },
     content: @Composable ColumnScope.() -> Unit,
 ) {
     // Read in the host composition, where the insets belong to the host window.
     val hostStatusBarsVisible = WindowInsets.areStatusBarsVisible
     val resolvedContainerColor = containerColor?.takeIf { it.alpha >= 1f } ?: AppPanelMaterial.Tint
+    val resolvedScrimColor = scrimColor?.takeIf { it.alpha >= 1f } ?: BottomSheetDefaults.ScrimColor
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         modifier = modifier,
@@ -99,7 +101,7 @@ fun AppModalBottomSheet(
         containerColor = resolvedContainerColor,
         contentColor = contentColor,
         tonalElevation = 0.dp,
-        scrimColor = BottomSheetDefaults.ScrimColor,
+        scrimColor = resolvedScrimColor,
         dragHandle = dragHandle,
         contentWindowInsets = {
             WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)
