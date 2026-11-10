@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.ui.theme.AccentColor
+import com.hinnka.mycamera.ui.components.liquidGlassSurface
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.ui.components.PhysicalButton
 import com.hinnka.mycamera.video.CaptureMode
@@ -60,6 +61,11 @@ fun CameraTopBar(
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val topBarSurfaceModifier = modifier.liquidGlassSurface(
+        shape = RoundedCornerShape(28.dp),
+        fallbackColor = Color.Transparent
+    )
+
     if (captureMode == CaptureMode.VIDEO) {
         VideoTopBar(
             isRecording = isRecording,
@@ -73,13 +79,13 @@ fun CameraTopBar(
             videoHdrEnabled = videoHdrEnabled,
             onVideoHdrToggle = onVideoHdrToggle,
             onSettingsClick = onSettingsClick,
-            modifier = modifier
+            modifier = topBarSurfaceModifier
         )
         return
     }
 
     Row(
-        modifier = modifier
+        modifier = topBarSurfaceModifier
             .fillMaxWidth()
             .padding(top = 32.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
