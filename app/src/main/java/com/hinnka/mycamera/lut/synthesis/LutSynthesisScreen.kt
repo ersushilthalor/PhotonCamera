@@ -1,7 +1,6 @@
 package com.hinnka.mycamera.lut.synthesis
 
 import com.hinnka.mycamera.ui.components.AppModalBottomSheet
-import com.hinnka.mycamera.ui.components.AppSheetStyle
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
@@ -558,8 +557,6 @@ fun LutSynthesisScreen(
     if (showBakeParamsSheet) {
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         AppModalBottomSheet(
-            containerColor = Color.Transparent,
-            style = AppSheetStyle.Translucent,
             onDismissRequest = { showBakeParamsSheet = false },
             sheetState = sheetState,
             contentColor = Color.White,

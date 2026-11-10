@@ -1332,7 +1332,7 @@ private fun RawRenderingEngineSelector(
     if (showSheet) {
         AppModalBottomSheet(
             onDismissRequest = { showSheet = false },
-            dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.2f)) }
+            dragHandle = { BottomSheetDefaults.DragHandle(color = Color(0xFF777777)) }
         ) {
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Text(
@@ -2169,7 +2169,6 @@ fun RawBaselineColorCorrectionBottomSheet(
 ) {
     AppModalBottomSheet(
         containerColor = containerColor,
-        style = AppSheetStyle.Translucent,
         onDismissRequest = onDismiss,
         dragHandle = { BottomSheetDefaults.DragHandle(color = Color.White.copy(alpha = 0.2f)) }
     ) {

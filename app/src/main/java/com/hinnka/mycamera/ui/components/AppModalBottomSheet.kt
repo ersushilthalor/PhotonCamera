@@ -40,6 +40,9 @@ object AppPanelMaterial {
     val EdgeHighlight = Color(0xFF39393B)
 }
 
+private val SheetCornerRadius = 28.dp
+private val SheetShape = RoundedCornerShape(topStart = SheetCornerRadius, topEnd = SheetCornerRadius)
+
 /**
  * Sheet state used by [AppModalBottomSheet]. The half-expanded anchor is skipped so the anchor set
  * never changes when content height crosses half of the window.
