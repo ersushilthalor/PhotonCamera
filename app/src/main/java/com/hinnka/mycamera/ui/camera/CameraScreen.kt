@@ -776,7 +776,6 @@ fun CameraScreen(
             }
     ) {
 
-        val backgroundPainter = rememberBackgroundPainter(viewModel)
 
         val isVideoMode = state.captureMode == CaptureMode.VIDEO
         val isPhotoStyleMode = state.captureMode != CaptureMode.VIDEO
@@ -1559,9 +1558,11 @@ fun CameraScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .paint(backgroundPainter, contentScale = ContentScale.Crop)
+                .background(Color.Black)
                 .navigationBarsPadding(),
         ) {
+            AppBackground(viewModel = viewModel, modifier = Modifier.matchParentSize())
+
             // The viewfinder is always the bottom layer. Its selected aspect ratio is fitted
             // to the full available area before camera controls are overlaid.
             Box(
