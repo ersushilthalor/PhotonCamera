@@ -185,19 +185,18 @@ fun CameraTopSheet(
                 }
                 onDispose {
                     dialogWindow?.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
-                    dialogWindow?.setCameraTopSheetBlurBehindRadius(0)
+                    dialogWindow?.setCameraTopSheetBackgroundBlurRadius(0)
                 }
             }
 
             LaunchedEffect(dialogWindow, blurSupported, blurRadiusPx) {
                 if (dialogWindow != null) {
-                    if (blurSupported) {
-                        dialogWindow.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
-                        dialogWindow.setCameraTopSheetBlurBehindRadius(blurRadiusPx)
-                    } else {
-                        dialogWindow.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
-                        dialogWindow.setCameraTopSheetBlurBehindRadius(0)
-                    }
+                    // Background blur is constrained to this dialog window. Blur-behind
+                    // would blur the entire camera viewfinder behind the dialog.
+                    dialogWindow.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                    dialogWindow.setCameraTopSheetBackgroundBlurRadius(
+                        if (blurSupported) blurRadiusPx else 0
+                    )
                 }
             }
 
@@ -1249,8 +1248,7 @@ private fun View.findCameraTopSheetDialogWindowProvider(): DialogWindowProvider?
     return null
 }
 
-private fun Window.setCameraTopSheetBlurBehindRadius(radius: Int) {
+private fun Window.setCameraTopSheetBackgroundBlurRadius(radius: Int) {
     if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return
-    if (attributes.blurBehindRadius == radius) return
-    attributes = attributes.apply { blurBehindRadius = radius }
+    setBackgroundBlurRadius(radius.coerceAtLeast(0))
 }
