@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import com.hinnka.mycamera.ui.components.liquidGlassSurface
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -62,9 +63,10 @@ internal fun ZoomPanJoystick(
     Box(
         modifier = modifier
             .size(116.dp)
-            .clip(CircleShape)
-            .background(Color.Black.copy(alpha = 0.72f))
-            .border(1.5.dp, Color.White.copy(alpha = 0.88f), CircleShape)
+            .liquidGlassSurface(
+                shape = CircleShape,
+                fallbackColor = Color.Black.copy(alpha = 0.72f)
+            )
             .pointerInput(maxTravelPx) {
                 fun clampOffset(offset: Offset): Offset {
                     val distance = hypot(offset.x, offset.y)
