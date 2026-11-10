@@ -41,6 +41,7 @@ import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.roundToInt
 import com.hinnka.mycamera.ui.icons.AppIcons
+import com.hinnka.mycamera.ui.components.FloatingUiMaterialSurface
 
 /**
  * 显示模式：变焦倍率 or 35mm等效焦距
@@ -315,14 +316,16 @@ private fun ZoomPresetPill(
     val visiblePresets = if (zoomRatio >= 3f) basePresets + listOf(5f, 10f) else basePresets
     val selectedPreset = visiblePresets.firstOrNull { abs(it - zoomRatio) <= 0.05f }
 
-    Row(
-        modifier = modifier
-            .clip(CircleShape)
-            .background(Color(0xFF25242C))
-            .padding(horizontal = 4.dp, vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(0.dp),
-        verticalAlignment = Alignment.CenterVertically
+    FloatingUiMaterialSurface(
+        modifier = modifier,
+        cornerRadius = 999.dp,
+        baseColor = Color(0xFF25242C),
     ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
         visiblePresets.forEach { preset ->
             val selected = selectedPreset != null && abs(selectedPreset - preset) <= 0.01f
             Box(
@@ -357,6 +360,7 @@ private fun ZoomPresetPill(
                 )
             }
         }
+        }
     }
 }
 
@@ -382,11 +386,10 @@ fun ZoomContinuousRuler(
 
     Box(modifier = modifier.fillMaxSize()) {
         // The track uses the same 33dp parent height as ZoomPresetPill.
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(CircleShape)
-                .background(Color(0xFF292929))
+        FloatingUiMaterialSurface(
+            modifier = Modifier.fillMaxSize(),
+            cornerRadius = 999.dp,
+            baseColor = Color(0xFF292929),
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val safeZoom = zoomRatio.coerceAtLeast(0.001f).toDouble()
