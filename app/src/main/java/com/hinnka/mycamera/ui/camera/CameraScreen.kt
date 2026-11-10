@@ -225,6 +225,7 @@ fun CameraScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val floatingUiBackdrop = rememberLiquidGlassBackdrop()
     val state by viewModel.state.collectAsState()
     val uiStyle by viewModel.uiStyle.collectAsState()
     val isCameraInitialized by viewModel.isInitialized.collectAsState()
@@ -906,7 +907,8 @@ fun CameraScreen(
 
         val zoomBar = @Composable {
             if (activePanel == ActivePanel.NONE && !isXpan) {
-                ZoomControlBar(
+                CompositionLocalProvider(LocalFloatingUiBackdrop provides floatingUiBackdrop) {
+                    ZoomControlBar(
                     viewModel = viewModel,
                     zoomRatio = viewModel.zoomRatioByMain,
                     availableCameras = state.availableCameras,
@@ -935,7 +937,8 @@ fun CameraScreen(
                         .onGloballyPositioned { coordinates ->
                             zoomBarBounds = coordinates.boundsInRoot()
                         }
-                )
+                    )
+                }
             } else {
                 SideEffect {
                     zoomBarBounds = null
@@ -1458,7 +1461,8 @@ fun CameraScreen(
                             .width(xpanSideWidth),
                         contentAlignment = Alignment.Center
                     ) {
-                        ZoomControlBarVerticel(
+                        CompositionLocalProvider(LocalFloatingUiBackdrop provides floatingUiBackdrop) {
+                            ZoomControlBarVerticel(
                             viewModel = viewModel,
                             zoomRatio = viewModel.zoomRatioByMain,
                             availableCameras = state.availableCameras,
@@ -1483,6 +1487,7 @@ fun CameraScreen(
                                 filterButtonBounds = bounds
                             },
                         )
+                        }
                     }
                     Box(
                         modifier = Modifier
@@ -1559,12 +1564,17 @@ fun CameraScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .paint(backgroundPainter, contentScale = ContentScale.Crop)
                 .navigationBarsPadding(),
         ) {
-            // The viewfinder is always the bottom layer. Its selected aspect ratio is fitted
-            // to the full available area before camera controls are overlaid.
             Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .paint(backgroundPainter, contentScale = ContentScale.Crop)
+                    .liquidGlassBackdropSource(floatingUiBackdrop)
+            ) {
+                // The viewfinder is always the bottom layer. Its selected aspect ratio is fitted
+                // to the full available area before camera controls are overlaid.
+                Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(cardHeight)
@@ -1576,18 +1586,6 @@ fun CameraScreen(
                 contentAlignment = Alignment.Center
             ) {
                 viewfinder()
-                if (uiStyle == "OPPO" && activePanel == ActivePanel.NONE && !isXpan) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp)
-                            .height(CameraControlsLayoutDefaults.ZoomBarHeight),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        zoomBar()
-                    }
-                }
                 if (canShowZoomJoystick) {
                     Box(
                         modifier = Modifier
@@ -1615,6 +1613,23 @@ fun CameraScreen(
                             )
                         }
                     }
+                }
+            }
+            }
+
+            if (uiStyle == "OPPO" && activePanel == ActivePanel.NONE && !isXpan) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(CameraControlsLayoutDefaults.ZoomBarHeight)
+                        .align(Alignment.TopCenter)
+                        .offset(
+                            y = viewfinderTop + cardHeight -
+                                CameraControlsLayoutDefaults.ZoomBarHeight - 8.dp
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    zoomBar()
                 }
             }
 
@@ -1664,7 +1679,8 @@ fun CameraScreen(
         }
 
         // TopSheet for settings
-        CameraTopSheet(
+        CompositionLocalProvider(LocalFloatingUiBackdrop provides floatingUiBackdrop) {
+            CameraTopSheet(
             visible = activePanel == ActivePanel.SETTINGS,
             captureMode = state.captureMode,
             aspectRatio = state.aspectRatio,
@@ -1750,7 +1766,8 @@ fun CameraScreen(
             onOppoPhotoSettingsChange = viewModel::updateOppoPhotoSettings,
             refocusAvailable = state.minimumFocusDistance > 0f,
             contentTopPadding = CameraTopBarBaseTopPadding + topSafePadding
-        )
+            )
+        }
 
         // During navigation measurement or window resizing, the viewport can be
         // shorter than the toolbar. The panel then has no available vertical space.
