@@ -126,14 +126,23 @@ fun AppBackground(
     blurRadius: Float? = null,
 ) {
     val userPreferences by viewModel.userPreferences.collectAsState()
-    val effectiveTransparency = (transparency ?: userPreferences.backgroundTransparency)
-        .takeIf { it.isFinite() }
-        ?.coerceIn(0f, 100f)
-        ?: 0f
-    val effectiveBlur = (blurRadius ?: userPreferences.backgroundBlur)
-        .takeIf { it.isFinite() }
-        ?.coerceIn(0f, 30f)
-        ?: 0f
+    // Liquid Glass replaces the manual background opacity/blur values while enabled.
+    val effectiveTransparency = if (userPreferences.liquidGlassEnabled) {
+        0f
+    } else {
+        (transparency ?: userPreferences.backgroundTransparency)
+            .takeIf { it.isFinite() }
+            ?.coerceIn(0f, 100f)
+            ?: 0f
+    }
+    val effectiveBlur = if (userPreferences.liquidGlassEnabled) {
+        18f
+    } else {
+        (blurRadius ?: userPreferences.backgroundBlur)
+            .takeIf { it.isFinite() }
+            ?.coerceIn(0f, 30f)
+            ?: 0f
+    }
 
     Image(
         painter = rememberBackgroundPainter(viewModel),
