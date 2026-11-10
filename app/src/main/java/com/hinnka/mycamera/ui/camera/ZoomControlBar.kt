@@ -30,6 +30,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.ui.theme.AccentColor
+import com.hinnka.mycamera.ui.components.liquidGlassSurface
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.CameraInfo
 import com.hinnka.mycamera.camera.LensType
@@ -317,8 +318,10 @@ private fun ZoomPresetPill(
 
     Row(
         modifier = modifier
-            .clip(CircleShape)
-            .background(Color(0xFF25242C))
+            .liquidGlassSurface(
+                shape = CircleShape,
+                fallbackColor = Color(0xFF25242C)
+            )
             .padding(horizontal = 4.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -336,8 +339,10 @@ private fun ZoomPresetPill(
                     Box(
                         modifier = Modifier
                             .size(29.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF484651))
+                            .liquidGlassSurface(
+                                shape = CircleShape,
+                                fallbackColor = Color(0xFF484651)
+                            )
                     )
                 }
                 val label = when {
@@ -385,8 +390,10 @@ fun ZoomContinuousRuler(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .clip(CircleShape)
-                .background(Color(0xFF292929))
+                .liquidGlassSurface(
+                    shape = CircleShape,
+                    fallbackColor = Color(0xFF292929)
+                )
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val safeZoom = zoomRatio.coerceAtLeast(0.001f).toDouble()
@@ -442,8 +449,10 @@ fun ZoomContinuousRuler(
                     .align(Alignment.CenterEnd)
                     .padding(end = 6.dp)
                     .size(25.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFF3A3A3A))
+                    .liquidGlassSurface(
+                        shape = CircleShape,
+                        fallbackColor = Color(0xFF3A3A3A)
+                    )
                     .clickable(onClick = onClose)
                     .semantics { contentDescription = closeDescription },
                 contentAlignment = Alignment.Center
