@@ -159,6 +159,8 @@ import com.hinnka.mycamera.ui.components.LogViewerDialog
 import com.hinnka.mycamera.ui.components.PaymentDialog
 import com.hinnka.mycamera.ui.components.DepthModelDownloadDialog
 import com.hinnka.mycamera.ui.components.SliderSettingItem
+import com.hinnka.mycamera.ui.components.LocalLiquidGlassEnabled
+import com.hinnka.mycamera.ui.components.liquidGlassSurface
 
 import com.hinnka.mycamera.ui.components.RawDngMetadataCorrectionSettings
 import com.hinnka.mycamera.ui.components.rawDcpLensOptions
@@ -1012,7 +1014,7 @@ fun SettingsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(SettingsBackgroundScrim)
+                    .background(if (userPreferences.liquidGlassEnabled) Color.Black.copy(alpha = 0.38f) else SettingsBackgroundScrim)
                     .navigationBarsPadding()
             ) {
             // 顶部标题栏
@@ -1894,6 +1896,13 @@ fun SettingsScreen(
                         )
 
                         UiStyleSetting(currentStyle = userPreferences.uiStyle, onStyleSelected = viewModel::setUiStyle)
+
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.1f), modifier = Modifier.padding(vertical = 12.dp))
+
+                        LiquidGlassModeSetting(
+                            enabled = userPreferences.liquidGlassEnabled,
+                            onEnabledChange = viewModel::setLiquidGlassEnabled
+                        )
 
                         HorizontalDivider(color = Color.White.copy(alpha = 0.1f), modifier = Modifier.padding(vertical = 12.dp))
 
@@ -5552,6 +5561,50 @@ private fun UiStyleSetting(currentStyle: String, onStyleSelected: (String) -> Un
 }
 
 @Composable
+private fun LiquidGlassModeSetting(
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .liquidGlassSurface(
+                shape = RoundedCornerShape(18.dp),
+                fallbackColor = Color.Transparent
+            )
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.settings_liquid_glass),
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.settings_liquid_glass_description),
+                color = Color.White.copy(alpha = 0.62f),
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+            )
+        }
+        Switch(
+            checked = enabled,
+            onCheckedChange = onEnabledChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = OnAccentColor,
+                checkedTrackColor = AccentColor,
+                uncheckedThumbColor = Color.Gray,
+                uncheckedTrackColor = Color.White.copy(alpha = 0.2f),
+                uncheckedBorderColor = Color.Transparent,
+            )
+        )
+    }
+}
+
+@Composable
 fun BackgroundSetting(
     viewModel: CameraViewModel,
     transparency: Float,
@@ -5563,6 +5616,7 @@ fun BackgroundSetting(
     modifier: Modifier = Modifier
 ) {
     val currentBg by viewModel.backgroundImage.collectAsState()
+    val liquidGlassActive = LocalLiquidGlassEnabled.current
     val context = androidx.compose.ui.platform.LocalContext.current
 
     val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -5610,6 +5664,7 @@ fun BackgroundSetting(
             description = stringResource(R.string.settings_background_transparency_description),
             value = transparency,
             valueRange = 0f..100f,
+            enabled = !liquidGlassActive,
             resetValue = 0f,
             onResetValue = { value ->
                 onTransparencyChange(value)
@@ -5630,6 +5685,7 @@ fun BackgroundSetting(
             description = stringResource(R.string.settings_background_blur_description),
             value = blurRadius,
             valueRange = 0f..30f,
+            enabled = !liquidGlassActive,
             resetValue = 0f,
             onResetValue = { value ->
                 onBlurChange(value)
@@ -5641,6 +5697,15 @@ fun BackgroundSetting(
                 String.format(blurValueFormat, value.roundToInt())
             },
         )
+
+        if (liquidGlassActive) {
+            Text(
+                text = stringResource(R.string.settings_background_glass_override),
+                color = Color(0xFFD7E8FF),
+                fontSize = 12.sp,
+                modifier = Modifier.padding(bottom = 10.dp)
+            )
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
