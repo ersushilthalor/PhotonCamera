@@ -1021,18 +1021,9 @@ fun SettingsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(
-                        if (userPreferences.liquidGlassEnabled) {
-                            val scrimOpacity = if (userPreferences.liquidGlassEnabled) {
-                                1f
-                            } else {
-                                1f - backgroundTransparencyUi.coerceIn(0f, 100f) / 100f
-                            }
-                            Color.Black.copy(alpha = 0.24f * scrimOpacity)
-                        } else {
-                            Color.Transparent
-                        }
-                    )
+                    // Do not dim the wallpaper at the screen level; translucent panels
+                    // already provide their own contrast treatment.
+                    .background(Color.Transparent)
                     .navigationBarsPadding()
             ) {
             // 顶部标题栏
