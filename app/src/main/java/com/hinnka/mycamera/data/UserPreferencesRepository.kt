@@ -227,6 +227,7 @@ data class UserPreferences(
     val backgroundImage: String = "camera_bg_black", // Default to solid black background
     val backgroundTransparency: Float = 0f,
     val backgroundBlur: Float = 0f,
+    val liquidGlassEnabled: Boolean = false,
     val uiStyle: String = "ORIGINAL",
     val accentColor: Int = AppAppearance.DEFAULT_ACCENT_COLOR,
     val captureButtonStyle: CaptureButtonStyle = CaptureButtonStyle.DEFAULT,
@@ -508,6 +509,7 @@ class UserPreferencesRepository(private val context: Context) {
         private val BACKGROUND_IMAGE = stringPreferencesKey("background_image")
         private val BACKGROUND_TRANSPARENCY = floatPreferencesKey("background_transparency")
         private val BACKGROUND_BLUR = floatPreferencesKey("background_blur")
+        private val LIQUID_GLASS_ENABLED = booleanPreferencesKey("liquid_glass_enabled")
         private val UI_STYLE = stringPreferencesKey("ui_style")
         private val CAPTURE_BUTTON_STYLE = stringPreferencesKey("capture_button_style")
         private val CAPTURE_BUTTON_COLOR = intPreferencesKey("capture_button_color")
@@ -865,6 +867,7 @@ class UserPreferencesRepository(private val context: Context) {
                 backgroundImage = preferences[BACKGROUND_IMAGE] ?: "camera_bg_black",
                 backgroundTransparency = (preferences[BACKGROUND_TRANSPARENCY] ?: 0f).coerceIn(0f, 100f),
                 backgroundBlur = (preferences[BACKGROUND_BLUR] ?: 0f).coerceIn(0f, 30f),
+                liquidGlassEnabled = preferences[LIQUID_GLASS_ENABLED] ?: false,
                 uiStyle = preferences[UI_STYLE] ?: "ORIGINAL",
                 captureButtonStyle = CaptureButtonStyle.fromPersistedName(
                     preferences[CAPTURE_BUTTON_STYLE]
@@ -2284,6 +2287,12 @@ class UserPreferencesRepository(private val context: Context) {
         val normalized = if (value.isFinite()) value.coerceIn(0f, 30f) else 0f
         context.dataStore.edit { preferences ->
             preferences[BACKGROUND_BLUR] = normalized
+        }
+    }
+
+    suspend fun saveLiquidGlassEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[LIQUID_GLASS_ENABLED] = enabled
         }
     }
 
