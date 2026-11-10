@@ -587,6 +587,7 @@ fun CameraTopSheet(
             }
         }
     }
+    }
 
     if (showOppoPipelineSheet) {
         OppoPhotoPipelineSheet(
