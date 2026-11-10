@@ -645,10 +645,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
         viewModelScope.launch {
-            userPreferencesRepository.userPreferences.collect { preferences ->
-                _floatingUiTransparencyPercent.value = preferences.floatingUiTransparencyPercent
-                _floatingUiBlurIntensityPercent.value = preferences.floatingUiBlurIntensityPercent
-            }
+            val preferences = userPreferencesRepository.userPreferences.first()
+            _floatingUiTransparencyPercent.value = preferences.floatingUiTransparencyPercent
+            _floatingUiBlurIntensityPercent.value = preferences.floatingUiBlurIntensityPercent
         }
     }
 
