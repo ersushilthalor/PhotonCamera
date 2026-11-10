@@ -195,14 +195,12 @@ fun AppModalBottomSheet(
                     window.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
                 }
             }
-            onDispose {
-                if (isCameraFrosted) window?.setCameraFrostedBackgroundBlurRadius(0)
-            }
+            onDispose { }
         }
         if (window != null && usesFrostedMaterial && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val blurRadius = if (isCameraFrosted) CameraFrostedBlurRadius else FrostedBlurRadius
             val maxBlurRadiusPx = with(LocalDensity.current) { blurRadius.toPx() }
-            LaunchedEffect(window, maxBlurRadiusPx, blurProgress, isCameraFrosted) {
+            LaunchedEffect(window, maxBlurRadiusPx, isCameraFrosted) {
                 snapshotFlow { (maxBlurRadiusPx * blurProgress).roundToInt() }
                     .collect { radius ->
                         if (isCameraFrosted) {

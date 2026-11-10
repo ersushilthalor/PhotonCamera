@@ -936,7 +936,7 @@ fun CameraScreen(
                         val blurSupported = FrostedDialogWindowEffect(
                             window = dialogWindow,
                             blurRadius = 28.dp,
-                            gravity = Gravity.TOP or Gravity.START,
+                            gravity = Gravity.TOP or Gravity.LEFT,
                             x = 0,
                             y = zoomBarWindowY,
                             width = WindowManager.LayoutParams.MATCH_PARENT,

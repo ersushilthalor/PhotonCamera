@@ -295,7 +295,7 @@ private fun VideoTopBar(
             val blurSupported = FrostedDialogWindowEffect(
                 window = dialogWindow,
                 blurRadius = 28.dp,
-                gravity = Gravity.TOP or Gravity.START,
+                gravity = Gravity.TOP or Gravity.LEFT,
                 x = (stabilizationAnchorRightPx - menuWidthPx).coerceAtLeast(0),
                 y = stabilizationAnchorBottomPx,
                 width = menuWidthPx,
