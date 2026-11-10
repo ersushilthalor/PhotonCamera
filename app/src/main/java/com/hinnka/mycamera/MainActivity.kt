@@ -35,6 +35,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -73,6 +74,8 @@ import com.hinnka.mycamera.lut.creator.LutCreatorScreen
 import com.hinnka.mycamera.lut.creator.LutCreatorViewModel
 import com.hinnka.mycamera.screencapture.ScreenCaptureRenderConfigStore
 import com.hinnka.mycamera.ui.camera.CameraScreen
+import com.hinnka.mycamera.ui.components.FloatingUiMaterialSettings
+import com.hinnka.mycamera.ui.components.LocalFloatingUiMaterialSettings
 import com.hinnka.mycamera.data.FilmData
 import com.hinnka.mycamera.ui.camera.ColorWalkScreen
 import com.hinnka.mycamera.ui.camera.FilmDetailScreen
@@ -290,6 +293,8 @@ class MainActivity : AppCompatActivity() {
             StartupComposeReadyEffect()
             val currentRecipeParams by cameraViewModel.currentRecipeParams.collectAsState()
             val phantomPipCrop by cameraViewModel.phantomPipCrop.collectAsState()
+            val floatingUiTransparencyPercent by cameraViewModel.floatingUiTransparencyPercent.collectAsState()
+            val floatingUiBlurIntensityPercent by cameraViewModel.floatingUiBlurIntensityPercent.collectAsState()
             ScreenCaptureRenderConfigStore.save(
                 creativeLutConfig = cameraViewModel.currentLutConfig,
                 creativeColorRecipeParams = currentRecipeParams,
@@ -297,11 +302,17 @@ class MainActivity : AppCompatActivity() {
             )
 
             PhotonCameraTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = Color.Black
+                CompositionLocalProvider(
+                    LocalFloatingUiMaterialSettings provides FloatingUiMaterialSettings(
+                        transparencyPercent = floatingUiTransparencyPercent,
+                        blurIntensityPercent = floatingUiBlurIntensityPercent,
+                    )
                 ) {
-                    Box(modifier = Modifier.fillMaxSize()) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = Color.Black
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize()) {
                         val cameraInitialized by cameraViewModel.isInitialized.collectAsState()
                         val galleryInitialized by galleryViewModel.isInitialized.collectAsState()
 
@@ -333,7 +344,8 @@ class MainActivity : AppCompatActivity() {
                             )
                         }
 
-                        AppUpdateInstallPrompt()
+                            AppUpdateInstallPrompt()
+                        }
                     }
                 }
             }
