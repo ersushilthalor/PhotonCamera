@@ -227,7 +227,6 @@ data class UserPreferences(
     val backgroundImage: String = "camera_bg_black", // Default to solid black background
     val backgroundTransparency: Float = 0f,
     val backgroundBlur: Float = 0f,
-    val liquidGlassEnabled: Boolean = false,
     val uiStyle: String = "ORIGINAL",
     val accentColor: Int = AppAppearance.DEFAULT_ACCENT_COLOR,
     val captureButtonStyle: CaptureButtonStyle = CaptureButtonStyle.DEFAULT,
@@ -293,7 +292,8 @@ data class UserPreferences(
     val activeEffectParamsJson: String = "",
     val customPresetsJson: String = "",
     val activePresetId: String? = null,
-    val deletedBuiltInIds: String = ""
+    val deletedBuiltInIds: String = "",
+    val liquidGlassEnabled: Boolean = false
 ) {
     val activeEffectParams: EffectParams
         get() = EffectParams.fromJson(activeEffectParamsJson)
