@@ -2499,12 +2499,17 @@ private fun CaptureModeSwitcher(
         modifier = Modifier
             .width(228.dp)
             .height(CameraControlsLayoutDefaults.ModeSwitcherHeight)
-            .clip(RoundedCornerShape(18.dp))
-            .background(if (oppoStyle) Color(0xFF202020) else Color.Black.copy(alpha = 0.28f))
-            .border(
-                width = 0.5.dp,
-                color = if (oppoStyle) Color(0xFF333333) else Color.White.copy(alpha = 0.18f),
-                shape = RoundedCornerShape(18.dp)
+            .liquidGlassSurface(
+                shape = RoundedCornerShape(18.dp),
+                fallbackColor = if (oppoStyle) Color(0xFF202020) else Color.Black.copy(alpha = 0.28f)
+            )
+            .then(
+                if (LocalLiquidGlassEnabled.current) Modifier
+                else Modifier.border(
+                    width = 0.5.dp,
+                    color = if (oppoStyle) Color(0xFF333333) else Color.White.copy(alpha = 0.18f),
+                    shape = RoundedCornerShape(18.dp)
+                )
             )
             .padding(3.dp)
     ) {
@@ -2517,8 +2522,9 @@ private fun CaptureModeSwitcher(
             animationSpec = tween(durationMillis = 220),
             label = "modeSwitcher"
         )
+        val liquidGlassEnabled = LocalLiquidGlassEnabled.current
         val selectedBackground by animateColorAsState(
-            targetValue = if (oppoStyle) Color(0xFF303030) else Color.White,
+            targetValue = if (liquidGlassEnabled) Color.White.copy(alpha = 0.22f) else if (oppoStyle) Color(0xFF303030) else Color.White,
             animationSpec = tween(durationMillis = 220),
             label = "modeSwitcherColor"
         )
@@ -2541,7 +2547,7 @@ private fun CaptureModeSwitcher(
                 enabled = enabled,
                 onClick = { onModeSelected(CameraShootingMode.PHOTO) },
                 modifier = Modifier.weight(1f),
-                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.Black
+                selectedContentColor = if (liquidGlassEnabled) Color.White else if (oppoStyle) Color(0xFFFF9A32) else Color.Black
             )
             ModeSwitcherItem(
                 label = stringResource(R.string.capture_mode_video) +
@@ -2550,7 +2556,7 @@ private fun CaptureModeSwitcher(
                 enabled = enabled,
                 onClick = { onModeSelected(CameraShootingMode.VIDEO) },
                 modifier = Modifier.weight(1f),
-                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.Black
+                selectedContentColor = if (liquidGlassEnabled) Color.White else if (oppoStyle) Color(0xFFFF9A32) else Color.Black
             )
         }
     }
