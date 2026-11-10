@@ -76,10 +76,7 @@ enum class AppSheetStyle {
 
 private val SheetCornerRadius = 28.dp
 private val SheetShape = RoundedCornerShape(topStart = SheetCornerRadius, topEnd = SheetCornerRadius)
-private const val FrostedTintAlpha = 0.6f
-private const val FrostedTintAlphaWithoutBlur = 0.92f
 private val FrostedScrimColor = Color.Black.copy(alpha = 0.28f)
-private val FrostedBlurRadius = 36.dp
 private const val BlurAnimationMillis = 280
 
 /**
@@ -96,10 +93,9 @@ fun rememberAppModalBottomSheetState(): SheetState =
  * change while it is dragged.
  *
  * Material: callers may pin [containerColor], [scrimColor] and [shape] for scenes with a dedicated
- * look; otherwise [AppSheetStyle.Frosted] blurs the screen behind the dialog window through cross-window
- * blur (Android 12+) and animates the blur radius with the sheet visibility. When cross-window blur
- * is unavailable or disabled at runtime (e.g. battery saver), the panel tint becomes nearly opaque
- * to keep content legible.
+ * look; otherwise the shared transparency and blur settings control the panel tint and its actual
+ * cross-window background blur (Android 12+). Blur is animated with sheet visibility and cleared
+ * when disabled or dismissed; devices without cross-window blur keep the configured translucent tint.
  *
  * Geometry: Material3's sheet drives drags coming from nested scrolling through `dispatchRawDelta`,
  * which does not hold the drag mutex. Whenever the sheet height or the available height changes
