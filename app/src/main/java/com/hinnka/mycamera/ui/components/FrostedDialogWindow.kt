@@ -97,6 +97,7 @@ private fun Window.setFrostedBackgroundBlurRadius(radius: Int) {
 
 /** Finds the Dialog window hosting a Compose dialog's view. */
 fun View.findFrostedDialogWindow(): Window? {
+    if (this is DialogWindowProvider) return window
     var current: ViewParent? = parent
     while (current != null) {
         if (current is DialogWindowProvider) return current.window
