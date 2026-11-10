@@ -2554,6 +2554,7 @@ private fun SettingsCategoryOverview(
     SettingsSection(title = stringResource(R.string.settings_tab_camera)) {
         NavigationSettingItem(
             title = stringResource(R.string.settings_section_interface),
+            description = stringResource(R.string.settings_background_description),
             onClick = { onPageSelected(SettingsPage.INTERFACE) }
         )
 

@@ -41,7 +41,7 @@ fun LutEditBottomSheet(
     editorTarget: LutEditorTarget = LutEditorTarget.CREATIVE_GLOBAL,
     containerColor: Color = Color.Transparent,
     modifier: Modifier = Modifier,
-    replaceVignetteWithWashedOutRecovery: Boolean = false,
+    replaceVignetteWithVideoBrightness: Boolean = false,
     videoOnly: Boolean = false
 ) {
     val lutEditViewModel: LutEditViewModel = viewModel()
@@ -157,7 +157,7 @@ fun LutEditBottomSheet(
                     null
                 },
                 modifier = Modifier.fillMaxWidth(),
-                replaceVignetteWithWashedOutRecovery = replaceVignetteWithWashedOutRecovery
+                replaceVignetteWithVideoBrightness = replaceVignetteWithVideoBrightness
             )
         }
     }
