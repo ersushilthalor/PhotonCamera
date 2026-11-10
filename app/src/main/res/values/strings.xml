@@ -5,6 +5,10 @@
     <!-- Camera Controls -->
     <string name="switch_camera">Switch Camera</string>
     <string name="settings">Settings</string>
+    <string name="settings_floating_ui_transparency">Floating UI transparency</string>
+    <string name="settings_floating_ui_transparency_description">Adjust the opacity of floating windows, zoom controls and sliders in real time.</string>
+    <string name="settings_floating_ui_blur">Floating UI background blur</string>
+    <string name="settings_floating_ui_blur_description">Adjust GPU-rendered background blur behind floating windows and zoom controls in real time.</string>
     <string name="flash">Flash</string>
     <string name="timer">Timer</string>
     <string name="toolbox_title">Toolbox</string>
