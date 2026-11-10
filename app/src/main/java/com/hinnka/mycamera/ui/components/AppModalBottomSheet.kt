@@ -140,9 +140,10 @@ fun AppModalBottomSheet(
     val liquidGlassEnabled = LocalLiquidGlassEnabled.current
     // Liquid Glass uses the native cross-window blur path for every shared modal sheet.
     val usesSheetMaterial = containerColor == null
+    val crossWindowBlurEnabled = rememberCrossWindowBlurEnabled()
     val blurSupported = usesSheetMaterial &&
         (style == AppSheetStyle.Frosted || liquidGlassEnabled) &&
-        rememberCrossWindowBlurEnabled()
+        crossWindowBlurEnabled
     val tintAlpha = when {
         liquidGlassEnabled -> 0.18f
         style == AppSheetStyle.Translucent -> AppPanelMaterial.TranslucentAlpha
