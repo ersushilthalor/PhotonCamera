@@ -1,6 +1,7 @@
 package com.hinnka.mycamera.ui.components
 
 import com.hinnka.mycamera.ui.theme.AccentColor
+import com.hinnka.mycamera.ui.components.liquidGlassSurface
 import com.hinnka.mycamera.ui.theme.OnAccentColor
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -46,7 +47,11 @@ fun SliderSettingItem(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp)
+            .liquidGlassSurface(
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                fallbackColor = Color.Transparent
+            )
+            .padding(horizontal = 10.dp, vertical = 8.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
