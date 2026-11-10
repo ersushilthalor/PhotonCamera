@@ -312,6 +312,8 @@ fun SettingsScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val userPreferences by viewModel.userPreferences.collectAsState()
+    val floatingUiTransparencyPercent by viewModel.floatingUiTransparencyPercent.collectAsState()
+    val floatingUiBlurIntensityPercent by viewModel.floatingUiBlurIntensityPercent.collectAsState()
     val showLevelIndicator by viewModel.showLevelIndicator.collectAsState(initial = false)
     val focusPeakingEnabled by viewModel.focusPeakingEnabled.collectAsState(initial = true)
     val eyeFocusEnabled by viewModel.eyeFocusEnabled.collectAsState()
@@ -1900,6 +1902,31 @@ fun SettingsScreen(
                         )
 
                         CaptureButtonAppearanceSetting(viewModel = viewModel)
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+
+                        SliderSettingItem(
+                            title = stringResource(R.string.settings_floating_ui_transparency),
+                            description = stringResource(R.string.settings_floating_ui_transparency_description),
+                            value = floatingUiTransparencyPercent.toFloat(),
+                            valueRange = 0f..100f,
+                            onValueChange = { viewModel.setFloatingUiTransparencyPercent(it.roundToInt()) },
+                            valueTextFormatter = { "${it.roundToInt()}%" },
+                            resetValue = 20f
+                        )
+
+                        SliderSettingItem(
+                            title = stringResource(R.string.settings_floating_ui_blur),
+                            description = stringResource(R.string.settings_floating_ui_blur_description),
+                            value = floatingUiBlurIntensityPercent.toFloat(),
+                            valueRange = 0f..100f,
+                            onValueChange = { viewModel.setFloatingUiBlurIntensityPercent(it.roundToInt()) },
+                            valueTextFormatter = { "${it.roundToInt()}%" },
+                            resetValue = 100f
+                        )
 
                         HorizontalDivider(
                             color = Color.White.copy(alpha = 0.1f),
