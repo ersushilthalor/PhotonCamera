@@ -35,6 +35,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -90,6 +91,7 @@ import com.hinnka.mycamera.ui.settings.SettingsScreen
 import com.hinnka.mycamera.ui.settings.PresetEditorScreen
 import com.hinnka.mycamera.ui.settings.PresetManagementScreen
 import com.hinnka.mycamera.ui.theme.PhotonCameraTheme
+import com.hinnka.mycamera.ui.components.LocalLiquidGlassEnabled
 import com.hinnka.mycamera.update.AppUpdateManager
 import com.hinnka.mycamera.utils.BuglyHelper
 import com.hinnka.mycamera.utils.DeviceUtil
@@ -297,11 +299,15 @@ class MainActivity : AppCompatActivity() {
             )
 
             PhotonCameraTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = Color.Black
+                val userPreferences by cameraViewModel.userPreferences.collectAsState()
+                CompositionLocalProvider(
+                    LocalLiquidGlassEnabled provides userPreferences.liquidGlassEnabled
                 ) {
-                    Box(modifier = Modifier.fillMaxSize()) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = Color.Black
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize()) {
                         val cameraInitialized by cameraViewModel.isInitialized.collectAsState()
                         val galleryInitialized by galleryViewModel.isInitialized.collectAsState()
 
@@ -334,6 +340,7 @@ class MainActivity : AppCompatActivity() {
                         }
 
                         AppUpdateInstallPrompt()
+                        }
                     }
                 }
             }
