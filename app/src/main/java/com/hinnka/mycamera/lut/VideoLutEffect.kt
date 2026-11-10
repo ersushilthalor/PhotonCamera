@@ -144,8 +144,6 @@ private class VideoLutShaderProgram(
             
             uniform float uChromaticAberration; // 0.0 ~ 1.0
             uniform float uClarity; // -1.0 ~ 1.0
-            uniform highp sampler2D uBrightnessLut;
-            uniform int uBrightnessEnabled;
             uniform float uSoftLight; // 0.0 ~ 1.0
             uniform float uSharpening;
             uniform vec2 uTexelSize;
@@ -158,6 +156,8 @@ private class VideoLutShaderProgram(
                 vec3 weights = (uInputColorSpace == 1) ? vec3(0.2290, 0.6917, 0.0793) : vec3(0.2126, 0.7152, 0.0722);
                 return dot(color, weights);
             }
+
+            ${VideoBrightnessToneCurve.GLSL}
 
             float log10(float x) { return log(x) * 0.4342944819; }
             vec3 log10(vec3 x) { return log(x) * 0.4342944819; }
@@ -725,25 +725,7 @@ private class VideoLutShaderProgram(
                     );
                 }
 
-                // Brightness is an independent final luminance pass. The precomputed 256-entry
-                // LUT lifts shadows/midtones while its soft knee retains highlight headroom.
-                if (uBrightnessEnabled != 0) {
-                    vec3 brightnessBase = clamp(color.rgb, 0.0, 1.0);
-                    float sourceLuma = clamp(getLuma(brightnessBase), 0.0, 1.0);
-                    float lutU = (sourceLuma * 255.0 + 0.5) / 256.0;
-                    float targetLuma = texture(uBrightnessLut, vec2(lutU, 0.5)).r;
-                    vec3 chroma = brightnessBase - vec3(sourceLuma);
-                    float chromaScale = 1.0;
-
-                    if (chroma.r > 0.00001) chromaScale = min(chromaScale, (1.0 - targetLuma) / chroma.r);
-                    else if (chroma.r < -0.00001) chromaScale = min(chromaScale, targetLuma / -chroma.r);
-                    if (chroma.g > 0.00001) chromaScale = min(chromaScale, (1.0 - targetLuma) / chroma.g);
-                    else if (chroma.g < -0.00001) chromaScale = min(chromaScale, targetLuma / -chroma.g);
-                    if (chroma.b > 0.00001) chromaScale = min(chromaScale, (1.0 - targetLuma) / chroma.b);
-                    else if (chroma.b < -0.00001) chromaScale = min(chromaScale, targetLuma / -chroma.b);
-
-                    color.rgb = vec3(targetLuma) + chroma * clamp(chromaScale, 0.0, 1.0);
-                }
+                color.rgb = applyVideoBrightness(color.rgb);
 
                 fragColor = clamp(color, 0.0, 1.0);
             }
@@ -1194,44 +1176,7 @@ private class VideoLutShaderProgram(
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
 
-        val amount = brightness.coerceIn(0f, 100f) / 100f
-        val gamma = 1f + 0.8f * amount
-        val inverseGamma = 1.0 / gamma.toDouble()
-        val kneeValue = Math.pow(0.8, inverseGamma).toFloat()
-        val kneeSlope = (
-            inverseGamma * Math.pow(0.8, inverseGamma - 1.0)
-        ).toFloat()
-        // Match the gamma segment's incoming slope at 0.8, then ease to a flat
-        // derivative at white. This avoids a visible kink and retains highlight detail.
-        val kneeStartTangent = (
-            0.2f * kneeSlope / (1f - kneeValue).coerceAtLeast(0.000001f)
-        ).coerceIn(0f, 3f)
-        val buffer = ByteBuffer.allocateDirect(256 * 4).order(ByteOrder.nativeOrder())
-
-        for (index in 0 until 256) {
-            val input = index / 255f
-            val output = if (input <= 0.8f) {
-                Math.pow(input.toDouble(), inverseGamma).toFloat()
-            } else {
-                val t = ((input - 0.8f) / 0.2f).coerceIn(0f, 1f)
-                val t2 = t * t
-                val t3 = t2 * t
-                val smoothEndpoint = -2f * t3 + 3f * t2
-                val matchedSlope = t3 - 2f * t2 + t
-                kneeValue + (1f - kneeValue) * (
-                    smoothEndpoint + kneeStartTangent * matchedSlope
-                )
-            }
-            val sample = (output.coerceIn(0f, 1f) * 255f + 0.5f)
-                .toInt()
-                .coerceIn(0, 255)
-                .toByte()
-            buffer.put(sample)
-            buffer.put(sample)
-            buffer.put(sample)
-            buffer.put(0xFF.toByte())
-        }
-        buffer.flip()
+        val buffer = VideoBrightnessToneCurve.createRgbaBuffer(brightness)
 
         GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 1)
         GLES30.glTexImage2D(

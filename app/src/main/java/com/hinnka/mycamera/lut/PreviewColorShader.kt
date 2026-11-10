@@ -131,6 +131,8 @@ internal object PreviewColorShader {
                 return dot(color, W);
             }
 
+            ${VideoBrightnessToneCurve.GLSL}
+
             ${PreviewShadowsHighlightsShader.GLSL}
 
             ${if (needsOklab) PreviewColorShaderModules.OKLAB else ""}
@@ -388,6 +390,7 @@ internal object PreviewColorShader {
                 }
                 """ else ""}
 
+                color.rgb = applyVideoBrightness(color.rgb);
                 fragColor = vec4(clamp(sanitizeColor(color.rgb), 0.0, 1.0), color.a);
             }
         """.trimIndent().trimStart()

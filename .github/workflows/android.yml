@@ -64,6 +64,7 @@ jobs:
             --tests com.hinnka.mycamera.lut.RealtimeVideoRendererTransformTest \
             --tests com.hinnka.mycamera.stabilization.RealtimeStabilizationMathTest \
             --tests com.hinnka.mycamera.video.VideoLogProfileTest \
+            --tests com.hinnka.mycamera.lut.VideoBrightnessToneCurveTest \
             --stacktrace
 
       - name: Build default debug APK

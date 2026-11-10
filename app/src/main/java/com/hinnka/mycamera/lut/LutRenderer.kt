@@ -49,6 +49,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private val appContext = context.applicationContext
     companion object {
         private const val TAG = "LutRenderer"
+        private const val VIDEO_BRIGHTNESS_TEXTURE_UNIT = 15
 
         // 属性位置
         private const val POSITION_COMPONENT_COUNT = 2
@@ -136,6 +137,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     // 曲线纹理
     private var curveTextureId: Int = 0
     private var baselineCurveTextureId: Int = 0
+    private var videoBrightnessTextureId: Int = 0
+    private var lastVideoBrightnessValue: Float = -1f
 
     @Volatile
     var curveEnabled: Boolean = false
@@ -594,6 +597,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         stabilizationOutputAvailable = false
         lutTextureId = 0
         baselineLutTextureId = 0
+        videoBrightnessTextureId = 0
+        lastVideoBrightnessValue = -1f
         basicToneTextures.reset()
         vertexBufferId = 0
         texCoordBufferId = 0
@@ -928,6 +933,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         GLES30.glUniform1i(locations.uCurveTextureLocation, 2)
         GLES30.glUniform1i(locations.uCurveEnabledLocation, if (curveEnabled && curveTextureId != 0) 1 else 0)
 
+        bindVideoBrightnessTexture(locations, params.videoBrightness)
+
         basicToneTextures.bind(
             context = appContext,
             textureUnit = 3,
@@ -974,6 +981,54 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         GLES30.glDisableVertexAttribArray(locations.aTexCoordLocation)
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, 0)
         GLES30.glBindBuffer(GLES30.GL_ELEMENT_ARRAY_BUFFER, 0)
+    }
+
+    private fun bindVideoBrightnessTexture(
+        locations: ColorPassLocations,
+        value: Float,
+    ) {
+        val brightness = if (value.isFinite()) value.coerceIn(0f, 100f) else 0f
+        if (brightness != lastVideoBrightnessValue) {
+            lastVideoBrightnessValue = brightness
+            if (brightness > 0f) {
+                if (videoBrightnessTextureId == 0) {
+                    val textures = IntArray(1)
+                    GLES30.glGenTextures(1, textures, 0)
+                    videoBrightnessTextureId = textures[0]
+                }
+
+                GLES30.glActiveTexture(GLES30.GL_TEXTURE0 + VIDEO_BRIGHTNESS_TEXTURE_UNIT)
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, videoBrightnessTextureId)
+                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+                GLES30.glTexImage2D(
+                    GLES30.GL_TEXTURE_2D,
+                    0,
+                    GLES30.GL_RGBA8,
+                    VideoBrightnessToneCurve.LUT_SIZE,
+                    1,
+                    0,
+                    GLES30.GL_RGBA,
+                    GLES30.GL_UNSIGNED_BYTE,
+                    VideoBrightnessToneCurve.createRgbaBuffer(brightness),
+                )
+                GlUtils.checkGlError("uploadVideoBrightnessTexture")
+            } else if (videoBrightnessTextureId != 0) {
+                GLES30.glDeleteTextures(1, intArrayOf(videoBrightnessTextureId), 0)
+                videoBrightnessTextureId = 0
+            }
+        }
+
+        val enabled = brightness > 0f && videoBrightnessTextureId != 0
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0 + VIDEO_BRIGHTNESS_TEXTURE_UNIT)
+        GLES30.glBindTexture(
+            GLES30.GL_TEXTURE_2D,
+            if (enabled) videoBrightnessTextureId else 0,
+        )
+        GLES30.glUniform1i(locations.uBrightnessLutLocation, VIDEO_BRIGHTNESS_TEXTURE_UNIT)
+        GLES30.glUniform1i(locations.uBrightnessEnabledLocation, if (enabled) 1 else 0)
     }
 
     private fun uploadPendingCurveTextures() {
@@ -3228,6 +3283,11 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             GLES30.glDeleteTextures(1, intArrayOf(baselineCurveTextureId), 0)
             baselineCurveTextureId = 0
         }
+        if (videoBrightnessTextureId != 0) {
+            GLES30.glDeleteTextures(1, intArrayOf(videoBrightnessTextureId), 0)
+            videoBrightnessTextureId = 0
+        }
+        lastVideoBrightnessValue = -1f
 
         // 释放清晰度实时预览资源
         GlUtils.deleteProgram(clarityDownsampleProgram)
