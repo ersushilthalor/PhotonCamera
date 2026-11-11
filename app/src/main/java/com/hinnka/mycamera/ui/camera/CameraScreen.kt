@@ -530,8 +530,23 @@ fun CameraScreen(
 
         zoomStopAnimationJob?.cancel()
         val startZoom = viewModel.zoomRatioByMain
+        val currentCamera = state.getCurrentCameraInfo()
+        val intrinsicZoom = currentCamera?.displayIntrinsicZoomRatio
+            ?.takeIf { it.isFinite() && it > 0f } ?: 1f
+        val minimumSupportedZoom = currentCamera?.minZoom
+            ?.takeIf { it.isFinite() && it > 0f }
+            ?.times(intrinsicZoom) ?: targetZoom
+        val maximumSupportedZoom = currentCamera?.maxZoom
+            ?.takeIf { it.isFinite() && it >= currentCamera.minZoom }
+            ?.times(intrinsicZoom)
+            ?.takeIf { it >= minimumSupportedZoom } ?: targetZoom
+        val animationTargetZoom = targetZoom.coerceIn(
+            minimumSupportedZoom,
+            maximumSupportedZoom
+        )
+
         if (!startZoom.isFinite() || startZoom <= 0f ||
-            abs(startZoom - targetZoom) <= 0.0001f
+            abs(startZoom - animationTargetZoom) <= 0.0001f
         ) {
             viewModel.setZoomRatio(targetZoom)
             onFinished?.invoke()
@@ -545,13 +560,13 @@ fun CameraScreen(
                 animationSpec = tween(
                     durationMillis = resolveZoomStopAnimationDurationMillis(
                         startZoom,
-                        targetZoom
+                        animationTargetZoom
                     ),
                     easing = FastOutSlowInEasing
                 )
             ) {
                 viewModel.setZoomRatio(
-                    interpolateZoomRatio(startZoom, targetZoom, value)
+                    interpolateZoomRatio(startZoom, animationTargetZoom, value)
                 )
             }
             viewModel.setZoomRatio(targetZoom)
