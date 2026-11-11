@@ -886,10 +886,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setVideoHdrEnabled(enabled: Boolean) {
-        if (state.value.videoRecordingState.isRecording ||
-            state.value.videoRecordingState.isProcessing
-        ) return
+        if (state.value.videoRecordingState.isProcessing) return
+        if (_videoHdrEnabled.value == enabled) return
+
         _videoHdrEnabled.value = enabled
+        if (state.value.videoRecordingState.isRecording) {
+            cameraController.setVideoColorRecipeParams(
+                getMergedRecipeParams(forVideo = true)
+            )
+        }
     }
 
     fun getMergedRecipeParams(
