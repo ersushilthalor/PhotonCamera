@@ -185,108 +185,107 @@ private fun VideoTopBar(
             .height(56.dp),
         contentAlignment = Alignment.Center
     ) {
-        if (isRecording) {
-            RecordingHud(
-                elapsedMs = recordingElapsedMs,
-                videoConfig = videoConfig
-            )
-        } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Box(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                contentAlignment = Alignment.Center
             ) {
-                // Settings Readouts (Left)
-                VideoParameterCluster(
-                    videoConfig = videoConfig,
-                    onResolutionClick = onVideoResolutionClick,
-                    onFpsClick = onVideoFpsClick
-                )
-
-                // Quick Action Toggles (Right)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    if (!videoConfig.logProfile.isEnabled) {
-                        IconButton(onClick = onVideoHdrToggle) {
-                            Text(
-                                text = "HDR",
-                                color = Color.White.copy(alpha = if (videoHdrEnabled) 1f else 0.65f),
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.autoRotate()
-                            )
-                        }
-                    }
-
-                    VideoActionIcon(
-                        icon = if (videoConfig.torchEnabled) AppIcons.FlashlightOn else AppIcons.FlashlightOff,
-                        active = videoConfig.torchEnabled,
-                        enabled = videoCapabilities.supportsTorch,
-                        onClick = onVideoTorchToggle,
-                        contentDescription = stringResource(R.string.video_torch_chip)
+                if (isRecording) {
+                    RecordingHud(
+                        elapsedMs = recordingElapsedMs,
+                        videoConfig = videoConfig
                     )
+                } else {
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        VideoParameterCluster(
+                            videoConfig = videoConfig,
+                            onResolutionClick = onVideoResolutionClick,
+                            onFpsClick = onVideoFpsClick
+                        )
+                    }
+                }
+            }
 
-                    if (videoCapabilities.availableStabilizationModes.size > 1) {
-                        Box {
-                            VideoActionIcon(
-                                icon = AppIcons.Stabilization,
-                                active = videoConfig.stabilizationMode !=
-                                    VideoStabilizationMode.OFF,
-                                enabled = true,
-                                onClick = { stabilizationMenuExpanded = true },
-                                contentDescription = stringResource(
-                                    R.string.settings_video_stabilization_default
-                                )
+            // HDR and torch remain live controls while the recording HUD is visible.
+            if (!videoConfig.logProfile.isEnabled) {
+                IconButton(onClick = onVideoHdrToggle) {
+                    Text(
+                        text = "HDR",
+                        color = Color.White.copy(alpha = if (videoHdrEnabled) 1f else 0.65f),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.autoRotate()
+                    )
+                }
+            }
+
+            VideoActionIcon(
+                icon = if (videoConfig.torchEnabled) AppIcons.FlashlightOn else AppIcons.FlashlightOff,
+                active = videoConfig.torchEnabled,
+                enabled = videoCapabilities.supportsTorch,
+                onClick = onVideoTorchToggle,
+                contentDescription = stringResource(R.string.video_torch_chip)
+            )
+
+            // These controls can change the camera session, so keep them outside recording.
+            if (!isRecording) {
+                if (videoCapabilities.availableStabilizationModes.size > 1) {
+                    Box {
+                        VideoActionIcon(
+                            icon = AppIcons.Stabilization,
+                            active = videoConfig.stabilizationMode != VideoStabilizationMode.OFF,
+                            enabled = true,
+                            onClick = { stabilizationMenuExpanded = true },
+                            contentDescription = stringResource(
+                                R.string.settings_video_stabilization_default
                             )
-                            DropdownMenu(
-                                expanded = stabilizationMenuExpanded,
-                                onDismissRequest = {
-                                    stabilizationMenuExpanded = false
-                                }
-                            ) {
-                                videoCapabilities.availableStabilizationModes.forEach { mode ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(videoStabilizationModeLabel(mode))
-                                        },
-                                        onClick = {
-                                            stabilizationMenuExpanded = false
-                                            onVideoStabilizationModeChange(mode)
-                                        },
-                                        trailingIcon = if (
-                                            mode == videoConfig.stabilizationMode
-                                        ) {
-                                            {
-                                                Icon(
-                                                    imageVector = Icons.Default.Check,
-                                                    contentDescription = null
-                                                )
-                                            }
-                                        } else {
-                                            null
+                        )
+                        DropdownMenu(
+                            expanded = stabilizationMenuExpanded,
+                            onDismissRequest = { stabilizationMenuExpanded = false }
+                        ) {
+                            videoCapabilities.availableStabilizationModes.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = { Text(videoStabilizationModeLabel(mode)) },
+                                    onClick = {
+                                        stabilizationMenuExpanded = false
+                                        onVideoStabilizationModeChange(mode)
+                                    },
+                                    trailingIcon = if (mode == videoConfig.stabilizationMode) {
+                                        {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null
+                                            )
                                         }
-                                    )
-                                }
+                                    } else {
+                                        null
+                                    }
+                                )
                             }
                         }
                     }
+                }
 
-                    IconButton(onClick = onSettingsClick) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = stringResource(R.string.settings),
-                            modifier = Modifier.size(20.dp).autoRotate(),
-                            tint = Color.White
-                        )
-                    }
+                IconButton(onClick = onSettingsClick) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = stringResource(R.string.settings),
+                        modifier = Modifier.size(20.dp).autoRotate(),
+                        tint = Color.White
+                    )
                 }
             }
         }
     }
 }
-
 @Composable
 private fun VideoParameterCluster(
     videoConfig: VideoConfig,
