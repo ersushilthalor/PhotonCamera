@@ -465,6 +465,33 @@ class VideoRecorder(
         renderer?.setCameraInputHlg10Source(enabled)
     }
 
+    /**
+     * Update the creative recipe on the active renderer without rebuilding the encoder or
+     * camera session. The last layer is the creative layer; an empty initial recipe is
+     * represented by the renderer's default layer and can be populated in place.
+     */
+    fun updateColorRecipeParams(params: ColorRecipeParams) {
+        if (!isRecording || stopRequested) return
+
+        requestedColorLayers = if (requestedColorLayers.isEmpty()) {
+            listOf(VideoColorEffectLayer(lutConfig = null, recipeParams = params))
+        } else {
+            requestedColorLayers.mapIndexed { index, layer ->
+                if (index == requestedColorLayers.lastIndex) {
+                    layer.copy(recipeParams = params)
+                } else {
+                    layer
+                }
+            }
+        }
+
+        scope.launch(renderDispatcher) {
+            if (isRecording && !stopRequested) {
+                renderer?.updateColorRecipeParams(params)
+            }
+        }
+    }
+
     fun isRecording(): Boolean = isRecording && !stopRequested
 
     fun setPreferredAudioInputId(audioInputId: String) {
