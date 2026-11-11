@@ -189,6 +189,7 @@ fun GalleryEditScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val editGlassBackdrop = rememberLiquidGlassBackdrop()
     val depthModelState by remember(context.applicationContext) {
         DepthModelManager.observe(context)
     }.collectAsState()
@@ -855,6 +856,7 @@ fun GalleryEditScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .liquidGlassBackdropSource(editGlassBackdrop)
                     .pointerInput(isZoomed, currentPhoto.isVideo, editTab) {
                         if (
                             !isZoomed &&
@@ -1290,9 +1292,18 @@ fun GalleryEditScreen(
                 exit = slideOutVertically(targetOffsetY = { it }) + shrinkVertically(shrinkTowards = Alignment.Bottom) + fadeOut(),
                 modifier = Modifier.align(Alignment.BottomCenter)
             ) {
-                Surface(
-                    color = Color.Transparent,
-                    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                LiquidGlassSurface(
+                    backdrop = editGlassBackdrop,
+                    cornerRadius = 24.dp,
+                    style = LiquidGlassStyle(
+    blurRadius = 18.dp,
+    refractionHeight = 0.dp,
+    refractionAmount = 0.dp,
+    saturation = 1f,
+    tint = Color.Black.copy(alpha = 0.5f),
+    highlightAlpha = 0.18f,
+    fallbackColor = Color(0x801C1C1E),
+),
                     modifier = Modifier
                         .fillMaxWidth()
                         .onSizeChanged { editPanelHeightPx = it.height }
