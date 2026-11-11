@@ -522,7 +522,10 @@ fun CameraScreen(
         viewModel.setZoomRatio(targetZoom)
     }
 
-    fun startZoomStopAnimation(targetZoom: Float) {
+    fun startZoomStopAnimation(
+        targetZoom: Float,
+        onFinished: (() -> Unit)? = null
+    ) {
         if (!targetZoom.isFinite() || targetZoom <= 0f) return
 
         zoomStopAnimationJob?.cancel()
@@ -531,6 +534,7 @@ fun CameraScreen(
             abs(startZoom - targetZoom) <= 0.0001f
         ) {
             viewModel.setZoomRatio(targetZoom)
+            onFinished?.invoke()
             return
         }
 
@@ -551,6 +555,7 @@ fun CameraScreen(
                 )
             }
             viewModel.setZoomRatio(targetZoom)
+            onFinished?.invoke()
         }
     }
 
@@ -571,8 +576,9 @@ fun CameraScreen(
             currentCamera?.cameraId ?: "0"
         )
         if (camera != null && camera.cameraId != currentCamera?.cameraId) {
-            zoomStopAnimationJob?.cancel()
-            viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
+            startZoomStopAnimation(targetZoom) {
+                viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
+            }
         } else {
             startZoomStopAnimation(targetZoom)
         }
@@ -589,7 +595,9 @@ fun CameraScreen(
             startZoomStopAnimation(targetZoom)
             return
         }
-        viewModel.switchToLens(cameraId)
+        startZoomStopAnimation(targetZoom) {
+            viewModel.switchToLens(cameraId)
+        }
     }
 
     fun setZoomWithPreviewTransition(targetZoom: Float) {
