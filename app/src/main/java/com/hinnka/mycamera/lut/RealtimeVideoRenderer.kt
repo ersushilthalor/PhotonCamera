@@ -60,7 +60,7 @@ class RealtimeVideoRenderer(
 
     private data class LayerResources(
         val lutConfig: LutConfig?,
-        val params: ColorRecipeParams,
+        var params: ColorRecipeParams,
         var lutTextureId: Int = 0,
         var curveTextureId: Int = 0,
     )
