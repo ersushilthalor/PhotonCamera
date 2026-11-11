@@ -144,7 +144,7 @@ private class VideoLutShaderProgram(
             
             uniform float uChromaticAberration; // 0.0 ~ 1.0
             uniform float uClarity; // -1.0 ~ 1.0
-            uniform float uVideoBrightness; // 0.0 ~ 1.0; chroma-only recovery
+            uniform float uVideoBrightness; // 0.0 ~ 1.0; gamma-based shadow/midtone lift
             uniform float uSoftLight; // 0.0 ~ 1.0
             uniform float uSharpening;
             uniform vec2 uTexelSize;
@@ -937,8 +937,8 @@ private class VideoLutShaderProgram(
         )
 
         // 设置色彩配方 uniforms
-        // Recovery is a final independent shader pass; do not enable unrelated recipe processing
-        // merely because the recovery slider is non-zero.
+        // Brightness is a final independent shader pass; do not enable unrelated recipe processing
+        // merely because the video brightness slider is non-zero.
         val colorRecipeEnabled = currentRecipeParams != null && !currentRecipeParams.isDefault(includeVideoBrightness = false)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(programId, "uColorRecipeEnabled"), if (colorRecipeEnabled) 1 else 0)
         GLES30.glUniform1f(
