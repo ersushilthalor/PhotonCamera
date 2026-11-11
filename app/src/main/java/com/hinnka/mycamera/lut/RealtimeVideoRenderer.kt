@@ -60,7 +60,7 @@ class RealtimeVideoRenderer(
 
     private data class LayerResources(
         val lutConfig: LutConfig?,
-        val params: ColorRecipeParams,
+        @Volatile var params: ColorRecipeParams,
         var lutTextureId: Int = 0,
         var curveTextureId: Int = 0,
     )
@@ -138,6 +138,16 @@ class RealtimeVideoRenderer(
 
     val inputSurface: Surface?
         get() = cameraSurface
+
+    /**
+     * Update the creative recipe on the GL thread without rebuilding the encoder or EGL session.
+     * The last layer is the creative layer (or the identity fallback when no creative effects
+     * were selected at recording start).
+     */
+    fun updateCreativeRecipeParams(params: ColorRecipeParams) {
+        layers.last().params = params
+        PLog.i(TAG, "Live recording recipe updated")
+    }
 
     fun setCameraInputHlg10Source(enabled: Boolean) {
         cameraInputAlreadyHlg10 = enabled

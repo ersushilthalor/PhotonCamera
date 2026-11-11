@@ -185,94 +185,85 @@ private fun VideoTopBar(
             .height(56.dp),
         contentAlignment = Alignment.Center
     ) {
-        if (isRecording) {
-            RecordingHud(
-                elapsedMs = recordingElapsedMs,
-                videoConfig = videoConfig
-            )
-        } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                // Settings Readouts (Left)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            if (isRecording) {
+                RecordingHud(
+                    elapsedMs = recordingElapsedMs,
+                    videoConfig = videoConfig
+                )
+            } else {
                 VideoParameterCluster(
                     videoConfig = videoConfig,
                     onResolutionClick = onVideoResolutionClick,
                     onFpsClick = onVideoFpsClick
                 )
+            }
 
-                // Quick Action Toggles (Right)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    if (!videoConfig.logProfile.isEnabled) {
-                        IconButton(onClick = onVideoHdrToggle) {
-                            Text(
-                                text = "HDR",
-                                color = Color.White.copy(alpha = if (videoHdrEnabled) 1f else 0.65f),
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.autoRotate()
-                            )
-                        }
+            // Keep live controls available while recording. HDR changes the active
+            // recording color layer; torch updates the Camera2 repeating request.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (!videoConfig.logProfile.isEnabled) {
+                    IconButton(onClick = onVideoHdrToggle) {
+                        Text(
+                            text = "HDR",
+                            color = Color.White.copy(alpha = if (videoHdrEnabled) 1f else 0.65f),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.autoRotate()
+                        )
                     }
+                }
 
-                    VideoActionIcon(
-                        icon = if (videoConfig.torchEnabled) AppIcons.FlashlightOn else AppIcons.FlashlightOff,
-                        active = videoConfig.torchEnabled,
-                        enabled = videoCapabilities.supportsTorch,
-                        onClick = onVideoTorchToggle,
-                        contentDescription = stringResource(R.string.video_torch_chip)
-                    )
+                VideoActionIcon(
+                    icon = if (videoConfig.torchEnabled) AppIcons.FlashlightOn else AppIcons.FlashlightOff,
+                    active = videoConfig.torchEnabled,
+                    enabled = videoCapabilities.supportsTorch,
+                    onClick = onVideoTorchToggle,
+                    contentDescription = stringResource(R.string.video_torch_chip)
+                )
 
-                    if (videoCapabilities.availableStabilizationModes.size > 1) {
-                        Box {
-                            VideoActionIcon(
-                                icon = AppIcons.Stabilization,
-                                active = videoConfig.stabilizationMode !=
-                                    VideoStabilizationMode.OFF,
-                                enabled = true,
-                                onClick = { stabilizationMenuExpanded = true },
-                                contentDescription = stringResource(
-                                    R.string.settings_video_stabilization_default
-                                )
-                            )
-                            DropdownMenu(
-                                expanded = stabilizationMenuExpanded,
-                                onDismissRequest = {
-                                    stabilizationMenuExpanded = false
-                                }
-                            ) {
-                                videoCapabilities.availableStabilizationModes.forEach { mode ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(videoStabilizationModeLabel(mode))
-                                        },
-                                        onClick = {
-                                            stabilizationMenuExpanded = false
-                                            onVideoStabilizationModeChange(mode)
-                                        },
-                                        trailingIcon = if (
-                                            mode == videoConfig.stabilizationMode
-                                        ) {
-                                            {
-                                                Icon(
-                                                    imageVector = Icons.Default.Check,
-                                                    contentDescription = null
-                                                )
-                                            }
-                                        } else {
-                                            null
+                if (!isRecording && videoCapabilities.availableStabilizationModes.size > 1) {
+                    Box {
+                        VideoActionIcon(
+                            icon = AppIcons.Stabilization,
+                            active = videoConfig.stabilizationMode != VideoStabilizationMode.OFF,
+                            enabled = true,
+                            onClick = { stabilizationMenuExpanded = true },
+                            contentDescription = stringResource(R.string.settings_video_stabilization_default)
+                        )
+                        DropdownMenu(
+                            expanded = stabilizationMenuExpanded,
+                            onDismissRequest = { stabilizationMenuExpanded = false }
+                        ) {
+                            videoCapabilities.availableStabilizationModes.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = { Text(videoStabilizationModeLabel(mode)) },
+                                    onClick = {
+                                        stabilizationMenuExpanded = false
+                                        onVideoStabilizationModeChange(mode)
+                                    },
+                                    trailingIcon = if (mode == videoConfig.stabilizationMode) {
+                                        {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null
+                                            )
                                         }
-                                    )
-                                }
+                                    } else null
+                                )
                             }
                         }
                     }
+                }
 
+                if (!isRecording) {
                     IconButton(onClick = onSettingsClick) {
                         Icon(
                             imageVector = Icons.Default.Settings,

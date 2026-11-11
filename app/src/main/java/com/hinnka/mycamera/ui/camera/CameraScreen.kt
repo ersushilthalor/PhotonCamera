@@ -1945,7 +1945,7 @@ fun CameraScreen(
                 initialParams = effectiveRecipeParams,
                 onParamsPreviewChange = { previewRecipeParamsOverride = it },
                 showEffects = true,
-                replaceVignetteWithVideoBrightness = state.captureMode == CaptureMode.VIDEO,
+                replaceVignetteWithWashedOutRecovery = state.captureMode == CaptureMode.VIDEO,
                 videoOnly = state.captureMode == CaptureMode.VIDEO,
                 onDismiss = {
                     // Keep the Video preview override until the separate recipe reaches DataStore.

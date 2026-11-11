@@ -358,6 +358,6 @@
     <string name="camera_focus_point_label">Fokus</string>
     <string name="camera_metering_point_label">Messpunkt</string>
     <!-- Video editor: independent color recovery with contrast preserved -->
-    <string name="video_brightness">Helligkeit 🔆</string>
-    <string name="video_brightness_description">Hebt Schatten und Mitteltöne per Gamma-Kurve an und schützt Lichter vor zusätzlichem Clipping.</string>
+    <string name="video_washed_out_recovery">Ausgewaschene Farben wiederherstellen</string>
+    <string name="video_washed_out_recovery_description">Verblasste Farben in hellen Tönen wiederherstellen, ohne die Bildhelligkeit oder die vorhandene Kontrasteinstellung zu verändern.</string>
 </resources>

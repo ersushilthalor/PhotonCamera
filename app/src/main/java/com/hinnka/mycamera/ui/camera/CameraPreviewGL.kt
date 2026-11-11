@@ -280,7 +280,7 @@ fun CameraPreviewGL(
                                 }
                             }
                         }
-                        val colorRecipeEnabled = !colorRecipeParams.isDefault(includeVideoBrightness = false)
+                        val colorRecipeEnabled = !colorRecipeParams.isDefault(includeWashedOutRecovery = true)
                         val baselineColorRecipeEnabled = !baselineColorRecipeParams.isDefault()
                         // 更新 LUT 设置
                         glSurfaceView.setEnginePreview(enginePreviewPlan.value)

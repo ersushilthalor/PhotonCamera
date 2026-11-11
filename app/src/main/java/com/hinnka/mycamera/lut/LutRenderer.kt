@@ -861,8 +861,12 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
 
         // Washed-out recovery is a standalone chroma pass; it must not depend on
         // enabling the other recipe controls (especially contrast/exposure).
-        val recipeEnabled = !params.isDefault(includeVideoBrightness = false)
+        val recipeEnabled = !params.isDefault(includeWashedOutRecovery = false)
         GLES30.glUniform1i(locations.uColorRecipeEnabledLocation, if (recipeEnabled) 1 else 0)
+        GLES30.glUniform1f(
+            locations.uWashedOutRecoveryLocation,
+            params.washedOutRecovery.coerceIn(0f, 1f),
+        )
         if (recipeEnabled) {
             GLES30.glUniform1f(locations.uExposureLocation, params.exposure)
             GLES30.glUniform1f(locations.uContrastLocation, params.contrast)
