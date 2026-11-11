@@ -4,7 +4,7 @@ import kotlin.math.exp
 import kotlin.math.ln
 import androidx.compose.animation.core.CubicBezierEasing
 
-internal const val ZoomStopAnimationDurationMillis = 500
+internal const val ZoomStopAnimationDurationMillis = 400
 internal val ZoomStopAnimationEasing = CubicBezierEasing(0.4f, 0f, 0.6f, 1f)
 
 internal fun interpolateZoomRatio(
