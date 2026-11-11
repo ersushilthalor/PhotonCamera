@@ -7821,6 +7821,11 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    fun setVideoColorRecipeParams(params: ColorRecipeParams) {
+        if (!_state.value.videoRecordingState.isRecording) return
+        videoRecorder.updateColorRecipeParams(params)
+    }
+
     fun setVideoLensLockEnabled(enabled: Boolean) {
         if (_state.value.videoConfig.lensLockEnabled == enabled) return
         _state.value = _state.value.copy(
