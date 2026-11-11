@@ -2559,7 +2559,7 @@ private fun CaptureModeSwitcher(
 ) {
     BoxWithConstraints(
         modifier = Modifier
-            .width(228.dp)
+            .width(171.dp)
             .height(CameraControlsLayoutDefaults.ModeSwitcherHeight)
             .clip(RoundedCornerShape(18.dp))
             .background(if (oppoStyle) Color(0xFF202020) else Color.Black.copy(alpha = 0.28f))
