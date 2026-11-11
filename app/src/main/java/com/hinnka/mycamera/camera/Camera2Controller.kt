@@ -304,6 +304,8 @@ class Camera2Controller(private val context: Context) {
     private var cachedCharacteristicsCameraId: String = ""
     private var activeOpenCameraId: String = ""
     private var activeOutputPhysicalCameraId: String? = null
+    private var logicalMultiCameraAutoSwitchActive = false
+    private var lastLogicalMultiCameraStabilizationPhysicalId: String? = null
     private val failedPhysicalOutputProfiles = mutableSetOf<PhysicalOutputFailureKey>()
     private var cachedSensorOrientation: Int = 0
     private var cachedLensFacing: Int = CameraCharacteristics.LENS_FACING_BACK
@@ -1175,6 +1177,7 @@ class Camera2Controller(private val context: Context) {
             // Results from a retired session can arrive after a physical-output handoff; using
             // the new global physical-camera ID for those old frames mixes two sensors' metadata.
             if (session === captureSession) {
+                updateLogicalMultiCameraStabilizationCamera(result)
                 realtimeStabilizationCoordinator.submitCaptureResult(
                     result = result,
                     request = request,
@@ -2115,6 +2118,8 @@ class Camera2Controller(private val context: Context) {
         cachedCharacteristicsCameraId = ""
         activeOpenCameraId = ""
         activeOutputPhysicalCameraId = null
+        logicalMultiCameraAutoSwitchActive = false
+        lastLogicalMultiCameraStabilizationPhysicalId = null
         cachedSensorOrientation = 0
         cachedLensFacing = CameraCharacteristics.LENS_FACING_BACK
         cachedHardwareLevel = CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED
@@ -2598,9 +2603,18 @@ class Camera2Controller(private val context: Context) {
         }
 
         activeOpenCameraId = openCameraId
+        logicalMultiCameraAutoSwitchActive = shouldUseLogicalMultiCameraZoom(_state.value, selectedCamera)
         val requestedPhysicalCameraId = resolveRequestedPhysicalCameraId(_state.value, selectedCamera)
-        var outputPhysicalCameraId = requestedPhysicalCameraId
+        var outputPhysicalCameraId = if (logicalMultiCameraAutoSwitchActive) null else requestedPhysicalCameraId
         activeOutputPhysicalCameraId = outputPhysicalCameraId
+        lastLogicalMultiCameraStabilizationPhysicalId = null
+        if (logicalMultiCameraAutoSwitchActive) {
+            PLog.i(
+                TAG,
+                "Logical multi-camera seamless zoom enabled: logical=$openCameraId, " +
+                    "physicalIds=${getCameraCharacteristicsCached(openCameraId).physicalCameraIds}"
+            )
+        }
 
         val cameraStateCallback = object : CameraDevice.StateCallback() {
             override fun onOpened(camera: CameraDevice) {
@@ -3815,6 +3829,97 @@ class Camera2Controller(private val context: Context) {
         return camera?.let { it.intrinsicZoomRatio * state.zoomRatio } ?: state.zoomRatio
     }
 
+    /**
+     * True when this selected physical lens is exposed through a real logical multi-camera
+     * CameraDevice and the HAL can select its physical sensors from CONTROL_ZOOM_RATIO.
+     * In this mode every output must remain attached to the logical camera; binding an
+     * OutputConfiguration to a physical ID pins that stream and forces session recreation.
+     */
+    private fun shouldUseLogicalMultiCameraZoom(
+        state: CameraState = _state.value,
+        camera: CameraInfo? = state.getCurrentCameraInfo(),
+    ): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+        camera ?: return false
+        if (camera.isVirtualIszLens) return false
+        val logicalCameraId = camera.logicalCameraId?.takeIf { it.isNotBlank() } ?: return false
+        val openCameraId = runCatching { camera.getOpenCameraId() }.getOrNull() ?: return false
+        if (openCameraId != logicalCameraId) return false
+
+        val characteristics = getCameraCharacteristicsOrNull(
+            logicalCameraId,
+            "logical multi-camera seamless zoom",
+        ) ?: return false
+        val capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+            ?: return false
+        if (!capabilities.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)) {
+            return false
+        }
+        if (characteristics.physicalCameraIds.size < 2) return false
+
+        val zoomRange = characteristics.readMetadataOrNull(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+            ?: return false
+        if (zoomRange.lower <= 0f || zoomRange.upper <= zoomRange.lower) return false
+
+        // Keep full-resolution RAW capture on its existing per-physical-camera path when the
+        // logical device does not advertise a RAW output of its own.
+        if (state.captureMode == CaptureMode.PHOTO && requestedRawCaptureEnabled &&
+            CameraUtils.getRawCaptureOutput(characteristics) == null
+        ) {
+            return false
+        }
+        return true
+    }
+
+    /**
+     * Check whether the currently running logical CameraDevice can service a lens-button
+     * change without closing/reopening the device or rebuilding its CaptureSession.
+     */
+    fun canSwitchLensWithoutReopen(targetCameraId: String): Boolean {
+        val state = _state.value
+        val currentCamera = state.getCurrentCameraInfo() ?: return false
+        val targetCamera = state.availableCameras.firstOrNull { it.cameraId == targetCameraId } ?: return false
+        val logicalCameraId = currentCamera.logicalCameraId ?: return false
+        if (targetCamera.logicalCameraId != logicalCameraId) return false
+        if (runCatching { targetCamera.getOpenCameraId() }.getOrNull() != logicalCameraId) return false
+        if (activeOpenCameraId != logicalCameraId || cameraDevice == null || captureSession == null) return false
+        if (activeOutputPhysicalCameraId != null || !logicalMultiCameraAutoSwitchActive) return false
+        return shouldUseLogicalMultiCameraZoom(state, targetCamera)
+    }
+
+    /**
+     * Rebind software-stabilization calibration to the physical sensor currently selected by
+     * the logical HAL. This updates metadata/calibration only; it never changes the camera
+     * device or capture session.
+     */
+    private fun updateLogicalMultiCameraStabilizationCamera(result: TotalCaptureResult) {
+        if (!logicalMultiCameraAutoSwitchActive || activeOutputPhysicalCameraId != null) return
+        val physicalCameraId = result.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
+            ?: return
+        if (physicalCameraId == lastLogicalMultiCameraStabilizationPhysicalId) return
+
+        val physicalCharacteristics = getCameraCharacteristicsOrNull(
+            physicalCameraId,
+            "logical multi-camera active physical sensor",
+        ) ?: return
+        val timingCharacteristics = getActiveOpenCameraCharacteristics() ?: return
+        val cameraChanged = realtimeStabilizationCoordinator.configureCamera(
+            cameraId = physicalCameraId,
+            characteristics = physicalCharacteristics,
+            timingCharacteristics = timingCharacteristics,
+        )
+        lastLogicalMultiCameraStabilizationPhysicalId = physicalCameraId
+        PLog.i(TAG, "Logical HAL active physical camera changed: $physicalCameraId")
+        if (_state.value.videoRecordingState.isRecording) {
+            videoRecorder.onCameraSwitched(
+                sensorOrientationDegrees = physicalCharacteristics.get(CameraCharacteristics.SENSOR_ORIENTATION)
+                    ?: cachedSensorOrientation,
+                frontFacing = isCurrentCameraFrontFacing(),
+                restartStabilization = cameraChanged,
+            )
+        }
+    }
+
     private fun resolveRequestedPhysicalCameraId(
         state: CameraState = _state.value,
         camera: CameraInfo? = state.getCurrentCameraInfo()
@@ -3834,6 +3939,7 @@ class Camera2Controller(private val context: Context) {
         ) {
             return activeOutputPhysicalCameraId
         }
+        if (shouldUseLogicalMultiCameraZoom(state, camera)) return null
         return resolveRequestedPhysicalCameraId(state, camera)
             ?.takeUnless { isPhysicalOutputProfileFailed(it) }
     }
@@ -5172,7 +5278,13 @@ class Camera2Controller(private val context: Context) {
             val zoomRatioRange = characteristics.readMetadataOrNull(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
             val minZoom = zoomRatioRange?.lower ?: 1f
             val maxSupportedZoom = zoomRatioRange?.upper ?: maxZoom
-            val userZoomRatio = state.zoomRatio.coerceIn(minZoom, maxSupportedZoom)
+            val logicalAutoSwitch = shouldUseLogicalMultiCameraZoom(state, state.getCurrentCameraInfo())
+            val requestedDeviceZoomRatio = if (logicalAutoSwitch) {
+                getTargetZoomRatioByMain(state, state.getCurrentCameraInfo())
+            } else {
+                state.zoomRatio
+            }
+            val userZoomRatio = requestedDeviceZoomRatio.coerceIn(minZoom, maxSupportedZoom)
             val zoomRatio = userZoomRatio
             val activeRect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
 
@@ -5184,7 +5296,7 @@ class Camera2Controller(private val context: Context) {
                 resetCropAtUnitZoom = false,
                 panX = state.zoomPanX,
                 panY = state.zoomPanY,
-                useFreeformPan = state.zoomPanEnabled &&
+                useFreeformPan = !logicalAutoSwitch && state.zoomPanEnabled &&
                     state.getCurrentCameraInfo()?.supportsFreeformZoomPan == true,
             )
         } catch (e: Exception) {
@@ -5262,6 +5374,7 @@ class Camera2Controller(private val context: Context) {
 
     private fun shouldUseControlZoomRatio(zoomRatioRange: android.util.Range<Float>?): Boolean {
         zoomRatioRange ?: return false
+        if (shouldUseLogicalMultiCameraZoom()) return true
         return _state.value.availableCameras.size <= 1 || zoomRatioRange.lower < 1f
     }
 
@@ -6628,18 +6741,32 @@ class Camera2Controller(private val context: Context) {
             val zoomRatioRange = characteristics.readMetadataOrNull(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
             val minZoom = zoomRatioRange?.lower ?: 1f
             val maxSupportedZoom = zoomRatioRange?.upper ?: maxZoom
-            val clampedRatio = requestedRatio.coerceIn(minZoom, maxSupportedZoom)
+            val selectedCamera = _state.value.getCurrentCameraInfo()
+            val logicalAutoSwitch = shouldUseLogicalMultiCameraZoom(_state.value, selectedCamera)
+            val requestedDeviceZoomRatio = if (logicalAutoSwitch) {
+                getTargetZoomRatioByMain(_state.value, selectedCamera)
+            } else {
+                requestedRatio
+            }
+            val clampedDeviceZoomRatio = requestedDeviceZoomRatio.coerceIn(minZoom, maxSupportedZoom)
+            val intrinsicZoomRatio = selectedCamera?.intrinsicZoomRatio
+                ?.takeIf { it.isFinite() && it > 0f } ?: 1f
+            val clampedStateZoomRatio = if (logicalAutoSwitch) {
+                clampedDeviceZoomRatio / intrinsicZoomRatio
+            } else {
+                clampedDeviceZoomRatio
+            }
 
             val stateBeforeClamp = _state.value
-            val keepZoomPan = clampedRatio > 1.001f && stateBeforeClamp.zoomPanEnabled
+            val keepZoomPan = !logicalAutoSwitch && clampedStateZoomRatio > 1.001f && stateBeforeClamp.zoomPanEnabled
             _state.value = stateBeforeClamp.copy(
-                zoomRatio = clampedRatio,
+                zoomRatio = clampedStateZoomRatio,
                 zoomPanX = if (keepZoomPan) stateBeforeClamp.zoomPanX else 0f,
                 zoomPanY = if (keepZoomPan) stateBeforeClamp.zoomPanY else 0f,
                 zoomPanEnabled = keepZoomPan,
             )
             if (recreateSessionForPhysicalZoomIfNeeded(_state.value)) {
-                PLog.d(TAG, "setZoomRatio: $ratio -> $clampedRatio (physical output session recreated)")
+                PLog.d(TAG, "setZoomRatio: $ratio -> $clampedDeviceZoomRatio (physical output session recreated)")
                 return
             }
 
@@ -6647,13 +6774,13 @@ class Camera2Controller(private val context: Context) {
             builder.apply {
                 applyZoomRequestSettings(
                     builder = this,
-                    zoomRatio = clampedRatio,
+                    zoomRatio = clampedDeviceZoomRatio,
                     activeRect = activeRect,
                     zoomRatioRange = zoomRatioRange,
                     resetCropAtUnitZoom = true,
                     panX = _state.value.zoomPanX,
                     panY = _state.value.zoomPanY,
-                    useFreeformPan = _state.value.zoomPanEnabled &&
+                    useFreeformPan = !logicalAutoSwitch && _state.value.zoomPanEnabled &&
                         _state.value.getCurrentCameraInfo()?.supportsFreeformZoomPan == true,
                 )
             }
@@ -6670,7 +6797,11 @@ class Camera2Controller(private val context: Context) {
                 "SCALER_CROP_REGION"
             }
             val applyTiming = if (captureSession == null) "builder-only" else "preview"
-            PLog.d(TAG, "setZoomRatio: $ratio -> $clampedRatio ($zoomMode, $applyTiming)")
+            PLog.d(
+                TAG,
+                "setZoomRatio: $ratio -> $clampedDeviceZoomRatio " +
+                    "(logicalAutoSwitch=$logicalAutoSwitch, $zoomMode, $applyTiming)"
+            )
 
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to set zoom", e)
