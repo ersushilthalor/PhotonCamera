@@ -7809,6 +7809,11 @@ class Camera2Controller(private val context: Context) {
         )
     }
 
+    fun updateVideoRecordingColorRecipeParams(params: ColorRecipeParams) {
+        if (!videoRecorder.isRecording()) return
+        videoRecorder.updateCreativeRecipeParams(VideoColorEffectLayer(null, params))
+    }
+
     fun setVideoTorchEnabled(enabled: Boolean) {
         _state.value = _state.value.copy(
             videoConfig = _state.value.videoConfig.copy(
