@@ -533,17 +533,20 @@ fun CameraScreen(
         val currentCamera = state.getCurrentCameraInfo()
         val intrinsicZoom = currentCamera?.displayIntrinsicZoomRatio
             ?.takeIf { it.isFinite() && it > 0f } ?: 1f
-        val minimumSupportedZoom = currentCamera?.minZoom
-            ?.takeIf { it.isFinite() && it > 0f }
-            ?.times(intrinsicZoom) ?: targetZoom
-        val maximumSupportedZoom = currentCamera?.maxZoom
-            ?.takeIf { it.isFinite() && it >= currentCamera.minZoom }
-            ?.times(intrinsicZoom)
-            ?.takeIf { it >= minimumSupportedZoom } ?: targetZoom
-        val animationTargetZoom = targetZoom.coerceIn(
-            minimumSupportedZoom,
-            maximumSupportedZoom
-        )
+        val currentCameraZoomRange = currentCamera?.let { camera ->
+            val minimum = camera.minZoom * intrinsicZoom
+            val maximum = camera.maxZoom * intrinsicZoom
+            if (minimum.isFinite() && minimum > 0f &&
+                maximum.isFinite() && maximum >= minimum
+            ) {
+                minimum to maximum
+            } else {
+                null
+            }
+        }
+        val animationTargetZoom = currentCameraZoomRange?.let { (minimum, maximum) ->
+            targetZoom.coerceIn(minimum, maximum)
+        } ?: targetZoom
 
         if (!startZoom.isFinite() || startZoom <= 0f ||
             abs(startZoom - animationTargetZoom) <= 0.0001f
