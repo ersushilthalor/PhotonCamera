@@ -18,6 +18,8 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
@@ -659,7 +661,13 @@ fun NavigationHost(
                 slideOutHorizontally(targetOffsetX = { it }) + fadeOut()
             }
         ) {
-            composable(Routes.CAMERA) {
+            composable(
+                route = Routes.CAMERA,
+                enterTransition = { EnterTransition.None },
+                exitTransition = { ExitTransition.None },
+                popEnterTransition = { EnterTransition.None },
+                popExitTransition = { ExitTransition.None }
+            ) {
                 if (cameraViewModel.isExpanded) {
                     Row {
                         CameraScreen(
