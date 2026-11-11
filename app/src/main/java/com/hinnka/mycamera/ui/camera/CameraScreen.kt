@@ -292,6 +292,8 @@ fun CameraScreen(
     var parameterRulerBounds by remember { mutableStateOf<Rect?>(null) }
     var galleryThumbnailBounds by remember { mutableStateOf<Rect?>(null) }
     var captureAnimationSnapshot by remember { mutableStateOf<CaptureAnimationSnapshot?>(null) }
+    val zoomStopAnimationProgress = remember { Animatable(0f) }
+    var zoomStopAnimationJob by remember { mutableStateOf<Job?>(null) }
     var previewTransitionActive by remember { mutableStateOf(false) }
     var previewTransitionRevealing by remember { mutableStateOf(false) }
     var previewTransitionToken by remember { mutableIntStateOf(0) }
@@ -519,11 +521,10 @@ fun CameraScreen(
         val targetZoom = targetCamera.displayIntrinsicZoomRatio.takeIf { it > 0f }
             ?: targetCamera.intrinsicZoomRatio.takeIf { it > 0f }
             ?: 1f
-        if (viewModel.isVideoLensLocked()) {
-            viewModel.setZoomRatio(targetZoom)
-            return
-        }
-        viewModel.switchToLens(cameraId)
+        animateZoomStopTo(
+            targetZoom = targetZoom,
+            requestedCameraId = cameraId.takeUnless { viewModel.isVideoLensLocked() }
+        )
     }
 
     fun setZoomWithPreviewTransition(targetZoom: Float) {
@@ -543,6 +544,88 @@ fun CameraScreen(
             viewModel.switchToLensAndSetZoomRatio(camera.cameraId, targetZoom)
         } else {
             viewModel.setZoomRatio(targetZoom)
+        }
+    }
+
+    suspend fun runZoomStopAnimation(startZoom: Float, targetZoom: Float) {
+        if (!startZoom.isFinite() || startZoom <= 0f ||
+            !targetZoom.isFinite() || targetZoom <= 0f
+        ) {
+            viewModel.setZoomRatio(targetZoom)
+            return
+        }
+        zoomStopAnimationProgress.snapTo(0f)
+        zoomStopAnimationProgress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(
+                durationMillis = ZoomStopAnimationDurationMillis,
+                easing = ZoomStopAnimationEasing
+            )
+        ) {
+            viewModel.setZoomRatio(
+                interpolateZoomRatio(startZoom, targetZoom, value)
+            )
+        }
+        viewModel.setZoomRatio(targetZoom)
+    }
+
+    fun animateZoomStopTo(targetZoom: Float, requestedCameraId: String? = null) {
+        val currentCamera = state.getCurrentCameraInfo()
+        val startZoom = viewModel.zoomRatioByMain
+            .takeIf { it.isFinite() && it > 0f }
+            ?: state.zoomRatio.coerceAtLeast(0.01f)
+        val videoLensLocked = viewModel.isVideoLensLocked()
+        val targetCamera = if (videoLensLocked) {
+            null
+        } else if (requestedCameraId != null) {
+            state.availableCameras.firstOrNull { it.cameraId == requestedCameraId }
+        } else {
+            viewModel.findOptimalLens(
+                targetZoom,
+                state.availableCameras,
+                currentCamera?.cameraId ?: "0"
+            )
+        }
+        val shouldSwitchLens = targetCamera != null &&
+            targetCamera.cameraId != currentCamera?.cameraId
+
+        zoomStopAnimationJob?.cancel()
+        if (abs(targetZoom - startZoom) <= 0.001f) {
+            if (shouldSwitchLens) {
+                viewModel.switchToLensAndSetZoomRatio(targetCamera!!.cameraId, targetZoom)
+            } else {
+                viewModel.setZoomRatio(targetZoom)
+            }
+            return
+        }
+
+        zoomStopAnimationJob = scope.launch {
+            if (shouldSwitchLens && targetCamera != null) {
+                val targetIntrinsic = targetCamera.displayIntrinsicZoomRatio
+                    .takeIf { it > 0f } ?: 1f
+                val targetLensStartZoom = startZoom / targetIntrinsic
+                val canRepresentCurrentZoom = targetLensStartZoom >= targetCamera.minZoom &&
+                    targetLensStartZoom <= targetCamera.maxZoom
+
+                if (canRepresentCurrentZoom) {
+                    // Open the destination lens at the current field of view, then animate
+                    // the remaining zoom on that lens.
+                    viewModel.switchToLensAndSetZoomRatio(targetCamera.cameraId, startZoom)
+                    runZoomStopAnimation(startZoom, targetZoom)
+                } else {
+                    // Keep the current lens active while it can provide a valid continuous
+                    // zoom path; perform the physical lens handoff at the end of the motion.
+                    val currentIntrinsic = currentCamera?.displayIntrinsicZoomRatio
+                        ?.takeIf { it > 0f } ?: 1f
+                    val minReachableZoom = (currentCamera?.minZoom ?: 1f) * currentIntrinsic
+                    val maxReachableZoom = (currentCamera?.maxZoom ?: 10f) * currentIntrinsic
+                    val currentLensTarget = targetZoom.coerceIn(minReachableZoom, maxReachableZoom)
+                    runZoomStopAnimation(startZoom, currentLensTarget)
+                    viewModel.switchToLensAndSetZoomRatio(targetCamera.cameraId, targetZoom)
+                }
+            } else {
+                runZoomStopAnimation(startZoom, targetZoom)
+            }
         }
     }
 
@@ -892,9 +975,9 @@ fun CameraScreen(
                     zoomRatio = viewModel.zoomRatioByMain,
                     availableCameras = state.availableCameras,
                     currentCameraId = state.getCurrentCameraInfo()?.cameraId ?: "0",
-                    onZoomChange = { setZoomWithPreviewTransition(it) },
+                    onZoomChange = { animateZoomStopTo(it) },
                     onPreviewZoomChange = viewModel::setZoomRatio,
-                    onZoomStopClick = { setZoomWithPreviewTransition(it) },
+                    onZoomStopClick = { animateZoomStopTo(it) },
                     onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
                     onFilterClick = {
                         if (isVideoMode) {
@@ -1444,9 +1527,9 @@ fun CameraScreen(
                             zoomRatio = viewModel.zoomRatioByMain,
                             availableCameras = state.availableCameras,
                             currentCameraId = state.getCurrentCameraInfo()?.cameraId ?: "0",
-                            onZoomChange = { setZoomWithPreviewTransition(it) },
+                            onZoomChange = { animateZoomStopTo(it) },
                             onPreviewZoomChange = viewModel::setZoomRatio,
-                            onZoomStopClick = { setZoomWithPreviewTransition(it) },
+                            onZoomStopClick = { animateZoomStopTo(it) },
                             onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
                             onFilterClick = {
                                 if (isVideoMode) {
