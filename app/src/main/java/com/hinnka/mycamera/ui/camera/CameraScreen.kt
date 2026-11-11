@@ -223,6 +223,7 @@ fun CameraScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val cameraGlassBackdrop = rememberLiquidGlassBackdrop()
     val scope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
     val uiStyle by viewModel.uiStyle.collectAsState()
@@ -1636,7 +1637,8 @@ fun CameraScreen(
                     .offset(y = viewfinderTop)
                     .onGloballyPositioned { coordinates ->
                         viewfinderAreaBounds = coordinates.boundsInRoot()
-                    },
+                    }
+                    .liquidGlassBackdropSource(cameraGlassBackdrop),
                 contentAlignment = Alignment.Center
             ) {
                 viewfinder()
@@ -1729,6 +1731,7 @@ fun CameraScreen(
 
         // TopSheet for settings
         CameraTopSheet(
+            glassBackdrop = cameraGlassBackdrop,
             visible = activePanel == ActivePanel.SETTINGS,
             captureMode = state.captureMode,
             aspectRatio = state.aspectRatio,
