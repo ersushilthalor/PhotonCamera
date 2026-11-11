@@ -313,6 +313,7 @@ fun SettingsScreen(
     onPresetManagementClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val state by viewModel.state.collectAsState()
     val userPreferences by viewModel.userPreferences.collectAsState()
     val floatingWindowAppearanceRepository = remember(context) { FloatingWindowAppearanceRepository(context.applicationContext) }
