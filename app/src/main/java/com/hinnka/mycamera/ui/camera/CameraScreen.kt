@@ -634,7 +634,7 @@ fun CameraScreen(
         viewModel.switchCamera()
     }
 
-    fun setShootingModeWithPreviewTransition(mode: CameraShootingMode) {
+    fun setShootingModeImmediately(mode: CameraShootingMode) {
         if (mode == CameraShootingMode.PROFESSIONAL && !state.isRawSupported) return
 
         val targetCaptureMode = when (mode) {
@@ -654,12 +654,12 @@ fun CameraScreen(
             return
         }
 
-        runPreviewTransition {
-            if (targetCaptureMode == CaptureMode.VIDEO && state.aspectRatio == AspectRatio.XPAN) {
-                viewModel.setAspectRatio(AspectRatio.RATIO_4_3)
-            }
-            viewModel.setShootingMode(targetCaptureMode, targetUseRaw)
+        // Keep the camera preview visible during the required capture-mode restart.
+        // The preview-cover animation is reserved for aspect-ratio and preset changes.
+        if (targetCaptureMode == CaptureMode.VIDEO && state.aspectRatio == AspectRatio.XPAN) {
+            viewModel.setAspectRatio(AspectRatio.RATIO_4_3)
         }
+        viewModel.setShootingMode(targetCaptureMode, targetUseRaw)
     }
 
     fun presetTargetAspectRatio(preset: CameraPreset?): AspectRatio {
@@ -1578,7 +1578,7 @@ fun CameraScreen(
                     captureButtonBounds = bounds
                 },
                 onSwitchCameraClick = ::switchCameraWithPreviewTransition,
-                onCaptureModeSelected = ::setShootingModeWithPreviewTransition,
+                onCaptureModeSelected = ::setShootingModeImmediately,
                 modeSwitchEnabled = !previewTransitionActive,
                 onCaptureTap = {
                     val shouldDebounceRawCapture =
