@@ -515,18 +515,6 @@ fun CameraScreen(
         }
     }
 
-    fun switchToLensWithPreviewTransition(cameraId: String) {
-        if (cameraId == state.getCurrentCameraInfo()?.cameraId) return
-        val targetCamera = state.availableCameras.firstOrNull { it.cameraId == cameraId } ?: return
-        val targetZoom = targetCamera.displayIntrinsicZoomRatio.takeIf { it > 0f }
-            ?: targetCamera.intrinsicZoomRatio.takeIf { it > 0f }
-            ?: 1f
-        animateZoomStopTo(
-            targetZoom = targetZoom,
-            requestedCameraId = cameraId.takeUnless { viewModel.isVideoLensLocked() }
-        )
-    }
-
     fun setZoomWithPreviewTransition(targetZoom: Float) {
         if (viewModel.isVideoLensLocked() ||
             viewModel.isCurrentLensCustomZoomRatioStop(targetZoom)
@@ -627,6 +615,18 @@ fun CameraScreen(
                 runZoomStopAnimation(startZoom, targetZoom)
             }
         }
+    }
+
+    fun switchToLensWithPreviewTransition(cameraId: String) {
+        if (cameraId == state.getCurrentCameraInfo()?.cameraId) return
+        val targetCamera = state.availableCameras.firstOrNull { it.cameraId == cameraId } ?: return
+        val targetZoom = targetCamera.displayIntrinsicZoomRatio.takeIf { it > 0f }
+            ?: targetCamera.intrinsicZoomRatio.takeIf { it > 0f }
+            ?: 1f
+        animateZoomStopTo(
+            targetZoom = targetZoom,
+            requestedCameraId = cameraId.takeUnless { viewModel.isVideoLensLocked() }
+        )
     }
 
     fun switchCameraWithPreviewTransition() {
