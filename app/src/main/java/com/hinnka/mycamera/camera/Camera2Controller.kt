@@ -2845,15 +2845,7 @@ class Camera2Controller(private val context: Context) {
                 availableColorCorrectionModes = loadAvailableColorCorrectionModes(openCharacteristics)
                 awbColorTemperatureRange = loadAwbColorTemperatureRange(openCharacteristics)
                 lastWhiteBalanceResult = null
-                val rawCapabilityCameraId = selectedCamera?.cameraId
-                    ?.takeIf { logicalMultiCameraAutoSwitchActive }
-                val rawCapabilityCharacteristics = rawCapabilityCameraId?.let { physicalId ->
-                    getCameraCharacteristicsOrNull(physicalId, "logical lens RAW capability")
-                } ?: capabilityCharacteristics
-                isRawSupported = resolveRawCaptureOutput(
-                    rawCapabilityCharacteristics,
-                    rawCapabilityCameraId ?: outputPhysicalCameraId,
-                ) != null
+                isRawSupported = resolveRawCaptureOutput(capabilityCharacteristics, outputPhysicalCameraId) != null
 
                 availableAeModes =
                     openCharacteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES) ?: intArrayOf()
@@ -3868,12 +3860,6 @@ class Camera2Controller(private val context: Context) {
         val zoomRange = characteristics.readMetadataOrNull(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
             ?: return false
         if (zoomRange.lower <= 0f || zoomRange.upper <= zoomRange.lower) return false
-        val selectedLensZoom = camera.intrinsicZoomRatio
-        if (!selectedLensZoom.isFinite() ||
-            selectedLensZoom < zoomRange.lower - 0.01f || selectedLensZoom > zoomRange.upper + 0.01f
-        ) {
-            return false
-        }
 
         // Keep full-resolution RAW capture on its existing per-physical-camera path when the
         // logical device does not advertise a RAW output of its own.
