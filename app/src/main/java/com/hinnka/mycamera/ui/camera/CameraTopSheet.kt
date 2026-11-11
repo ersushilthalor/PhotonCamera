@@ -59,6 +59,7 @@ private val CameraTopSheetContentTopPadding = 32.dp
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun CameraTopSheet(
+    glassBackdrop: LiquidGlassBackdrop,
     visible: Boolean,
     captureMode: CaptureMode,
     aspectRatio: AspectRatio,
@@ -143,18 +144,32 @@ fun CameraTopSheet(
         exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
         modifier = modifier
     ) {
-        Column(
+        LiquidGlassSurface(
+            backdrop = glassBackdrop,
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
-                .background(Color.Black.copy(alpha = 0.8f))
-                // Keep the screen's top inset fixed, but measure content and side padding
-                // in the rotated viewport so landscape controls stay inside the sheet.
-                .padding(top = contentTopPadding)
-                .autoRotate(matchParentSize = true)
-                .padding(horizontal = 24.dp)
+                .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)),
+            cornerRadius = 0.dp,
+            style = LiquidGlassStyle(
+    blurRadius = 18.dp,
+    refractionHeight = 0.dp,
+    refractionAmount = 0.dp,
+    saturation = 1f,
+    tint = Color.Black.copy(alpha = 0.5f),
+    highlightAlpha = 0.18f,
+    fallbackColor = Color(0x801C1C1E),
+)
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    // Keep the screen's top inset fixed, but measure content and side padding
+                    // in the rotated viewport so landscape controls stay inside the sheet.
+                    .padding(top = contentTopPadding)
+                    .autoRotate(matchParentSize = true)
+                    .padding(horizontal = 24.dp)
+            ) {
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -509,6 +524,7 @@ fun CameraTopSheet(
                         )
                     }
                 }
+            }
             }
         }
     }
