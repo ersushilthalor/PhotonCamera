@@ -2576,12 +2576,12 @@ private fun CaptureModeSwitcher(
         val selectedIndex = if (shootingMode == CameraShootingMode.VIDEO) 1 else 0
         val knobOffset by animateDpAsState(
             targetValue = knobWidth * selectedIndex,
-            animationSpec = tween(durationMillis = 400),
+            animationSpec = tween(durationMillis = 220),
             label = "modeSwitcher"
         )
         val selectedBackground by animateColorAsState(
             targetValue = if (oppoStyle) Color(0xFF303030) else Color.White,
-            animationSpec = tween(durationMillis = 400),
+            animationSpec = tween(durationMillis = 220),
             label = "modeSwitcherColor"
         )
         Box(
