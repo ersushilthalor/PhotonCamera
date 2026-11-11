@@ -63,6 +63,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Slider
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.DropdownMenu
@@ -131,6 +132,8 @@ import com.hinnka.mycamera.camera.VendorCaptureSettings
 import com.hinnka.mycamera.camera.VendorCaptureSettingsByLens
 import com.hinnka.mycamera.camera.VendorCaptureValueType
 import com.hinnka.mycamera.data.CaptureButtonStyle
+import com.hinnka.mycamera.data.FloatingWindowAppearance
+import com.hinnka.mycamera.data.FloatingWindowAppearanceRepository
 import com.hinnka.mycamera.data.VolumeKeyAction
 import com.hinnka.mycamera.frame.FrameInfo
 import com.hinnka.mycamera.gallery.PhotoSavePath
@@ -312,6 +315,15 @@ fun SettingsScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val userPreferences by viewModel.userPreferences.collectAsState()
+    val floatingWindowAppearanceRepository = remember(context) { FloatingWindowAppearanceRepository(context.applicationContext) }
+    val floatingWindowAppearance by floatingWindowAppearanceRepository.appearance.collectAsState(initial = FloatingWindowAppearance.DEFAULT)
+    var floatingWindowTransparency by remember(floatingWindowAppearance.transparencyPercent) {
+        mutableStateOf(floatingWindowAppearance.transparencyPercent.toFloat())
+    }
+    var floatingWindowBlurStrength by remember(floatingWindowAppearance.blurStrengthDp) {
+        mutableStateOf(floatingWindowAppearance.blurStrengthDp)
+    }
+    val floatingWindowSettingsScope = androidx.compose.runtime.rememberCoroutineScope()
     val showLevelIndicator by viewModel.showLevelIndicator.collectAsState(initial = false)
     val focusPeakingEnabled by viewModel.focusPeakingEnabled.collectAsState(initial = true)
     val eyeFocusEnabled by viewModel.eyeFocusEnabled.collectAsState()
@@ -1897,6 +1909,85 @@ fun SettingsScreen(
                         )
 
                         CaptureButtonAppearanceSetting(viewModel = viewModel)
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                text = stringResource(R.string.settings_floating_window_glass),
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = stringResource(R.string.settings_floating_window_glass_description),
+                                color = Color.White.copy(alpha = 0.62f),
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp,
+                                modifier = Modifier.padding(top = 3.dp, bottom = 12.dp)
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(stringResource(R.string.settings_floating_window_transparency), color = Color.White.copy(alpha = 0.88f), fontSize = 13.sp)
+                                Text("${floatingWindowTransparency.roundToInt()}%", color = AccentColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                            Slider(
+                                value = floatingWindowTransparency,
+                                onValueChange = { floatingWindowTransparency = it },
+                                valueRange = 0f..90f,
+                                onValueChangeFinished = {
+                                    floatingWindowSettingsScope.launch {
+                                        floatingWindowAppearanceRepository.save(
+                                            FloatingWindowAppearance(
+                                                floatingWindowTransparency.roundToInt(),
+                                                floatingWindowBlurStrength
+                                            )
+                                        )
+                                    }
+                                }
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(stringResource(R.string.settings_floating_window_blur), color = Color.White.copy(alpha = 0.88f), fontSize = 13.sp)
+                                Text("${floatingWindowBlurStrength.roundToInt()} dp", color = AccentColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                            Slider(
+                                value = floatingWindowBlurStrength,
+                                onValueChange = { floatingWindowBlurStrength = it },
+                                valueRange = 0f..50f,
+                                onValueChangeFinished = {
+                                    floatingWindowSettingsScope.launch {
+                                        floatingWindowAppearanceRepository.save(
+                                            FloatingWindowAppearance(
+                                                floatingWindowTransparency.roundToInt(),
+                                                floatingWindowBlurStrength
+                                            )
+                                        )
+                                    }
+                                }
+                            )
+                            TextButton(
+                                onClick = {
+                                    floatingWindowTransparency = FloatingWindowAppearance.DEFAULT.transparencyPercent.toFloat()
+                                    floatingWindowBlurStrength = FloatingWindowAppearance.DEFAULT.blurStrengthDp
+                                    floatingWindowSettingsScope.launch {
+                                        floatingWindowAppearanceRepository.save(FloatingWindowAppearance.DEFAULT)
+                                    }
+                                },
+                                modifier = Modifier.align(Alignment.End)
+                            ) {
+                                Text(stringResource(R.string.settings_accent_color_reset))
+                            }
+                        }
 
                         HorizontalDivider(
                             color = Color.White.copy(alpha = 0.1f),
