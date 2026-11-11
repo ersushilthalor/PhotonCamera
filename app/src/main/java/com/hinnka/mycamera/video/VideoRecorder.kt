@@ -460,13 +460,11 @@ class VideoRecorder(
         PLog.d(TAG, "Video recording resumed")
     }
 
-    fun updateCreativeRecipeParams(params: VideoColorEffectLayer) {
+    fun updateCreativeRecipeParams(params: com.hinnka.mycamera.model.ColorRecipeParams) {
         if (!isRecording || stopRequested) return
         scope.launch(renderDispatcher) {
             if (!isRecording || stopRequested) return@launch
-            renderer?.updateCreativeRecipeParams(
-                params.recipeParams ?: com.hinnka.mycamera.model.ColorRecipeParams.DEFAULT
-            )
+            renderer?.updateCreativeRecipeParams(params)
         }
     }
 
