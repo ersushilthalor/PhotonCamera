@@ -3827,13 +3827,20 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun switchToLens(cameraId: String) {
         if (isVideoLensLocked()) return
         val targetCamera = state.value.availableCameras.find { it.cameraId == cameraId }
+        // A validated logical multi-camera group can change physical sensors through the
+        // existing logical CameraDevice. Decide before mutating CameraState.
+        val canSwitchInPlace = targetCamera != null &&
+            cameraController.canSwitchLensWithoutReopen(cameraId)
         syncVendorCaptureSettingsToController()
         cameraController.switchToCameraId(cameraId)
         targetCamera?.let { camera ->
             setZoomRatioForCamera(camera.defaultVisibleZoomRatio(), camera.cameraId)
         }
-        // Always use the regular Camera2 close/open path for lens changes.
-        reopenCamera(preserveVideoRecording = true)
+        if (!canSwitchInPlace) {
+            reopenCamera(preserveVideoRecording = true)
+        } else {
+            PLog.i(TAG, "Logical multi-camera lens handoff without CameraDevice reopen: $cameraId")
+        }
     }
 
     fun switchToLensAndSetZoomRatio(cameraId: String, ratio: Float) {
@@ -3841,10 +3848,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             setZoomRatio(ratio)
             return
         }
+        val canSwitchInPlace = state.value.availableCameras.any { it.cameraId == cameraId } &&
+            cameraController.canSwitchLensWithoutReopen(cameraId)
         syncVendorCaptureSettingsToController()
         cameraController.switchToCameraId(cameraId)
         setZoomRatioForCamera(ratio, cameraId)
-        reopenCamera(preserveVideoRecording = true)
+        if (!canSwitchInPlace) {
+            reopenCamera(preserveVideoRecording = true)
+        } else {
+            PLog.i(TAG, "Logical multi-camera zoom-stop handoff without CameraDevice reopen: $cameraId")
+        }
     }
 
     /**
