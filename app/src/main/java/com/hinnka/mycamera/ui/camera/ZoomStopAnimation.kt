@@ -3,7 +3,6 @@ package com.hinnka.mycamera.ui.camera
 import kotlin.math.exp
 import kotlin.math.ln
 import androidx.compose.animation.core.CubicBezierEasing
-import kotlin.math.roundToInt
 
 internal const val ZoomStopAnimationDurationMillis = 500
 internal val ZoomStopAnimationEasing = CubicBezierEasing(0.4f, 0f, 0.6f, 1f)
