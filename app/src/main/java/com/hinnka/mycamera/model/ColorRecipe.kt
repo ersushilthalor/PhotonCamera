@@ -35,8 +35,8 @@ data class ColorRecipeParams(
     val chromaticAberration: Float = 0f, // 0.0 ~ 1.0 (色散/边缘溢色强度，0为无效果)
     val noise: Float = 0f,          // 0.0 ~ 1.0 (噪点强度，包含亮度和色彩噪点，0为无效果)
     val lowRes: Float = 0f,         // 0.0 ~ 1.0 (低像素强度，0为无效果)
-    // Video-editor-only chroma recovery; it must not change the existing luminance/contrast curve.
-    val washedOutRecovery: Float = 0f,
+    // Video-editor-only gamma-curve brightness lift with highlight protection.
+    val videoBrightness: Float = 0f,
     val skinHue: Float = 0f,
     val skinChroma: Float = 0f,
     val skinLightness: Float = 0f,
@@ -95,8 +95,8 @@ data class ColorRecipeParams(
     /**
      * 检查参数是否为默认值（无任何调整）
      */
-    fun isDefault(includeWashedOutRecovery: Boolean = false): Boolean {
-        return (!includeWashedOutRecovery || washedOutRecovery == 0f) &&
+    fun isDefault(includeVideoBrightness: Boolean = false): Boolean {
+        return (!includeVideoBrightness || videoBrightness == 0f) &&
                 exposure == 0f &&
                 contrast == 1f &&
                 tonality == 0f &&
@@ -199,7 +199,7 @@ data class ColorRecipeParams(
                 chromaticAberration == other.chromaticAberration &&
                 noise == other.noise &&
                 lowRes == other.lowRes &&
-                washedOutRecovery == other.washedOutRecovery &&
+                videoBrightness == other.videoBrightness &&
                 skinHue == other.skinHue &&
                 skinChroma == other.skinChroma &&
                 skinLightness == other.skinLightness &&
