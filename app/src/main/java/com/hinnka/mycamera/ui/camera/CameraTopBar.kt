@@ -244,7 +244,9 @@ private fun VideoTopBar(
                                 expanded = stabilizationMenuExpanded,
                                 onDismissRequest = {
                                     stabilizationMenuExpanded = false
-                                }
+                                },
+                                containerColor = Color(0x801C1C1E),
+                                shadowElevation = 12.dp
                             ) {
                                 videoCapabilities.availableStabilizationModes.forEach { mode ->
                                     DropdownMenuItem(
