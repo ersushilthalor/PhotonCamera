@@ -111,7 +111,6 @@ private enum class CameraShootingMode {
     VIDEO
 }
 
-private const val InitialPreviewTransitionDelayMillis = 150L
 private const val PreviewTransitionRevealDurationMillis = 800
 private const val RawCaptureTapDebounceMillis = 1000L
 private const val DefaultShutterSpeedNs = 1_000_000_000f / 60f
@@ -293,12 +292,11 @@ fun CameraScreen(
     var parameterRulerBounds by remember { mutableStateOf<Rect?>(null) }
     var galleryThumbnailBounds by remember { mutableStateOf<Rect?>(null) }
     var captureAnimationSnapshot by remember { mutableStateOf<CaptureAnimationSnapshot?>(null) }
-    var previewTransitionActive by remember { mutableStateOf(true) }
+    var previewTransitionActive by remember { mutableStateOf(false) }
     var previewTransitionRevealing by remember { mutableStateOf(false) }
     var previewTransitionToken by remember { mutableIntStateOf(0) }
     var previewTransitionAwaitingResume by remember { mutableStateOf(false) }
     var previewTransitionSawPause by remember { mutableStateOf(false) }
-    var hasPlayedInitialPreviewTransition by remember { mutableStateOf(false) }
     var rawCaptureTapLocked by remember { mutableStateOf(false) }
     fun discardTransientLookEdits() {
         previewRecipeParamsOverride = null
@@ -549,7 +547,8 @@ fun CameraScreen(
     }
 
     fun switchCameraWithPreviewTransition() {
-        runPreviewTransition { viewModel.switchCamera() }
+        // Switch cameras immediately without the black preview-cover reveal.
+        viewModel.switchCamera()
     }
 
     fun setShootingModeWithPreviewTransition(mode: CameraShootingMode) {
@@ -636,24 +635,6 @@ fun CameraScreen(
             previewTransitionAwaitingResume = false
             previewTransitionSawPause = false
         }
-    }
-
-    LaunchedEffect(
-        state.isPreviewActive,
-        state.captureMode,
-        hasPlayedInitialPreviewTransition,
-        canStartShutterAnimation
-    ) {
-        val canRevealInitialPreview =
-            canStartShutterAnimation ||
-                state.captureMode == CaptureMode.VIDEO
-        if (hasPlayedInitialPreviewTransition || !state.isPreviewActive || !canRevealInitialPreview) return@LaunchedEffect
-        previewTransitionActive = true
-        delay(InitialPreviewTransitionDelayMillis)
-        previewTransitionRevealing = true
-        delay(PreviewTransitionRevealDurationMillis.toLong())
-        previewTransitionActive = false
-        hasPlayedInitialPreviewTransition = true
     }
 
     var showGhostPermissionDialog by remember { mutableStateOf(false) }
