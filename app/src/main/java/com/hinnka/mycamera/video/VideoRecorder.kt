@@ -460,6 +460,16 @@ class VideoRecorder(
         PLog.d(TAG, "Video recording resumed")
     }
 
+    fun updateCreativeRecipeParams(params: VideoColorEffectLayer) {
+        if (!isRecording || stopRequested) return
+        scope.launch(renderDispatcher) {
+            if (!isRecording || stopRequested) return@launch
+            renderer?.updateCreativeRecipeParams(
+                params.recipeParams ?: com.hinnka.mycamera.model.ColorRecipeParams.DEFAULT
+            )
+        }
+    }
+
     fun setCameraInputHlg10Source(enabled: Boolean) {
         requestedCameraInputIsHlg10 = enabled
         renderer?.setCameraInputHlg10Source(enabled)
