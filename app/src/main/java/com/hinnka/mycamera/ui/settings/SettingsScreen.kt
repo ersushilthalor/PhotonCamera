@@ -211,8 +211,8 @@ private val APP_LANGUAGE_OPTIONS = listOf(
     AppLanguageOption("zh-TW", R.string.settings_language_chinese_traditional),
 )
 
-private val SettingsBackgroundColor = Color(0xFF151515)
-private val SettingsBackgroundScrim = Color.Black.copy(alpha = 0.62f)
+private val SettingsBackgroundColor = Color(0xFF000000)
+private val SettingsBackgroundScrim = Color.Transparent
 private val SettingsRippleAlpha = RippleAlpha(
     pressedAlpha = 0.04f,
     focusedAlpha = 0.06f,
@@ -955,7 +955,6 @@ fun SettingsScreen(
         }
     }
 
-    val backgroundPainter = rememberBackgroundPainter(viewModel)
     val settingsRippleConfiguration = remember {
         RippleConfiguration(
             color = Color.White,
@@ -993,8 +992,6 @@ fun SettingsScreen(
             modifier = modifier
                 .fillMaxSize()
                 .background(SettingsBackgroundColor)
-                .paint(backgroundPainter, contentScale = ContentScale.Crop)
-                .background(SettingsBackgroundScrim)
                 .navigationBarsPadding()
         ) {
             // 顶部标题栏
@@ -2498,7 +2495,7 @@ private fun SettingsCategoryOverview(
 ) {
     if (showPremium) {
         PremiumCard(onClick = onPremiumClick)
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(20.dp))
     }
 
     SettingsSection(title = stringResource(R.string.settings_tab_camera)) {
@@ -2511,9 +2508,7 @@ private fun SettingsCategoryOverview(
             ).joinToString(" · "),
             onClick = { onPageSelected(SettingsPage.ASSIST) }
         )
-
         SettingsCategoryDivider()
-
         NavigationSettingItem(
             title = stringResource(R.string.settings_section_focus_lens),
             description = listOf(
@@ -2524,9 +2519,7 @@ private fun SettingsCategoryOverview(
             ).joinToString(" · "),
             onClick = { onPageSelected(SettingsPage.FOCUS_LENS) }
         )
-
         SettingsCategoryDivider()
-
         NavigationSettingItem(
             title = stringResource(R.string.settings_section_capture_storage),
             description = listOf(
@@ -2538,9 +2531,7 @@ private fun SettingsCategoryOverview(
             ).joinToString(" · "),
             onClick = { onPageSelected(SettingsPage.CAPTURE_STORAGE) }
         )
-
         SettingsCategoryDivider()
-
         NavigationSettingItem(
             title = stringResource(R.string.settings_section_video),
             description = listOf(
@@ -2548,20 +2539,21 @@ private fun SettingsCategoryOverview(
                 stringResource(R.string.settings_edge_level),
                 stringResource(R.string.settings_separate_video_lut),
                 stringResource(R.string.settings_video_lock_lens),
-                stringResource(R.string.settings_video_lock_white_balance),
-                stringResource(
-                    R.string.settings_storage_path_title,
-                    stringResource(R.string.settings_storage_path_video_title_arg)
-                )
+                stringResource(R.string.settings_video_lock_white_balance)
             ).joinToString(" · "),
             onClick = { onPageSelected(SettingsPage.VIDEO) }
         )
-
     }
 
-    Spacer(modifier = Modifier.height(24.dp))
+    Spacer(modifier = Modifier.height(22.dp))
 
-SettingsSection(title = stringResource(R.string.settings_tab_system)) {
+    SettingsSection(title = stringResource(R.string.settings_tab_system)) {
+        NavigationSettingItem(
+            title = stringResource(R.string.settings_section_interface),
+            description = stringResource(R.string.settings_section_interface),
+            onClick = { onPageSelected(SettingsPage.INTERFACE) }
+        )
+        SettingsCategoryDivider()
         NavigationSettingItem(
             title = stringResource(R.string.settings_section_system_control),
             description = listOf(
@@ -2571,6 +2563,38 @@ SettingsSection(title = stringResource(R.string.settings_tab_system)) {
                 stringResource(R.string.settings_volume_key_action)
             ).joinToString(" · "),
             onClick = { onPageSelected(SettingsPage.SYSTEM_CONTROL) }
+        )
+    }
+
+    Spacer(modifier = Modifier.height(22.dp))
+
+    SettingsSection(title = stringResource(R.string.settings_section_management)) {
+        NavigationSettingItem(
+            title = stringResource(R.string.settings_section_management),
+            description = stringResource(R.string.settings_section_management),
+            onClick = { onPageSelected(SettingsPage.CONTENT_MANAGEMENT) }
+        )
+        SettingsCategoryDivider()
+        NavigationSettingItem(
+            title = stringResource(R.string.ai_service),
+            description = stringResource(R.string.ai_service),
+            onClick = { onPageSelected(SettingsPage.AI_SERVICE) }
+        )
+        SettingsCategoryDivider()
+        NavigationSettingItem(
+            title = stringResource(R.string.settings_section_data_maintenance),
+            description = stringResource(R.string.settings_section_data_maintenance),
+            onClick = { onPageSelected(SettingsPage.DATA_MAINTENANCE) }
+        )
+    }
+
+    Spacer(modifier = Modifier.height(22.dp))
+
+    SettingsSection(title = stringResource(R.string.settings_section_help_about)) {
+        NavigationSettingItem(
+            title = stringResource(R.string.settings_section_help_about),
+            description = stringResource(R.string.settings_section_help_about),
+            onClick = { onPageSelected(SettingsPage.HELP_ABOUT) }
         )
     }
 }
@@ -2611,8 +2635,8 @@ fun SettingsSection(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color.White.copy(alpha = 0.05f))
+                .clip(RoundedCornerShape(22.dp))
+                .background(Color(0xFF1B1B1B))
         ) {
             if (isExpandable) {
                 Row(
