@@ -463,11 +463,14 @@ class CameraDiscovery(private val context: Context) {
                     if (publicCameraIdSet.contains(physicalCamera.cameraId)) {
                         PLog.d(
                             TAG,
-                            "Skip logical binding for direct camera ${physicalCamera.cameraId} " +
-                                    "from logical $logicalCameraId"
+                            "Prefer logical multi-camera route for listed physical camera " +
+                                    "${physicalCamera.cameraId} from logical $logicalCameraId"
                         )
-                        continue
                     }
+                    // When logical discovery is enabled, represent every advertised physical
+                    // lens through its parent logical CameraDevice—even if the same ID was
+                    // also found by CameraManager or the hidden-ID probe. Otherwise the app
+                    // opens/pins that physical camera directly and cannot use HAL zoom handoff.
                     val binding = LogicalCameraBinding(
                         logicalCameraId = logicalCameraId,
                         physicalCameras = listOf(physicalCamera)
