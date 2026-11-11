@@ -1,13 +1,9 @@
 package com.hinnka.mycamera.ui.camera
 
-import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.ln
-import kotlin.math.roundToInt
 
-private const val MinZoomStopAnimationDurationMillis = 220
-private const val MaxZoomStopAnimationDurationMillis = 420
-private const val ZoomStopAnimationMillisPerOctave = 80f
+private const val ZoomStopAnimationDurationMillis = 500
 
 internal fun interpolateZoomRatio(
     startZoom: Float,
@@ -28,12 +24,5 @@ internal fun resolveZoomStopAnimationDurationMillis(
 ): Int {
     require(startZoom.isFinite() && startZoom > 0f)
     require(targetZoom.isFinite() && targetZoom > 0f)
-    val octaveDistance = abs(ln((targetZoom / startZoom).toDouble()) / ln(2.0))
-    return (MinZoomStopAnimationDurationMillis +
-        octaveDistance * ZoomStopAnimationMillisPerOctave)
-        .roundToInt()
-        .coerceIn(
-            MinZoomStopAnimationDurationMillis,
-            MaxZoomStopAnimationDurationMillis
-        )
+    return ZoomStopAnimationDurationMillis
 }
