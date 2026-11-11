@@ -142,6 +142,15 @@ class RealtimeVideoRenderer(
     fun setCameraInputHlg10Source(enabled: Boolean) {
         cameraInputAlreadyHlg10 = enabled
     }
+
+    /**
+     * Called on the render dispatcher so recipe uniforms change atomically between frames.
+     * Keep the existing LUT texture resources and replace only the creative layer parameters.
+     */
+    fun updateColorRecipeParams(params: ColorRecipeParams) {
+        layers.lastOrNull()?.params = params
+        PLog.d(TAG, "Active video color recipe updated")
+    }
     /**
      * A single recording may span multiple lenses. Refresh the output mirror in place instead of
      * retaining the facing of the camera that started the recording.
