@@ -21,6 +21,7 @@ import android.view.Surface
 import androidx.core.app.ActivityCompat
 import com.hinnka.mycamera.lut.RealtimeVideoRenderer
 import com.hinnka.mycamera.lut.VideoColorEffectLayer
+import com.hinnka.mycamera.model.ColorRecipeParams
 import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD
 import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_STRENGTH
 import com.hinnka.mycamera.stabilization.RealtimeStabilizationCoordinator
