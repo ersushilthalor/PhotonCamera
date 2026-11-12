@@ -4991,7 +4991,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 (target.faceCenterX + halfWidth).coerceIn(0f, 1f),
                 (target.faceCenterY + halfHeight).coerceIn(0f, 1f),
             )
-            val appliedZoom = cameraController.getLastAppliedZoomRatio()
+            val appliedZoom = cameraController.getLastAppliedZoomRatio(target.timestampNs)
             if (dollyZoomController.state == DollyZoomController.State.ARMED) {
                 if (dollyZoomController.lock(target.faceHeight, appliedZoom, target.timestampNs)) {
                     _dollyZoomHint.value = ""
