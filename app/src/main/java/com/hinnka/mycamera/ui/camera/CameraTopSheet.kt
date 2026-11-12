@@ -34,9 +34,6 @@ import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.MeteringMode
 import com.hinnka.mycamera.data.OppoPhotoSettings
-import com.hinnka.mycamera.data.FloatingWindowAppearance
-import com.hinnka.mycamera.ui.components.FloatingWindowBackdrop
-import com.hinnka.mycamera.ui.components.floatingWindowMaterial
 import com.hinnka.mycamera.raw.DcpInfo
 import com.hinnka.mycamera.raw.HncsFilmCurveMode
 import com.hinnka.mycamera.raw.RawRenderingEngine
@@ -119,8 +116,6 @@ fun CameraTopSheet(
     onOppoPhotoSettingsChange: (OppoPhotoSettings) -> Unit,
     refocusAvailable: Boolean,
     contentTopPadding: Dp = CameraTopSheetContentTopPadding,
-    floatingWindowAppearance: FloatingWindowAppearance = FloatingWindowAppearance.DEFAULT,
-    floatingWindowBackdrop: FloatingWindowBackdrop? = null,
     modifier: Modifier = Modifier
 ) {
     var expandedVideoPanel by rememberSaveable { mutableStateOf<VideoSettingPanel?>(null) }
@@ -152,11 +147,8 @@ fun CameraTopSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .floatingWindowMaterial(
-                    appearance = floatingWindowAppearance,
-                    backdrop = floatingWindowBackdrop,
-                    shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
-                )
+                .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
+                .background(Color.Black.copy(alpha = 0.8f))
                 // Keep the screen's top inset fixed, but measure content and side padding
                 // in the rotated viewport so landscape controls stay inside the sheet.
                 .padding(top = contentTopPadding)
