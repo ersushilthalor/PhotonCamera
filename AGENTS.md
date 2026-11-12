@@ -45,3 +45,13 @@
 * 无需添加单元测试用例
 * 对推理强度要求相对较低的子任务可以交给轻量子代理执行
 * token不够用了，规划好尽量省着点用
+
+## Git Workflow (Mandatory)
+
+* `main` is the only working and integration branch for this repository.
+* Make every future code, configuration, documentation, and build change directly on `main`.
+* Never create, switch to, or push a feature, fix, chore, backup, or temporary branch.
+* Do not open pull requests for repository changes; commit directly to `main`.
+* Before making changes, verify that the target ref is `main`. If a task or tool attempts to use another branch, stop and redirect the work to `main`.
+* Do not delete or rewrite existing branch history as part of this workflow rule. Existing non-main branches are historical; do not use them for new work.
+* After each change, report the commit SHA and verify that the commit is present on `main`.
