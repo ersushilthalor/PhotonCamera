@@ -4258,6 +4258,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun toggleDollyZoom() {
         if (!dollyZoomEnabled.value || state.value.captureMode != CaptureMode.VIDEO) return
         if (!_dollyZoomActive.value) {
+            previewEyeFocusProcessor.prewarm()
             dollyZoomController.arm(zoomRatioByMain)
             _dollyZoomHint.value = "Point at a face"
             _dollyZoomActive.value = true
