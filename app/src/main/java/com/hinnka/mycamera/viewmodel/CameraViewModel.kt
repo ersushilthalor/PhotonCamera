@@ -2070,14 +2070,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         previewEyeFocusProcessor.onEyeTarget = { target ->
             viewModelScope.launch(Dispatchers.Main.immediate) { handleEyeFocusTarget(target) }
         }
-        previewEyeFocusProcessor.onTargetLost = {
-            viewModelScope.launch(Dispatchers.Main.immediate) {
-                if (dollyZoomController.state == DollyZoomController.State.LOCKED) {
-                    _dollyZoomHint.value = "Subject lost"
-                    _dollyZoomFaceBox.value = null
-                }
-            }
-        }
         previewEyeFocusProcessor.onPortraitMask = { mask ->
             latestPortraitMask = mask.copy(
                 confidence = mask.confidence.copyOf(),
@@ -2093,7 +2085,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         previewEyeFocusProcessor.onTargetLost = {
             viewModelScope.launch(Dispatchers.Main.immediate) {
-                resetEyeFocusTracking(cancelCameraFocus = true, reason = "target_lost")
+                if (dollyZoomController.state == DollyZoomController.State.LOCKED) {
+                    _dollyZoomHint.value = "Subject lost"
+                    _dollyZoomFaceBox.value = null
+                }
+                if (eyeFocusEnabled.value) {
+                    resetEyeFocusTracking(cancelCameraFocus = true, reason = "target_lost")
+                }
             }
         }
         previewEyeFocusProcessor.onInitializationError = { error ->
