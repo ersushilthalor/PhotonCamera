@@ -1422,8 +1422,4 @@
     <string name="oppo_refocus_plane_count">Plane %1$d of %2$d</string>
     <string name="oppo_refocus_near">Near</string>
     <string name="oppo_refocus_far">Far</string>
-    <string name="settings_floating_window_glass">Floating window glass</string>
-    <string name="settings_floating_window_glass_description">Adjust the live frosted-glass material used by camera floating panels and overlays.</string>
-    <string name="settings_floating_window_transparency">Transparency</string>
-    <string name="settings_floating_window_blur">Background blur</string>
 </resources>
