@@ -27,9 +27,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.hinnka.mycamera.data.FloatingWindowAppearance
-import com.hinnka.mycamera.ui.components.FloatingWindowBackdrop
-import com.hinnka.mycamera.ui.components.floatingWindowMaterial
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -43,8 +40,6 @@ import kotlin.math.roundToInt
 internal fun ZoomPanJoystick(
     modifier: Modifier = Modifier,
     onPanBy: (Float, Float) -> Unit,
-    floatingWindowAppearance: FloatingWindowAppearance = FloatingWindowAppearance.DEFAULT,
-    floatingWindowBackdrop: FloatingWindowBackdrop? = null,
 ) {
     val density = LocalDensity.current
     val maxTravelPx = with(density) { 34.dp.toPx() }
@@ -67,11 +62,8 @@ internal fun ZoomPanJoystick(
     Box(
         modifier = modifier
             .size(116.dp)
-            .floatingWindowMaterial(
-                appearance = floatingWindowAppearance,
-                backdrop = floatingWindowBackdrop,
-                shape = CircleShape
-            )
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.72f))
             .border(1.5.dp, Color.White.copy(alpha = 0.88f), CircleShape)
             .pointerInput(maxTravelPx) {
                 fun clampOffset(offset: Offset): Offset {
