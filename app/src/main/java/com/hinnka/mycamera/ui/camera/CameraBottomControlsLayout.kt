@@ -12,10 +12,10 @@ import androidx.compose.ui.unit.dp
 internal object CameraControlsLayoutDefaults {
     val ParameterBarHeight = 48.dp
     val ZoomBarHeight = 33.dp
-    val CaptureButtonSize = 72.dp
+    val CaptureButtonSize = 80.dp
     val SideButtonSize = 48.dp
-    val ModeSwitcherHeight = 36.dp
-    val ModeSwitcherSpacing = 30.dp
+    val ModeSwitcherHeight = 40.dp
+    val ModeSwitcherSpacing = 10.dp
     val BottomPadding = 8.dp
     val CaptureClearance = 8.dp
     val BarSpacing = 4.dp

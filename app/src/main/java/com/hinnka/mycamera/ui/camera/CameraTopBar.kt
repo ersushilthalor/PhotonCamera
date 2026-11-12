@@ -1,41 +1,34 @@
 package com.hinnka.mycamera.ui.camera
 
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.ui.components.PhysicalButton
+import com.hinnka.mycamera.ui.icons.AppIcons
+import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.video.CaptureMode
-import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VideoCapabilities
 import com.hinnka.mycamera.video.VideoConfig
-import com.hinnka.mycamera.video.VideoLogProfile
 import com.hinnka.mycamera.video.VideoResolutionPreset
-import com.hinnka.mycamera.video.VideoStabilizationMode
-import com.hinnka.mycamera.ui.icons.AppIcons
 
+/**
+ * Google Camera-inspired toolbar. The five hit targets stay the same size in Photo and Video:
+ * scene/exposure, format, aspect ratio, flash, and settings.
+ */
 @Composable
 fun CameraTopBar(
     captureMode: CaptureMode,
@@ -43,16 +36,15 @@ fun CameraTopBar(
     recordingElapsedMs: Long,
     flashMode: Int,
     onFlashToggle: () -> Unit,
-    timerSeconds: Int,
-    onTimerToggle: () -> Unit,
     showHistogram: Boolean,
     onHistogramToggle: () -> Unit,
-    useLivePhoto: Boolean,
-    onLivePhotoToggle: () -> Unit,
+    showLevelIndicator: Boolean,
+    onLevelIndicatorToggle: () -> Unit,
+    aspectRatioLabel: String,
+    onAspectRatioClick: () -> Unit,
     videoConfig: VideoConfig,
     videoCapabilities: VideoCapabilities,
     onVideoTorchToggle: () -> Unit,
-    onVideoStabilizationModeChange: (VideoStabilizationMode) -> Unit,
     onVideoResolutionClick: () -> Unit,
     onVideoFpsClick: () -> Unit,
     videoHdrEnabled: Boolean,
@@ -66,8 +58,9 @@ fun CameraTopBar(
             recordingElapsedMs = recordingElapsedMs,
             videoConfig = videoConfig,
             videoCapabilities = videoCapabilities,
+            aspectRatioLabel = aspectRatioLabel,
+            onAspectRatioClick = onAspectRatioClick,
             onVideoTorchToggle = onVideoTorchToggle,
-            onVideoStabilizationModeChange = onVideoStabilizationModeChange,
             onVideoResolutionClick = onVideoResolutionClick,
             onVideoFpsClick = onVideoFpsClick,
             videoHdrEnabled = videoHdrEnabled,
@@ -81,84 +74,51 @@ fun CameraTopBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 32.dp, bottom = 8.dp),
+            .padding(top = 32.dp, bottom = 8.dp, start = 10.dp, end = 10.dp)
+            .height(40.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
         PhysicalButton(
             modifier = Modifier.size(36.dp),
-            onClick = onFlashToggle
-        ) {
-            Icon(
-                imageVector = when (flashMode) {
-                    0 -> AppIcons.FlashOff
-                    1 -> AppIcons.FlashOn
-                    2 -> AppIcons.FlashlightOn
-                    else -> AppIcons.FlashOff
-                },
-                modifier = Modifier.size(20.dp).autoRotate(),
-                contentDescription = stringResource(R.string.flash),
-                tint = Color.White
-            )
-        }
-
-        PhysicalButton(
-            modifier = Modifier.size(36.dp),
-            onClick = onTimerToggle
-        ) {
-            if (timerSeconds > 0) {
-                Text(
-                    text = "${timerSeconds}s",
-                    color = AccentColor,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.autoRotate()
-                )
-            } else {
-                Icon(
-                    imageVector = AppIcons.Timer,
-                    contentDescription = stringResource(R.string.timer),
-                    modifier = Modifier.size(20.dp).autoRotate(),
-                    tint = Color.White
-                )
-            }
-        }
-
-        PhysicalButton(
-            modifier = Modifier.size(36.dp),
-            onClick = onLivePhotoToggle
-        ) {
-            Icon(
-                painterResource(R.drawable.ic_live_photo),
-                contentDescription = stringResource(R.string.settings_use_live_photo),
-                modifier = Modifier.size(20.dp).autoRotate(),
-                tint = if (useLivePhoto) AccentColor else Color.White
-            )
-        }
-
-        PhysicalButton(
-            modifier = Modifier.size(36.dp),
             onClick = onHistogramToggle
         ) {
-            Icon(
-                imageVector = AppIcons.BarChart,
-                contentDescription = stringResource(R.string.histogram),
-                modifier = Modifier.size(20.dp).autoRotate(),
-                tint = if (showHistogram) AccentColor else Color.White
+            SunburstIcon(
+                tint = if (showHistogram) AccentColor else Color.White,
+                contentDescription = stringResource(R.string.histogram)
             )
         }
 
-        PhysicalButton(
-            modifier = Modifier.size(36.dp),
+        TopTextAction(
+            text = aspectRatioLabel,
+            contentDescription = stringResource(R.string.camera_aspect_ratio),
+            onClick = onAspectRatioClick
+        )
+
+        TopIconAction(
+            icon = AppIcons.Stabilization,
+            contentDescription = stringResource(R.string.camera_level_indicator),
+            tint = if (showLevelIndicator) AccentColor else Color.White,
+            onClick = onLevelIndicatorToggle
+        )
+
+        TopIconAction(
+            icon = when (flashMode) {
+                1 -> AppIcons.FlashOn
+                2 -> AppIcons.FlashlightOn
+                else -> AppIcons.FlashOff
+            },
+            contentDescription = stringResource(R.string.flash),
+            tint = Color.White,
+            onClick = onFlashToggle
+        )
+
+        TopIconAction(
+            icon = AppIcons.Tune,
+            contentDescription = stringResource(R.string.settings),
+            tint = Color.White,
             onClick = onSettingsClick
-        ) {
-            Icon(
-                imageVector = Icons.Default.Settings,
-                contentDescription = stringResource(R.string.settings),
-                modifier = Modifier.size(20.dp).autoRotate(),
-                tint = Color.White
-            )
-        }
+        )
     }
 }
 
@@ -168,8 +128,9 @@ private fun VideoTopBar(
     recordingElapsedMs: Long,
     videoConfig: VideoConfig,
     videoCapabilities: VideoCapabilities,
+    aspectRatioLabel: String,
+    onAspectRatioClick: () -> Unit,
     onVideoTorchToggle: () -> Unit,
-    onVideoStabilizationModeChange: (VideoStabilizationMode) -> Unit,
     onVideoResolutionClick: () -> Unit,
     onVideoFpsClick: () -> Unit,
     videoHdrEnabled: Boolean,
@@ -177,289 +138,201 @@ private fun VideoTopBar(
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var stabilizationMenuExpanded by remember { mutableStateOf(false) }
-    Box(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 24.dp, start = 8.dp, end = 8.dp)
-            .height(56.dp),
-        contentAlignment = Alignment.Center
+            .padding(top = 32.dp, bottom = 8.dp, start = 10.dp, end = 10.dp)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(40.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            if (isRecording) {
-                RecordingHud(
-                    elapsedMs = recordingElapsedMs,
-                    videoConfig = videoConfig
-                )
-            } else {
-                VideoParameterCluster(
-                    videoConfig = videoConfig,
-                    onResolutionClick = onVideoResolutionClick,
-                    onFpsClick = onVideoFpsClick
-                )
-            }
-
-            // Keep live controls available while recording. HDR changes the active
-            // recording color layer; torch updates the Camera2 repeating request.
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            PhysicalButton(
+                modifier = Modifier.size(36.dp),
+                onClick = onVideoHdrToggle
             ) {
-                if (!videoConfig.logProfile.isEnabled) {
-                    IconButton(onClick = onVideoHdrToggle) {
-                        Text(
-                            text = "HDR",
-                            color = Color.White.copy(alpha = if (videoHdrEnabled) 1f else 0.65f),
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.autoRotate()
-                        )
-                    }
-                }
-
-                VideoActionIcon(
-                    icon = if (videoConfig.torchEnabled) AppIcons.FlashlightOn else AppIcons.FlashlightOff,
-                    active = videoConfig.torchEnabled,
-                    enabled = videoCapabilities.supportsTorch,
-                    onClick = onVideoTorchToggle,
-                    contentDescription = stringResource(R.string.video_torch_chip)
+                SunburstIcon(
+                    tint = if (videoHdrEnabled) AccentColor else Color.White,
+                    contentDescription = stringResource(R.string.camera_hdr)
                 )
-
-                if (!isRecording && videoCapabilities.availableStabilizationModes.size > 1) {
-                    Box {
-                        VideoActionIcon(
-                            icon = AppIcons.Stabilization,
-                            active = videoConfig.stabilizationMode != VideoStabilizationMode.OFF,
-                            enabled = true,
-                            onClick = { stabilizationMenuExpanded = true },
-                            contentDescription = stringResource(R.string.settings_video_stabilization_default)
-                        )
-                        DropdownMenu(
-                            expanded = stabilizationMenuExpanded,
-                            onDismissRequest = { stabilizationMenuExpanded = false }
-                        ) {
-                            videoCapabilities.availableStabilizationModes.forEach { mode ->
-                                DropdownMenuItem(
-                                    text = { Text(videoStabilizationModeLabel(mode)) },
-                                    onClick = {
-                                        stabilizationMenuExpanded = false
-                                        onVideoStabilizationModeChange(mode)
-                                    },
-                                    trailingIcon = if (mode == videoConfig.stabilizationMode) {
-                                        {
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = null
-                                            )
-                                        }
-                                    } else null
-                                )
-                            }
-                        }
-                    }
-                }
-
-                if (!isRecording) {
-                    IconButton(onClick = onSettingsClick) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = stringResource(R.string.settings),
-                            modifier = Modifier.size(20.dp).autoRotate(),
-                            tint = Color.White
-                        )
-                    }
-                }
             }
+
+            VideoFormatAction(
+                videoConfig = videoConfig,
+                onResolutionClick = onVideoResolutionClick,
+                onFpsClick = onVideoFpsClick
+            )
+
+            TopTextAction(
+                text = aspectRatioLabel,
+                contentDescription = stringResource(R.string.camera_aspect_ratio),
+                onClick = onAspectRatioClick
+            )
+
+            TopIconAction(
+                icon = if (videoConfig.torchEnabled) AppIcons.FlashlightOn else AppIcons.FlashlightOff,
+                contentDescription = stringResource(R.string.video_torch_chip),
+                tint = if (videoCapabilities.supportsTorch) {
+                    if (videoConfig.torchEnabled) AccentColor else Color.White
+                } else {
+                    Color.White.copy(alpha = 0.35f)
+                },
+                onClick = onVideoTorchToggle,
+                enabled = videoCapabilities.supportsTorch
+            )
+
+            TopIconAction(
+                icon = AppIcons.Tune,
+                contentDescription = stringResource(R.string.settings),
+                tint = Color.White,
+                onClick = onSettingsClick
+            )
+        }
+
+        if (isRecording) {
+            Text(
+                text = formatRecordingDuration(recordingElapsedMs),
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 2.dp),
+                color = Color.White,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+            )
         }
     }
 }
 
 @Composable
-private fun VideoParameterCluster(
+private fun VideoFormatAction(
     videoConfig: VideoConfig,
     onResolutionClick: () -> Unit,
     onFpsClick: () -> Unit
 ) {
-    Surface(
-        color = Color.Black.copy(alpha = 0.35f),
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+    Column(
+        modifier = Modifier.size(width = 44.dp, height = 40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        val resolutionLabel = when (videoConfig.resolution) {
+            VideoResolutionPreset.UHD_2160P -> "4K"
+            VideoResolutionPreset.FHD_1080P -> "FHD"
+            VideoResolutionPreset.HD_720P -> "HD"
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .clickable(onClick = onResolutionClick),
+            contentAlignment = Alignment.Center
         ) {
-            val isOpenGate = videoConfig.aspectRatio == VideoAspectRatio.OPEN_GATE
-            val resLabel = if (isOpenGate) {
-                stringResource(R.string.video_resolution_max)
-            } else when (videoConfig.resolution) {
-                VideoResolutionPreset.UHD_2160P -> "4K"
-                VideoResolutionPreset.FHD_1080P -> "1080p"
-                VideoResolutionPreset.HD_720P -> "720p"
-            }
-            ParameterText(resLabel, onResolutionClick, enabled = !isOpenGate)
-
-            ParameterDivider()
-
-            ParameterText("${videoConfig.fps.fps} fps", onFpsClick)
+            Text(
+                text = resolutionLabel,
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .clickable(onClick = onFpsClick),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = videoConfig.fps.fps.toString(),
+                color = Color.White.copy(alpha = 0.9f),
+                fontSize = 9.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
         }
     }
 }
 
 @Composable
-private fun ParameterText(
-    text: String,
+private fun TopIconAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    tint: Color,
     onClick: () -> Unit,
-    tint: Color = Color.White,
     enabled: Boolean = true
 ) {
-    Text(
-        text = text,
-        color = if (enabled) tint else tint.copy(alpha = 0.4f),
-        style = MaterialTheme.typography.labelLarge.copy(
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace,
-            letterSpacing = 0.sp
-        ),
-        modifier = Modifier
-            .clip(RoundedCornerShape(4.dp))
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 4.dp, vertical = 2.dp)
-    )
-}
-
-@Composable
-private fun ParameterDivider() {
-    Box(
-        modifier = Modifier
-            .size(1.dp, 12.dp)
-            .background(Color.White.copy(alpha = 0.2f))
-    )
-}
-
-@Composable
-private fun VideoActionIcon(
-    icon: ImageVector,
-    active: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
-    contentDescription: String
-) {
-    IconButton(
+    PhysicalButton(
+        modifier = Modifier.size(36.dp),
         onClick = onClick,
         enabled = enabled
     ) {
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            modifier = Modifier.size(20.dp).autoRotate(),
-            tint = if (enabled) {
-                if (active) AccentColor else Color.White
-            } else {
-                Color.White.copy(alpha = 0.3f)
-            }
+            modifier = Modifier.size(20.dp),
+            tint = tint
         )
     }
 }
 
 @Composable
-private fun videoStabilizationModeLabel(mode: VideoStabilizationMode): String {
-    return when (mode) {
-        VideoStabilizationMode.OFF ->
-            stringResource(R.string.settings_video_stabilization_mode_off)
-        VideoStabilizationMode.EIS ->
-            stringResource(R.string.settings_video_stabilization_mode_eis)
-        VideoStabilizationMode.OIS ->
-            stringResource(R.string.settings_video_stabilization_mode_ois)
-        VideoStabilizationMode.ENHANCED ->
-            stringResource(R.string.settings_video_stabilization_mode_enhanced)
+private fun TopTextAction(
+    text: String,
+    contentDescription: String,
+    onClick: () -> Unit
+) {
+    PhysicalButton(
+        modifier = Modifier.size(36.dp),
+        onClick = onClick
+    ) {
+        Text(
+            text = text,
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1
+        )
     }
 }
 
 @Composable
-private fun RecordingHud(
-    elapsedMs: Long,
-    videoConfig: VideoConfig,
-    modifier: Modifier = Modifier
+private fun SunburstIcon(
+    tint: Color,
+    contentDescription: String
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "recBlink")
-    val dotAlpha by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 0.3f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 800),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "recDotAlpha"
-    )
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Surface(
-            color = Color.Black.copy(alpha = 0.5f),
-            shape = RoundedCornerShape(20.dp),
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(Color.Red.copy(alpha = dotAlpha))
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = formatRecordingDuration(elapsedMs),
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        letterSpacing = 0.5.sp
-                    )
-                )
-            }
-        }
+    Canvas(modifier = Modifier.size(20.dp)) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val strokeWidth = 1.7.dp.toPx()
+        val coreRadius = size.minDimension * 0.17f
+        val rayStart = size.minDimension * 0.34f
+        val rayEnd = size.minDimension * 0.46f
 
-        Row(
-            modifier = Modifier.padding(top = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = if (videoConfig.aspectRatio == VideoAspectRatio.OPEN_GATE) {
-                    stringResource(R.string.video_resolution_max)
-                } else {
-                    videoConfig.resolution.displayName
-                },
-                color = Color.White.copy(alpha = 0.6f),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold
+        drawCircle(
+            color = tint,
+            radius = coreRadius,
+            center = center,
+            style = Stroke(width = strokeWidth)
+        )
+        repeat(8) { index ->
+            val angle = Math.PI * index / 4.0
+            val start = Offset(
+                x = center.x + (rayStart * kotlin.math.cos(angle)).toFloat(),
+                y = center.y + (rayStart * kotlin.math.sin(angle)).toFloat()
             )
-            Box(Modifier.size(3.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.4f)))
-            Text(
-                text = "${videoConfig.fps.fps} FPS",
-                color = Color.White.copy(alpha = 0.6f),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold
+            val end = Offset(
+                x = center.x + (rayEnd * kotlin.math.cos(angle)).toFloat(),
+                y = center.y + (rayEnd * kotlin.math.sin(angle)).toFloat()
             )
-            if (videoConfig.logProfile != VideoLogProfile.OFF) {
-                Box(Modifier.size(3.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.4f)))
-                Text(
-                    text = "LOG",
-                    color = AccentColor.copy(alpha = 0.8f),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold
-                )
-            }
+            drawLine(
+                color = tint,
+                start = start,
+                end = end,
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round
+            )
         }
     }
 }
