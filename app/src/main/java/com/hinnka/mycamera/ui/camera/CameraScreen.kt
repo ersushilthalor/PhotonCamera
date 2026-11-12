@@ -851,7 +851,7 @@ fun CameraScreen(
             !state.useRaw &&
                 (state.captureMode == CaptureMode.PHOTO || state.captureMode == CaptureMode.VIDEO) &&
                 viewModel.zoomRatioByMain >= 3f &&
-                state.getCurrentCameraInfo()?.supportsFreeformZoomPan == true
+                state.getCurrentCameraInfo()?.activeArraySize != null
         val canShowZoomJoystick = activePanel == ActivePanel.NONE && zoomJoystickSupported
 
         LaunchedEffect(canShowZoomJoystick) {
