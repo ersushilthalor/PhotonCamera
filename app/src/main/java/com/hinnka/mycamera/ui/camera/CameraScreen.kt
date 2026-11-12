@@ -848,14 +848,10 @@ fun CameraScreen(
 
         val isVideoMode = state.captureMode == CaptureMode.VIDEO
         var horizontalLockEnabled by rememberSaveable { mutableStateOf(false) }
-        LaunchedEffect(
-            isVideoMode,
-            horizontalLockEnabled,
-            OrientationObserver.continuousOrientationDegrees,
-        ) {
+        LaunchedEffect(isVideoMode, horizontalLockEnabled) {
             VideoHorizontalLockState.setEnabled(
                 enabled = isVideoMode && horizontalLockEnabled,
-                currentOrientationDegrees = OrientationObserver.continuousOrientationDegrees,
+                currentOrientationDegrees = OrientationObserver.horizontalLockOrientationDegrees,
             )
         }
         val isPhotoStyleMode = state.captureMode != CaptureMode.VIDEO

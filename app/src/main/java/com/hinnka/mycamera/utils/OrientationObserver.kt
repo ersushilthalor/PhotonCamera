@@ -5,11 +5,14 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.SystemClock
 import android.view.OrientationEventListener
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.hinnka.mycamera.stabilization.VideoHorizontalLockState
+import com.hinnka.mycamera.stabilization.resolveHorizontalLockSensorOrientationDegrees
 import kotlin.math.abs
 
 object OrientationObserver {
@@ -19,38 +22,44 @@ object OrientationObserver {
     private var sensorManager: SensorManager? = null
     private var orientationListener: OrientationEventListener? = null
     private var gravityListener: SensorEventListener? = null
+    private var horizontalLockSensorAvailable = false
     private var isNearFlat by mutableStateOf(false)
 
-    // 存储是否为横屏模式
+    // High-rate floating-point horizon angle. Do not make this Compose state: each sensor
+    // sample is consumed by the renderers and should not trigger camera-screen recomposition.
+    @Volatile
+    var horizontalLockOrientationDegrees: Float = 0f
+        private set
+
     var isLandscape by mutableStateOf(false)
         private set
 
-    // 存储旋转角度，用于UI旋转
     var rotationDegrees by mutableStateOf(0f)
         private set
 
-    // 未经过平放阈值过滤的连续设备姿态传感器角，用于 PhysicalButton 材质高光。
-    // 消费方负责将传感器的顺时针角度转换到自己的屏幕坐标系。
+    // Kept for existing UI/material consumers; this is still the rounded platform callback.
     var continuousOrientationDegrees by mutableFloatStateOf(0f)
         private set
 
-    // 存储拍摄方向，包含反向竖屏，用于照片保存/处理和录像方向元数据
     var captureRotationDegrees by mutableStateOf(0f)
         private set
 
-    // 更新方向，只在横竖屏切换时才更新状态
     fun updateOrientation(orientation: Int) {
-        if (orientation == OrientationEventListener.ORIENTATION_UNKNOWN) {
-            return
-        }
+        if (orientation == OrientationEventListener.ORIENTATION_UNKNOWN) return
 
         continuousOrientationDegrees = orientation.toFloat()
 
-        if (isNearFlat) {
-            return
+        // Fallback only: the high-rate gravity sensor is preferred for horizontal lock.
+        if (!horizontalLockSensorAvailable) {
+            horizontalLockOrientationDegrees = orientation.toFloat()
+            VideoHorizontalLockState.updateOrientation(
+                currentOrientationDegrees = orientation.toFloat(),
+                timestampNanos = SystemClock.elapsedRealtimeNanos(),
+            )
         }
 
-        // 右侧朝上（手机顺时针旋转90°）
+        if (isNearFlat) return
+
         when (orientation) {
             in 45..135 -> {
                 captureRotationDegrees = 90f
@@ -60,7 +69,6 @@ object OrientationObserver {
                     PLog.d(TAG, "Orientation locked to landscape-right, orientation=$orientation")
                 }
             }
-            // 左侧朝上（手机逆时针旋转90°）
             in 225..315 -> {
                 captureRotationDegrees = 270f
                 if (!isLandscape || rotationDegrees != 270f) {
@@ -69,7 +77,6 @@ object OrientationObserver {
                     PLog.d(TAG, "Orientation locked to landscape-left, orientation=$orientation")
                 }
             }
-            // 反向竖屏
             in 135..225 -> {
                 captureRotationDegrees = 180f
                 if (isLandscape || rotationDegrees != 0f) {
@@ -78,7 +85,6 @@ object OrientationObserver {
                     PLog.d(TAG, "Orientation locked to reverse-portrait, orientation=$orientation")
                 }
             }
-            // 竖屏
             else -> {
                 captureRotationDegrees = 0f
                 if (isLandscape || rotationDegrees != 0f) {
@@ -91,34 +97,47 @@ object OrientationObserver {
     }
 
     fun observe(context: Context) {
-        if (orientationListener != null) {
-            return
-        }
+        if (orientationListener != null) return
 
         sensorManager = context.applicationContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
 
-        gravityListener = object : SensorEventListener {
-            override fun onSensorChanged(event: SensorEvent?) {
-                val values = event?.values ?: return
-                val nearFlat = abs(values[2]) > FLAT_AXIS_THRESHOLD
-                if (nearFlat != isNearFlat) {
-                    isNearFlat = nearFlat
-//                    PLog.d(
-//                        TAG,
-//                        "Flat state changed: isNearFlat=$isNearFlat, x=${values[0]}, y=${values[1]}, z=${values[2]}"
-//                    )
+        // Prefer Android's fused gravity vector; fall back to the accelerometer on devices
+        // that do not expose TYPE_GRAVITY. Both use the same device-coordinate convention.
+        val horizontalLockSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_GRAVITY)
+            ?: sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+
+        if (horizontalLockSensor != null) {
+            gravityListener = object : SensorEventListener {
+                override fun onSensorChanged(event: SensorEvent?) {
+                    val values = event?.values ?: return
+                    if (values.size < 3) return
+
+                    val nearFlat = abs(values[2]) > FLAT_AXIS_THRESHOLD
+                    if (nearFlat != isNearFlat) {
+                        isNearFlat = nearFlat
+                    }
+
+                    val angle = resolveHorizontalLockSensorOrientationDegrees(
+                        gravityX = values[0],
+                        gravityY = values[1],
+                        gravityZ = values[2],
+                    ) ?: return
+
+                    horizontalLockOrientationDegrees = angle
+                    VideoHorizontalLockState.updateOrientation(
+                        currentOrientationDegrees = angle,
+                        timestampNanos = event.timestamp,
+                    )
                 }
+
+                override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
             }
 
-            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
-        }
-
-        sensorManager?.getDefaultSensor(Sensor.TYPE_GRAVITY)?.let { gravitySensor ->
-            sensorManager?.registerListener(
+            horizontalLockSensorAvailable = sensorManager?.registerListener(
                 gravityListener,
-                gravitySensor,
-                SensorManager.SENSOR_DELAY_UI
-            )
+                horizontalLockSensor,
+                SensorManager.SENSOR_DELAY_GAME,
+            ) == true
         }
 
         orientationListener = object : OrientationEventListener(
