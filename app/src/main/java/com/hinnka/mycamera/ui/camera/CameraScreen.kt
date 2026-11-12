@@ -232,6 +232,8 @@ fun CameraScreen(
     val showLevelIndicator by viewModel.showLevelIndicator.collectAsState(initial = false)
     val focusPeakingEnabled by viewModel.focusPeakingEnabled.collectAsState(initial = true)
     val eyeFocusEnabled by viewModel.eyeFocusEnabled.collectAsState()
+    val dollyZoomActive by viewModel.dollyZoomActive.collectAsState()
+    val dollyZoomHint by viewModel.dollyZoomHint.collectAsState()
     val keepScreenOn by viewModel.keepScreenOn.collectAsState(initial = false)
     val currentLutId by viewModel.currentLutId.collectAsState()
     val lutNameOverlayState = rememberLutNameOverlayState()
@@ -1168,6 +1170,10 @@ fun CameraScreen(
                                         continue
                                     }
                                     if (event.changes.size >= 2) {
+                                        if (viewModel.dollyZoomActive.value) {
+                                            event.changes.forEach { it.consume() }
+                                            continue
+                                        }
                                         // Pinch to zoom
                                         childConsumedDrag = true
                                         totalDrag = 0f
@@ -1652,6 +1658,17 @@ fun CameraScreen(
                 contentAlignment = Alignment.Center
             ) {
                 viewfinder()
+                if (dollyZoomActive && dollyZoomHint.isNotBlank()) {
+                    Text(
+                        text = dollyZoomHint,
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                            .padding(top = 76.dp)
+                            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
                 if (uiStyle == "OPPO" && activePanel == ActivePanel.NONE && !isXpan) {
                     Box(
                         modifier = Modifier

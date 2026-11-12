@@ -5,6 +5,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
@@ -149,8 +150,8 @@ fun ZoomControlBar(
             .fillMaxWidth()
             .padding(horizontal = 8.dp)
             .height(CameraControlsLayoutDefaults.ZoomBarHeight)
-            .pointerInput(isCameraReady, minZoom, maxZoom, zoomStops) {
-                if (!isCameraReady) return@pointerInput
+            .pointerInput(isCameraReady, minZoom, maxZoom, zoomStops, dollyZoomActive) {
+                if (!isCameraReady || dollyZoomActive) return@pointerInput
                 var dragAccumulated = 0f
                 detectHorizontalDragGestures(
                     onDragStart = {
@@ -256,6 +257,14 @@ fun ZoomControlBar(
                     tint = if (dollyZoomActive) AccentColor else Color.White
                 )
             }
+        }
+
+        if (dollyZoomActive) {
+            Box(
+                modifier = Modifier.fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.28f))
+                    .pointerInput(Unit) { detectTapGestures { } }
+            )
         }
 
         // Zoom Ruler (Center)
