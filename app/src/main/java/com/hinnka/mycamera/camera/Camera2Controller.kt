@@ -3463,6 +3463,14 @@ class Camera2Controller(private val context: Context) {
                     set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
                 }
             }
+            PLog.i(
+                TAG,
+                "Preview stabilization request: generation=$sessionGeneration, mode=$captureMode, " +
+                    "algorithmic=${stabilizationInput != null}, " +
+                    "videoRequested=${previewRequestBuilder?.get(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE)}, " +
+                    "opticalRequested=${previewRequestBuilder?.get(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE)}, " +
+                    "advertisedOpticalModes=${availableOpticalStabilizationModes.contentToString()}"
+            )
 
             val surfaces = mutableListOf(surface)
             videoSurface?.let(surfaces::add)
@@ -5655,6 +5663,29 @@ class Camera2Controller(private val context: Context) {
         isCapture: Boolean = false,
     ) {
         try {
+            val enhancedSelected = when (state.captureMode) {
+                CaptureMode.VIDEO -> state.videoConfig.stabilizationMode == VideoStabilizationMode.ENHANCED
+                CaptureMode.PHOTO -> state.photoPreviewStabilizationEnabled && !isCapture
+            }
+            if (enhancedSelected) {
+                // Some HALs advertise only OIS OFF while their preview template defaults to ON.
+                // Both photo and video EIS+ must explicitly disable HAL stabilization, based on
+                // request-key support rather than whether OIS ON is advertised.
+                if (isCaptureRequestKeyAvailable(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE.name)) {
+                    builder.set(
+                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF,
+                    )
+                }
+                if (isCaptureRequestKeyAvailable(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE.name)) {
+                    builder.set(
+                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF,
+                    )
+                }
+                applyOisDataMode(builder, realtimeStabilizationCoordinator.shouldRequestOisSamples)
+                return
+            }
             if (state.captureMode == CaptureMode.VIDEO) {
                 val mode = state.videoConfig.stabilizationMode
                 val enhancedSelected = mode == VideoStabilizationMode.ENHANCED
@@ -5675,18 +5706,7 @@ class Camera2Controller(private val context: Context) {
                         videoStabilizationMode
                     )
                 }
-                if (enhancedSelected && isCaptureRequestKeyAvailable(
-                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE.name
-                    )
-                ) {
-                    // Never enable OIS proactively for EIS+. Some HALs default TEMPLATE_PREVIEW
-                    // to OIS ON or ignore OFF; the coordinator fuses telemetry only for that
-                    // forced-ON case and disables EIS+ if no correction stream is available.
-                    builder.set(
-                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
-                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF,
-                    )
-                } else if (availableOpticalStabilizationModes.contains(
+                if (availableOpticalStabilizationModes.contains(
                         CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
                     )
                 ) {
@@ -5699,11 +5719,7 @@ class Camera2Controller(private val context: Context) {
                         }
                     )
                 }
-                applyOisDataMode(
-                    builder,
-                    enhancedSelected &&
-                        realtimeStabilizationCoordinator.shouldRequestOisSamples,
-                )
+                applyOisDataMode(builder, false)
                 return
             }
 
@@ -5725,14 +5741,10 @@ class Camera2Controller(private val context: Context) {
             if (availableOpticalStabilizationModes.contains(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)) {
                 builder.set(
                     CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
-                    if (enhancedPhotoPreview) {
-                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
-                    } else {
-                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
-                    }
+                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
                 )
             }
-            applyOisDataMode(builder, enhancedPhotoPreview)
+            applyOisDataMode(builder, false)
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to apply stabilization settings", e)
         }
