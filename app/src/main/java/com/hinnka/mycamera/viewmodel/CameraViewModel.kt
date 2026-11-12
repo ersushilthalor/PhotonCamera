@@ -1935,6 +1935,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val videoWhiteBalanceLockEnabled: StateFlow<Boolean> = userPreferencesRepository.userPreferences
         .map { it.videoWhiteBalanceLockEnabled }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val dollyZoomEnabled: StateFlow<Boolean> = userPreferencesRepository.userPreferences
+        .map { it.dollyZoomEnabled }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    private val _dollyZoomActive = MutableStateFlow(false)
+    val dollyZoomActive: StateFlow<Boolean> = _dollyZoomActive.asStateFlow()
     val photoPreviewStabilizationEnabled: StateFlow<Boolean> =
         userPreferencesRepository.userPreferences
             .map { it.photoPreviewStabilizationEnabled }
@@ -4236,9 +4241,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setVideoWhiteBalanceLockEnabled(enabled: Boolean) {
         cameraController.setVideoWhiteBalanceLockEnabled(enabled)
-        viewModelScope.launch {
-            userPreferencesRepository.saveVideoWhiteBalanceLockEnabled(enabled)
-        }
+        viewModelScope.launch { userPreferencesRepository.saveVideoWhiteBalanceLockEnabled(enabled) }
+    }
+
+    fun setDollyZoomEnabled(enabled: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.saveDollyZoomEnabled(enabled) }
+        if (!enabled) _dollyZoomActive.value = false
+    }
+
+    fun toggleDollyZoom() {
+        if (dollyZoomEnabled.value && state.value.captureMode == CaptureMode.VIDEO) _dollyZoomActive.value = !_dollyZoomActive.value
     }
 
     /**

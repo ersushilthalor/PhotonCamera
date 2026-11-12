@@ -27,6 +27,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.ui.theme.AccentColor
@@ -75,6 +76,8 @@ fun ZoomControlBar(
     modifier: Modifier = Modifier
 ) {
     val displayMode by viewModel.zoomDisplayMode.collectAsState()
+    val dollyZoomEnabled by viewModel.dollyZoomEnabled.collectAsState()
+    val dollyZoomActive by viewModel.dollyZoomActive.collectAsState()
 
     val currentCamera = availableCameras.find { it.cameraId == currentCameraId }
     val isCameraReady = currentCamera != null
@@ -235,6 +238,22 @@ fun ZoomControlBar(
                         .size(32.dp)
                         .padding(8.dp),
                     tint = AccentColor
+                )
+            }
+        }
+
+        AnimatedVisibility(
+            visible = !isContinuousZooming && cameraState.captureMode == CaptureMode.VIDEO && dollyZoomEnabled,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.CenterEnd).offset(y = (-32).dp)
+        ) {
+            IconButton(onClick = viewModel::toggleDollyZoom, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    painter = painterResource(com.hinnka.mycamera.R.drawable.ic_dolly_zoom_24),
+                    contentDescription = "Dolly Zoom",
+                    modifier = Modifier.size(32.dp).padding(8.dp),
+                    tint = if (dollyZoomActive) AccentColor else Color.White
                 )
             }
         }

@@ -1576,6 +1576,13 @@ fun SettingsScreen(
                         title = stringResource(R.string.settings_section_video),
                         showTitle = false
                     ) {
+                        SwitchSettingItem(
+                            title = "Dolly Zoom",
+                            description = "Keep the selected subject the same size while moving the camera.",
+                            checked = userPreferences.dollyZoomEnabled,
+                            onCheckedChange = viewModel::setDollyZoomEnabled,
+                        )
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.1f), modifier = Modifier.padding(vertical = 8.dp))
                         QualityLevelSetting(
                             title = stringResource(R.string.settings_nr_level),
                             description = stringResource(R.string.settings_video_nr_level_description),
