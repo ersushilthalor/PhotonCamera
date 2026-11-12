@@ -460,6 +460,7 @@ class Camera2Controller(private val context: Context) {
     // 保留最近的一个结果作为后备
     @Volatile
     private var lastCaptureResult: TotalCaptureResult? = null
+    private val dollyZoomAppliedZoomHistory = java.util.ArrayDeque<Pair<Long, Float>>()
 
     @Volatile
     private var enginePreviewEnabled = false
@@ -1122,9 +1123,16 @@ class Camera2Controller(private val context: Context) {
         return true
     }
 
-    fun getLastAppliedZoomRatio(): Float {
+    fun getLastAppliedZoomRatio(frameTimestampNs: Long? = null): Float {
+        val matched = frameTimestampNs?.let { frameTime ->
+            synchronized(dollyZoomAppliedZoomHistory) {
+                dollyZoomAppliedZoomHistory.minByOrNull { sample ->
+                    kotlin.math.abs(sample.first - frameTime)
+                }?.takeIf { kotlin.math.abs(it.first - frameTime) <= 100_000_000L }?.second
+            }
+        }
         val resultZoom = lastCaptureResult?.get(CaptureResult.CONTROL_ZOOM_RATIO)
-        return resultZoom?.takeIf { it.isFinite() && it > 0f } ?: _state.value.zoomRatio
+        return matched ?: resultZoom?.takeIf { it.isFinite() && it > 0f } ?: _state.value.zoomRatio
     }
 
     private val previewCallback = object : CameraCaptureSession.CaptureCallback() {
@@ -1193,6 +1201,15 @@ class Camera2Controller(private val context: Context) {
             }
 
             lastCaptureResult = result
+            val appliedZoom = result.get(CaptureResult.CONTROL_ZOOM_RATIO)
+                ?: request.get(CaptureRequest.CONTROL_ZOOM_RATIO)
+            val sensorTimestamp = result.get(CaptureResult.SENSOR_TIMESTAMP)
+            if (appliedZoom != null && appliedZoom.isFinite() && appliedZoom > 0f && sensorTimestamp != null) {
+                synchronized(dollyZoomAppliedZoomHistory) {
+                    dollyZoomAppliedZoomHistory.addLast(sensorTimestamp to appliedZoom)
+                    while (dollyZoomAppliedZoomHistory.size > 48) dollyZoomAppliedZoomHistory.removeFirst()
+                }
+            }
             logVideoCaptureStats(result)
             if (session === captureSession) {
                 updateEnginePreviewSource(result)
