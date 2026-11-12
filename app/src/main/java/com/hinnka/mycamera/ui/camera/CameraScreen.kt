@@ -974,6 +974,9 @@ fun CameraScreen(
                 },
                 useLivePhoto = useLivePhoto,
                 onLivePhotoToggle = { viewModel.setUseLivePhoto(!state.useLivePhoto) },
+                isPortraitMode = selectedShootingMode == CameraShootingMode.PORTRAIT,
+                virtualAperture = state.virtualAperture,
+                onApertureSelected = { viewModel.setAperture(it) },
                 videoConfig = state.videoConfig,
                 videoCapabilities = state.videoCapabilities,
                 onVideoTorchToggle = { viewModel.setVideoTorchEnabled(!state.videoConfig.torchEnabled) },
@@ -2266,29 +2269,6 @@ private fun Controls(
                 }
             }
 
-            if (shootingMode == CameraShootingMode.PORTRAIT) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 28.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "ƒ/" + formatVirtualApertureFStop(state.virtualAperture),
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.width(48.dp)
-                    )
-                    Slider(
-                        value = state.virtualAperture.coerceIn(1f, 16f),
-                        onValueChange = { viewModel.setAperture(it) },
-                        valueRange = 1f..16f,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-
             Spacer(modifier = Modifier.height(CameraControlsLayoutDefaults.ModeSwitcherSpacing))
 
             CaptureModeSwitcher(
@@ -2676,7 +2656,7 @@ private fun CaptureModeSwitcher(
                 selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.Black
             )
             ModeSwitcherItem(
-                label = "ƒ Portrait",
+                label = "Portrait",
                 selected = shootingMode == CameraShootingMode.PORTRAIT,
                 enabled = enabled,
                 onClick = { onModeSelected(CameraShootingMode.PORTRAIT) },
