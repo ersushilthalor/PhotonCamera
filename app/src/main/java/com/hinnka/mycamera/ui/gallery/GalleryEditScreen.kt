@@ -1566,7 +1566,7 @@ fun GalleryEditScreen(
                                                 effects.applyTo(latestRecipe)
                                             )
                                         },
-                                        replaceVignetteWithWashedOutRecovery = currentPhoto.isVideo,
+                                        replaceVignetteWithVideoBrightness = currentPhoto.isVideo,
                                         headerControls = if (
                                             editLutId != null || currentPhoto.isMotionPhoto
                                         ) {

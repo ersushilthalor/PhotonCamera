@@ -560,7 +560,6 @@ fun SettingsScreen(
         viewModel.setRawMaxChromaNoiseReduction(rawMaxChromaNoiseReductionUi)
     }
 
-    val context = androidx.compose.ui.platform.LocalContext.current
     val depthModelState by remember(context.applicationContext) {
         DepthModelManager.observe(context)
     }.collectAsState()
