@@ -66,17 +66,25 @@ internal fun applyHorizontalLockMvpMatrix(
     targetHeight: Int,
     correctionDegrees: Float,
     output: FloatArray,
+    rotationScratch: FloatArray,
 ): FloatArray {
-    require(baseMvpMatrix.size >= 16 && output.size >= 16)
-    System.arraycopy(baseMvpMatrix, 0, output, 0, 16)
-    if (targetWidth <= 0 || targetHeight <= 0 || !correctionDegrees.isFinite()) return output
+    require(baseMvpMatrix.size >= 16 && output.size >= 16 && rotationScratch.size >= 16)
+    if (targetWidth <= 0 || targetHeight <= 0 || !correctionDegrees.isFinite()) {
+        System.arraycopy(baseMvpMatrix, 0, output, 0, 16)
+        return output
+    }
 
     var angle = correctionDegrees % 360f
     if (angle > 180f) angle -= 360f
     if (angle < -180f) angle += 360f
-    if (abs(angle) < 0.01f) return output
+    if (abs(angle) < 0.01f) {
+        System.arraycopy(baseMvpMatrix, 0, output, 0, 16)
+        return output
+    }
 
-    Matrix.rotateM(output, 0, angle, 0f, 0f, 1f)
+    // Rotate in output/viewfinder coordinates, after the existing crop and orientation matrix.
+    Matrix.setRotateM(rotationScratch, 0, angle, 0f, 0f, 1f)
+    Matrix.multiplyMM(output, 0, rotationScratch, 0, baseMvpMatrix, 0)
 
     val radians = Math.toRadians(abs(angle).toDouble())
     val sine = abs(sin(radians)).toFloat()
