@@ -4264,6 +4264,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val restoreZoom = dollyZoomController.stop()
         dollyZoomPreviousWbLock?.let(cameraController::setVideoWhiteBalanceLockEnabled)
         dollyZoomPreviousWbLock = null
+        cameraController.unlockFocus()
         _dollyZoomActive.value = false
         _dollyZoomHint.value = ""
         _dollyZoomFaceBox.value = null
