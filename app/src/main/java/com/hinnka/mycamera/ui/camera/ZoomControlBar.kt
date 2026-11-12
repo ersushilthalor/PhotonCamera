@@ -41,6 +41,7 @@ import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.roundToInt
 import com.hinnka.mycamera.ui.icons.AppIcons
+import com.hinnka.mycamera.ui.components.GlassSurface
 
 /**
  * 显示模式：变焦倍率 or 35mm等效焦距
@@ -315,46 +316,62 @@ private fun ZoomPresetPill(
     val visiblePresets = if (zoomRatio >= 3f) basePresets + listOf(5f, 10f) else basePresets
     val selectedPreset = visiblePresets.firstOrNull { abs(it - zoomRatio) <= 0.05f }
 
-    Row(
-        modifier = modifier
-            .clip(CircleShape)
-            .background(Color(0xFF25242C))
-            .padding(horizontal = 4.dp, vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(0.dp),
-        verticalAlignment = Alignment.CenterVertically
+    GlassSurface(
+        modifier = modifier,
+        shape = CircleShape,
+        blurRadius = 10.dp,
+        lensHeight = 10.dp,
+        lensAmount = 18.dp,
+        tint = Color(0xFF25242C),
+        tintAlpha = 0.28f,
+        frostedAlpha = 0.62f,
+        nestedGlass = true,
     ) {
-        visiblePresets.forEach { preset ->
-            val selected = selectedPreset != null && abs(selectedPreset - preset) <= 0.01f
-            Box(
-                modifier = Modifier
-                    .width(37.dp)
-                    .height(29.dp)
-                    .clickable { onPresetClick(preset) },
-                contentAlignment = Alignment.Center
-            ) {
-                if (selected) {
-                    Box(
-                        modifier = Modifier
-                            .size(29.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF484651))
+        Row(
+            modifier = Modifier
+                .clip(CircleShape)
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            visiblePresets.forEach { preset ->
+                val selected = selectedPreset != null && abs(selectedPreset - preset) <= 0.01f
+                Box(
+                    modifier = Modifier
+                        .width(37.dp)
+                        .height(29.dp)
+                        .clickable { onPresetClick(preset) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (selected) {
+                        GlassSurface(
+                            modifier = Modifier.size(29.dp),
+                            shape = CircleShape,
+                            blurRadius = 0.dp,
+                            lensHeight = 8.dp,
+                            lensAmount = 12.dp,
+                            tint = Color.White,
+                            tintAlpha = 0.16f,
+                            frostedAlpha = 0.20f,
+                            dropShadow = false,
+                        )
+                    }
+                    val label = when {
+                        abs(preset - 0.6f) <= 0.01f -> ".6"
+                        else -> preset.toInt().toString()
+                    }
+                    Text(
+                        text = if (selected) "${label}x" else label,
+                        style = TextStyle(
+                            fontSize = if (selected) 14.sp else 13.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            color = Color.White,
+                            textAlign = TextAlign.Center
+                        ),
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
-                val label = when {
-                    abs(preset - 0.6f) <= 0.01f -> ".6"
-                    else -> preset.toInt().toString()
-                }
-                Text(
-                    text = if (selected) "${label}x" else label,
-                    style = TextStyle(
-                        fontSize = if (selected) 14.sp else 13.sp,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                        color = Color.White,
-                        textAlign = TextAlign.Center
-                    ),
-                    maxLines = 1,
-                    softWrap = false
-                )
             }
         }
     }

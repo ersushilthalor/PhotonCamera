@@ -55,3 +55,5 @@ Except for third-party components, models, fonts, LUTs, and other assets that ca
 ## Contact
 
 Telegram: https://t.me/photoncameraapp
+
+Liquid-glass control styling is adapted from [AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass) (Apache-2.0).
