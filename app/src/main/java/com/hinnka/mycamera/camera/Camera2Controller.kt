@@ -1131,7 +1131,9 @@ class Camera2Controller(private val context: Context) {
                 }?.takeIf { kotlin.math.abs(it.first - frameTime) <= 100_000_000L }?.second
             }
         }
-        val resultZoom = lastCaptureResult?.get(CaptureResult.CONTROL_ZOOM_RATIO)
+        val resultZoom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            lastCaptureResult?.get(CaptureResult.CONTROL_ZOOM_RATIO)
+        } else null
         return matched ?: resultZoom?.takeIf { it.isFinite() && it > 0f } ?: _state.value.zoomRatio
     }
 
@@ -1201,8 +1203,9 @@ class Camera2Controller(private val context: Context) {
             }
 
             lastCaptureResult = result
-            val appliedZoom = result.get(CaptureResult.CONTROL_ZOOM_RATIO)
-                ?: request.get(CaptureRequest.CONTROL_ZOOM_RATIO)
+            val appliedZoom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                result.get(CaptureResult.CONTROL_ZOOM_RATIO) ?: request.get(CaptureRequest.CONTROL_ZOOM_RATIO)
+            } else null
             val sensorTimestamp = result.get(CaptureResult.SENSOR_TIMESTAMP)
             if (appliedZoom != null && appliedZoom.isFinite() && appliedZoom > 0f && sensorTimestamp != null) {
                 synchronized(dollyZoomAppliedZoomHistory) {
