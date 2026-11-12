@@ -1160,7 +1160,7 @@ fun CameraScreen(
                                                 val positionInRoot =
                                                     currentPreviewBounds.topLeft + firstPressedChange.position
                                                 zoomBarBounds?.contains(positionInRoot) == true ||
-                                                    parameterRulerBounds?.contains(positionInRoot) == true ||
+                                                    parameterRulerBounds?.contains(positionInRoot) == true
                                             } else {
                                                 false
                                             }
