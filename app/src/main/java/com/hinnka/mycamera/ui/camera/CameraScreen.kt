@@ -2618,59 +2618,29 @@ private fun CaptureModeSwitcher(
     enabled: Boolean,
     onModeSelected: (CameraShootingMode) -> Unit
 ) {
-    var moreExpanded by remember { mutableStateOf(false) }
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(CameraControlsLayoutDefaults.ModeSwitcherHeight)
             .padding(horizontal = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
         ModeSwitcherItem(
-            label = stringResource(R.string.camera_mode_portrait).uppercase(),
-            selected = false,
-            enabled = enabled,
-            onClick = { onModeSelected(CameraShootingMode.PHOTO) },
-            modifier = Modifier.weight(1.12f)
-        )
-        ModeSwitcherItem(
             label = stringResource(R.string.capture_mode_photo).uppercase(),
-            selected = shootingMode == CameraShootingMode.PHOTO,
+            selected = shootingMode != CameraShootingMode.VIDEO,
             enabled = enabled,
             onClick = { onModeSelected(CameraShootingMode.PHOTO) },
-            modifier = Modifier.weight(0.9f)
+            modifier = Modifier.width(84.dp)
         )
+        Spacer(modifier = Modifier.width(12.dp))
         ModeSwitcherItem(
             label = stringResource(R.string.capture_mode_video).uppercase(),
             selected = shootingMode == CameraShootingMode.VIDEO,
             enabled = enabled,
             onClick = { onModeSelected(CameraShootingMode.VIDEO) },
-            modifier = Modifier.weight(0.9f)
+            modifier = Modifier.width(84.dp)
         )
-        Box(modifier = Modifier.weight(0.9f)) {
-            ModeSwitcherItem(
-                label = stringResource(R.string.camera_mode_more).uppercase(),
-                selected = shootingMode == CameraShootingMode.PROFESSIONAL,
-                enabled = enabled,
-                onClick = { moreExpanded = true },
-                modifier = Modifier.fillMaxWidth()
-            )
-            DropdownMenu(
-                expanded = moreExpanded,
-                onDismissRequest = { moreExpanded = false }
-            ) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.capture_mode_professional)) },
-                    enabled = enabled,
-                    onClick = {
-                        moreExpanded = false
-                        onModeSelected(CameraShootingMode.PROFESSIONAL)
-                    }
-                )
-            }
-        }
     }
 }
 

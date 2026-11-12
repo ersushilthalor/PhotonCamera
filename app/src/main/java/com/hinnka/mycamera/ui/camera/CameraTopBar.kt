@@ -1,26 +1,30 @@
 package com.hinnka.mycamera.ui.camera
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Icon
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.ui.components.PhysicalButton
-import com.hinnka.mycamera.ui.icons.AppIcons
 import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.video.VideoCapabilities
@@ -28,8 +32,9 @@ import com.hinnka.mycamera.video.VideoConfig
 import com.hinnka.mycamera.video.VideoResolutionPreset
 
 /**
- * Google Camera-inspired toolbar. The five hit targets stay the same size in Photo and Video:
- * scene/exposure, format, aspect ratio, flash, and settings.
+ * Camera toolbar styled to match the compact outlined Google Camera controls.
+ * Photo: brightness, aspect ratio, level, flash, settings.
+ * Video: HDR, resolution/FPS, aspect ratio, torch, settings.
  */
 @Composable
 fun CameraTopBar(
@@ -81,46 +86,38 @@ fun CameraTopBar(
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        PhysicalButton(
-            modifier = Modifier.size(36.dp),
+        DrawingAction(
+            contentDescription = stringResource(R.string.histogram),
             onClick = onHistogramToggle
         ) {
-            SunburstIcon(
-                tint = if (showHistogram) AccentColor else Color.White,
-                contentDescription = stringResource(R.string.histogram)
-            )
+            SunburstIcon(tint = if (showHistogram) AccentColor else Color.White)
         }
 
-        TopTextAction(
+        AspectRatioAction(
             text = aspectRatioLabel,
-            contentDescription = stringResource(R.string.camera_aspect_ratio),
             onClick = onAspectRatioClick
         )
 
-        TopIconAction(
-            icon = AppIcons.Stabilization,
+        DrawingAction(
             contentDescription = stringResource(R.string.camera_level_indicator),
-            tint = if (showLevelIndicator) AccentColor else Color.White,
             onClick = onLevelIndicatorToggle
-        )
+        ) {
+            CompassIcon(tint = if (showLevelIndicator) AccentColor else Color.White)
+        }
 
-        TopIconAction(
-            icon = when (flashMode) {
-                1 -> AppIcons.FlashOn
-                2 -> AppIcons.FlashlightOn
-                else -> AppIcons.FlashOff
-            },
+        DrawingAction(
             contentDescription = stringResource(R.string.flash),
-            tint = Color.White,
             onClick = onFlashToggle
-        )
+        ) {
+            FlashIcon(tint = Color.White, enabled = flashMode != 0)
+        }
 
-        TopIconAction(
-            icon = Icons.Default.Settings,
+        DrawingAction(
             contentDescription = stringResource(R.string.settings),
-            tint = Color.White,
             onClick = onSettingsClick
-        )
+        ) {
+            GearIcon(tint = Color.White)
+        }
     }
 }
 
@@ -152,14 +149,11 @@ private fun VideoTopBar(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            PhysicalButton(
-                modifier = Modifier.size(36.dp),
+            DrawingAction(
+                contentDescription = stringResource(R.string.camera_hdr),
                 onClick = onVideoHdrToggle
             ) {
-                SunburstIcon(
-                    tint = if (videoHdrEnabled) AccentColor else Color.White,
-                    contentDescription = stringResource(R.string.camera_hdr)
-                )
+                SunburstIcon(tint = if (videoHdrEnabled) AccentColor else Color.White)
             }
 
             VideoFormatAction(
@@ -168,30 +162,32 @@ private fun VideoTopBar(
                 onFpsClick = onVideoFpsClick
             )
 
-            TopTextAction(
+            AspectRatioAction(
                 text = aspectRatioLabel,
-                contentDescription = stringResource(R.string.camera_aspect_ratio),
                 onClick = onAspectRatioClick
             )
 
-            TopIconAction(
-                icon = if (videoConfig.torchEnabled) AppIcons.FlashlightOn else AppIcons.FlashlightOff,
+            DrawingAction(
                 contentDescription = stringResource(R.string.video_torch_chip),
-                tint = if (videoCapabilities.supportsTorch) {
-                    if (videoConfig.torchEnabled) AccentColor else Color.White
-                } else {
-                    Color.White.copy(alpha = 0.35f)
-                },
                 onClick = onVideoTorchToggle,
                 enabled = videoCapabilities.supportsTorch
-            )
+            ) {
+                FlashIcon(
+                    tint = if (videoCapabilities.supportsTorch && videoConfig.torchEnabled) {
+                        AccentColor
+                    } else {
+                        Color.White
+                    },
+                    enabled = videoConfig.torchEnabled
+                )
+            }
 
-            TopIconAction(
-                icon = Icons.Default.Settings,
+            DrawingAction(
                 contentDescription = stringResource(R.string.settings),
-                tint = Color.White,
                 onClick = onSettingsClick
-            )
+            ) {
+                GearIcon(tint = Color.White)
+            }
         }
 
         if (isRecording) {
@@ -204,6 +200,77 @@ private fun VideoTopBar(
                 fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+            )
+        }
+    }
+}
+
+@Composable
+private fun DrawingAction(
+    contentDescription: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit
+) {
+    PhysicalButton(
+        modifier = Modifier
+            .size(40.dp)
+            .semantics {
+                this.contentDescription = contentDescription
+                role = Role.Button
+            },
+        onClick = onClick,
+        enabled = enabled
+    ) {
+        Box(
+            modifier = Modifier.size(22.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun AspectRatioAction(
+    text: String,
+    onClick: () -> Unit
+) {
+    PhysicalButton(
+        modifier = Modifier
+            .size(width = 44.dp, height = 40.dp)
+            .semantics {
+                contentDescription = text
+                role = Role.Button
+            },
+        onClick = onClick
+    ) {
+        Box(
+            modifier = Modifier.size(width = 31.dp, height = 25.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val stroke = 1.45.dp.toPx()
+                val edge = 1.dp.toPx()
+                val corner = 5.dp.toPx()
+                val right = size.width - edge
+                val bottom = size.height - edge
+                drawLine(Color.White, Offset(edge, edge), Offset(edge + corner, edge), stroke)
+                drawLine(Color.White, Offset(edge, edge), Offset(edge, edge + corner), stroke)
+                drawLine(Color.White, Offset(right - corner, edge), Offset(right, edge), stroke)
+                drawLine(Color.White, Offset(right, edge), Offset(right, edge + corner), stroke)
+                drawLine(Color.White, Offset(edge, bottom - corner), Offset(edge, bottom), stroke)
+                drawLine(Color.White, Offset(edge, bottom), Offset(edge + corner, bottom), stroke)
+                drawLine(Color.White, Offset(right - corner, bottom), Offset(right, bottom), stroke)
+                drawLine(Color.White, Offset(right, bottom - corner), Offset(right, bottom), stroke)
+            }
+            Text(
+                text = text,
+                color = Color.White,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false
             )
         }
     }
@@ -229,6 +296,7 @@ private fun VideoFormatAction(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
+                .clip(RoundedCornerShape(3.dp))
                 .clickable(onClick = onResolutionClick),
             contentAlignment = Alignment.Center
         ) {
@@ -242,16 +310,18 @@ private fun VideoFormatAction(
         }
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .clickable(onClick = onFpsClick),
+                .clip(RoundedCornerShape(3.dp))
+                .clickable(onClick = onFpsClick)
+                .background(Color.White, RoundedCornerShape(3.dp))
+                .padding(horizontal = 4.dp, vertical = 1.dp),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = videoConfig.fps.fps.toString(),
-                color = Color.White.copy(alpha = 0.9f),
-                fontSize = 9.sp,
-                fontWeight = FontWeight.SemiBold,
+                color = Color.Black,
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold,
+                lineHeight = 9.sp,
                 maxLines = 1
             )
         }
@@ -259,81 +329,114 @@ private fun VideoFormatAction(
 }
 
 @Composable
-private fun TopIconAction(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    contentDescription: String,
-    tint: Color,
-    onClick: () -> Unit,
-    enabled: Boolean = true
-) {
-    PhysicalButton(
-        modifier = Modifier.size(36.dp),
-        onClick = onClick,
-        enabled = enabled
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            modifier = Modifier.size(20.dp),
-            tint = tint
-        )
-    }
-}
-
-@Composable
-private fun TopTextAction(
-    text: String,
-    contentDescription: String,
-    onClick: () -> Unit
-) {
-    PhysicalButton(
-        modifier = Modifier.size(36.dp),
-        onClick = onClick
-    ) {
-        Text(
-            text = text,
-            color = Color.White,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1
-        )
-    }
-}
-
-@Composable
-private fun SunburstIcon(
-    tint: Color,
-    contentDescription: String
-) {
-    Canvas(modifier = Modifier.size(20.dp)) {
+private fun SunburstIcon(tint: Color) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
         val center = Offset(size.width / 2f, size.height / 2f)
-        val strokeWidth = 1.7.dp.toPx()
-        val coreRadius = size.minDimension * 0.17f
-        val rayStart = size.minDimension * 0.34f
-        val rayEnd = size.minDimension * 0.46f
+        val stroke = 1.7.dp.toPx()
+        val rayStart = size.minDimension * 0.29f
+        val rayEnd = size.minDimension * 0.48f
+        repeat(8) { index ->
+            val angle = Math.PI * index / 4.0
+            drawLine(
+                color = tint,
+                start = Offset(
+                    center.x + (rayStart * kotlin.math.cos(angle)).toFloat(),
+                    center.y + (rayStart * kotlin.math.sin(angle)).toFloat()
+                ),
+                end = Offset(
+                    center.x + (rayEnd * kotlin.math.cos(angle)).toFloat(),
+                    center.y + (rayEnd * kotlin.math.sin(angle)).toFloat()
+                ),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round
+            )
+        }
+        drawCircle(tint, radius = size.minDimension * 0.085f, center = center)
+    }
+}
 
-        drawCircle(
+@Composable
+private fun CompassIcon(tint: Color) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val stroke = 1.6.dp.toPx()
+        val radius = size.minDimension * 0.39f
+        drawCircle(tint, radius = radius, center = center, style = Stroke(stroke))
+        val needle = Path().apply {
+            moveTo(center.x, center.y - radius * 0.72f)
+            lineTo(center.x + radius * 0.38f, center.y + radius * 0.30f)
+            lineTo(center.x - radius * 0.10f, center.y + radius * 0.08f)
+            close()
+        }
+        drawPath(needle, color = tint)
+        drawCircle(Color.Black, radius = radius * 0.13f, center = center)
+    }
+}
+
+@Composable
+private fun FlashIcon(
+    tint: Color,
+    enabled: Boolean
+) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val w = size.width
+        val h = size.height
+        val stroke = 1.6.dp.toPx()
+        val bolt = Path().apply {
+            moveTo(w * 0.61f, h * 0.05f)
+            lineTo(w * 0.34f, h * 0.49f)
+            lineTo(w * 0.51f, h * 0.49f)
+            lineTo(w * 0.40f, h * 0.94f)
+            lineTo(w * 0.75f, h * 0.40f)
+            lineTo(w * 0.56f, h * 0.40f)
+            close()
+        }
+        drawPath(
+            path = bolt,
             color = tint,
-            radius = coreRadius,
+            style = Stroke(width = stroke, cap = StrokeCap.Round)
+        )
+        if (!enabled) {
+            drawLine(
+                color = tint,
+                start = Offset(w * 0.12f, h * 0.15f),
+                end = Offset(w * 0.88f, h * 0.85f),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round
+            )
+        }
+    }
+}
+
+@Composable
+private fun GearIcon(tint: Color) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val stroke = 1.65.dp.toPx()
+        val outerRadius = size.minDimension * 0.36f
+        val toothInner = size.minDimension * 0.39f
+        val toothOuter = size.minDimension * 0.48f
+        drawCircle(tint, radius = outerRadius, center = center, style = Stroke(stroke))
+        drawCircle(
+            tint,
+            radius = size.minDimension * 0.14f,
             center = center,
-            style = Stroke(width = strokeWidth)
+            style = Stroke(stroke)
         )
         repeat(8) { index ->
             val angle = Math.PI * index / 4.0
-            val start = Offset(
-                x = center.x + (rayStart * kotlin.math.cos(angle)).toFloat(),
-                y = center.y + (rayStart * kotlin.math.sin(angle)).toFloat()
-            )
-            val end = Offset(
-                x = center.x + (rayEnd * kotlin.math.cos(angle)).toFloat(),
-                y = center.y + (rayEnd * kotlin.math.sin(angle)).toFloat()
-            )
             drawLine(
                 color = tint,
-                start = start,
-                end = end,
-                strokeWidth = strokeWidth,
-                cap = StrokeCap.Round
+                start = Offset(
+                    center.x + (toothInner * kotlin.math.cos(angle)).toFloat(),
+                    center.y + (toothInner * kotlin.math.sin(angle)).toFloat()
+                ),
+                end = Offset(
+                    center.x + (toothOuter * kotlin.math.cos(angle)).toFloat(),
+                    center.y + (toothOuter * kotlin.math.sin(angle)).toFloat()
+                ),
+                strokeWidth = stroke,
+                cap = StrokeCap.Square
             )
         }
     }
