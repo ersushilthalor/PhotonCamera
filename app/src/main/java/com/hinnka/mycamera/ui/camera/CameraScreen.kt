@@ -235,6 +235,9 @@ fun CameraScreen(
     val dollyZoomActive by viewModel.dollyZoomActive.collectAsState()
     val dollyZoomHint by viewModel.dollyZoomHint.collectAsState()
     val dollyZoomFaceBox by viewModel.dollyZoomFaceBox.collectAsState()
+    LaunchedEffect(state.captureMode, dollyZoomActive) {
+        if (state.captureMode != CaptureMode.VIDEO && dollyZoomActive) viewModel.stopDollyZoom()
+    }
     val keepScreenOn by viewModel.keepScreenOn.collectAsState(initial = false)
     val currentLutId by viewModel.currentLutId.collectAsState()
     val lutNameOverlayState = rememberLutNameOverlayState()
