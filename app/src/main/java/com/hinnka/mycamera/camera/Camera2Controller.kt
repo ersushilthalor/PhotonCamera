@@ -278,6 +278,7 @@ class Camera2Controller(private val context: Context) {
     private var previewRequestBuilder: CaptureRequest.Builder? = null
     private var previewSessionGeneration: Long = 0L
     private val previewUpdateScheduled = AtomicBoolean(false)
+    private var lastEisZoomPanCropWarningElapsedMs = 0L
     private var pendingVendorSessionParameterRestart = false
     private var oppoSuperStabilizationEnabled = false
 
@@ -1177,6 +1178,7 @@ class Camera2Controller(private val context: Context) {
             // Results from a retired session can arrive after a physical-output handoff; using
             // the new global physical-camera ID for those old frames mixes two sensors' metadata.
             if (session === captureSession) {
+                warnIfVideoStabilizationOverridesPanCrop(request, result)
                 updateLogicalMultiCameraStabilizationCamera(result)
                 realtimeStabilizationCoordinator.submitCaptureResult(
                     result = result,
@@ -5304,6 +5306,41 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+
+    /**
+     * Some camera HALs apply an additional stabilization crop after the request crop.
+     * Keep submitting the joystick crop and warn (rate-limited) when the result reports
+     * a different crop, rather than interrupting the active recording session.
+     */
+    private fun warnIfVideoStabilizationOverridesPanCrop(
+        request: CaptureRequest,
+        result: CaptureResult,
+    ) {
+        val state = _state.value
+        if (
+            !state.zoomPanEnabled ||
+            state.captureMode != CaptureMode.VIDEO ||
+            state.videoConfig.stabilizationMode != VideoStabilizationMode.EIS
+        ) return
+
+        val requested = request.get(CaptureRequest.SCALER_CROP_REGION) ?: return
+        val applied = result.get(CaptureResult.SCALER_CROP_REGION) ?: return
+        val differs = kotlin.math.abs(requested.left - applied.left) > 2 ||
+            kotlin.math.abs(requested.top - applied.top) > 2 ||
+            kotlin.math.abs(requested.right - applied.right) > 2 ||
+            kotlin.math.abs(requested.bottom - applied.bottom) > 2
+        if (!differs) return
+
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastEisZoomPanCropWarningElapsedMs < 5_000L) return
+        lastEisZoomPanCropWarningElapsedMs = now
+        PLog.w(
+            TAG,
+            "Video EIS adjusted the requested zoom-pan crop: requested=$requested applied=$applied. " +
+                "Continuing to submit SCALER_CROP_REGION; the device HAL controls the final stabilized frame."
+        )
+    }
+
     private fun resolveZoomRequestCharacteristics(openCameraId: String): CameraCharacteristics {
         val physicalCameraId = activeOutputPhysicalCameraId
         if (physicalCameraId != null) {
@@ -5324,8 +5361,8 @@ class Camera2Controller(private val context: Context) {
         panY: Float = 0f,
         useFreeformPan: Boolean = false,
     ) {
-        // Freeform SCALER_CROP_REGION must not be combined with CONTROL_ZOOM_RATIO != 1.
-        // While joystick pan is active, express zoom as a non-centred sensor crop instead.
+        // While joystick pan is active, zoom is expressed entirely by SCALER_CROP_REGION.
+        // CONTROL_ZOOM_RATIO is held at identity so it cannot add a second centre crop.
         if (useFreeformPan && activeRect != null) {
             if (zoomRatioRange != null) {
                 builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, 1f)
@@ -5357,19 +5394,44 @@ class Camera2Controller(private val context: Context) {
 
     private fun buildZoomPanCropRegion(activeRect: Rect, zoomRatio: Float, panX: Float, panY: Float): Rect {
         val safeZoom = zoomRatio.coerceAtLeast(1f)
-        val cropWidth = (activeRect.width() / safeZoom).roundToInt()
-            .coerceIn(1, activeRect.width())
-        val cropHeight = (activeRect.height() / safeZoom).roundToInt()
-            .coerceIn(1, activeRect.height())
+        // Keep the crop in the active-array coordinate space and preserve its native aspect ratio.
+        val cropWidth = roundEvenWithinRange(
+            activeRect.width() / safeZoom,
+            minimum = 2,
+            maximum = activeRect.width(),
+        )
+        val cropHeight = roundEvenWithinRange(
+            activeRect.height() / safeZoom,
+            minimum = 2,
+            maximum = activeRect.height(),
+        )
         val travelX = (activeRect.width() - cropWidth) / 2f
         val travelY = (activeRect.height() - cropHeight) / 2f
-        val centeredLeft = activeRect.left + (activeRect.width() - cropWidth) / 2f
-        val centeredTop = activeRect.top + (activeRect.height() - cropHeight) / 2f
-        val cropLeft = (centeredLeft + panX.coerceIn(-1f, 1f) * travelX)
-            .roundToInt().coerceIn(activeRect.left, activeRect.right - cropWidth)
-        val cropTop = (centeredTop + panY.coerceIn(-1f, 1f) * travelY)
-            .roundToInt().coerceIn(activeRect.top, activeRect.bottom - cropHeight)
+        val centerX = activeRect.left + activeRect.width() / 2f +
+            panX.coerceIn(-1f, 1f) * travelX
+        val centerY = activeRect.top + activeRect.height() / 2f +
+            panY.coerceIn(-1f, 1f) * travelY
+        val cropLeft = roundEvenWithinRange(
+            centerX - cropWidth / 2f,
+            minimum = activeRect.left,
+            maximum = activeRect.right - cropWidth,
+        )
+        val cropTop = roundEvenWithinRange(
+            centerY - cropHeight / 2f,
+            minimum = activeRect.top,
+            maximum = activeRect.bottom - cropHeight,
+        )
         return Rect(cropLeft, cropTop, cropLeft + cropWidth, cropTop + cropHeight)
+    }
+
+    /** Round to an even sensor coordinate/dimension while remaining inside the supplied bounds. */
+    private fun roundEvenWithinRange(value: Float, minimum: Int, maximum: Int): Int {
+        val firstEven = if (minimum % 2 == 0) minimum else minimum + 1
+        val lastEven = if (maximum % 2 == 0) maximum else maximum - 1
+        if (firstEven > lastEven) {
+            return value.roundToInt().coerceIn(minimum, maximum)
+        }
+        return (value / 2f).roundToInt().times(2).coerceIn(firstEven, lastEven)
     }
 
     private fun shouldUseControlZoomRatio(zoomRatioRange: android.util.Range<Float>?): Boolean {
@@ -5957,7 +6019,10 @@ class Camera2Controller(private val context: Context) {
             _state.value = _state.value.copy(
                 currentCameraId = cam.cameraId,
                 currentLensType = cam.lensType,
-                zoomRatio = 1f
+                zoomRatio = 1f,
+                zoomPanX = 0f,
+                zoomPanY = 0f,
+                zoomPanEnabled = false,
             )
         } ?: PLog.w(TAG, "Camera with lens type $lensType not found")
     }
@@ -5974,7 +6039,10 @@ class Camera2Controller(private val context: Context) {
             _state.value = _state.value.copy(
                 currentCameraId = cam.cameraId,
                 currentLensType = cam.lensType,
-                zoomRatio = 1f
+                zoomRatio = 1f,
+                zoomPanX = 0f,
+                zoomPanY = 0f,
+                zoomPanEnabled = false,
             )
         } ?: PLog.w(TAG, "Camera with ID $cameraId not found")
     }
@@ -6469,14 +6537,27 @@ class Camera2Controller(private val context: Context) {
         val characteristics = resolveZoomRequestCharacteristics(openCameraId)
         val activeRect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return null
         val zoomRatioRange = characteristics.readMetadataOrNull(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
-        val zoomMode = if (shouldUseControlZoomRatio(zoomRatioRange)) {
+        val currentState = _state.value
+        val useFreeformPan = currentState.zoomPanEnabled &&
+            currentState.getCurrentCameraInfo()?.supportsFreeformZoomPan == true &&
+            !shouldUseLogicalMultiCameraZoom(currentState, currentState.getCurrentCameraInfo())
+        val zoomMode = if (!useFreeformPan && shouldUseControlZoomRatio(zoomRatioRange)) {
             PreviewMeteringZoomMode.POST_ZOOM_ACTIVE_ARRAY
         } else {
             PreviewMeteringZoomMode.SCALER_CROP_REGION
         }
         val requestedScalerCrop = if (zoomMode == PreviewMeteringZoomMode.SCALER_CROP_REGION) {
             builder.get(CaptureRequest.SCALER_CROP_REGION)
-                ?: buildCenteredCropRegion(activeRect, _state.value.zoomRatio)
+                ?: if (useFreeformPan) {
+                    buildZoomPanCropRegion(
+                        activeRect,
+                        currentState.zoomRatio,
+                        currentState.zoomPanX,
+                        currentState.zoomPanY,
+                    )
+                } else {
+                    buildCenteredCropRegion(activeRect, currentState.zoomRatio)
+                }
         } else {
             null
         }
@@ -6493,6 +6574,38 @@ class Camera2Controller(private val context: Context) {
             isFrontFacing = (characteristics.get(CameraCharacteristics.LENS_FACING) ?: getLensFacing()) ==
                 CameraCharacteristics.LENS_FACING_FRONT,
         )
+    }
+
+    /**
+     * Reposition existing AF/AE regions whenever the active crop changes. This keeps a
+     * previously selected viewfinder point attached to the same visible location while panning.
+     */
+    private fun remapFocusAndMeteringRegionsForCurrentCrop() {
+        val builder = previewRequestBuilder ?: return
+        val currentState = _state.value
+        val focusPoint = currentState.focusPoint
+        if (focusPoint != null && currentState.isAutoFocus && maxAfRegions > 0) {
+            val viewAspectRatio = pointMeteringViewAspectRatio
+                ?.takeIf { it.isFinite() && it > 0f }
+                ?: currentState.getPreviewAspectRatio()
+            val mapping = mapPreviewMeteringPoint(
+                focusPoint.first,
+                focusPoint.second,
+                viewAspectRatio,
+            )
+            if (mapping != null) {
+                val afRect = PreviewMeteringMapper.buildCenteredRegion(
+                    mapping = mapping,
+                    widthFraction = AF_REGION_WIDTH_FRACTION,
+                    heightFraction = AF_REGION_HEIGHT_FRACTION,
+                ).toAndroidRect()
+                builder.set(
+                    CaptureRequest.CONTROL_AF_REGIONS,
+                    arrayOf(MeteringRectangle(afRect, MeteringRectangle.METERING_WEIGHT_MAX)),
+                )
+            }
+        }
+        applyMeteringRegions()
     }
 
     /** 拖动测光圈仅更新 AE，保留原有 AF 区域与镜头位置。 */
@@ -6784,9 +6897,7 @@ class Camera2Controller(private val context: Context) {
                         _state.value.getCurrentCameraInfo()?.supportsFreeformZoomPan == true,
                 )
             }
-            if (_state.value.meteringPoint != null) {
-                applyMeteringRegions()
-            }
+            remapFocusAndMeteringRegionsForCurrentCrop()
             if (cameraDevice != null && captureSession != null) {
                 updatePreview()
             }
@@ -6840,9 +6951,13 @@ class Camera2Controller(private val context: Context) {
             cameraInfo.lensFacing == CameraCharacteristics.LENS_FACING_FRONT
         ) -sensorDeltaX else sensorDeltaX
 
+        val intrinsicDisplayZoom = cameraInfo.displayIntrinsicZoomRatio
+            .takeIf { it.isFinite() && it > 0f } ?: 1f
+        val visibleZoom = (current.zoomRatio * intrinsicDisplayZoom).coerceAtLeast(1f)
+        val zoomSensitivity = (3f / visibleZoom).coerceIn(0.08f, 1f)
         val next = current.copy(
-            zoomPanX = (current.zoomPanX + sensorDeltaXForFacing).coerceIn(-1f, 1f),
-            zoomPanY = (current.zoomPanY + sensorDeltaY).coerceIn(-1f, 1f),
+            zoomPanX = (current.zoomPanX + sensorDeltaXForFacing * zoomSensitivity).coerceIn(-1f, 1f),
+            zoomPanY = (current.zoomPanY + sensorDeltaY * zoomSensitivity).coerceIn(-1f, 1f),
             zoomPanEnabled = true,
         )
         if (next.zoomPanX == current.zoomPanX &&
@@ -6855,6 +6970,7 @@ class Camera2Controller(private val context: Context) {
         val builder = previewRequestBuilder ?: return
         builder.apply {
             applyBaseCameraSettings(this, isCapture = false, currentState = next)
+            remapFocusAndMeteringRegionsForCurrentCrop()
             updatePreview()
         }
         PLog.d(TAG, "Zoom joystick pan: x=${next.zoomPanX}, y=${next.zoomPanY}, zoom=${next.zoomRatio}")
@@ -6957,6 +7073,7 @@ class Camera2Controller(private val context: Context) {
         }
         previewRequestBuilder?.apply {
             applyBaseCameraSettings(this, isCapture = false, currentState = next)
+            remapFocusAndMeteringRegionsForCurrentCrop()
             updatePreview()
         }
     }
