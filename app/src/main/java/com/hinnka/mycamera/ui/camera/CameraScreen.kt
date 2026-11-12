@@ -1756,6 +1756,9 @@ fun CameraScreen(
 
             CameraBottomControlsLayout(
                 viewfinderBottom = viewfinderTop + cardHeight,
+                // Only video moves the mode row, shutter, gallery and camera switcher
+                // into the viewfinder; photo keeps the established bottom control rail.
+                captureInsideViewfinder = state.captureMode == CaptureMode.VIDEO,
                 modifier = Modifier.fillMaxSize(),
                 zoomBar = {
                     // Panel visibility changes the zoom content, not the space used to

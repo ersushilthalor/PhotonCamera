@@ -40,6 +40,7 @@ internal fun CameraBottomControlsLayout(
     parameterRuler: @Composable () -> Unit,
     parameterBar: @Composable () -> Unit,
     captureControls: @Composable () -> Unit,
+    captureInsideViewfinder: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Layout(
@@ -57,7 +58,13 @@ internal fun CameraBottomControlsLayout(
         val height = constraints.maxHeight
         val clearance = CameraControlsLayoutDefaults.CaptureClearance.roundToPx()
         val barGap = CameraControlsLayoutDefaults.BarSpacing.roundToPx()
-        val captureTop = height - capture.height
+        // Video controls overlay the lower part of the live viewfinder, matching the
+        // reference camera layout. Photo controls retain their existing bottom rail.
+        val captureTop = if (captureInsideViewfinder) {
+            previewBottom - capture.height - CameraControlsLayoutDefaults.CaptureClearance.roundToPx()
+        } else {
+            height - capture.height
+        }.coerceAtLeast(0)
         val controlsBottom = captureTop - clearance
         val previewBottom = viewfinderBottom.roundToPx().coerceAtMost(height)
         val spaceBelowPreview = controlsBottom - previewBottom
