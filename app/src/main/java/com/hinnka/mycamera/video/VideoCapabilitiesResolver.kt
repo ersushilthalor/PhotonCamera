@@ -300,6 +300,8 @@ object VideoCapabilitiesResolver {
         // The regular AE range and regular stream-duration checks are not sufficient.
         val highSpeed120Supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
             cameraInputSize == previewSize &&
+            maxOf(cameraInputSize.width, cameraInputSize.height) == VideoResolutionPreset.FHD_1080P.longEdge &&
+            minOf(cameraInputSize.width, cameraInputSize.height) == VideoResolutionPreset.FHD_1080P.shortEdge &&
             runCatching {
                 val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
                     ?: return@runCatching false

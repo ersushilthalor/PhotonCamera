@@ -1847,7 +1847,7 @@ class Camera2Controller(private val context: Context) {
             }
             val torchRequest = torchRequestBuilder.build()
 
-            session.setRepeatingRequest(torchRequest, previewCallback, handler)
+            submitRepeatingPreviewRequest(session, torchRequest)
             multiFrameTorchWarmupNeedsAePrecapture = _state.value.isAutoExposure &&
                 torchRequest.get(CaptureRequest.CONTROL_AE_MODE) != CaptureRequest.CONTROL_AE_MODE_OFF &&
                 isAePrecaptureSupported()
@@ -3197,11 +3197,7 @@ class Camera2Controller(private val context: Context) {
 
                 try {
                     applyExposureSettings(builder, _state.value, false)
-                    session.setRepeatingRequest(
-                        builder.build(),
-                        previewCallback,
-                        cameraHandler
-                    )
+                    submitRepeatingPreviewRequest(session, builder)
                 } catch (e: CameraAccessException) {
                     PLog.e(TAG, "Failed to update exposure: ${e.message}")
                 } catch (e: IllegalStateException) {
@@ -3266,6 +3262,12 @@ class Camera2Controller(private val context: Context) {
         var vendorSessionParametersApplied = false
 
         try {
+            val highSpeedFpsRange = if (highSpeedVideo) {
+                resolveHighSpeed120FpsRange()
+                    ?: throw IllegalStateException("Camera no longer advertises a 120fps high-speed range for the selected 1080p stream")
+            } else {
+                null
+            }
             previewRequestBuilder = device.createCaptureRequest(templateType).apply {
                 addTarget(surface)
                 stabilizationReader?.surface?.let(::addTarget)
@@ -3274,7 +3276,7 @@ class Camera2Controller(private val context: Context) {
                 // 应用所有相机参数（曝光、白平衡、闪光灯、变焦）
                 applyBaseCameraSettings(this, isCapture = false)
                 if (highSpeedVideo) {
-                    set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(120, 120))
+                    set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, requireNotNull(highSpeedFpsRange))
                     set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
                     set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
                 }
@@ -6702,15 +6704,36 @@ class Camera2Controller(private val context: Context) {
     /**
      * 更新预览
      */
+    private fun resolveHighSpeed120FpsRange(): Range<Int>? {
+        val state = _state.value
+        val inputSize = state.videoCapabilities.cameraInputSizesByResolution[state.videoConfig.resolution]
+            ?: return null
+        val characteristics = getActiveOpenCameraCharacteristics() ?: return null
+        val streamMap = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            ?: return null
+        return runCatching {
+            streamMap.getHighSpeedVideoFpsRangesFor(inputSize).firstOrNull { range ->
+                range.lower <= 120 && range.upper >= 120
+            }
+        }.getOrNull()
+    }
+
     private fun submitRepeatingPreviewRequest(
         session: CameraCaptureSession,
         builder: CaptureRequest.Builder
     ) {
+        submitRepeatingPreviewRequest(session, builder.build())
+    }
+
+    private fun submitRepeatingPreviewRequest(
+        session: CameraCaptureSession,
+        request: CaptureRequest
+    ) {
         if (session is CameraConstrainedHighSpeedCaptureSession) {
-            val requests = session.createHighSpeedRequestList(builder.build())
+            val requests = session.createHighSpeedRequestList(request)
             session.setRepeatingBurst(requests, previewCallback, cameraHandler)
         } else {
-            session.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
+            session.setRepeatingRequest(request, previewCallback, cameraHandler)
         }
     }
 
@@ -8154,6 +8177,11 @@ class Camera2Controller(private val context: Context) {
         val previewTarget = previewSurface ?: return false
         val encoderTarget = videoRecorder.cameraInputSurface
         if (includeVideoSurface && encoderTarget == null) return false
+        val highSpeedFpsRange = if (_state.value.videoConfig.fps == VideoFpsPreset.FPS_120) {
+            resolveHighSpeed120FpsRange() ?: return false
+        } else {
+            null
+        }
 
         return try {
             val useEnhancedStabilization = shouldUseVideoEnhancedStabilization()
@@ -8180,7 +8208,7 @@ class Camera2Controller(private val context: Context) {
                 applyBaseCameraSettings(this, isCapture = false)
             }
             if (_state.value.videoConfig.fps == VideoFpsPreset.FPS_120) {
-                builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(120, 120))
+                builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, requireNotNull(highSpeedFpsRange))
                 builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
                 builder.set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
             }
@@ -8397,7 +8425,7 @@ class Camera2Controller(private val context: Context) {
 
         if (submitted) {
             try {
-                session.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
+                submitRepeatingPreviewRequest(session, builder)
             } catch (e: Exception) {
                 // The one-shot request is already queued and its callback can still complete the lock.
                 PLog.w(TAG, "Unable to resume IDLE repeating request after $reason AF trigger", e)
