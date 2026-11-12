@@ -70,8 +70,6 @@ import com.hinnka.mycamera.camera.CameraState
 import com.hinnka.mycamera.camera.FocusPointSource
 import com.hinnka.mycamera.camera.PhotoCaptureProgress
 import com.hinnka.mycamera.data.CaptureButtonStyle
-import com.hinnka.mycamera.data.FloatingWindowAppearance
-import com.hinnka.mycamera.data.FloatingWindowAppearanceRepository
 import com.hinnka.mycamera.data.DevelopAnimationStyle
 import com.hinnka.mycamera.model.CameraPreset
 import com.hinnka.mycamera.model.ColorRecipeParams
@@ -228,8 +226,6 @@ fun CameraScreen(
     val scope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
     val uiStyle by viewModel.uiStyle.collectAsState()
-    val floatingWindowAppearanceRepository = remember(context) { FloatingWindowAppearanceRepository(context.applicationContext) }
-    val floatingWindowAppearance by floatingWindowAppearanceRepository.appearance.collectAsState(initial = FloatingWindowAppearance.DEFAULT)
     val isCameraInitialized by viewModel.isInitialized.collectAsState()
     val latestPhoto by galleryViewModel.latestPhoto.collectAsState()
     val showLevelIndicator by viewModel.showLevelIndicator.collectAsState(initial = false)
@@ -288,11 +284,6 @@ fun CameraScreen(
     var captureAnimationJob by remember { mutableStateOf<Job?>(null) }
     var cameraScreenBounds by remember { mutableStateOf<Rect?>(null) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
-    var floatingBackdropBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var floatingBackdropPreviousBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var floatingBackdropOlderBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var floatingBackdropGeneration by remember { mutableIntStateOf(0) }
-    val floatingWindowBackdrop = FloatingWindowBackdrop(floatingBackdropBitmap, previewBounds)
     var zoomJoystickOpen by remember { mutableStateOf(false) }
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
     var zoomBarBounds by remember { mutableStateOf<Rect?>(null) }
@@ -341,49 +332,6 @@ fun CameraScreen(
     // UI State
     var activePanel by remember { mutableStateOf(ActivePanel.NONE) }
 
-    val needsFloatingBackdrop = activePanel != ActivePanel.NONE ||
-        zoomJoystickOpen ||
-        (state.histogram != null && viewModel.showHistogram)
-
-    LaunchedEffect(needsFloatingBackdrop, isCameraPrepared) {
-        val generation = ++floatingBackdropGeneration
-        if (!needsFloatingBackdrop || !isCameraPrepared) {
-            floatingBackdropBitmap?.recycle()
-            floatingBackdropPreviousBitmap?.recycle()
-            floatingBackdropOlderBitmap?.recycle()
-            floatingBackdropBitmap = null
-            floatingBackdropPreviousBitmap = null
-            floatingBackdropOlderBitmap = null
-            return@LaunchedEffect
-        }
-        var capturePending = false
-        while (true) {
-            val preview = viewModel.glSurfaceView
-            if (preview != null && !capturePending) {
-                capturePending = true
-                runCatching {
-                    preview.captureNextPreviewFrame(640) { bitmap ->
-                        capturePending = false
-                        if (generation == floatingBackdropGeneration && needsFloatingBackdrop) {
-                            floatingBackdropOlderBitmap?.recycle()
-                            floatingBackdropOlderBitmap = floatingBackdropPreviousBitmap
-                            floatingBackdropPreviousBitmap = floatingBackdropBitmap
-                            floatingBackdropBitmap = bitmap
-                        } else bitmap.recycle()
-                    }
-                }.onFailure { capturePending = false }
-            }
-            delay(125L)
-        }
-    }
-
-    androidx.compose.runtime.DisposableEffect(Unit) {
-        onDispose {
-            floatingBackdropBitmap?.recycle()
-            floatingBackdropPreviousBitmap?.recycle()
-            floatingBackdropOlderBitmap?.recycle()
-        }
-    }
     var selectedParameter by remember { mutableStateOf(CameraParameter.EXPOSURE_COMPENSATION) }
     var showParameterRuler by remember(state.captureMode, state.useRaw) { mutableStateOf(false) }
     val isXpan = state.aspectRatio == AspectRatio.XPAN
@@ -1486,8 +1434,6 @@ fun CameraScreen(
                                     .size(80.dp, 40.dp)
                                     .align(Alignment.TopStart)
                                     .autoRotate(dx = -20.dp, dy = 20.dp),
-                                floatingWindowAppearance = floatingWindowAppearance,
-                                floatingWindowBackdrop = floatingWindowBackdrop
                             )
                         }
 
@@ -1731,8 +1677,6 @@ fun CameraScreen(
                             ZoomPanJoystick(
                                 modifier = Modifier.align(Alignment.Center),
                                 onPanBy = viewModel::panZoomBy,
-                                floatingWindowAppearance = floatingWindowAppearance,
-                                floatingWindowBackdrop = floatingWindowBackdrop
                             )
                         }
                     }
@@ -1870,9 +1814,7 @@ fun CameraScreen(
             oppoPhotoSettings = oppoPhotoSettings,
             onOppoPhotoSettingsChange = viewModel::updateOppoPhotoSettings,
             refocusAvailable = state.minimumFocusDistance > 0f,
-            contentTopPadding = CameraTopBarBaseTopPadding + topSafePadding,
-            floatingWindowAppearance = floatingWindowAppearance,
-            floatingWindowBackdrop = floatingWindowBackdrop
+            contentTopPadding = CameraTopBarBaseTopPadding + topSafePadding
         )
 
         // During navigation measurement or window resizing, the viewport can be
