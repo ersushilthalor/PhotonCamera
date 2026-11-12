@@ -2089,7 +2089,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     _dollyZoomHint.value = "Subject lost"
                     _dollyZoomFaceBox.value = null
                 }
-                if (eyeFocusEnabled.value) {
+                if (eyeFocusEnabled.value && !dollyZoomActive.value) {
                     resetEyeFocusTracking(cancelCameraFocus = true, reason = "target_lost")
                 }
             }
