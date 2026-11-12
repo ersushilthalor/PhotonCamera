@@ -1942,6 +1942,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     private val _dollyZoomActive = MutableStateFlow(false)
     val dollyZoomActive: StateFlow<Boolean> = _dollyZoomActive.asStateFlow()
+    private val _dollyZoomLocked = MutableStateFlow(false)
+    val dollyZoomLocked: StateFlow<Boolean> = _dollyZoomLocked.asStateFlow()
     private val _dollyZoomHint = MutableStateFlow("Point at a face")
     val dollyZoomHint: StateFlow<String> = _dollyZoomHint.asStateFlow()
     private val _dollyZoomFaceBox = MutableStateFlow<FloatArray?>(null)
@@ -4266,6 +4268,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         dollyZoomPreviousWbLock = null
         cameraController.unlockFocus()
         _dollyZoomActive.value = false
+        _dollyZoomLocked.value = false
         _dollyZoomHint.value = ""
         _dollyZoomFaceBox.value = null
         val from = zoomRatioByMain.coerceAtLeast(0.01f)
@@ -4289,6 +4292,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             dollyZoomController.arm(zoomRatioByMain)
             _dollyZoomHint.value = "Point at a face"
             _dollyZoomFaceBox.value = null
+            _dollyZoomLocked.value = false
             _dollyZoomActive.value = true
         }
     }
@@ -5004,6 +5008,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     _dollyZoomHint.value = "Center the subject"
                 } else if (dollyZoomController.lock(target.faceHeight, appliedZoom, target.timestampNs)) {
                     _dollyZoomHint.value = ""
+                    _dollyZoomLocked.value = true
                     dollyZoomPreviousWbLock = cameraState.videoConfig.whiteBalanceLockEnabled
                     cameraController.focusOnNormalizedPoint(
                         normX = target.x,

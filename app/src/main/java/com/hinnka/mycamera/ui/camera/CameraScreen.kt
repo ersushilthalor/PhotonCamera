@@ -233,6 +233,7 @@ fun CameraScreen(
     val focusPeakingEnabled by viewModel.focusPeakingEnabled.collectAsState(initial = true)
     val eyeFocusEnabled by viewModel.eyeFocusEnabled.collectAsState()
     val dollyZoomActive by viewModel.dollyZoomActive.collectAsState()
+    val dollyZoomLocked by viewModel.dollyZoomLocked.collectAsState()
     val dollyZoomHint by viewModel.dollyZoomHint.collectAsState()
     val dollyZoomFaceBox by viewModel.dollyZoomFaceBox.collectAsState()
     LaunchedEffect(state.captureMode, dollyZoomActive) {
@@ -579,7 +580,7 @@ fun CameraScreen(
     }
 
     fun animateZoomStopTo(targetZoom: Float, requestedCameraId: String? = null) {
-        if (viewModel.dollyZoomActive.value) return
+        if (viewModel.dollyZoomLocked.value) return
         val currentCamera = state.getCurrentCameraInfo()
         val startZoom = viewModel.zoomRatioByMain
             .takeIf { it.isFinite() && it > 0f }
@@ -652,7 +653,7 @@ fun CameraScreen(
     }
 
     fun switchCameraWithPreviewTransition() {
-        if (viewModel.dollyZoomActive.value) return
+        if (viewModel.dollyZoomLocked.value) return
         // Switch cameras immediately without the black preview-cover reveal.
         viewModel.switchCamera()
     }
@@ -1176,7 +1177,7 @@ fun CameraScreen(
                                         continue
                                     }
                                     if (event.changes.size >= 2) {
-                                        if (viewModel.dollyZoomActive.value) {
+                                        if (viewModel.dollyZoomLocked.value) {
                                             event.changes.forEach { it.consume() }
                                             continue
                                         }

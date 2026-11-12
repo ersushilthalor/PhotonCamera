@@ -79,6 +79,7 @@ fun ZoomControlBar(
     val displayMode by viewModel.zoomDisplayMode.collectAsState()
     val dollyZoomEnabled by viewModel.dollyZoomEnabled.collectAsState()
     val dollyZoomActive by viewModel.dollyZoomActive.collectAsState()
+    val dollyZoomLocked by viewModel.dollyZoomLocked.collectAsState()
 
     val currentCamera = availableCameras.find { it.cameraId == currentCameraId }
     val isCameraReady = currentCamera != null
@@ -150,8 +151,8 @@ fun ZoomControlBar(
             .fillMaxWidth()
             .padding(horizontal = 8.dp)
             .height(CameraControlsLayoutDefaults.ZoomBarHeight)
-            .pointerInput(isCameraReady, minZoom, maxZoom, zoomStops, dollyZoomActive) {
-                if (!isCameraReady || dollyZoomActive) return@pointerInput
+            .pointerInput(isCameraReady, minZoom, maxZoom, zoomStops, dollyZoomLocked) {
+                if (!isCameraReady || dollyZoomLocked) return@pointerInput
                 var dragAccumulated = 0f
                 detectHorizontalDragGestures(
                     onDragStart = {
@@ -259,7 +260,7 @@ fun ZoomControlBar(
             }
         }
 
-        if (dollyZoomActive) {
+        if (dollyZoomLocked) {
             Box(
                 modifier = Modifier.fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.28f))
@@ -298,7 +299,7 @@ fun ZoomControlBar(
                 ZoomPresetPill(
                     zoomRatio = internalZoomRatio,
                     onPresetClick = { preset ->
-                        if (!dollyZoomActive) {
+                        if (!dollyZoomLocked) {
                         val matchingLensCameras = availableCameras
                             .filter { camera ->
                                 val matchesFacing = if (currentCamera?.lensType == LensType.FRONT) {
