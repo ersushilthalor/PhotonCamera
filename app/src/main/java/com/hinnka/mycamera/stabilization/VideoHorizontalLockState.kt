@@ -82,14 +82,26 @@ internal fun applyHorizontalLockMvpMatrix(
         return output
     }
 
-    // Rotate in output/viewfinder coordinates, after the existing crop and orientation matrix.
-    Matrix.setRotateM(rotationScratch, 0, angle, 0f, 0f, 1f)
+    val aspect = targetWidth.toFloat() / targetHeight.toFloat()
+
+    // Clip space is a square [-1, 1] x [-1, 1] no matter what the output size is, so a plain
+    // rotation there shears/stretches the image on any non-square target (16:9, 9:16, ...).
+    // Rotate in pixel-proportional space instead: M = A^-1 * R * A with A = scale(aspect, 1).
+    //   | cos   -sin/aspect |
+    //   | sin*aspect   cos  |   (column-major below)
+    val signedRadians = Math.toRadians(angle.toDouble())
+    val signedSine = sin(signedRadians).toFloat()
+    val signedCosine = cos(signedRadians).toFloat()
+    Matrix.setIdentityM(rotationScratch, 0)
+    rotationScratch[0] = signedCosine
+    rotationScratch[1] = signedSine * aspect
+    rotationScratch[4] = -signedSine / aspect
+    rotationScratch[5] = signedCosine
     Matrix.multiplyMM(output, 0, rotationScratch, 0, baseMvpMatrix, 0)
 
     val radians = Math.toRadians(abs(angle).toDouble())
     val sine = abs(sin(radians)).toFloat()
     val cosine = abs(cos(radians)).toFloat()
-    val aspect = targetWidth.toFloat() / targetHeight.toFloat()
     val zoom = maxOf(
         1f,
         cosine + sine * aspect,

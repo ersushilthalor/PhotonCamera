@@ -121,7 +121,10 @@ object OrientationObserver {
             )
         }
 
-        orientationListener = object : OrientationEventListener(context.applicationContext) {
+        orientationListener = object : OrientationEventListener(
+            context.applicationContext,
+            SensorManager.SENSOR_DELAY_GAME,
+        ) {
             override fun onOrientationChanged(orientation: Int) {
                 updateOrientation(orientation)
             }
