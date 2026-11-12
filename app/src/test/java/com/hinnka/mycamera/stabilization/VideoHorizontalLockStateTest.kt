@@ -64,7 +64,12 @@ class VideoHorizontalLockStateTest {
     fun rotationDoesNotStretchNonSquareOutput() {
         listOf(1920 to 1080, 1080 to 1920, 1000 to 1000).forEach { (w, h) ->
             val aspect = w.toFloat() / h.toFloat()
-            val base = FloatArray(16).also { android.opengl.Matrix.setIdentityM(it, 0) }
+            val base = FloatArray(16).also { matrix ->
+                matrix[0] = 1f
+                matrix[5] = 1f
+                matrix[10] = 1f
+                matrix[15] = 1f
+            }
             val out = FloatArray(16)
             applyHorizontalLockMvpMatrix(base, w, h, 17f, out, FloatArray(16))
 

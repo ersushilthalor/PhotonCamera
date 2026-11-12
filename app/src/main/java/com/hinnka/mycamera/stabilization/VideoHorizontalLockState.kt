@@ -1,6 +1,5 @@
 package com.hinnka.mycamera.stabilization
 
-import android.opengl.Matrix
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -92,12 +91,31 @@ internal fun applyHorizontalLockMvpMatrix(
     val signedRadians = Math.toRadians(angle.toDouble())
     val signedSine = sin(signedRadians).toFloat()
     val signedCosine = cos(signedRadians).toFloat()
-    Matrix.setIdentityM(rotationScratch, 0)
+    // Build the rotation matrix directly so this math is deterministic in JVM tests and does
+    // not depend on Android's android.opengl.Matrix stubs. Keep all work in caller-owned arrays:
+    // this method runs for every preview and encoder frame.
+    for (index in 0 until 16) {
+        rotationScratch[index] = 0f
+    }
     rotationScratch[0] = signedCosine
     rotationScratch[1] = signedSine * aspect
     rotationScratch[4] = -signedSine / aspect
     rotationScratch[5] = signedCosine
-    Matrix.multiplyMM(output, 0, rotationScratch, 0, baseMvpMatrix, 0)
+    rotationScratch[10] = 1f
+    rotationScratch[15] = 1f
+
+    // Column-major 4x4 multiplication: output = rotationScratch * baseMvpMatrix.
+    for (column in 0 until 4) {
+        val columnOffset = column * 4
+        for (row in 0 until 4) {
+            var value = 0f
+            for (component in 0 until 4) {
+                value += rotationScratch[component * 4 + row] *
+                    baseMvpMatrix[columnOffset + component]
+            }
+            output[columnOffset + row] = value
+        }
+    }
 
     val radians = Math.toRadians(abs(angle).toDouble())
     val sine = abs(sin(radians)).toFloat()
@@ -107,6 +125,11 @@ internal fun applyHorizontalLockMvpMatrix(
         cosine + sine * aspect,
         cosine + sine / aspect,
     )
-    Matrix.scaleM(output, 0, zoom, zoom, 1f)
+
+    // Post-multiply by a uniform X/Y scale (Z remains 1), matching Matrix.scaleM semantics.
+    for (row in 0 until 4) {
+        output[row] *= zoom
+        output[4 + row] *= zoom
+    }
     return output
 }
