@@ -108,6 +108,7 @@ enum class ActivePanel {
 private enum class CameraShootingMode {
     PROFESSIONAL,
     PHOTO,
+    PORTRAIT,
     VIDEO
 }
 
@@ -333,6 +334,7 @@ fun CameraScreen(
 
     // UI State
     var activePanel by remember { mutableStateOf(ActivePanel.NONE) }
+    var selectedShootingMode by remember { mutableStateOf(CameraShootingMode.PHOTO) }
 
     var selectedParameter by remember { mutableStateOf(CameraParameter.EXPOSURE_COMPENSATION) }
     var showParameterRuler by remember(state.captureMode, state.useRaw) { mutableStateOf(false) }
@@ -640,14 +642,23 @@ fun CameraScreen(
     fun setShootingModeImmediately(mode: CameraShootingMode) {
         if (mode == CameraShootingMode.PROFESSIONAL && !state.isRawSupported) return
 
+        selectedShootingMode = mode
+        val isPortraitMode = mode == CameraShootingMode.PORTRAIT
+        viewModel.setVirtualApertureAuto(isPortraitMode)
+        if (isPortraitMode) {
+            viewModel.setAperture(state.virtualAperture.coerceIn(1f, 16f))
+        }
+
         val targetCaptureMode = when (mode) {
             CameraShootingMode.PROFESSIONAL,
-            CameraShootingMode.PHOTO -> CaptureMode.PHOTO
+            CameraShootingMode.PHOTO,
+            CameraShootingMode.PORTRAIT -> CaptureMode.PHOTO
             CameraShootingMode.VIDEO -> CaptureMode.VIDEO
         }
         val targetUseRaw = when (mode) {
             CameraShootingMode.PROFESSIONAL -> true
-            CameraShootingMode.PHOTO -> false
+            CameraShootingMode.PHOTO,
+            CameraShootingMode.PORTRAIT -> false
             CameraShootingMode.VIDEO -> null
         }
         if (
@@ -1362,7 +1373,7 @@ fun CameraScreen(
                     val showLivePhotoIndicator =
                         state.captureMode == CaptureMode.PHOTO && useLivePhoto
                     val showVirtualApertureIndicator =
-                        state.captureMode != CaptureMode.VIDEO &&
+                        selectedShootingMode == CameraShootingMode.PORTRAIT &&
                             state.isVirtualApertureEnabled
                     if (showLivePhotoIndicator || showVirtualApertureIndicator) {
                         Column(
@@ -1587,6 +1598,7 @@ fun CameraScreen(
                 },
                 onSwitchCameraClick = ::switchCameraWithPreviewTransition,
                 onCaptureModeSelected = ::setShootingModeImmediately,
+                shootingMode = selectedShootingMode,
                 modeSwitchEnabled = !previewTransitionActive,
                 onCaptureTap = {
                     val shouldDebounceRawCapture =
@@ -2102,6 +2114,7 @@ private fun Controls(
     onCaptureButtonBoundsChanged: (Rect) -> Unit,
     onSwitchCameraClick: () -> Unit,
     onCaptureModeSelected: (CameraShootingMode) -> Unit,
+    shootingMode: CameraShootingMode,
     modeSwitchEnabled: Boolean,
     onCaptureTap: () -> Unit,
     onGalleryClick: () -> Unit,
@@ -2240,17 +2253,35 @@ private fun Controls(
                 }
             }
 
+            if (shootingMode == CameraShootingMode.PORTRAIT) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 28.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "ƒ/" + formatVirtualApertureFStop(state.virtualAperture),
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.width(48.dp)
+                    )
+                    Slider(
+                        value = state.virtualAperture.coerceIn(1f, 16f),
+                        onValueChange = { viewModel.setAperture(it) },
+                        valueRange = 1f..16f,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(CameraControlsLayoutDefaults.ModeSwitcherSpacing))
 
             CaptureModeSwitcher(
                 oppoStyle = uiStyle == "OPPO",
-                // Pro/RAW remains an internal capture option, but is no longer a
-                // separate item in the visible Photo/Video mode switcher.
-                shootingMode = if (state.captureMode == CaptureMode.VIDEO) {
-                    CameraShootingMode.VIDEO
-                } else {
-                    CameraShootingMode.PHOTO
-                },
+                // Pro/RAW remains an internal capture option.
+                shootingMode = shootingMode,
                 enabled = modeSwitchEnabled &&
                     !state.videoRecordingState.isRecording &&
                     !state.videoRecordingState.isProcessing,
@@ -2583,7 +2614,7 @@ private fun CaptureModeSwitcher(
 ) {
     BoxWithConstraints(
         modifier = Modifier
-            .width(171.dp)
+            .width(240.dp)
             .height(CameraControlsLayoutDefaults.ModeSwitcherHeight)
             .clip(RoundedCornerShape(18.dp))
             .background(if (oppoStyle) Color(0xFF202020) else Color.Black.copy(alpha = 0.28f))
@@ -2594,10 +2625,13 @@ private fun CaptureModeSwitcher(
             )
             .padding(3.dp)
     ) {
-        // The visible switcher contains only Photo and Video. Pro/RAW capture
-        // internals are preserved but are not exposed as a separate UI mode.
-        val knobWidth = maxWidth / 2
-        val selectedIndex = if (shootingMode == CameraShootingMode.VIDEO) 1 else 0
+        // Three independent shooting modes; Portrait reuses the existing depth-bokeh pipeline.
+        val knobWidth = maxWidth / 3
+        val selectedIndex = when (shootingMode) {
+            CameraShootingMode.VIDEO -> 2
+            CameraShootingMode.PORTRAIT -> 1
+            else -> 0
+        }
         val knobOffset by animateDpAsState(
             targetValue = knobWidth * selectedIndex,
             animationSpec = tween(durationMillis = 220),
@@ -2621,17 +2655,23 @@ private fun CaptureModeSwitcher(
             verticalAlignment = Alignment.CenterVertically
         ) {
             ModeSwitcherItem(
-                label = stringResource(R.string.capture_mode_photo) +
-                    if (oppoStyle && shootingMode != CameraShootingMode.VIDEO) " ▴" else "",
-                selected = shootingMode != CameraShootingMode.VIDEO,
+                label = stringResource(R.string.capture_mode_photo),
+                selected = shootingMode == CameraShootingMode.PHOTO,
                 enabled = enabled,
                 onClick = { onModeSelected(CameraShootingMode.PHOTO) },
                 modifier = Modifier.weight(1f),
                 selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.Black
             )
             ModeSwitcherItem(
-                label = stringResource(R.string.capture_mode_video) +
-                    if (oppoStyle && shootingMode == CameraShootingMode.VIDEO) " ▴" else "",
+                label = "ƒ Portrait",
+                selected = shootingMode == CameraShootingMode.PORTRAIT,
+                enabled = enabled,
+                onClick = { onModeSelected(CameraShootingMode.PORTRAIT) },
+                modifier = Modifier.weight(1f),
+                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.Black
+            )
+            ModeSwitcherItem(
+                label = stringResource(R.string.capture_mode_video),
                 selected = shootingMode == CameraShootingMode.VIDEO,
                 enabled = enabled,
                 onClick = { onModeSelected(CameraShootingMode.VIDEO) },
