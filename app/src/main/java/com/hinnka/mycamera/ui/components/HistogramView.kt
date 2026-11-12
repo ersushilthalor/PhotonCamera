@@ -1,6 +1,7 @@
 package com.hinnka.mycamera.ui.components
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -14,7 +15,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.unit.dp
-import com.hinnka.mycamera.data.FloatingWindowAppearance
 
 /**
  * 直方图组件
@@ -25,19 +25,14 @@ import com.hinnka.mycamera.data.FloatingWindowAppearance
 @Composable
 fun HistogramView(
     histogram: IntArray?,
-    modifier: Modifier = Modifier,
-    floatingWindowAppearance: FloatingWindowAppearance = FloatingWindowAppearance.DEFAULT,
-    floatingWindowBackdrop: FloatingWindowBackdrop? = null,
+    modifier: Modifier = Modifier
 ) {
     Box(
         modifier = modifier
             .width(120.dp)
             .height(30.dp)
-            .floatingWindowMaterial(
-                appearance = floatingWindowAppearance,
-                backdrop = floatingWindowBackdrop,
-                shape = RoundedCornerShape(4.dp)
-            )
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color.Black.copy(alpha = 0.4f))
             .padding(4.dp)
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
