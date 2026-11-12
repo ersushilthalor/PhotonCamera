@@ -11,6 +11,7 @@ class DollyZoomController {
     var state: State = State.OFF
         private set
     private var startZoom = 1f
+    private var restoreZoom = 1f
     private var startDistance = 1f
     private var filteredDistance = 1f
     private var previousDistance = 1f
@@ -22,6 +23,7 @@ class DollyZoomController {
 
     fun arm(currentZoom: Float) {
         startZoom = currentZoom.coerceAtLeast(0.01f)
+        restoreZoom = startZoom
         lastCommand = startZoom
         filteredCommand = startZoom
         state = State.ARMED
@@ -70,5 +72,5 @@ class DollyZoomController {
     }
 
     fun isLost(timestampNs: Long): Boolean = state == State.LOCKED && lastSeenNs > 0L && timestampNs - lastSeenNs > 350_000_000L
-    fun stop(): Float { val restoreZoom = startZoom; state = State.OFF; return restoreZoom }
+    fun stop(): Float { state = State.OFF; return restoreZoom }
 }
