@@ -6892,8 +6892,7 @@ class Camera2Controller(private val context: Context) {
                     resetCropAtUnitZoom = true,
                     panX = _state.value.zoomPanX,
                     panY = _state.value.zoomPanY,
-                    useFreeformPan = !logicalAutoSwitch && _state.value.zoomPanEnabled &&
-                        _state.value.getCurrentCameraInfo()?.supportsFreeformZoomPan == true,
+                    useFreeformPan = !logicalAutoSwitch && _state.value.zoomPanEnabled && activeRect != null,
                 )
             }
             remapFocusAndMeteringRegionsForCurrentCrop()
