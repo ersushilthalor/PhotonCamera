@@ -3233,7 +3233,10 @@ class Camera2Controller(private val context: Context) {
         invalidateCaptureSession(captureSession, "preview session replacement")
         val captureMode = _state.value.captureMode
         val reader = imageReader
-        val stabilizationReader = ensureStabilizationImageReader()
+        val highSpeedVideo = captureMode == CaptureMode.VIDEO &&
+            _state.value.videoConfig.fps == VideoFpsPreset.FPS_120 &&
+            _state.value.videoRecordingState.shouldAttachCameraInput()
+        val stabilizationReader = if (highSpeedVideo) null else ensureStabilizationImageReader()
         val useEnhancedStabilization = shouldUseVideoEnhancedStabilization()
         val videoSurface = if (
             captureMode == CaptureMode.VIDEO &&
@@ -3270,6 +3273,11 @@ class Camera2Controller(private val context: Context) {
 
                 // 应用所有相机参数（曝光、白平衡、闪光灯、变焦）
                 applyBaseCameraSettings(this, isCapture = false)
+                if (highSpeedVideo) {
+                    set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(120, 120))
+                    set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+                    set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
+                }
             }
 
             val surfaces = mutableListOf(surface)
@@ -3281,6 +3289,40 @@ class Camera2Controller(private val context: Context) {
             }
 
             if (captureMode == CaptureMode.VIDEO) {
+                if (highSpeedVideo) {
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || videoSurface == null || surfaces.size != 2) {
+                        throw IllegalStateException("1080p120 requires a supported two-surface Camera2 high-speed session")
+                    }
+                    PLog.i(TAG, "Creating constrained high-speed video session: 1080p @ 120fps")
+                    device.createConstrainedHighSpeedCaptureSession(
+                        surfaces,
+                        object : CameraCaptureSession.StateCallback() {
+                            override fun onClosed(session: CameraCaptureSession) {
+                                invalidateCaptureSession(session, "high-speed video session closed")
+                            }
+
+                            override fun onConfigured(session: CameraCaptureSession) {
+                                if (openGeneration != cameraOpenGeneration || sessionGeneration != previewSessionGeneration) {
+                                    safeCloseCaptureSession(session, "stale high-speed video session")
+                                    return
+                                }
+                                onSessionConfigured(session, openGeneration, sessionGeneration)
+                            }
+
+                            override fun onConfigureFailed(session: CameraCaptureSession) {
+                                if (openGeneration != cameraOpenGeneration || sessionGeneration != previewSessionGeneration) {
+                                    safeCloseCaptureSession(session, "stale high-speed configure failure")
+                                    return
+                                }
+                                PLog.e(TAG, "Camera2 constrained high-speed session configuration failed")
+                                safeCloseCaptureSession(session, "high-speed configure failure")
+                                handlePreviewSessionFailure("1080p120 high-speed session configure failed", openGeneration)
+                            }
+                        },
+                        handler
+                    )
+                    return
+                }
                 val sessionOperatingMode = resolveVideoSessionOperatingMode()
                 PLog.i(
                     TAG,
@@ -4039,7 +4081,7 @@ class Camera2Controller(private val context: Context) {
             // 开始预览
             // 关键修复: 不再动态添加 surface，因为已经在创建 builder 时添加了
             previewRequestBuilder?.let { builder ->
-                session.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
+                submitRepeatingPreviewRequest(session, builder)
             }
             if (shouldUseAlgorithmicStabilization()) {
                 scheduleEnhancedStabilizationInputWatchdog(sessionGeneration)
@@ -6660,6 +6702,18 @@ class Camera2Controller(private val context: Context) {
     /**
      * 更新预览
      */
+    private fun submitRepeatingPreviewRequest(
+        session: CameraCaptureSession,
+        builder: CaptureRequest.Builder
+    ) {
+        if (session is CameraConstrainedHighSpeedCaptureSession) {
+            val requests = session.createHighSpeedRequestList(builder.build())
+            session.setRepeatingBurst(requests, previewCallback, cameraHandler)
+        } else {
+            session.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
+        }
+    }
+
     private fun updatePreview() {
         val handler = cameraHandler
         if (handler != null && Looper.myLooper() != handler.looper) {
@@ -6687,7 +6741,7 @@ class Camera2Controller(private val context: Context) {
 
         try {
             applyFrozenCaptureFocus(builder)
-            session.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
+            submitRepeatingPreviewRequest(session, builder)
         } catch (e: CameraAccessException) {
             PLog.e(TAG, "Failed to update preview", e)
         } catch (e: IllegalStateException) {
@@ -7904,6 +7958,7 @@ class Camera2Controller(private val context: Context) {
             }
         }
         val cameraInputIsHlg10 = logProfile == VideoLogProfile.HLG10 &&
+            _state.value.videoConfig.fps != VideoFpsPreset.FPS_120 &&
             !useEnhancedStabilization &&
             colorLayers.isEmpty() &&
             supportsCameraHlg10Input()
@@ -7918,7 +7973,11 @@ class Camera2Controller(private val context: Context) {
             size = outputSize,
             cameraInputSize = cameraInputSize,
             fps = _state.value.videoConfig.fps.fps,
-            bitrateMbps = _state.value.videoConfig.bitrate.bitrateMbps,
+            bitrateMbps = if (_state.value.videoConfig.fps == VideoFpsPreset.FPS_120) {
+                minOf(_state.value.videoConfig.bitrate.bitrateMbps, 100)
+            } else {
+                _state.value.videoConfig.bitrate.bitrateMbps
+            },
             codecMime = _state.value.videoConfig.codec.mimeType,
             colorConfig = VideoEncoderColorRequest(
                 logProfile = logProfile,
@@ -7986,6 +8045,7 @@ class Camera2Controller(private val context: Context) {
     private fun shouldUseVideoEnhancedStabilization(): Boolean {
         val state = _state.value
         return state.videoConfig.stabilizationMode == VideoStabilizationMode.ENHANCED &&
+            state.videoConfig.fps != VideoFpsPreset.FPS_120 &&
             state.captureMode == CaptureMode.VIDEO &&
             VideoStabilizationMode.ENHANCED in
                 state.videoCapabilities.availableStabilizationModes &&
@@ -8119,8 +8179,13 @@ class Camera2Controller(private val context: Context) {
                     ?.let(::addTarget)
                 applyBaseCameraSettings(this, isCapture = false)
             }
+            if (_state.value.videoConfig.fps == VideoFpsPreset.FPS_120) {
+                builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(120, 120))
+                builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+                builder.set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
+            }
             previewRequestBuilder = builder
-            session.setRepeatingRequest(builder.build(), previewCallback, cameraHandler)
+            submitRepeatingPreviewRequest(session, builder)
             true
         } catch (e: Exception) {
             PLog.e(

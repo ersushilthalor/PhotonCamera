@@ -128,14 +128,16 @@ object VideoCapabilitiesResolver {
             ?: VideoLogProfile.OFF
 
         val availableStabilizationModes = mutableListOf(VideoStabilizationMode.OFF)
-        if (supportsElectronicStabilization(availableVideoStabilizationModes)) {
-            availableStabilizationModes.add(VideoStabilizationMode.EIS)
-        }
-        if (availableOpticalStabilizationModes.contains(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)) {
-            availableStabilizationModes.add(VideoStabilizationMode.OIS)
-        }
-        if (enhancedStabilizationAvailable) {
-            availableStabilizationModes.add(VideoStabilizationMode.ENHANCED)
+        if (resolvedFps != VideoFpsPreset.FPS_120) {
+            if (supportsElectronicStabilization(availableVideoStabilizationModes)) {
+                availableStabilizationModes.add(VideoStabilizationMode.EIS)
+            }
+            if (availableOpticalStabilizationModes.contains(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)) {
+                availableStabilizationModes.add(VideoStabilizationMode.OIS)
+            }
+            if (enhancedStabilizationAvailable) {
+                availableStabilizationModes.add(VideoStabilizationMode.ENHANCED)
+            }
         }
         
         val resolvedStabilizationMode = if (availableStabilizationModes.contains(requestedConfig.stabilizationMode)) {
@@ -286,8 +288,7 @@ object VideoCapabilitiesResolver {
         previewSize: Size
     ): List<VideoFpsPreset> {
         val outputRanges = characteristics.readMetadataOrNull(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
-            ?: return emptyList()
-        if (outputRanges.isEmpty()) return emptyList()
+            .orEmpty()
         val minFrameDurationNs = resolveMinFrameDurationNs(characteristics, cameraInputSize, previewSize)
         val maxFpsByDuration = if (minFrameDurationNs > 0) {
             (1_000_000_000.0 / minFrameDurationNs.toDouble()).toInt()
@@ -295,31 +296,42 @@ object VideoCapabilitiesResolver {
             Int.MAX_VALUE
         }
 
-        val strictAvailableFps = VideoFpsPreset.entries.filter { preset ->
+        // 120 fps is exposed only through Camera2 constrained-high-speed sessions.
+        // The regular AE range and regular stream-duration checks are not sufficient.
+        val highSpeed120Supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            cameraInputSize == previewSize &&
+            runCatching {
+                val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                    ?: return@runCatching false
+                val highSpeedSize = map.highSpeedVideoSizes?.any { it == cameraInputSize } == true
+                highSpeedSize && map.getHighSpeedVideoFpsRangesFor(cameraInputSize).any { range ->
+                    range.lower <= 120 && range.upper >= 120
+                }
+            }.getOrDefault(false)
+
+        val standardPresets = VideoFpsPreset.entries.filter { it != VideoFpsPreset.FPS_120 }
+        val strictAvailableFps = standardPresets.filter { preset ->
             preset.fps <= maxFpsByDuration && outputRanges.any { range ->
                 supportsFps(range, preset.fps)
             }
         }
 
-        if (strictAvailableFps.isNotEmpty()) {
+        val standardAvailableFps = if (strictAvailableFps.isNotEmpty()) {
             val advertisedMaxFps = strictAvailableFps.maxOf { it.fps }
             if (advertisedMaxFps >= 50) {
-                return strictAvailableFps
+                strictAvailableFps
+            } else {
+                val optimisticFps = standardPresets.filter { it.fps > advertisedMaxFps }
+                (strictAvailableFps + optimisticFps).distinctBy { it.fps }
             }
-
-            val optimisticFps = VideoFpsPreset.entries.filter { it.fps > advertisedMaxFps }
-            if (optimisticFps.isNotEmpty()) {
-                /*PLog.w(
-                    TAG,
-                    "Camera reports max $advertisedMaxFps fps only, keeping optimistic presets=${optimisticFps.map { it.fps }} " +
-                        "for cameraInput=${cameraInputSize.width}x${cameraInputSize.height}"
-                )*/
-                return (strictAvailableFps + optimisticFps).distinctBy { it.fps }
-            }
+        } else {
+            listOf(VideoFpsPreset.FPS_30)
         }
 
-        return strictAvailableFps.ifEmpty {
-            listOf(VideoFpsPreset.FPS_30)
+        return if (highSpeed120Supported) {
+            (standardAvailableFps + VideoFpsPreset.FPS_120).distinctBy { it.fps }.sortedBy { it.fps }
+        } else {
+            standardAvailableFps
         }
     }
 

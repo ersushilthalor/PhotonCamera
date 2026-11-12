@@ -68,7 +68,8 @@ enum class VideoFpsPreset(val fps: Int) {
     FPS_25(25),
     FPS_30(30),
     FPS_50(50),
-    FPS_60(60);
+    FPS_60(60),
+    FPS_120(120);
 
     fun getDisplayName(): String = fps.toString()
 }
