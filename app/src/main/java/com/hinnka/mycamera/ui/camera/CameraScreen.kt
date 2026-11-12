@@ -225,7 +225,6 @@ fun CameraScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
-    val uiStyle by viewModel.uiStyle.collectAsState()
     val isCameraInitialized by viewModel.isInitialized.collectAsState()
     val latestPhoto by galleryViewModel.latestPhoto.collectAsState()
     val showLevelIndicator by viewModel.showLevelIndicator.collectAsState(initial = false)
@@ -1565,7 +1564,6 @@ fun CameraScreen(
         val controls = @Composable { modifier: Modifier ->
             Controls(
                 state = state,
-                uiStyle = uiStyle,
                 viewModel = viewModel,
                 galleryViewModel = galleryViewModel,
                 latestPhoto = latestPhoto,
@@ -1641,7 +1639,7 @@ fun CameraScreen(
                 contentAlignment = Alignment.Center
             ) {
                 viewfinder()
-                if (uiStyle == "OPPO" && activePanel == ActivePanel.NONE && !isXpan) {
+                if (activePanel == ActivePanel.NONE && !isXpan) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
@@ -1691,16 +1689,12 @@ fun CameraScreen(
                 zoomBar = {
                     // Panel visibility changes the zoom content, not the space used to
                     // position the parameter row beneath it. XPAN has no horizontal bar.
-                    if (uiStyle != "OPPO" || isXpan) {
-                        Box(
-                            modifier = if (isXpan) Modifier else Modifier
-                                .fillMaxWidth()
-                                .height(CameraControlsLayoutDefaults.ZoomBarHeight)
-                        ) {
-                            zoomBar()
-                        }
-                    } else {
-                        Spacer(modifier = Modifier.height(0.dp))
+                    Box(
+                        modifier = if (isXpan) Modifier else Modifier
+                            .fillMaxWidth()
+                            .height(CameraControlsLayoutDefaults.ZoomBarHeight)
+                    ) {
+                        zoomBar()
                     }
                 },
                 // Hide the manual controls (EV/Tv/ISO/AF/AWB and their value ruler)
@@ -2068,7 +2062,6 @@ fun MultipleExposureOverlay(
 @Composable
 private fun Controls(
     state: CameraState,
-    uiStyle: String,
     viewModel: CameraViewModel,
     galleryViewModel: GalleryViewModel,
     latestPhoto: com.hinnka.mycamera.gallery.MediaData?,
@@ -2150,16 +2143,8 @@ private fun Controls(
                     multipleExposureEnabled = useMultipleExposure && state.captureMode == CaptureMode.PHOTO,
                     multipleExposureProgress = multipleExposureState.capturedCount.toFloat() /
                             multipleExposureState.targetCount.coerceAtLeast(1).toFloat(),
-                    customStyle = if (uiStyle == "OPPO" && state.captureMode != CaptureMode.VIDEO) {
-                        CaptureButtonStyle.COLOR
-                    } else {
-                        captureButtonStyle
-                    },
-                    customColor = if (uiStyle == "OPPO" && state.captureMode != CaptureMode.VIDEO) {
-                        0xFFFF8500.toInt()
-                    } else {
-                        captureButtonColor
-                    },
+                    customStyle = captureButtonStyle,
+                    customColor = captureButtonColor,
                     customImagePath = captureButtonImagePath,
                     onTap = onCaptureTap,
                     onLongPressStart = { viewModel.startContinuousCapture() },
@@ -2220,7 +2205,6 @@ private fun Controls(
             Spacer(modifier = Modifier.height(CameraControlsLayoutDefaults.ModeSwitcherSpacing))
 
             CaptureModeSwitcher(
-                oppoStyle = uiStyle == "OPPO",
                 // Pro/RAW remains an internal capture option, but is no longer a
                 // separate item in the visible Photo/Video mode switcher.
                 shootingMode = if (state.captureMode == CaptureMode.VIDEO) {
@@ -2553,7 +2537,6 @@ private fun rememberPhotoCaptureProgress(progress: PhotoCaptureProgress?): State
 
 @Composable
 private fun CaptureModeSwitcher(
-    oppoStyle: Boolean,
     shootingMode: CameraShootingMode,
     enabled: Boolean,
     onModeSelected: (CameraShootingMode) -> Unit
@@ -2563,10 +2546,10 @@ private fun CaptureModeSwitcher(
             .width(171.dp)
             .height(CameraControlsLayoutDefaults.ModeSwitcherHeight)
             .clip(RoundedCornerShape(18.dp))
-            .background(if (oppoStyle) Color(0xFF202020) else Color.Black.copy(alpha = 0.28f))
+            .background(Color.Black.copy(alpha = 0.28f))
             .border(
                 width = 0.5.dp,
-                color = if (oppoStyle) Color(0xFF333333) else Color.White.copy(alpha = 0.18f),
+                color = Color.White.copy(alpha = 0.18f),
                 shape = RoundedCornerShape(18.dp)
             )
             .padding(3.dp)
@@ -2581,7 +2564,7 @@ private fun CaptureModeSwitcher(
             label = "modeSwitcher"
         )
         val selectedBackground by animateColorAsState(
-            targetValue = if (oppoStyle) Color(0xFF303030) else Color.White,
+            targetValue = Color.White,
             animationSpec = tween(durationMillis = 220),
             label = "modeSwitcherColor"
         )
@@ -2598,22 +2581,20 @@ private fun CaptureModeSwitcher(
             verticalAlignment = Alignment.CenterVertically
         ) {
             ModeSwitcherItem(
-                label = stringResource(R.string.capture_mode_photo) +
-                    if (oppoStyle && shootingMode != CameraShootingMode.VIDEO) " ▴" else "",
+                label = stringResource(R.string.capture_mode_photo),
                 selected = shootingMode != CameraShootingMode.VIDEO,
                 enabled = enabled,
                 onClick = { onModeSelected(CameraShootingMode.PHOTO) },
                 modifier = Modifier.weight(1f),
-                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.Black
+                selectedContentColor = Color.Black
             )
             ModeSwitcherItem(
-                label = stringResource(R.string.capture_mode_video) +
-                    if (oppoStyle && shootingMode == CameraShootingMode.VIDEO) " ▴" else "",
+                label = stringResource(R.string.capture_mode_video),
                 selected = shootingMode == CameraShootingMode.VIDEO,
                 enabled = enabled,
                 onClick = { onModeSelected(CameraShootingMode.VIDEO) },
                 modifier = Modifier.weight(1f),
-                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.Black
+                selectedContentColor = Color.Black
             )
         }
     }

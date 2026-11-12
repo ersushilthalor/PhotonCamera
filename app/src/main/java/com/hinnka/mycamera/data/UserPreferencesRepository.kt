@@ -225,7 +225,6 @@ data class UserPreferences(
     val colorPaletteEnabled: Boolean = false,
     val developAnimationStyle: DevelopAnimationStyle = DevelopAnimationStyle.FILM,
     val backgroundImage: String = "camera_bg_black", // Default to solid black background
-    val uiStyle: String = "ORIGINAL",
     val accentColor: Int = AppAppearance.DEFAULT_ACCENT_COLOR,
     val captureButtonStyle: CaptureButtonStyle = CaptureButtonStyle.DEFAULT,
     val captureButtonColor: Int = 0xFFFFFFFF.toInt(),
@@ -504,8 +503,7 @@ class UserPreferencesRepository(private val context: Context) {
         private val COLOR_PALETTE_ENABLED = booleanPreferencesKey("color_palette_enabled")
         private val DEVELOP_ANIMATION_STYLE = stringPreferencesKey("develop_animation_style")
         private val BACKGROUND_IMAGE = stringPreferencesKey("background_image")
-        private val UI_STYLE = stringPreferencesKey("ui_style")
-        private val CAPTURE_BUTTON_STYLE = stringPreferencesKey("capture_button_style")
+            private val CAPTURE_BUTTON_STYLE = stringPreferencesKey("capture_button_style")
         private val CAPTURE_BUTTON_COLOR = intPreferencesKey("capture_button_color")
         private val ACCENT_COLOR = intPreferencesKey("ui_accent_color")
         private val CAPTURE_BUTTON_IMAGE_PATH = stringPreferencesKey("capture_button_image_path")
@@ -859,8 +857,7 @@ class UserPreferencesRepository(private val context: Context) {
                     it.name == preferences[DEVELOP_ANIMATION_STYLE]
                 } ?: DevelopAnimationStyle.FILM,
                 backgroundImage = preferences[BACKGROUND_IMAGE] ?: "camera_bg_black",
-                uiStyle = preferences[UI_STYLE] ?: "ORIGINAL",
-                captureButtonStyle = CaptureButtonStyle.fromPersistedName(
+                        captureButtonStyle = CaptureButtonStyle.fromPersistedName(
                     preferences[CAPTURE_BUTTON_STYLE]
                 ),
                 captureButtonColor = preferences[CAPTURE_BUTTON_COLOR] ?: 0xFFFFFFFF.toInt(),
@@ -2257,10 +2254,6 @@ class UserPreferencesRepository(private val context: Context) {
     /**
      * 保存背景图
      */
-    suspend fun saveUiStyle(style: String) {
-        context.dataStore.edit { preferences -> preferences[UI_STYLE] = style }
-    }
-
     suspend fun saveBackgroundImage(image: String) {
         context.dataStore.edit { preferences ->
             preferences[BACKGROUND_IMAGE] = image
