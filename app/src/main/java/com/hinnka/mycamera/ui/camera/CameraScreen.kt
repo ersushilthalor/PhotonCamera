@@ -1299,7 +1299,7 @@ fun CameraScreen(
                                     hy
                                 )
                             },
-                            onEyeFocusInputAvailable = if (eyeFocusActive || portraitMaskActive) {
+                            onEyeFocusInputAvailable = if (eyeFocusActive || portraitMaskActive || dollyZoomActive) {
                                 viewModel::handleEyeFocusInputUpdate
                             } else {
                                 null
