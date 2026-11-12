@@ -109,6 +109,7 @@ class RealtimeVideoRenderer(
         }
     }
     private val horizontalLockMvpMatrix = FloatArray(16)
+    private val horizontalLockRotationMatrix = FloatArray(16)
     private val fullCropRect = floatArrayOf(0f, 0f, 1f, 1f)
     private var cameraCropRect = fullCropRect
     @Volatile private var cameraTransformAxesSwapped: Boolean? = null
@@ -341,6 +342,7 @@ class RealtimeVideoRenderer(
                 targetHeight = encoderOutputSize.height,
                 correctionDegrees = VideoHorizontalLockState.correctionDegrees,
                 output = horizontalLockMvpMatrix,
+                rotationScratch = horizontalLockRotationMatrix,
             )
         } else {
             firstPassMvpMatrix
