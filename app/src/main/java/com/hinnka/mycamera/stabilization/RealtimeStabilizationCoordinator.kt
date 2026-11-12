@@ -672,7 +672,9 @@ class RealtimeStabilizationCoordinator(context: Context) {
                 height = image.height,
                 pendingSessionIds = activeSessions.keys.toMutableSet(),
             )
-            trimBufferedImagesLocked()
+            // ImageReader bounds the number of physical images. Preserve each recording
+            // consumer's FIFO lease; if it falls behind, reader capacity applies backpressure
+            // instead of evicting images whose timestamped results are still needed.
             onFrameBoundaryLocked(timestampNs)
         }
     }
@@ -714,6 +716,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
         if (sameConfig) {
             activeSessions[sessionId] = onFrameAvailable
             activeSessionCount = activeSessions.size
+            PLog.i(TAG, "MGC consumer registered: session=$sessionId, active=$activeSessionCount")
             return resultSequence
         }
 
@@ -791,7 +794,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
         }
         activeSessions[sessionId] = onFrameAvailable
         activeSessionCount = activeSessions.size
-        PLog.i(TAG, "MGC htd feeder started with gyro=${sensor.name}")
+        PLog.i(TAG, "MGC htd feeder started with gyro=${sensor.name}, session=$sessionId, active=$activeSessionCount")
         resultSequence
     }
 
@@ -802,6 +805,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
             bufferedImages.values.forEach { it.pendingSessionIds.remove(sessionId) }
             closeFullyConsumedImagesLocked()
             activeSessionCount = activeSessions.size
+            PLog.i(TAG, "MGC consumer released: session=$sessionId, active=$activeSessionCount, bufferedImages=${bufferedImages.size}")
             if (activeSessionCount > 0) return
             sensorManager.unregisterListener(sensorListener)
             sensorThread?.quitSafely()
@@ -1028,6 +1032,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
                 TAG,
                 "MGC feeder state: boundary#$boundaryCount=$currentBoundaryNs, " +
                     "queuedBoundaries=${frameBoundaries.size}, metadata=${frameMetadata.size}, " +
+                    "bufferedImages=${bufferedImages.size}, " +
                     "pendingGyro=${pendingGyroSamples.size}, " +
                     "gyroLagMs=${timestampLagMs(currentBoundaryNs, lastProcessedGyroTimestampNs)}" +
                     "(dead=$gyroDead), " +
@@ -1166,22 +1171,6 @@ class RealtimeStabilizationCoordinator(context: Context) {
         }
     }
 
-    private fun trimBufferedImagesLocked() {
-        while (bufferedImages.size > MAX_BUFFERED_STABILIZATION_IMAGES) {
-            val oldestEntry = bufferedImages.entries.firstOrNull {
-                it.value.acquiredLeaseCount == 0
-            } ?: return
-            val oldestTimestamp = oldestEntry.key
-            val oldest = bufferedImages.remove(oldestTimestamp) ?: continue
-            oldest.image.close()
-            PLog.w(
-                TAG,
-                "MGC YUV queue overflow; dropping source image $oldestTimestamp " +
-                    "before native result, queued=${bufferedImages.size}",
-            )
-        }
-    }
-
     private fun closeFullyConsumedImagesLocked() {
         val iterator = bufferedImages.entries.iterator()
         while (iterator.hasNext()) {
@@ -1244,7 +1233,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
         @Synchronized
         fun dequeueFrame(): StabilizationFrame? = dequeueFrameThrough(Long.MAX_VALUE)
 
-        /** Photo preview presents the freshest pose; recording keeps the sequential API. */
+        /** Preview presents the freshest pose; recording keeps the sequential API. */
         @Synchronized
         fun dequeueLatestFrame(): StabilizationFrame? {
             if (!active) return null

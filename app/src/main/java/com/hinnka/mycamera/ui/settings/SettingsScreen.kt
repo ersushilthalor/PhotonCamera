@@ -179,6 +179,7 @@ import com.hinnka.mycamera.ui.components.rememberBackgroundPainter
 import com.hinnka.mycamera.update.AppUpdateManager
 import com.hinnka.mycamera.utils.DeviceUtil
 import com.hinnka.mycamera.viewmodel.CameraViewModel
+import com.hinnka.mycamera.video.VideoInputMode
 import com.hinnka.mycamera.video.VideoRecordingPath
 import com.hinnka.mycamera.video.VideoStabilizationMode
 import java.io.File
@@ -1586,6 +1587,15 @@ fun SettingsScreen(
                 }
 
                 SettingsPage.VIDEO -> {
+                    val videoSettingsEnabled = !state.videoRecordingState.isRecording &&
+                        !state.videoRecordingState.isProcessing
+                    val eisRequiresYuv = userPreferences.videoStabilizationMode ==
+                        VideoStabilizationMode.ENHANCED
+                    val usesYuvInput = userPreferences.effectiveVideoInputMode == VideoInputMode.YUV
+                    val videoInputLabels = listOf(
+                        VideoInputMode.OES to stringResource(R.string.settings_video_input_oes),
+                        VideoInputMode.YUV to stringResource(R.string.settings_video_input_yuv),
+                    )
                     val stabilizationModes = state.videoCapabilities
                         .availableStabilizationModes
                         .ifEmpty {
@@ -1614,9 +1624,36 @@ fun SettingsScreen(
                         title = stringResource(R.string.settings_section_video),
                         showTitle = false
                     ) {
+                        DropdownSettingItem(
+                            title = stringResource(R.string.settings_video_input_mode),
+                            description = stringResource(
+                                if (eisRequiresYuv) R.string.settings_video_input_eis_required
+                                else R.string.settings_video_input_mode_description
+                            ),
+                            value = videoInputLabels.first {
+                                it.first == userPreferences.effectiveVideoInputMode
+                            }.second,
+                            options = videoInputLabels.map { it.second },
+                            isLoading = false,
+                            onExpanded = {},
+                            onOptionSelected = { selectedLabel ->
+                                videoInputLabels.firstOrNull { it.second == selectedLabel }
+                                    ?.first?.let { videoInputMode = it }
+                            },
+                            enabled = videoSettingsEnabled && !eisRequiresYuv,
+                        )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+
                         QualityLevelSetting(
                             title = stringResource(R.string.settings_nr_level),
-                            description = stringResource(R.string.settings_video_nr_level_description),
+                            description = stringResource(
+                                if (usesYuvInput) R.string.settings_video_nr_yuv_description
+                                else R.string.settings_video_nr_level_description
+                            ),
                             levels = listOf(
                                 NoiseReductionLevel.OFF to stringResource(R.string.settings_nr_level_off),
                                 NoiseReductionLevel.FAST to stringResource(R.string.settings_nr_level_fast),
@@ -1665,6 +1702,7 @@ fun SettingsScreen(
                                     ?.first
                                     ?.let(viewModel::setVideoStabilizationMode)
                             },
+                            enabled = videoSettingsEnabled,
                         )
 
                         if (DeviceUtil.isOppo) {
@@ -1678,11 +1716,13 @@ fun SettingsScreen(
                                     R.string.settings_oppo_super_stabilization
                                 ),
                                 description = stringResource(
-                                    R.string.settings_oppo_super_stabilization_description
+                                    if (usesYuvInput) R.string.settings_oppo_super_stabilization_yuv_disabled
+                                    else R.string.settings_oppo_super_stabilization_description
                                 ),
-                                checked = userPreferences.oppoSuperStabilizationEnabled,
+                                checked = userPreferences.effectiveOppoSuperStabilizationEnabled,
                                 onCheckedChange =
                                     viewModel::setOppoSuperStabilizationEnabled,
+                                enabled = videoSettingsEnabled && !usesYuvInput,
                             )
                         }
 
@@ -3700,7 +3740,7 @@ fun DropdownSettingItem(
                 tint = Color.White.copy(alpha = 0.4f)
             )
             DropdownMenu(
-                expanded = expanded,
+                expanded = expanded && enabled,
                 onDismissRequest = { expanded = false },
                 modifier = Modifier.background(Color(0xFF2C2C2E))
             ) {
@@ -5247,13 +5287,14 @@ fun <T> QualityLevelSetting(
     levels: List<Pair<T, String>>,
     currentLevel: T,
     onLevelSelected: (T) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         if (title != null) {
             Text(
                 text = title,
-                color = Color.White,
+                color = Color.White.copy(alpha = if (enabled) 1f else 0.38f),
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Normal,
                 modifier = Modifier.padding(bottom = 4.dp)
@@ -5262,7 +5303,7 @@ fun <T> QualityLevelSetting(
         if (description != null) {
             Text(
                 text = description,
-                color = Color.White.copy(alpha = 0.6f),
+                color = Color.White.copy(alpha = if (enabled) 0.6f else 0.38f),
                 fontSize = 13.sp,
                 lineHeight = 18.sp,
                 modifier = Modifier.padding(bottom = 12.dp)
@@ -5286,7 +5327,8 @@ fun <T> QualityLevelSetting(
                 ) {
                     Text(
                         text = label,
-                        color = if (isSelected) OnAccentColor else Color.White,
+                        color = (if (isSelected) OnAccentColor else Color.White)
+                            .copy(alpha = if (enabled) 1f else 0.38f),
                         fontSize = 12.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                         textAlign = TextAlign.Center,

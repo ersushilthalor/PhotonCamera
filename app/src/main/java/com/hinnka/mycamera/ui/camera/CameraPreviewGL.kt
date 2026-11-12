@@ -316,7 +316,9 @@ fun CameraPreviewGL(
                             )
                         })
                         glSurfaceView.setMeteringMode(meteringMode)
-                        glSurfaceView.setLivePhotoRecorder(livePhotoRecorder)
+                        glSurfaceView.setLivePhotoRecorder(
+                            livePhotoRecorder.takeIf { captureMode == CaptureMode.PHOTO }
+                        )
                         glSurfaceView.setVideoLogProfile(videoLogProfile)
                         glSurfaceView.setAutoFocus(isAutoFocus)
                         glSurfaceView.setFocusPeakingEnabled(focusPeakingEnabled)
