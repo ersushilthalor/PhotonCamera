@@ -5298,8 +5298,7 @@ class Camera2Controller(private val context: Context) {
                 resetCropAtUnitZoom = false,
                 panX = state.zoomPanX,
                 panY = state.zoomPanY,
-                useFreeformPan = !logicalAutoSwitch && state.zoomPanEnabled &&
-                    state.getCurrentCameraInfo()?.supportsFreeformZoomPan == true,
+                useFreeformPan = !logicalAutoSwitch && state.zoomPanEnabled && activeRect != null,
             )
         } catch (e: Exception) {
             PLog.e(TAG, "Failed to apply zoom settings", e)
@@ -6539,7 +6538,7 @@ class Camera2Controller(private val context: Context) {
         val zoomRatioRange = characteristics.readMetadataOrNull(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
         val currentState = _state.value
         val useFreeformPan = currentState.zoomPanEnabled &&
-            currentState.getCurrentCameraInfo()?.supportsFreeformZoomPan == true &&
+            activeRect != null &&
             !shouldUseLogicalMultiCameraZoom(currentState, currentState.getCurrentCameraInfo())
         val zoomMode = if (!useFreeformPan && shouldUseControlZoomRatio(zoomRatioRange)) {
             PreviewMeteringZoomMode.POST_ZOOM_ACTIVE_ARRAY
@@ -6935,7 +6934,11 @@ class Camera2Controller(private val context: Context) {
 
         val current = _state.value
         val cameraInfo = current.getCurrentCameraInfo()
-        if (current.zoomRatio <= 1.001f || cameraInfo?.supportsFreeformZoomPan != true) {
+        if (
+            current.zoomRatio <= 1.001f ||
+            cameraInfo?.activeArraySize == null ||
+            shouldUseLogicalMultiCameraZoom(current, cameraInfo)
+        ) {
             return
         }
 
