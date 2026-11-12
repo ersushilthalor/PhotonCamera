@@ -18,6 +18,8 @@ import com.hinnka.mycamera.stabilization.RealtimeStabilizationCoordinator
 import com.hinnka.mycamera.stabilization.StabilizationUseCase
 import com.hinnka.mycamera.stabilization.normalizeStabilizationLookahead
 import com.hinnka.mycamera.stabilization.normalizeStabilizationStrength
+import com.hinnka.mycamera.stabilization.VideoHorizontalLockState
+import com.hinnka.mycamera.stabilization.applyHorizontalLockMvpMatrix
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.video.VideoLogProfile
 import java.nio.ByteBuffer
@@ -221,6 +223,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     // MVP 变换矩阵（用于 center crop）；EIS 输出可能使用不同于 OES 预览的输入尺寸。
     private val mvpMatrix = FloatArray(16)
     private val stabilizationMvpMatrix = FloatArray(16)
+    private val horizontalLockMvpMatrix = FloatArray(16)
     private val eisFallbackMvpMatrix = FloatArray(16)
 
     // Primary Camera2 preview input.
@@ -235,6 +238,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private var stabilizationOutputAvailable = false
     private var previewStabilizationUseCase: StabilizationUseCase? = null
     private var previewStabilizationStrength = 0f
+    @Volatile
+    private var horizontalLockEnabled = false
     private var currentCameraTextureSource = PreviewColorTextureSource.EXTERNAL_OES
     private var currentCameraTextureTarget = GLES11Ext.GL_TEXTURE_EXTERNAL_OES
     private var currentCameraTextureId = 0
@@ -1306,29 +1311,43 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         val needsEisSafetyCrop = !stabilized &&
             previewStabilizationUseCase != null &&
             stabilizationCoordinator?.isCurrentCameraSupported == true
-        if (targetWidth == viewportWidth && targetHeight == viewportHeight) {
-            if (stabilized) return stabilizationMvpMatrix
-            if (!needsEisSafetyCrop) return mvpMatrix
-            System.arraycopy(mvpMatrix, 0, eisFallbackMvpMatrix, 0, eisFallbackMvpMatrix.size)
-            Matrix.scaleM(
-                eisFallbackMvpMatrix,
-                0,
-                EIS_OUTPUT_CROP_ZOOM,
-                EIS_OUTPUT_CROP_ZOOM,
-                1f,
-            )
-            return eisFallbackMvpMatrix
-        }
-        return buildMvpMatrix(
-            targetWidth = targetWidth,
-            targetHeight = targetHeight,
-            sourceWidth = if (stabilized) stabilizationInputWidth else previewWidth,
-            sourceHeight = if (stabilized) stabilizationInputHeight else previewHeight,
-        ).also { matrix ->
-            if (needsEisSafetyCrop) {
-                Matrix.scaleM(matrix, 0, EIS_OUTPUT_CROP_ZOOM, EIS_OUTPUT_CROP_ZOOM, 1f)
+        val baseMatrix = if (targetWidth == viewportWidth && targetHeight == viewportHeight) {
+            when {
+                stabilized -> stabilizationMvpMatrix
+                !needsEisSafetyCrop -> mvpMatrix
+                else -> {
+                    System.arraycopy(mvpMatrix, 0, eisFallbackMvpMatrix, 0, eisFallbackMvpMatrix.size)
+                    Matrix.scaleM(
+                        eisFallbackMvpMatrix,
+                        0,
+                        EIS_OUTPUT_CROP_ZOOM,
+                        EIS_OUTPUT_CROP_ZOOM,
+                        1f,
+                    )
+                    eisFallbackMvpMatrix
+                }
+            }
+        } else {
+            buildMvpMatrix(
+                targetWidth = targetWidth,
+                targetHeight = targetHeight,
+                sourceWidth = if (stabilized) stabilizationInputWidth else previewWidth,
+                sourceHeight = if (stabilized) stabilizationInputHeight else previewHeight,
+            ).also { matrix ->
+                if (needsEisSafetyCrop) {
+                    Matrix.scaleM(matrix, 0, EIS_OUTPUT_CROP_ZOOM, EIS_OUTPUT_CROP_ZOOM, 1f)
+                }
             }
         }
+
+        if (!horizontalLockEnabled || !VideoHorizontalLockState.isEnabled) return baseMatrix
+        return applyHorizontalLockMvpMatrix(
+            baseMvpMatrix = baseMatrix,
+            targetWidth = targetWidth,
+            targetHeight = targetHeight,
+            correctionDegrees = VideoHorizontalLockState.correctionDegrees,
+            output = horizontalLockMvpMatrix,
+        )
     }
 
     private fun useCurrentOesFrame() {
@@ -2414,6 +2433,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             mgcEisYuvRenderer.release()
             recreatePreviewStabilizationSession()
         }
+    }
+
+    fun setHorizontalLockEnabled(enabled: Boolean) {
+        horizontalLockEnabled = enabled
     }
 
     fun setStabilizationCoordinator(coordinator: RealtimeStabilizationCoordinator?) {
