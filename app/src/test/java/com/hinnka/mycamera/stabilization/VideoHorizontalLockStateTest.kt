@@ -93,41 +93,52 @@ class VideoHorizontalLockStateTest {
     }
 
     @Test
-    fun cropKeepsAllOutputCornersInsideSourceForBothOrientations() {
+    fun cropKeepsAllOutputCornersInsideSourceWithExistingCenterCropAndMirroring() {
         val sizes = listOf(1920 to 1080, 1080 to 1920, 1000 to 1000)
         val angles = listOf(-45f, -17f, -1f, 1f, 17f, 45f)
+        val baseMatrices = listOf(
+            identityMatrix(),
+            identityMatrix().also { it[5] = 1.4f },
+            identityMatrix().also { it[0] = 1.4f },
+            identityMatrix().also {
+                it[0] = -1f
+                it[5] = 1.4f
+            },
+        )
 
         sizes.forEach { (width, height) ->
-            angles.forEach { angle ->
-                val output = FloatArray(16)
-                applyHorizontalLockMvpMatrix(
-                    baseMvpMatrix = identityMatrix(),
-                    targetWidth = width,
-                    targetHeight = height,
-                    correctionDegrees = angle,
-                    output = output,
-                    rotationScratch = FloatArray(16),
-                )
+            baseMatrices.forEach { base ->
+                angles.forEach { angle ->
+                    val output = FloatArray(16)
+                    applyHorizontalLockMvpMatrix(
+                        baseMvpMatrix = base,
+                        targetWidth = width,
+                        targetHeight = height,
+                        correctionDegrees = angle,
+                        output = output,
+                        rotationScratch = FloatArray(16),
+                    )
 
-                val m00 = output[0]
-                val m01 = output[4]
-                val m10 = output[1]
-                val m11 = output[5]
-                val determinant = m00 * m11 - m01 * m10
-                assertTrue(abs(determinant) > 1e-6f)
+                    val m00 = output[0]
+                    val m01 = output[4]
+                    val m10 = output[1]
+                    val m11 = output[5]
+                    val determinant = m00 * m11 - m01 * m10
+                    assertTrue(abs(determinant) > 1e-6f)
 
-                for (x in listOf(-1f, 1f)) {
-                    for (y in listOf(-1f, 1f)) {
-                        val sourceX = (m11 * x - m01 * y) / determinant
-                        val sourceY = (-m10 * x + m00 * y) / determinant
-                        assertTrue(
-                            "sourceX=" + sourceX + " outside at " + width + "x" + height + ", angle=" + angle,
-                            abs(sourceX) <= 1.0001f,
-                        )
-                        assertTrue(
-                            "sourceY=" + sourceY + " outside at " + width + "x" + height + ", angle=" + angle,
-                            abs(sourceY) <= 1.0001f,
-                        )
+                    for (x in listOf(-1f, 1f)) {
+                        for (y in listOf(-1f, 1f)) {
+                            val sourceX = (m11 * x - m01 * y) / determinant
+                            val sourceY = (-m10 * x + m00 * y) / determinant
+                            assertTrue(
+                                "sourceX=" + sourceX + " outside at " + width + "x" + height + ", angle=" + angle,
+                                abs(sourceX) <= 1.0001f,
+                            )
+                            assertTrue(
+                                "sourceY=" + sourceY + " outside at " + width + "x" + height + ", angle=" + angle,
+                                abs(sourceY) <= 1.0001f,
+                            )
+                        }
                     }
                 }
             }
@@ -135,8 +146,14 @@ class VideoHorizontalLockStateTest {
     }
 
     @Test
+    fun existingCenterCropDoesNotAddUnnecessaryZoomWhenHorizonIsLevel() {
+        val centerCropped = identityMatrix().also { it[5] = 1.4f }
+        assertEquals(1f, computeHorizontalLockCropZoom(centerCropped), 1e-6f)
+    }
+
+    @Test
     fun cropIsNeutralWhenThereIsNoRotation() {
-        assertEquals(1f, computeHorizontalLockCropZoom(1920, 1080, 0f), 1e-6f)
+        assertEquals(1f, computeHorizontalLockCropZoom(identityMatrix()), 1e-6f)
     }
 
     private fun identityMatrix() = FloatArray(16).also { matrix ->
