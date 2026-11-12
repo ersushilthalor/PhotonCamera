@@ -602,6 +602,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val oppoPhotoSettings: StateFlow<OppoPhotoSettings> = oppoPhotoSettingsRepository.settings
     private val previewEyeFocusProcessor = PreviewEyeFocusProcessor(application)
     private val dollyZoomController = DollyZoomController()
+    private var dollyZoomPreviousWbLock: Boolean? = null
 
     // 计费管理器
     private val billingManager = com.hinnka.mycamera.billing.BillingManagerImpl(application)
@@ -4270,6 +4271,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             _dollyZoomActive.value = true
         } else {
             val restoreZoom = dollyZoomController.stop()
+            dollyZoomPreviousWbLock?.let(cameraController::setVideoWhiteBalanceLockEnabled)
+            dollyZoomPreviousWbLock = null
             _dollyZoomActive.value = false
             _dollyZoomHint.value = ""
             _dollyZoomFaceBox.value = null
@@ -4990,7 +4993,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             )
             val appliedZoom = cameraController.getLastAppliedZoomRatio()
             if (dollyZoomController.state == DollyZoomController.State.ARMED) {
-                if (dollyZoomController.lock(target.faceHeight, appliedZoom, target.timestampNs)) _dollyZoomHint.value = ""
+                if (dollyZoomController.lock(target.faceHeight, appliedZoom, target.timestampNs)) {
+                    _dollyZoomHint.value = ""
+                    dollyZoomPreviousWbLock = cameraState.videoConfig.whiteBalanceLockEnabled
+                    cameraController.focusOnNormalizedPoint(
+                        normX = target.x,
+                        normY = target.y,
+                        source = FocusPointSource.MANUAL,
+                        lockFocus = true,
+                    )
+                    cameraController.setVideoWhiteBalanceLockEnabled(true)
+                }
             } else {
                 val update = dollyZoomController.update(
                     subjectHeight = target.faceHeight,
@@ -5005,6 +5018,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         }
+        if (dollyZoomEnabled.value && dollyZoomActive.value && cameraState.captureMode == CaptureMode.VIDEO) return
         if (
             !eyeFocusEnabled.value ||
             !isEyeFocusRuntimeAvailable ||
