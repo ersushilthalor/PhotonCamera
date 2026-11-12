@@ -38,6 +38,26 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Set up Python for U2NetP model conversion
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Generate and validate U2NetP TFLite asset
+        run: |
+          python -m pip install --disable-pip-version-check \
+            tensorflow==2.17.1 onnx==1.17.0 onnxruntime==1.20.1 pillow==11.1.0
+          mkdir -p /tmp/photon-models app/src/main/assets/u2netp
+          curl --fail --location --retry 3 \
+            https://huggingface.co/edgetools/u2netp/resolve/25dee37/u2netp.onnx \
+            --output /tmp/photon-models/u2netp.onnx
+          echo "309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8  /tmp/photon-models/u2netp.onnx" | sha256sum --check
+          python scripts/convert_u2netp_to_tflite.py \
+            --source /tmp/photon-models/u2netp.onnx \
+            --output app/src/main/assets/u2netp/u2netp.tflite
+          test -s app/src/main/assets/u2netp/u2netp.tflite
+          test -s app/src/main/assets/u2netp/u2netp.json
+
       - name: Verify front-camera crop regression guard
         run: |
           test_file="app/src/test/java/com/hinnka/mycamera/lut/RealtimeVideoRendererTransformTest.kt"
