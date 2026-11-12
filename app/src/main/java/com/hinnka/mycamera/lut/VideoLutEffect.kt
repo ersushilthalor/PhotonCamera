@@ -930,10 +930,9 @@ private class VideoLutShaderProgram(
             amount = currentRecipeParams?.tonality ?: 0f,
         )
 
-        // 设置色彩配方 uniforms
-        // Recovery is a final independent shader pass; do not enable unrelated recipe processing
-        // merely because the recovery slider is non-zero.
-        val colorRecipeEnabled = currentRecipeParams != null && !currentRecipeParams.isDefault(includeWashedOutRecovery = false)
+        // The brightness gamma pass is evaluated inside the recipe shader block, so include
+        // its persisted slider value when deciding whether recipe processing is enabled.
+        val colorRecipeEnabled = currentRecipeParams != null && !currentRecipeParams.isDefault(includeWashedOutRecovery = true)
         GLES30.glUniform1i(GLES30.glGetUniformLocation(programId, "uColorRecipeEnabled"), if (colorRecipeEnabled) 1 else 0)
         GLES30.glUniform1f(
             GLES30.glGetUniformLocation(programId, "uFilmGrain"),
