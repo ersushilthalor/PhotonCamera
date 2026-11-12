@@ -224,6 +224,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private val mvpMatrix = FloatArray(16)
     private val stabilizationMvpMatrix = FloatArray(16)
     private val horizontalLockMvpMatrix = FloatArray(16)
+    private val horizontalLockRotationMatrix = FloatArray(16)
     private val eisFallbackMvpMatrix = FloatArray(16)
 
     // Primary Camera2 preview input.
@@ -1347,6 +1348,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             targetHeight = targetHeight,
             correctionDegrees = VideoHorizontalLockState.correctionDegrees,
             output = horizontalLockMvpMatrix,
+            rotationScratch = horizontalLockRotationMatrix,
         )
     }
 
