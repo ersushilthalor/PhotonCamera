@@ -724,16 +724,17 @@ private class VideoLutShaderProgram(
                     );
                 }
 
-                // Gamma-based video brightness: lift shadows and midtones without using EV.
-                // The upper luminance range is progressively protected to avoid washing out
-                // highlights or clipping already-bright whites.
+                // Apply video brightness as a real display-referred gamma curve, independently
+                // of the general Color Recipe block. Gamma lifts dark and midtone pixels while
+                // keeping the white point fixed at 1.0, so existing highlights do not turn into
+                // clipped flat white. The adaptive exponent gradually returns to 1.0 near white.
                 if (uVideoBrightness > 0.001) {
-                    float sourceLuma = getLuma(clamp(color.rgb, 0.0, 1.0));
-                    float gammaValue = mix(1.0, 0.58, clamp(uVideoBrightness, 0.0, 1.0));
-                    vec3 gammaBrightened = pow(max(color.rgb, vec3(0.0)), vec3(gammaValue));
-                    float highlightProtection = smoothstep(0.68, 0.98, sourceLuma);
-                    float brightnessBlend = 1.0 - highlightProtection * 0.92;
-                    color.rgb = mix(color.rgb, gammaBrightened, brightnessBlend);
+                    vec3 sourceRgb = clamp(color.rgb, 0.0, 1.0);
+                    float sourceLuma = getLuma(sourceRgb);
+                    float requestedGamma = mix(1.0, 0.38, clamp(uVideoBrightness, 0.0, 1.0));
+                    float highlightProtection = smoothstep(0.78, 0.995, sourceLuma);
+                    float effectiveGamma = mix(requestedGamma, 1.0, highlightProtection * 0.88);
+                    color.rgb = pow(sourceRgb, vec3(effectiveGamma));
                 }
 
                 fragColor = clamp(color, 0.0, 1.0);
@@ -930,9 +931,9 @@ private class VideoLutShaderProgram(
             amount = currentRecipeParams?.tonality ?: 0f,
         )
 
-        // The brightness gamma pass is evaluated inside the recipe shader block, so include
-        // its persisted slider value when deciding whether recipe processing is enabled.
-        val colorRecipeEnabled = currentRecipeParams != null && !currentRecipeParams.isDefault(includeWashedOutRecovery = true)
+        // Video brightness is a separate gamma pass below the recipe block. Do not enable
+        // every color-recipe operation merely because the legacy persisted brightness field is set.
+        val colorRecipeEnabled = currentRecipeParams != null && !currentRecipeParams.isDefault()
         GLES30.glUniform1i(GLES30.glGetUniformLocation(programId, "uColorRecipeEnabled"), if (colorRecipeEnabled) 1 else 0)
         GLES30.glUniform1f(
             GLES30.glGetUniformLocation(programId, "uFilmGrain"),
