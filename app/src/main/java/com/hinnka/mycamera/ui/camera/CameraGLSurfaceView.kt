@@ -170,6 +170,13 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         }
     }
 
+    fun setHorizontalLockEnabled(enabled: Boolean) {
+        queueEvent {
+            renderer.setHorizontalLockEnabled(enabled)
+            requestRender()
+        }
+    }
+
     fun setStabilizationCoordinator(coordinator: RealtimeStabilizationCoordinator?) {
         if (currentStabilizationCoordinator === coordinator) return
         currentStabilizationCoordinator = coordinator
