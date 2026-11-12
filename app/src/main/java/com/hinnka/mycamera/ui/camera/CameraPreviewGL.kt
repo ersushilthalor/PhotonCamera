@@ -84,6 +84,7 @@ fun CameraPreviewGL(
     videoPreviewStabilizationEnabled: Boolean = false,
     videoPreviewStabilizationStrength: Float = 0f,
     videoPreviewStabilizationLookahead: Int = DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD,
+    horizontalLockEnabled: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val rotationDegrees = OrientationObserver.rotationDegrees
@@ -97,6 +98,10 @@ fun CameraPreviewGL(
     LaunchedEffect(glSurfaceViewRef, enginePreviewPlan, resumeGeneration) {
         val view = glSurfaceViewRef ?: return@LaunchedEffect
         enginePreviewPlan.collect { view.setEnginePreview(it) }
+    }
+
+    LaunchedEffect(glSurfaceViewRef, horizontalLockEnabled) {
+        glSurfaceViewRef?.setHorizontalLockEnabled(horizontalLockEnabled)
     }
 
     DisposableEffect(lifecycleOwner) {
