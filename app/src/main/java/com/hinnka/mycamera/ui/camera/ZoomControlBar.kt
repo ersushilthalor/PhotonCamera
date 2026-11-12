@@ -298,6 +298,7 @@ fun ZoomControlBar(
                 ZoomPresetPill(
                     zoomRatio = internalZoomRatio,
                     onPresetClick = { preset ->
+                        if (!dollyZoomActive) {
                         val matchingLensCameras = availableCameras
                             .filter { camera ->
                                 val matchesFacing = if (currentCamera?.lensType == LensType.FRONT) {
@@ -324,6 +325,7 @@ fun ZoomControlBar(
                             onLensSwitch(targetCameraId)
                         } else {
                             onZoomStopClick(preset)
+                        }
                         }
                     },
                     modifier = Modifier.wrapContentWidth().fillMaxHeight()
