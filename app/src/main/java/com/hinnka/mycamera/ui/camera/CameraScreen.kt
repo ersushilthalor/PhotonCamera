@@ -21,7 +21,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
@@ -1735,11 +1734,7 @@ fun CameraScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector = if (horizontalLockEnabled) {
-                            Icons.Default.Lock
-                        } else {
-                            Icons.Default.LockOpen
-                        },
+                        imageVector = Icons.Default.Lock,
                         contentDescription = "Horizontal lock",
                         modifier = Modifier.size(19.dp),
                         tint = if (horizontalLockEnabled) AccentColor else Color.White,
