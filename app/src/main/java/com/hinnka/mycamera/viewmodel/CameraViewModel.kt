@@ -4995,7 +4995,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 (target.faceCenterX + halfWidth).coerceIn(0f, 1f),
                 (target.faceCenterY + halfHeight).coerceIn(0f, 1f),
             )
-            val appliedZoom = cameraController.getLastAppliedZoomRatio(target.timestampNs)
+            val currentCamera = cameraState.getCurrentCameraInfo()
+            val displayIntrinsic = currentCamera?.displayIntrinsicZoomRatio?.takeIf { it > 0f } ?: 1f
+            val appliedZoom = cameraController.getLastAppliedZoomRatio(target.timestampNs) * displayIntrinsic
             if (dollyZoomController.state == DollyZoomController.State.ARMED) {
                 val centeredFace = target.faceCenterX in 0.20f..0.80f && target.faceCenterY in 0.12f..0.88f
                 if (!centeredFace) {
