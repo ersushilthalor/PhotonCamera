@@ -2302,9 +2302,11 @@ private fun Controls(
                 }
             }
 
-            CaptureModeSwitcher(
-                oppoStyle = uiStyle == "OPPO",
-                //y-in animation. */
+        }
+    }
+}
+
+/** Keeps render progress independent of the shutter and the optional photo fly-in animation. */
 @Composable
 private fun GalleryProcessingOverlay(
     pendingCount: Int,
