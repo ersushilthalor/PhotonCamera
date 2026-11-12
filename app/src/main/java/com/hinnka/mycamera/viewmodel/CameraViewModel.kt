@@ -4263,10 +4263,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun stopDollyZoom() {
         if (!_dollyZoomActive.value) return
+        val wasSubjectLocked = dollyZoomController.state == DollyZoomController.State.LOCKED
         val restoreZoom = dollyZoomController.stop()
         dollyZoomPreviousWbLock?.let(cameraController::setVideoWhiteBalanceLockEnabled)
         dollyZoomPreviousWbLock = null
-        cameraController.unlockFocus()
+        if (wasSubjectLocked) cameraController.unlockFocus()
         _dollyZoomActive.value = false
         _dollyZoomLocked.value = false
         _dollyZoomHint.value = ""
