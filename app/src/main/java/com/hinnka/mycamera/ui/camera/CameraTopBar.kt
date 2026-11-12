@@ -49,6 +49,9 @@ fun CameraTopBar(
     onHistogramToggle: () -> Unit,
     useLivePhoto: Boolean,
     onLivePhotoToggle: () -> Unit,
+    isPortraitMode: Boolean,
+    virtualAperture: Float,
+    onApertureSelected: (Float) -> Unit,
     videoConfig: VideoConfig,
     videoCapabilities: VideoCapabilities,
     onVideoTorchToggle: () -> Unit,
@@ -60,6 +63,8 @@ fun CameraTopBar(
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var aperturePickerExpanded by remember { mutableStateOf(false) }
+
     if (captureMode == CaptureMode.VIDEO) {
         VideoTopBar(
             isRecording = isRecording,
@@ -126,14 +131,26 @@ fun CameraTopBar(
 
         PhysicalButton(
             modifier = Modifier.size(36.dp),
-            onClick = onLivePhotoToggle
+            onClick = {
+                if (isPortraitMode) aperturePickerExpanded = true else onLivePhotoToggle()
+            }
         ) {
-            Icon(
-                painterResource(R.drawable.ic_live_photo),
-                contentDescription = stringResource(R.string.settings_use_live_photo),
-                modifier = Modifier.size(20.dp).autoRotate(),
-                tint = if (useLivePhoto) AccentColor else Color.White
-            )
+            if (isPortraitMode) {
+                Text(
+                    text = "ƒ",
+                    color = Color.White,
+                    fontSize = 25.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.autoRotate()
+                )
+            } else {
+                Icon(
+                    painterResource(R.drawable.ic_live_photo),
+                    contentDescription = stringResource(R.string.settings_use_live_photo),
+                    modifier = Modifier.size(20.dp).autoRotate(),
+                    tint = if (useLivePhoto) AccentColor else Color.White
+                )
+            }
         }
 
         PhysicalButton(
@@ -160,6 +177,60 @@ fun CameraTopBar(
             )
         }
     }
+
+    if (aperturePickerExpanded) {
+        val options = listOf(1f, 1.8f, 4f, 16f)
+        AlertDialog(
+            onDismissRequest = { aperturePickerExpanded = false },
+            containerColor = Color(0xFF1D1D1D),
+            title = null,
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    options.chunked(2).forEach { rowOptions ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            rowOptions.forEach { aperture ->
+                                val selected = kotlin.math.abs(virtualAperture - aperture) < 0.05f
+                                val label = if (aperture == aperture.toInt().toFloat()) {
+                                    "f/${aperture.toInt()}"
+                                } else {
+                                    "f/$aperture"
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(82.dp)
+                                        .clip(RoundedCornerShape(22.dp))
+                                        .background(if (selected) Color(0xFFFFCC32) else Color(0xFF303030))
+                                        .clickable {
+                                            onApertureSelected(aperture)
+                                            aperturePickerExpanded = false
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = label,
+                                        color = if (selected) Color.Black else Color.White,
+                                        fontSize = 25.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            if (rowOptions.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {}
+        )
+    }
+
 }
 
 @Composable
