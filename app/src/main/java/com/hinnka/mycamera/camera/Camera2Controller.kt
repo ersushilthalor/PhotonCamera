@@ -1122,6 +1122,11 @@ class Camera2Controller(private val context: Context) {
         return true
     }
 
+    fun getLastAppliedZoomRatio(): Float {
+        val resultZoom = lastCaptureResult?.get(CaptureResult.CONTROL_ZOOM_RATIO)
+        return resultZoom?.takeIf { it.isFinite() && it > 0f } ?: _state.value.zoomRatio
+    }
+
     private val previewCallback = object : CameraCaptureSession.CaptureCallback() {
         override fun onCaptureStarted(
             session: CameraCaptureSession,

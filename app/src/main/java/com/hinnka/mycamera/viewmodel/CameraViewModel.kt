@@ -601,6 +601,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val oppoPhotoSettingsRepository = OppoPhotoSettingsRepository(application)
     val oppoPhotoSettings: StateFlow<OppoPhotoSettings> = oppoPhotoSettingsRepository.settings
     private val previewEyeFocusProcessor = PreviewEyeFocusProcessor(application)
+    private val dollyZoomController = DollyZoomController()
 
     // 计费管理器
     private val billingManager = com.hinnka.mycamera.billing.BillingManagerImpl(application)
@@ -1940,6 +1941,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     private val _dollyZoomActive = MutableStateFlow(false)
     val dollyZoomActive: StateFlow<Boolean> = _dollyZoomActive.asStateFlow()
+    private val _dollyZoomHint = MutableStateFlow("Point at a face")
+    val dollyZoomHint: StateFlow<String> = _dollyZoomHint.asStateFlow()
     val photoPreviewStabilizationEnabled: StateFlow<Boolean> =
         userPreferencesRepository.userPreferences
             .map { it.photoPreviewStabilizationEnabled }
@@ -2062,8 +2065,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
         previewEyeFocusProcessor.onEyeTarget = { target ->
+            viewModelScope.launch(Dispatchers.Main.immediate) { handleEyeFocusTarget(target) }
+        }
+        previewEyeFocusProcessor.onTargetLost = {
             viewModelScope.launch(Dispatchers.Main.immediate) {
-                handleEyeFocusTarget(target)
+                if (dollyZoomController.state == DollyZoomController.State.LOCKED) _dollyZoomHint.value = "Subject lost"
             }
         }
         previewEyeFocusProcessor.onPortraitMask = { mask ->
@@ -4250,7 +4256,26 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun toggleDollyZoom() {
-        if (dollyZoomEnabled.value && state.value.captureMode == CaptureMode.VIDEO) _dollyZoomActive.value = !_dollyZoomActive.value
+        if (!dollyZoomEnabled.value || state.value.captureMode != CaptureMode.VIDEO) return
+        if (!_dollyZoomActive.value) {
+            dollyZoomController.arm(zoomRatioByMain)
+            _dollyZoomHint.value = "Point at a face"
+            _dollyZoomActive.value = true
+        } else {
+            val restoreZoom = dollyZoomController.stop()
+            _dollyZoomActive.value = false
+            _dollyZoomHint.value = ""
+            val from = zoomRatioByMain.coerceAtLeast(0.01f)
+            viewModelScope.launch {
+                val started = SystemClock.elapsedRealtime()
+                while (true) {
+                    val t = ((SystemClock.elapsedRealtime() - started) / 280f).coerceIn(0f, 1f)
+                    setZoomRatio(kotlin.math.exp(kotlin.math.ln(from) + (kotlin.math.ln(restoreZoom) - kotlin.math.ln(from)) * t))
+                    if (t >= 1f) break
+                    delay(16L)
+                }
+            }
+        }
     }
 
     /**
@@ -4916,6 +4941,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             cameraState.isRawSupported &&
             cameraState.isPreviewActive &&
             !cameraState.isCapturing
+        val acceptsDollyZoom = dollyZoomEnabled.value && dollyZoomActive.value &&
+            cameraState.captureMode == CaptureMode.VIDEO && cameraState.isPreviewActive &&
+            !cameraState.isCapturing
         val acceptsEyeFocus = eyeFocusEnabled.value &&
             isEyeFocusRuntimeAvailable &&
             cameraState.isPreviewActive &&
@@ -4923,7 +4951,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             !cameraState.isHyperfocalFocusEnabled &&
             !cameraState.isCapturing &&
             (cameraState.focusPoint == null || cameraState.focusPointSource == FocusPointSource.EYE)
-        if (!acceptsEyeFocus && !acceptsPortraitMask) {
+        if (!acceptsEyeFocus && !acceptsPortraitMask && !acceptsDollyZoom) {
             frame.bitmap.recycle()
             completeEyeFocusInput()
             return
@@ -4932,7 +4960,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (
             !previewEyeFocusProcessor.processFrame(
                 frame = frame,
-                detectEyeTarget = acceptsEyeFocus,
+                detectEyeTarget = acceptsEyeFocus || acceptsDollyZoom,
                 createFaceMask = acceptsPortraitMask,
             )
         ) {
@@ -4943,6 +4971,24 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun handleEyeFocusTarget(target: PreviewEyeFocusProcessor.EyeTarget) {
         val cameraState = state.value
+        if (dollyZoomEnabled.value && dollyZoomActive.value && cameraState.captureMode == CaptureMode.VIDEO) {
+            val appliedZoom = cameraController.getLastAppliedZoomRatio()
+            if (dollyZoomController.state == DollyZoomController.State.ARMED) {
+                if (dollyZoomController.lock(target.faceHeight, appliedZoom, target.timestampNs)) _dollyZoomHint.value = ""
+            } else {
+                val update = dollyZoomController.update(
+                    subjectHeight = target.faceHeight,
+                    appliedZoom = appliedZoom,
+                    timestampNs = target.timestampNs,
+                    minZoom = globalMinZoom,
+                    maxZoom = globalMaxZoom,
+                )
+                update?.let {
+                    setZoomRatio(it.zoom)
+                    _dollyZoomHint.value = if (it.rangeLimited) "Range limit" else ""
+                }
+            }
+        }
         if (
             !eyeFocusEnabled.value ||
             !isEyeFocusRuntimeAvailable ||
