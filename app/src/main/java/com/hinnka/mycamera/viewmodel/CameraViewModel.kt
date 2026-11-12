@@ -4996,7 +4996,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             )
             val appliedZoom = cameraController.getLastAppliedZoomRatio(target.timestampNs)
             if (dollyZoomController.state == DollyZoomController.State.ARMED) {
-                if (dollyZoomController.lock(target.faceHeight, appliedZoom, target.timestampNs)) {
+                val centeredFace = target.faceCenterX in 0.20f..0.80f && target.faceCenterY in 0.12f..0.88f
+                if (!centeredFace) {
+                    _dollyZoomHint.value = "Center the subject"
+                } else if (dollyZoomController.lock(target.faceHeight, appliedZoom, target.timestampNs)) {
                     _dollyZoomHint.value = ""
                     dollyZoomPreviousWbLock = cameraState.videoConfig.whiteBalanceLockEnabled
                     cameraController.focusOnNormalizedPoint(
