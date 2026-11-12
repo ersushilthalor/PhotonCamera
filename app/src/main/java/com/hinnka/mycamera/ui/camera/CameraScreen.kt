@@ -285,9 +285,6 @@ fun CameraScreen(
     var captureAnimationJob by remember { mutableStateOf<Job?>(null) }
     var cameraScreenBounds by remember { mutableStateOf<Rect?>(null) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
-    var zoomJoystickPosition by remember { mutableStateOf<Offset?>(null) }
-    var zoomJoystickBounds by remember { mutableStateOf<Rect?>(null) }
-    val currentZoomJoystickBounds by rememberUpdatedState(zoomJoystickBounds)
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
     var zoomBarBounds by remember { mutableStateOf<Rect?>(null) }
     var filterButtonBounds by remember { mutableStateOf<Rect?>(null) }
@@ -871,26 +868,6 @@ fun CameraScreen(
 
         val isVideoMode = state.captureMode == CaptureMode.VIDEO
         val isPhotoStyleMode = state.captureMode != CaptureMode.VIDEO
-        val zoomJoystickSupported =
-            !state.useRaw &&
-                (state.captureMode == CaptureMode.PHOTO || state.captureMode == CaptureMode.VIDEO) &&
-                viewModel.zoomRatioByMain >= 3f &&
-                state.getCurrentCameraInfo()?.activeArraySize != null
-        val canShowZoomJoystick = activePanel == ActivePanel.NONE && zoomJoystickSupported
-
-        LaunchedEffect(canShowZoomJoystick) {
-            if (!canShowZoomJoystick) zoomJoystickBounds = null
-        }
-        LaunchedEffect(zoomJoystickSupported) {
-            if (!zoomJoystickSupported) {
-                viewModel.resetZoomPan()
-                zoomJoystickPosition = null
-                zoomJoystickBounds = null
-            }
-        }
-        LaunchedEffect(state.currentCameraId) {
-            viewModel.resetZoomPan()
-        }
         val onParameterClick: (CameraParameter) -> Unit = { parameter ->
             val wasSelected = selectedParameter == parameter
             selectedParameter = parameter
@@ -1178,7 +1155,6 @@ fun CameraScreen(
                                                     currentPreviewBounds.topLeft + firstPressedChange.position
                                                 zoomBarBounds?.contains(positionInRoot) == true ||
                                                     parameterRulerBounds?.contains(positionInRoot) == true ||
-                                                    currentZoomJoystickBounds?.contains(positionInRoot) == true
                                             } else {
                                                 false
                                             }
@@ -1686,50 +1662,6 @@ fun CameraScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         zoomBar()
-                    }
-                }
-                AnimatedVisibility(
-                    visible = canShowZoomJoystick,
-                    modifier = Modifier.fillMaxSize(),
-                    enter = fadeIn(animationSpec = tween(180)),
-                    exit = fadeOut(animationSpec = tween(180)),
-                ) {
-                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                        val density = LocalDensity.current
-                        val joystickSizePx = with(density) { 72.dp.toPx() }
-                        val marginPx = with(density) { 12.dp.toPx() }
-                        val maxX = (constraints.maxWidth - joystickSizePx).coerceAtLeast(0f)
-                        val maxY = (constraints.maxHeight - joystickSizePx).coerceAtLeast(0f)
-                        val defaultPosition = Offset(
-                            x = (maxX - marginPx).coerceAtLeast(0f),
-                            y = (maxY - marginPx).coerceAtLeast(0f),
-                        )
-                        val currentPosition = zoomJoystickPosition ?: defaultPosition
-                        val clampedPosition = Offset(
-                            x = currentPosition.x.coerceIn(0f, maxX),
-                            y = currentPosition.y.coerceIn(0f, maxY),
-                        )
-
-                        ZoomPanJoystick(
-                            modifier = Modifier
-                                .offset {
-                                    IntOffset(
-                                        clampedPosition.x.roundToInt(),
-                                        clampedPosition.y.roundToInt(),
-                                    )
-                                }
-                                .onGloballyPositioned { coordinates ->
-                                    zoomJoystickBounds = coordinates.boundsInRoot()
-                                },
-                            onPanBy = viewModel::panZoomBy,
-                            onResetPan = viewModel::resetZoomPan,
-                            onMoveBy = { dx, dy ->
-                                zoomJoystickPosition = Offset(
-                                    x = (clampedPosition.x + dx).coerceIn(0f, maxX),
-                                    y = (clampedPosition.y + dy).coerceIn(0f, maxY),
-                                )
-                            },
-                        )
                     }
                 }
             }
