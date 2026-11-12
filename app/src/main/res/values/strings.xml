@@ -1388,8 +1388,8 @@
     <string name="camera_focus_point_label">Focus</string>
     <string name="camera_metering_point_label">Metering</string>
     <!-- Video editor: independent color recovery with contrast preserved -->
-    <string name="video_washed_out_recovery">Washed-Out Recovery</string>
-    <string name="video_washed_out_recovery_description">Restore faded color in bright tones while preserving image luminance and the existing contrast setting.</string>
+    <string name="video_brightness">Video Brightness</string>
+    <string name="video_brightness_description">Brighten video with a highlight-protected gamma curve. Does not change camera exposure or EV.</string>
 
     <string name="oppo_auto_hdr">Auto HDR</string>
     <string name="oppo_fast_shutter">Fast Shutter</string>

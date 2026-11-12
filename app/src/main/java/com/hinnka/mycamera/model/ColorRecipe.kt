@@ -35,7 +35,7 @@ data class ColorRecipeParams(
     val chromaticAberration: Float = 0f, // 0.0 ~ 1.0 (色散/边缘溢色强度，0为无效果)
     val noise: Float = 0f,          // 0.0 ~ 1.0 (噪点强度，包含亮度和色彩噪点，0为无效果)
     val lowRes: Float = 0f,         // 0.0 ~ 1.0 (低像素强度，0为无效果)
-    // Video-editor-only chroma recovery; it must not change the existing luminance/contrast curve.
+    // Legacy persisted key reused by the video editor as gamma-based brightness; kept for JSON compatibility.
     val washedOutRecovery: Float = 0f,
     val skinHue: Float = 0f,
     val skinChroma: Float = 0f,

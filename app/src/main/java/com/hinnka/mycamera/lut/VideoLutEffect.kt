@@ -144,7 +144,7 @@ private class VideoLutShaderProgram(
             
             uniform float uChromaticAberration; // 0.0 ~ 1.0
             uniform float uClarity; // -1.0 ~ 1.0
-            uniform float uWashedOutRecovery; // 0.0 ~ 1.0; chroma-only recovery
+            uniform float uVideoBrightness; // 0.0 ~ 1.0; highlight-protected gamma brightening
             uniform float uSoftLight; // 0.0 ~ 1.0
             uniform float uSharpening;
             uniform vec2 uTexelSize;
@@ -724,25 +724,16 @@ private class VideoLutShaderProgram(
                     );
                 }
 
-                // Recover faded chroma in brighter tones as an independent final pass. Scaling
-                // RGB deviations around the pixel's luminance preserves its luminance and the
-                // contrast curve already applied above.
-                if (uWashedOutRecovery > 0.001) {
-                    vec3 recoveryBase = clamp(color.rgb, 0.0, 1.0);
-                    float recoveryLuma = getLuma(recoveryBase);
-                    float recoveryMask = smoothstep(0.34, 0.70, recoveryLuma) *
-                        (1.0 - smoothstep(0.88, 0.99, recoveryLuma));
-                    vec3 recoveryDelta = recoveryBase - vec3(recoveryLuma);
-                    float scaleLimit = 1000.0;
-                    if (recoveryDelta.r > 0.00001) scaleLimit = min(scaleLimit, (1.0 - recoveryLuma) / recoveryDelta.r);
-                    else if (recoveryDelta.r < -0.00001) scaleLimit = min(scaleLimit, recoveryLuma / -recoveryDelta.r);
-                    if (recoveryDelta.g > 0.00001) scaleLimit = min(scaleLimit, (1.0 - recoveryLuma) / recoveryDelta.g);
-                    else if (recoveryDelta.g < -0.00001) scaleLimit = min(scaleLimit, recoveryLuma / -recoveryDelta.g);
-                    if (recoveryDelta.b > 0.00001) scaleLimit = min(scaleLimit, (1.0 - recoveryLuma) / recoveryDelta.b);
-                    else if (recoveryDelta.b < -0.00001) scaleLimit = min(scaleLimit, recoveryLuma / -recoveryDelta.b);
-                    float requestedScale = 1.0 + uWashedOutRecovery * 1.5 * recoveryMask;
-                    float chromaScale = min(requestedScale, max(1.0, scaleLimit));
-                    color.rgb = vec3(recoveryLuma) + recoveryDelta * chromaScale;
+                // Gamma-based video brightness: lift shadows and midtones without using EV.
+                // The upper luminance range is progressively protected to avoid washing out
+                // highlights or clipping already-bright whites.
+                if (uVideoBrightness > 0.001) {
+                    float sourceLuma = getLuma(clamp(color.rgb, 0.0, 1.0));
+                    float gammaValue = mix(1.0, 0.58, clamp(uVideoBrightness, 0.0, 1.0));
+                    vec3 gammaBrightened = pow(max(color.rgb, vec3(0.0)), vec3(gammaValue));
+                    float highlightProtection = smoothstep(0.68, 0.98, sourceLuma);
+                    float brightnessBlend = 1.0 - highlightProtection * 0.92;
+                    color.rgb = mix(color.rgb, gammaBrightened, brightnessBlend);
                 }
 
                 fragColor = clamp(color, 0.0, 1.0);
@@ -1057,7 +1048,7 @@ private class VideoLutShaderProgram(
             currentRecipeParams?.softLight?.coerceIn(0f, 1f) ?: 0f,
         )
         GLES30.glUniform1f(
-            GLES30.glGetUniformLocation(programId, "uWashedOutRecovery"),
+            GLES30.glGetUniformLocation(programId, "uVideoBrightness"),
             currentRecipeParams?.washedOutRecovery?.coerceIn(0f, 1f) ?: 0f,
         )
         GLES30.glUniform2f(
