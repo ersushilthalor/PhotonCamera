@@ -153,25 +153,24 @@ internal fun resolveHorizontalLockCorrection(
 }
 
 /**
- * Minimum uniform scale needed for the rotated image to cover the output rectangle. The small
- * safety margin protects edge texels from filtering and viewport rounding at crop boundaries.
+ * Computes extra crop from the complete transform, including existing center-crop, calibration
+ * rotation and mirroring. The inverse transform maps the four output corners to source space.
  */
-internal fun computeHorizontalLockCropZoom(
-    targetWidth: Int,
-    targetHeight: Int,
-    correctionDegrees: Float,
-): Float {
-    if (targetWidth <= 0 || targetHeight <= 0 || !correctionDegrees.isFinite()) return 1f
+internal fun computeHorizontalLockCropZoom(transformedMvpMatrix: FloatArray): Float {
+    require(transformedMvpMatrix.size >= 16)
+    val m00 = transformedMvpMatrix[0]
+    val m01 = transformedMvpMatrix[4]
+    val m10 = transformedMvpMatrix[1]
+    val m11 = transformedMvpMatrix[5]
+    if (!m00.isFinite() || !m01.isFinite() || !m10.isFinite() || !m11.isFinite()) return 1f
 
-    val radians = Math.toRadians(abs(correctionDegrees).toDouble())
-    val sine = abs(sin(radians)).toFloat()
-    val cosine = abs(cos(radians)).toFloat()
-    val aspect = targetWidth.toFloat() / targetHeight.toFloat()
-    val requiredZoom = maxOf(
-        1f,
-        cosine + sine * aspect,
-        cosine + sine / aspect,
-    )
+    val determinant = m00 * m11 - m01 * m10
+    if (!determinant.isFinite() || abs(determinant) < 1e-6f) return 1f
+
+    // Maximum absolute source-coordinate extent of all four inverse-mapped output corners.
+    val inverseRow0 = abs(m11 / determinant) + abs(-m01 / determinant)
+    val inverseRow1 = abs(-m10 / determinant) + abs(m00 / determinant)
+    val requiredZoom = maxOf(1f, inverseRow0, inverseRow1)
     return if (requiredZoom > 1.0001f) {
         requiredZoom * HORIZONTAL_LOCK_CROP_SAFETY_MARGIN
     } else {
@@ -235,7 +234,7 @@ internal fun applyHorizontalLockMvpMatrix(
         }
     }
 
-    val zoom = computeHorizontalLockCropZoom(targetWidth, targetHeight, angle)
+    val zoom = computeHorizontalLockCropZoom(output)
     // Post-multiply by a uniform X/Y scale (Z remains 1), matching Matrix.scaleM semantics.
     for (row in 0 until 4) {
         output[row] *= zoom
