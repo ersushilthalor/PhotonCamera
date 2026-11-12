@@ -336,6 +336,19 @@ fun CameraScreen(
     var activePanel by remember { mutableStateOf(ActivePanel.NONE) }
     var selectedShootingMode by remember { mutableStateOf(CameraShootingMode.PHOTO) }
 
+    // Restore the regular shooting mode after preferences load. Virtual aperture is
+    // deliberately disabled on entry so it can only affect captures in Portrait mode.
+    LaunchedEffect(isCameraInitialized) {
+        if (isCameraInitialized) {
+            selectedShootingMode = if (state.captureMode == CaptureMode.VIDEO) {
+                CameraShootingMode.VIDEO
+            } else {
+                CameraShootingMode.PHOTO
+            }
+            viewModel.setVirtualApertureAuto(false)
+        }
+    }
+
     var selectedParameter by remember { mutableStateOf(CameraParameter.EXPOSURE_COMPENSATION) }
     var showParameterRuler by remember(state.captureMode, state.useRaw) { mutableStateOf(false) }
     val isXpan = state.aspectRatio == AspectRatio.XPAN
