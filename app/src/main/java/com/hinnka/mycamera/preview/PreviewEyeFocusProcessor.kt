@@ -28,6 +28,9 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
         val y: Float,
         val confidence: Float,
         val faceHeight: Float,
+        val faceCenterX: Float,
+        val faceCenterY: Float,
+        val faceWidth: Float,
         val timestampNs: Long,
     )
 
@@ -534,6 +537,9 @@ class PreviewEyeFocusProcessor(context: Context) : Closeable {
             y = smoothedEyeY?.coerceIn(0f, 1f) ?: return null,
             confidence = candidate.confidence,
             faceHeight = candidate.boxHeight,
+            faceCenterX = candidate.faceCenterX,
+            faceCenterY = candidate.faceCenterY,
+            faceWidth = candidate.boxWidth,
             timestampNs = activeSampleStartedAtNanos,
         )
     }

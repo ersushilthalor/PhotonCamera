@@ -1943,6 +1943,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val dollyZoomActive: StateFlow<Boolean> = _dollyZoomActive.asStateFlow()
     private val _dollyZoomHint = MutableStateFlow("Point at a face")
     val dollyZoomHint: StateFlow<String> = _dollyZoomHint.asStateFlow()
+    private val _dollyZoomFaceBox = MutableStateFlow<FloatArray?>(null)
+    val dollyZoomFaceBox: StateFlow<FloatArray?> = _dollyZoomFaceBox.asStateFlow()
     val photoPreviewStabilizationEnabled: StateFlow<Boolean> =
         userPreferencesRepository.userPreferences
             .map { it.photoPreviewStabilizationEnabled }
@@ -2069,7 +2071,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         previewEyeFocusProcessor.onTargetLost = {
             viewModelScope.launch(Dispatchers.Main.immediate) {
-                if (dollyZoomController.state == DollyZoomController.State.LOCKED) _dollyZoomHint.value = "Subject lost"
+                if (dollyZoomController.state == DollyZoomController.State.LOCKED) {
+                    _dollyZoomHint.value = "Subject lost"
+                    _dollyZoomFaceBox.value = null
+                }
             }
         }
         previewEyeFocusProcessor.onPortraitMask = { mask ->
@@ -4261,11 +4266,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             previewEyeFocusProcessor.prewarm()
             dollyZoomController.arm(zoomRatioByMain)
             _dollyZoomHint.value = "Point at a face"
+            _dollyZoomFaceBox.value = null
             _dollyZoomActive.value = true
         } else {
             val restoreZoom = dollyZoomController.stop()
             _dollyZoomActive.value = false
             _dollyZoomHint.value = ""
+            _dollyZoomFaceBox.value = null
             val from = zoomRatioByMain.coerceAtLeast(0.01f)
             viewModelScope.launch {
                 val started = SystemClock.elapsedRealtime()
@@ -4973,6 +4980,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private fun handleEyeFocusTarget(target: PreviewEyeFocusProcessor.EyeTarget) {
         val cameraState = state.value
         if (dollyZoomEnabled.value && dollyZoomActive.value && cameraState.captureMode == CaptureMode.VIDEO) {
+            val halfWidth = target.faceWidth * 0.5f
+            val halfHeight = target.faceHeight * 0.5f
+            _dollyZoomFaceBox.value = floatArrayOf(
+                (target.faceCenterX - halfWidth).coerceIn(0f, 1f),
+                (target.faceCenterY - halfHeight).coerceIn(0f, 1f),
+                (target.faceCenterX + halfWidth).coerceIn(0f, 1f),
+                (target.faceCenterY + halfHeight).coerceIn(0f, 1f),
+            )
             val appliedZoom = cameraController.getLastAppliedZoomRatio()
             if (dollyZoomController.state == DollyZoomController.State.ARMED) {
                 if (dollyZoomController.lock(target.faceHeight, appliedZoom, target.timestampNs)) _dollyZoomHint.value = ""
@@ -4981,8 +4996,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     subjectHeight = target.faceHeight,
                     appliedZoom = appliedZoom,
                     timestampNs = target.timestampNs,
-                    minZoom = globalMinZoom,
-                    maxZoom = globalMaxZoom,
+                    minZoom = cameraState.getCurrentCameraInfo()?.let { it.minZoom * it.displayIntrinsicZoomRatio } ?: globalMinZoom,
+                    maxZoom = cameraState.getCurrentCameraInfo()?.let { it.maxZoom * it.displayIntrinsicZoomRatio } ?: globalMaxZoom,
                 )
                 update?.let {
                     setZoomRatio(it.zoom)

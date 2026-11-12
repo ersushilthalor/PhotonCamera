@@ -234,6 +234,7 @@ fun CameraScreen(
     val eyeFocusEnabled by viewModel.eyeFocusEnabled.collectAsState()
     val dollyZoomActive by viewModel.dollyZoomActive.collectAsState()
     val dollyZoomHint by viewModel.dollyZoomHint.collectAsState()
+    val dollyZoomFaceBox by viewModel.dollyZoomFaceBox.collectAsState()
     val keepScreenOn by viewModel.keepScreenOn.collectAsState(initial = false)
     val currentLutId by viewModel.currentLutId.collectAsState()
     val lutNameOverlayState = rememberLutNameOverlayState()
@@ -1658,6 +1659,20 @@ fun CameraScreen(
                 contentAlignment = Alignment.Center
             ) {
                 viewfinder()
+                if (dollyZoomActive && dollyZoomFaceBox != null) {
+                    val face = dollyZoomFaceBox!!
+                    Canvas(Modifier.fillMaxSize()) {
+                        drawRect(
+                            color = Color.White.copy(alpha = 0.9f),
+                            topLeft = Offset(face[0] * size.width, face[1] * size.height),
+                            size = androidx.compose.ui.geometry.Size(
+                                (face[2] - face[0]) * size.width,
+                                (face[3] - face[1]) * size.height
+                            ),
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx())
+                        )
+                    }
+                }
                 if (dollyZoomActive && dollyZoomHint.isNotBlank()) {
                     Text(
                         text = dollyZoomHint,
