@@ -261,6 +261,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
     private var resultSequence = 0L
     private var boundaryCount = 0L
     private var nativeFrameAttemptCount = 0L
+    private var currentCaptureRequestGeneration = -1L
     private var captureResultCount = 0L
     private var consecutiveHalStabilizationConflictCount = 0
     private var rawGyroCallbackCount = 0L
@@ -454,6 +455,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
     }
     fun submitCaptureResult(
         result: CaptureResult,
+        captureRequestGeneration: Long,
         request: CaptureRequest? = null,
         outputPhysicalCameraId: String? = null,
     ) {
@@ -495,6 +497,11 @@ class RealtimeStabilizationCoordinator(context: Context) {
             emptyList()
         }
         synchronized(lock) {
+            if (currentCaptureRequestGeneration != captureRequestGeneration) {
+                currentCaptureRequestGeneration = captureRequestGeneration
+                captureResultCount = 0L
+                consecutiveHalStabilizationConflictCount = 0
+            }
             captureResultCount += 1L
             val requestedVideoStabilization = request?.get(
                 CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
@@ -828,6 +835,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
         if (resetSequence) resultSequence = 0L
         boundaryCount = 0L
         nativeFrameAttemptCount = 0L
+        currentCaptureRequestGeneration = -1L
         captureResultCount = 0L
         consecutiveHalStabilizationConflictCount = 0
         rawGyroCallbackCount = 0L

@@ -1319,6 +1319,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         var cameraFrameUpdated = oesFrameUpdated
 
         if (delayedStabilizationEnabled) {
+            // Photo mode has no OES stream or ordinary YUV notifications while EIS is active.
+            if (!mgcEisPresentationTransform.captureFromSensorOrientation(sensorOrientation)) {
+                PLog.w(TAG, "MGC cannot derive presentation from sensor orientation $sensorOrientation")
+            }
             val session = stabilizationSession
             if (!stabilizationSessionStarted) {
                 stabilizationSessionStarted = session?.start() == true
@@ -2742,8 +2746,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         previewHeight = height
         surfaceTexture?.setDefaultBufferSize(width, height)
         if (sizeChanged && previewStabilizationUseCase != null) {
-            mgcEisHardwareBufferRenderer.release()
-            mgcEisYuvRenderer.release()
+            mgcEisRenderer.release()
             recreatePreviewStabilizationSession()
         }
         // 更新 MVP 矩阵以处理 center crop
@@ -2761,8 +2764,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         stabilizationInputHeight = height
         updateMVPMatrix()
         if (previewStabilizationUseCase != null) {
-            mgcEisHardwareBufferRenderer.release()
-            mgcEisYuvRenderer.release()
+            mgcEisRenderer.release()
             recreatePreviewStabilizationSession()
         }
     }
@@ -2821,11 +2823,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         currentFrameTimestampNs = 0L
     }
 
-    /**
-     * Uses MGC's HardwareBuffer/EGLImage renderer whenever the camera buffer and current EGL
-     * context support it. The CPU YUV implementation is retained only for devices without that
-     * platform import path.
-     */
+    /** Converts with the ordinary preview's color rules, then applies only EIS geometry. */
     private fun renderMgcEisFrame(
         frame: com.hinnka.mycamera.stabilization.StabilizationFrame,
     ): MgcEisHardwareBufferRenderer.Frame? {

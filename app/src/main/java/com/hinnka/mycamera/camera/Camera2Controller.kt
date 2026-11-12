@@ -291,6 +291,9 @@ class Camera2Controller(private val context: Context) {
     private var captureSession: CameraCaptureSession? = null
     private var previewRequestBuilder: CaptureRequest.Builder? = null
     private var previewSessionGeneration: Long = 0L
+    // Camera-thread state: only this configured input and its request epoch may feed EIS.
+    private var activeStabilizationInput: StabilizationImageReader? = null
+    private var stabilizationInputFirstTimestampNs: Long = 0L
     private val previewUpdateScheduled = AtomicBoolean(false)
     private var pendingVendorSessionParameterRestart = false
     private var oppoSuperStabilizationEnabled = false
@@ -1490,19 +1493,10 @@ class Camera2Controller(private val context: Context) {
         val previewTarget = checkNotNull(previewSurface) {
             "Preview surface unavailable for photo preparation"
         }
-        val stabilizationTarget = if (shouldUseAlgorithmicStabilization()) {
-            checkNotNull(stabilizationImageReader) {
-                "Stabilization reader unavailable for photo preparation"
-            }.surface
-        } else {
-            null
-        }
         return device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-            // Preserve the configured preview outputs, including the EIS YUV reader. Both
-            // repeating and trigger requests must keep feeding it through previewCallback
-            // so each stabilization image has matching CaptureResult metadata.
+            // The photo viewfinder is also the EIS input. Keep feeding it through
+            // previewCallback so trigger frames retain matching CaptureResult metadata.
             addTarget(previewTarget)
-            stabilizationTarget?.let(::addTarget)
         }
     }
 
@@ -3516,7 +3510,7 @@ class Camera2Controller(private val context: Context) {
                                 return
                             }
                             closeUnusedStabilizationImageReader(stabilizationReader)
-                            onSessionConfigured(session, openGeneration, sessionGeneration)
+                            onSessionConfigured(session, openGeneration, sessionGeneration, stabilizationInput)
                         }
 
                         override fun onConfigureFailed(session: CameraCaptureSession) {
@@ -3584,7 +3578,7 @@ class Camera2Controller(private val context: Context) {
                             return
                         }
                         closeUnusedStabilizationImageReader(stabilizationReader)
-                        onSessionConfigured(session, openGeneration, sessionGeneration)
+                        onSessionConfigured(session, openGeneration, sessionGeneration, stabilizationInput)
                     }
 
                     override fun onConfigureFailed(session: CameraCaptureSession) {
@@ -3669,13 +3663,11 @@ class Camera2Controller(private val context: Context) {
     private fun ensureStabilizationImageReader(): StabilizationImageReader? {
         val handler = cameraHandler ?: return null
         val state = _state.value
-        if (!shouldUseAlgorithmicStabilization()) return null
-        val size = when (state.captureMode) {
-            CaptureMode.PHOTO -> state.currentPreviewSize
-            CaptureMode.VIDEO -> state.videoCapabilities
-                .enhancedStabilizationInputSizesByResolution[state.videoConfig.resolution]
-                ?: return null
-        }
+        // Photo mode feeds EIS from previewYuvReader; only video needs a separate input.
+        if (state.captureMode != CaptureMode.VIDEO || !shouldUseAlgorithmicStabilization()) return null
+        val size = state.videoCapabilities
+            .enhancedStabilizationInputSizesByResolution[state.videoConfig.resolution]
+            ?: return null
         if (size.width <= 0 || size.height <= 0) return null
         stabilizationImageReader?.let { existing ->
             if (existing.width == size.width && existing.height == size.height) {
@@ -3696,8 +3688,7 @@ class Camera2Controller(private val context: Context) {
                         PLog.e(TAG, "Cannot acquire MGC YUV image", error)
                         null
                     } ?: break
-                    logStabilizationInputStats(image)
-                    realtimeStabilizationCoordinator.submitStabilizationImage(image)
+                    submitCurrentStabilizationImage(image)
                 }
             }
             stabilizationImageReader = reader
@@ -3705,6 +3696,65 @@ class Camera2Controller(private val context: Context) {
             stabilizationInputStatsFrames = 0
             PLog.i(TAG, "MGC YUV input configured: ${size.width}x${size.height}")
         }
+    }
+
+    private fun submitCurrentStabilizationResult(
+        session: CameraCaptureSession,
+        request: CaptureRequest,
+        result: TotalCaptureResult,
+    ) {
+        // Old sessions can finish requests after their replacement's onConfigured callback.
+        // Check the configured input as well as mutable UI state: selecting EIS can precede
+        // camera-thread reconfiguration, while the current session still runs OIS requests.
+        if (session !== captureSession || activeStabilizationInput == null ||
+            !shouldUseAlgorithmicStabilization()
+        ) {
+            return
+        }
+        val physicalCameraId = activeOutputPhysicalCameraId
+            ?: result.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
+        val timestampNs = physicalCameraId?.let { result.physicalCameraResults[it] }
+            ?.get(CaptureResult.SENSOR_TIMESTAMP)
+            ?: result.get(CaptureResult.SENSOR_TIMESTAMP)
+            ?: return
+        if (timestampNs <= 0L) return
+        if (stabilizationInputFirstTimestampNs == 0L) {
+            stabilizationInputFirstTimestampNs = timestampNs
+            PLog.i(
+                TAG,
+                "EIS+ current request confirmed: generation=$previewSessionGeneration, " +
+                    "firstTimestamp=$timestampNs, frame=${result.frameNumber}, " +
+                    "videoRequested=${request.get(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE)}, " +
+                    "opticalRequested=${request.get(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE)}",
+            )
+        }
+        if (timestampNs < stabilizationInputFirstTimestampNs) return
+        realtimeStabilizationCoordinator.submitCaptureResult(
+            result = result,
+            request = request,
+            outputPhysicalCameraId = activeOutputPhysicalCameraId,
+            captureRequestGeneration = previewSessionGeneration,
+        )
+    }
+
+    private fun submitCurrentStabilizationImage(image: StabilizationImageReader.AcquiredImage) {
+        val firstTimestampNs = stabilizationInputFirstTimestampNs
+        if (!shouldUseAlgorithmicStabilization() || image.owner !== activeStabilizationInput ||
+            firstTimestampNs == 0L || image.timestampNs < firstTimestampNs
+        ) {
+            // The photo reader is shared across sessions and can still contain old OIS frames.
+            image.close()
+            return
+        }
+        logStabilizationInputStats(image)
+        realtimeStabilizationCoordinator.submitStabilizationImage(image)
+    }
+
+    private fun clearStabilizationInput() {
+        val input = activeStabilizationInput
+        activeStabilizationInput = null
+        stabilizationInputFirstTimestampNs = 0L
+        input?.let(realtimeStabilizationCoordinator::discardStabilizationImages)
     }
 
     private fun logStabilizationInputStats(image: StabilizationImageReader.AcquiredImage) {
@@ -4231,6 +4281,8 @@ class Camera2Controller(private val context: Context) {
             return
         }
         captureSession = session
+        activeStabilizationInput = stabilizationInput
+        stabilizationInputFirstTimestampNs = 0L
         _state.update { it.copy(previewFirstFrameTimestampNs = null) }
 
         try {
@@ -10300,6 +10352,7 @@ class Camera2Controller(private val context: Context) {
     private fun invalidateCaptureSession(session: CameraCaptureSession?, reason: String) {
         // A delayed close callback from the old session must not clear its replacement.
         if (session == null || captureSession !== session) return
+        clearStabilizationInput()
         captureSession = null
         _enginePreviewSource.value = null
         previewRequestBuilder = null

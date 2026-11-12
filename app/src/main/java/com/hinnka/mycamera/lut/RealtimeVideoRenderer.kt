@@ -90,8 +90,8 @@ class RealtimeVideoRenderer(
     private val colorProgramCache = PreviewColorProgramCache()
     private val basicToneTextures = BasicToneGlTextures()
     private val filmGrainGl = FilmGrainGl(TAG)
-    private val mgcEisHardwareBufferRenderer = MgcEisHardwareBufferRenderer(TAG)
-    private val mgcEisYuvRenderer = MgcEisYuvRenderer(TAG)
+    private val mgcEisRenderer = MgcEisRenderer(TAG)
+    private val previewYuvRenderer = PreviewYuvRenderer(TAG)
     private val filmGrainAmount: Float
         get() = layers.lastOrNull { it.params.filmGrain > 0.001f }?.params?.filmGrain ?: 0f
     private val finalFilmGrainEnabled: Boolean
