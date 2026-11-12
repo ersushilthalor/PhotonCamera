@@ -4258,34 +4258,39 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setDollyZoomEnabled(enabled: Boolean) {
         viewModelScope.launch { userPreferencesRepository.saveDollyZoomEnabled(enabled) }
-        if (!enabled) _dollyZoomActive.value = false
+        if (!enabled) stopDollyZoom()
+    }
+
+    fun stopDollyZoom() {
+        if (!_dollyZoomActive.value) return
+        val restoreZoom = dollyZoomController.stop()
+        dollyZoomPreviousWbLock?.let(cameraController::setVideoWhiteBalanceLockEnabled)
+        dollyZoomPreviousWbLock = null
+        _dollyZoomActive.value = false
+        _dollyZoomHint.value = ""
+        _dollyZoomFaceBox.value = null
+        val from = zoomRatioByMain.coerceAtLeast(0.01f)
+        viewModelScope.launch {
+            val started = SystemClock.elapsedRealtime()
+            while (true) {
+                val t = ((SystemClock.elapsedRealtime() - started) / 280f).coerceIn(0f, 1f)
+                setZoomRatio(kotlin.math.exp(kotlin.math.ln(from) + (kotlin.math.ln(restoreZoom) - kotlin.math.ln(from)) * t))
+                if (t >= 1f) break
+                delay(16L)
+            }
+        }
     }
 
     fun toggleDollyZoom() {
         if (!dollyZoomEnabled.value || state.value.captureMode != CaptureMode.VIDEO) return
-        if (!_dollyZoomActive.value) {
+        if (_dollyZoomActive.value) {
+            stopDollyZoom()
+        } else {
             previewEyeFocusProcessor.prewarm()
             dollyZoomController.arm(zoomRatioByMain)
             _dollyZoomHint.value = "Point at a face"
             _dollyZoomFaceBox.value = null
             _dollyZoomActive.value = true
-        } else {
-            val restoreZoom = dollyZoomController.stop()
-            dollyZoomPreviousWbLock?.let(cameraController::setVideoWhiteBalanceLockEnabled)
-            dollyZoomPreviousWbLock = null
-            _dollyZoomActive.value = false
-            _dollyZoomHint.value = ""
-            _dollyZoomFaceBox.value = null
-            val from = zoomRatioByMain.coerceAtLeast(0.01f)
-            viewModelScope.launch {
-                val started = SystemClock.elapsedRealtime()
-                while (true) {
-                    val t = ((SystemClock.elapsedRealtime() - started) / 280f).coerceIn(0f, 1f)
-                    setZoomRatio(kotlin.math.exp(kotlin.math.ln(from) + (kotlin.math.ln(restoreZoom) - kotlin.math.ln(from)) * t))
-                    if (t >= 1f) break
-                    delay(16L)
-                }
-            }
         }
     }
 
