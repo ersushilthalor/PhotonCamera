@@ -2492,6 +2492,7 @@ fun CaptureButton(
                 )
             },
         shape = CircleShape,
+        backgroundColor = Color.White,
         contentAlignment = Alignment.Center
     ) {
         val ringColor = when {

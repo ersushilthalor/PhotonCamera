@@ -3,6 +3,8 @@ package com.hinnka.mycamera.ui.camera
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -114,7 +116,7 @@ fun CameraTopBar(
         )
 
         TopIconAction(
-            icon = AppIcons.Tune,
+            icon = Icons.Default.Settings,
             contentDescription = stringResource(R.string.settings),
             tint = Color.White,
             onClick = onSettingsClick
@@ -185,7 +187,7 @@ private fun VideoTopBar(
             )
 
             TopIconAction(
-                icon = AppIcons.Tune,
+                icon = Icons.Default.Settings,
                 contentDescription = stringResource(R.string.settings),
                 tint = Color.White,
                 onClick = onSettingsClick
