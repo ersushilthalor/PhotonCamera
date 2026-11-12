@@ -579,6 +579,7 @@ fun CameraScreen(
     }
 
     fun animateZoomStopTo(targetZoom: Float, requestedCameraId: String? = null) {
+        if (viewModel.dollyZoomActive.value) return
         val currentCamera = state.getCurrentCameraInfo()
         val startZoom = viewModel.zoomRatioByMain
             .takeIf { it.isFinite() && it > 0f }
@@ -651,6 +652,7 @@ fun CameraScreen(
     }
 
     fun switchCameraWithPreviewTransition() {
+        if (viewModel.dollyZoomActive.value) return
         // Switch cameras immediately without the black preview-cover reveal.
         viewModel.switchCamera()
     }
