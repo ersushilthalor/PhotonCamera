@@ -1431,4 +1431,10 @@
     <string name="camera_quick_menu_aspect">Aspect</string>
     <string name="camera_quick_menu_live">Live</string>
     <string name="camera_quick_menu_depth">Depth</string>
+    <string name="video_quick_menu_action">Action</string>
+    <string name="video_quick_menu_dual_capture">Dual Capture</string>
+    <string name="video_quick_menu_format">Format</string>
+    <string name="video_quick_menu_aspect_ratio">Aspect Ratio</string>
+    <string name="dual_capture_coming_soon">Coming soon</string>
+    <string name="video_hdr_disabled_log">HDR is unavailable while a Log profile is active.</string>
 </resources>

@@ -1882,6 +1882,24 @@ fun CameraScreen(
             onVideoBitrateChange = { viewModel.setVideoBitrate(it) },
             videoCodec = videoCodec,
             onVideoCodecChange = { viewModel.setVideoCodec(it) },
+            videoHdrEnabled = videoHdrEnabled,
+            onVideoHdrToggle = { viewModel.setVideoHdrEnabled(!videoHdrEnabled) },
+            videoTorchEnabled = state.videoConfig.torchEnabled,
+            videoTorchSupported = state.videoCapabilities.supportsTorch,
+            onVideoTorchToggle = { viewModel.setVideoTorchEnabled(!state.videoConfig.torchEnabled) },
+            videoStabilizationMode = state.videoConfig.stabilizationMode,
+            availableVideoStabilizationModes = state.videoCapabilities.availableStabilizationModes,
+            isVideoRecording = state.videoRecordingState.isRecording ||
+                state.videoRecordingState.isProcessing,
+            onVideoStabilizationModeChange = viewModel::setVideoStabilizationMode,
+            onEditClick = { activePanel = ActivePanel.EDIT },
+            onDualCaptureClick = {
+                android.widget.Toast.makeText(
+                    context,
+                    R.string.dual_capture_coming_soon,
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            },
             videoAudioInputId = state.videoConfig.audioInputId,
             videoAudioInputOptions = videoAudioInputOptions,
             onVideoAudioInputChange = { viewModel.setVideoAudioInputId(it) },
