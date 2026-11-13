@@ -1737,6 +1737,42 @@ fun CameraScreen(
             onAspectRatioChange = { runPreviewTransition { viewModel.setAspectRatio(it) } },
             videoAspectRatio = state.videoConfig.aspectRatio,
             onVideoAspectRatioChange = { runPreviewTransition { viewModel.setVideoAspectRatio(it) } },
+            videoTorchEnabled = state.videoConfig.torchEnabled,
+            videoTorchAvailable = state.videoCapabilities.supportsTorch,
+            onVideoTorchToggle = {
+                viewModel.setVideoTorchEnabled(!state.videoConfig.torchEnabled)
+            },
+            videoHdrEnabled = videoHdrEnabled,
+            onVideoHdrToggle = {
+                viewModel.setVideoHdrEnabled(!videoHdrEnabled)
+            },
+            videoStabilizationMode = state.videoConfig.stabilizationMode,
+            videoActionAvailable =
+                VideoStabilizationMode.ENHANCED in state.videoCapabilities.availableStabilizationModes &&
+                    !state.videoRecordingState.isRecording &&
+                    !state.videoRecordingState.isProcessing,
+            onVideoActionToggle = {
+                val nextMode = if (state.videoConfig.stabilizationMode == VideoStabilizationMode.ENHANCED) {
+                    if (VideoStabilizationMode.OIS in state.videoCapabilities.availableStabilizationModes) {
+                        VideoStabilizationMode.OIS
+                    } else {
+                        VideoStabilizationMode.OFF
+                    }
+                } else {
+                    VideoStabilizationMode.ENHANCED
+                }
+                viewModel.setVideoStabilizationMode(nextMode)
+            },
+            onVideoEditClick = {
+                activePanel = ActivePanel.EDIT
+            },
+            onVideoDualCaptureClick = {
+                android.widget.Toast.makeText(
+                    context,
+                    "Coming soon",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            },
             videoLogProfile = state.videoConfig.logProfile,
             availableVideoLogProfiles = state.videoCapabilities.availableLogProfiles,
             onVideoLogProfileChange = { viewModel.setVideoLogProfile(it) },
