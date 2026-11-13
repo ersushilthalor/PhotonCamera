@@ -2665,7 +2665,7 @@ private fun CaptureModeSwitcher(
             verticalAlignment = Alignment.CenterVertically
         ) {
             ModeSwitcherItem(
-                label = stringResource(R.string.capture_mode_video) +
+                label = stringResource(R.string.capture_mode_video).uppercase() +
                     if (oppoStyle && shootingMode == CameraShootingMode.VIDEO) " ▴" else "",
                 selected = shootingMode == CameraShootingMode.VIDEO,
                 enabled = enabled,
@@ -2674,7 +2674,7 @@ private fun CaptureModeSwitcher(
                 selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color(0xFFFFD400)
             )
             ModeSwitcherItem(
-                label = stringResource(R.string.capture_mode_photo) +
+                label = stringResource(R.string.capture_mode_photo).uppercase() +
                     if (oppoStyle && shootingMode != CameraShootingMode.VIDEO) " ▴" else "",
                 selected = shootingMode != CameraShootingMode.VIDEO,
                 enabled = enabled,
