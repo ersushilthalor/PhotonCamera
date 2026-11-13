@@ -1332,7 +1332,11 @@ fun CameraScreen(
                                 state.videoConfig.enhancedStabilizationStrength,
                             videoPreviewStabilizationLookahead =
                                 state.videoConfig.enhancedStabilizationLookahead,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .offset(
+                                    y = if (state.captureMode == CaptureMode.VIDEO) 1.dp else 0.dp
+                                )
                         )
                     }
 
@@ -2649,28 +2653,28 @@ private fun CaptureModeSwitcher(
         } else {
             val liquidGlassStyle = remember {
                 LiquidGlassStyle(
-                    blurRadius = 0.5.dp,
+                    blurRadius = 10.dp,
                     refractionHeight = 18.dp,
-                    refractionAmount = 16.dp,
-                    saturation = 1.7f,
-                    tint = Color.Transparent,
+                    refractionAmount = 0.dp,
+                    saturation = 1.15f,
+                    tint = Color(0x26000000),
                     highlightWidth = 0.65.dp,
                     highlightBlur = 0.4.dp,
-                    highlightAlpha = 0.72f,
-                    fallbackColor = Color.Transparent
+                    highlightAlpha = 0.42f,
+                    fallbackColor = Color(0xB31B1B1B)
                 )
             }
             val outerGlassStyle = remember {
                 LiquidGlassStyle(
-                    blurRadius = 0.6.dp,
+                    blurRadius = 14.dp,
                     refractionHeight = 20.dp,
-                    refractionAmount = 14.dp,
-                    saturation = 1.55f,
-                    tint = Color.Transparent,
+                    refractionAmount = 0.dp,
+                    saturation = 1.12f,
+                    tint = Color(0x40000000),
                     highlightWidth = 0.45.dp,
                     highlightBlur = 0.35.dp,
-                    highlightAlpha = 0.42f,
-                    fallbackColor = Color.Transparent
+                    highlightAlpha = 0.36f,
+                    fallbackColor = Color(0xC21B1B1B)
                 )
             }
             LiquidGlassSurface(
