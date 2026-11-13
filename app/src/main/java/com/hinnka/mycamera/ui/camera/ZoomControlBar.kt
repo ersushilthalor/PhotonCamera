@@ -4,6 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -326,7 +327,10 @@ private fun ZoomPresetPill(
                 modifier = Modifier
                     .width(37.dp)
                     .height(29.dp)
-                    .clickable { onPresetClick(preset) },
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { onPresetClick(preset) },
                 contentAlignment = Alignment.Center
             ) {
                 if (selected) {
