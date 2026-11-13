@@ -5,7 +5,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
@@ -43,8 +43,8 @@ fun GalleryThumbnail(
 ) {
     val context = LocalContext.current
     val refreshKey = latestPhoto?.id?.let { viewModel.getPreparedPhotoThumbnailRefreshKey(it) } ?: 0L
-    val buttonShape = RoundedCornerShape(10.dp)
-    val thumbnailShape = RoundedCornerShape(7.dp)
+    val buttonShape = CircleShape
+    val thumbnailShape = CircleShape
     var finalThumbnailLoaded by remember(capturedThumbnail?.captureId) { mutableStateOf(false) }
     val finalCaptureId = capturedThumbnail?.takeIf {
         it.processingFinished && it.savedPhotoId == latestPhoto?.id
@@ -53,9 +53,10 @@ fun GalleryThumbnail(
 
     PhysicalButton(
         modifier = modifier
-            .size(48.dp),
+            .size(45.dp),
         onClick = onClick,
         shape = buttonShape,
+        backgroundColor = Color.White.copy(alpha = 0.12f),
         contentShape = thumbnailShape
     ) {
         if (latestPhoto != null) {
