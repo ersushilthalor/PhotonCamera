@@ -2336,14 +2336,14 @@ private fun Controls(
                     },
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
-                        .padding(end = sideControlInset ?: 40.dp)
+                        .padding(end = sideControlInset ?: 32.dp)
                         .size(CameraControlsLayoutDefaults.SideButtonSize)
                         .autoRotate(),
                     shape = CircleShape,
                     backgroundColor = Color.White.copy(alpha = 0.12f)
                 ) {
                     Icon(
-                        imageVector = AppIcons.Cameraswitch,
+                        imageVector = AppIcons.RestartAlt,
                         contentDescription = stringResource(R.string.switch_camera),
                         tint = Color.White.copy(
                             alpha = if (state.videoRecordingState.isProcessing) 0.35f else 1f
