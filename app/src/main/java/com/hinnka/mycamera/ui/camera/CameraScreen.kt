@@ -1735,6 +1735,25 @@ fun CameraScreen(
             aspectRatio = state.aspectRatio,
             topSheetAspectRatios = topSheetAspectRatios,
             onAspectRatioChange = { runPreviewTransition { viewModel.setAspectRatio(it) } },
+            useLivePhoto = useLivePhoto,
+            onLivePhotoToggle = { viewModel.setUseLivePhoto(!useLivePhoto) },
+            timerSeconds = state.timerSeconds,
+            onTimerToggle = { viewModel.toggleTimer() },
+            depthEnabled = state.isVirtualApertureEnabled,
+            onDepthClick = {
+                if (com.hinnka.mycamera.ml.DepthModelManager.isInstalled(context)) {
+                    viewModel.setVirtualApertureAuto(!state.isVirtualApertureEnabled)
+                } else {
+                    android.widget.Toast.makeText(
+                        context,
+                        "Install a Depth Model in Settings to use Depth",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            },
+            onOpenFiltersClick = {
+                activePanel = ActivePanel.FILTERS
+            },
             videoAspectRatio = state.videoConfig.aspectRatio,
             onVideoAspectRatioChange = { runPreviewTransition { viewModel.setVideoAspectRatio(it) } },
             videoTorchEnabled = state.videoConfig.torchEnabled,

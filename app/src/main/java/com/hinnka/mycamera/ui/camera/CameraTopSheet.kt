@@ -54,18 +54,28 @@ import com.hinnka.mycamera.video.*
 import com.hinnka.mycamera.video.VideoCodec
 import com.hinnka.mycamera.ui.icons.AppIcons
 
-private enum class VideoSettingPanel {
+private enum class CameraMenuPanel {
     ASPECT_RATIO,
+    PHOTO_ASPECT_RATIO,
     LOG_PROFILE,
     BITRATE
 }
 
-private enum class VideoMenuGlyph {
+private enum class CameraMenuGlyph {
     EDIT,
     ACTION,
     DUAL_CAPTURE,
     LOG,
-    ASPECT_RATIO
+    ASPECT_RATIO,
+    REFOCUS,
+    LIVE,
+    PHOTO_ASPECT,
+    TIMER_OFF,
+    TIMER,
+    BURST,
+    STYLES,
+    FILTER,
+    DEPTH
 }
 
 private val CameraTopSheetContentTopPadding = 32.dp
@@ -78,6 +88,13 @@ fun CameraTopSheet(
     aspectRatio: AspectRatio,
     topSheetAspectRatios: List<AspectRatio>,
     onAspectRatioChange: (AspectRatio) -> Unit,
+    useLivePhoto: Boolean,
+    onLivePhotoToggle: () -> Unit,
+    timerSeconds: Int,
+    onTimerToggle: () -> Unit,
+    depthEnabled: Boolean,
+    onDepthClick: () -> Unit,
+    onOpenFiltersClick: () -> Unit,
     videoAspectRatio: VideoAspectRatio,
     onVideoAspectRatioChange: (VideoAspectRatio) -> Unit,
     videoTorchEnabled: Boolean,
@@ -142,7 +159,7 @@ fun CameraTopSheet(
     contentTopPadding: Dp = CameraTopSheetContentTopPadding,
     modifier: Modifier = Modifier
 ) {
-    var expandedVideoPanel by rememberSaveable { mutableStateOf<VideoSettingPanel?>(null) }
+    var expandedMenuPanel by rememberSaveable { mutableStateOf<CameraMenuPanel?>(null) }
     var showRenderingEngineSheet by rememberSaveable { mutableStateOf(false) }
     var showOppoPipelineSheet by rememberSaveable { mutableStateOf(false) }
     var showContentManagementOptions by rememberSaveable { mutableStateOf(false) }
@@ -153,7 +170,7 @@ fun CameraTopSheet(
 
     LaunchedEffect(visible, captureMode) {
         showContentManagementOptions = false
-        expandedVideoPanel = null
+        expandedMenuPanel = null
     }
 
     LaunchedEffect(useRaw) {
@@ -184,7 +201,7 @@ fun CameraTopSheet(
                 modifier = Modifier
                     .weight(1f)
                     .then(
-                        if (captureMode == CaptureMode.PHOTO || expandedVideoPanel != null) {
+                        if (expandedMenuPanel != null) {
                             Modifier.verticalScroll(rememberScrollState())
                         } else {
                             Modifier
@@ -193,124 +210,12 @@ fun CameraTopSheet(
             ) {
                 if (captureMode == CaptureMode.PHOTO) {
                     val isProfessionalMode = useRaw && isRawSupported
-                    SectionLabel(title = stringResource(R.string.aspect_ratio))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        AspectRatio.sanitizeTopSheetRatios(topSheetAspectRatios).forEach { ratio ->
-                            val isSelected = aspectRatio == ratio
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .heightIn(min = 40.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(
-                                        if (isSelected) AccentColor else Color.White.copy(
-                                            alpha = 0.12f
-                                        )
-                                    )
-                                    .clickable { onAspectRatioChange(ratio) }
-                                    .padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = ratio.getDisplayName(),
-                                    color = if (isSelected) OnAccentColor else Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                )
-                            }
-                        }
-                    }
 
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    QuickSettingGrid { itemModifier ->
-                        if (isProfessionalMode) {
-                            QuickSettingButton2(
-                                title = stringResource(R.string.settings_raw_color_engine),
-                                checked = true,
-                                onClick = { showRenderingEngineSheet = true },
-                                modifier = itemModifier
-                            )
-                        } else {
-                            QuickSettingToggle(
-                                title = stringResource(R.string.oppo_auto_hdr),
-                                checked = oppoPhotoSettings.autoHdrEnabled,
-                                onCheckedChange = { enabled ->
-                                    onOppoPhotoSettingsChange(
-                                        oppoPhotoSettings.copy(
-                                            autoHdrEnabled = enabled,
-                                            refocusEnabled = if (enabled) false else oppoPhotoSettings.refocusEnabled,
-                                        )
-                                    )
-                                },
-                                modifier = itemModifier
-                            )
-                            QuickSettingToggle(
-                                title = stringResource(R.string.oppo_fast_shutter),
-                                checked = oppoPhotoSettings.fastShutterEnabled,
-                                onCheckedChange = {
-                                    onOppoPhotoSettingsChange(oppoPhotoSettings.copy(fastShutterEnabled = it))
-                                },
-                                modifier = itemModifier
-                            )
-                            QuickSettingToggle(
-                                title = stringResource(R.string.oppo_refocus),
-                                checked = oppoPhotoSettings.refocusEnabled,
-                                onCheckedChange = { enabled ->
-                                    onOppoPhotoSettingsChange(
-                                        oppoPhotoSettings.copy(
-                                            refocusEnabled = enabled,
-                                            autoHdrEnabled = if (enabled) false else oppoPhotoSettings.autoHdrEnabled,
-                                        )
-                                    )
-                                },
-                                enabled = refocusAvailable,
-                                modifier = itemModifier
-                            )
-                            QuickSettingButton2(
-                                title = stringResource(R.string.oppo_custom_pipeline),
-                                checked = oppoPhotoSettings.customPipelineEnabled,
-                                onClick = { showOppoPipelineSheet = true },
-                                modifier = itemModifier
-                            )
-                        }
-                        MeteringModeQuickSetting(
-                            meteringMode = meteringMode,
-                            onMeteringModeChange = onMeteringModeChange,
-                            modifier = itemModifier
-                        )
-                        ToolboxQuickSetting(
-                            onToolboxClick = onToolboxClick,
-                            modifier = itemModifier
-                        )
-                        ContentManagementQuickSetting(
-                            onClick = { showContentManagementOptions = !showContentManagementOptions },
-                            modifier = itemModifier
-                        )
-                    }
-
-                    ContentManagementOptionsPanel(
-                        visible = showContentManagementOptions,
-                        onFilterManageClick = {
-                            handleContentManagementAction(onFilterManageClick)
-                        },
-                        onFrameManageClick = {
-                            handleContentManagementAction(onFrameManageClick)
-                        },
-                        onPresetManageClick = {
-                            handleContentManagementAction(onPresetManageClick)
-                        }
-                    )
-                } else {
-                    // Keep the existing sheet frame unchanged and replace only its video-mode contents.
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .then(
-                                if (expandedVideoPanel == null) {
+                                if (expandedMenuPanel == null) {
                                     Modifier.weight(1f)
                                 } else {
                                     Modifier.height(292.dp)
@@ -322,7 +227,157 @@ fun CameraTopSheet(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            VideoMenuItem(
+                            CameraMenuItem(
+                                label = "REFOCUS",
+                                glyph = CameraMenuGlyph.REFOCUS,
+                                selected = oppoPhotoSettings.refocusEnabled,
+                                enabled = refocusAvailable && !isProfessionalMode,
+                                onClick = {
+                                    val enabled = !oppoPhotoSettings.refocusEnabled
+                                    onOppoPhotoSettingsChange(
+                                        oppoPhotoSettings.copy(
+                                            refocusEnabled = enabled,
+                                            autoHdrEnabled = if (enabled) false else oppoPhotoSettings.autoHdrEnabled
+                                        )
+                                    )
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                            CameraMenuItem(
+                                label = "LIVE",
+                                glyph = CameraMenuGlyph.LIVE,
+                                selected = useLivePhoto,
+                                onClick = onLivePhotoToggle,
+                                modifier = Modifier.weight(1f)
+                            )
+                            CameraMenuItem(
+                                label = "ASPECT",
+                                glyph = CameraMenuGlyph.PHOTO_ASPECT,
+                                centerText = aspectRatio.getDisplayName(),
+                                selected = expandedMenuPanel == CameraMenuPanel.PHOTO_ASPECT_RATIO,
+                                onClick = {
+                                    expandedMenuPanel = if (expandedMenuPanel == CameraMenuPanel.PHOTO_ASPECT_RATIO) {
+                                        null
+                                    } else {
+                                        CameraMenuPanel.PHOTO_ASPECT_RATIO
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            CameraMenuItem(
+                                label = "TIMER",
+                                glyph = if (timerSeconds > 0) CameraMenuGlyph.TIMER else CameraMenuGlyph.TIMER_OFF,
+                                centerText = if (timerSeconds > 0) "${timerSeconds}s" else null,
+                                selected = timerSeconds > 0,
+                                onClick = onTimerToggle,
+                                modifier = Modifier.weight(1f)
+                            )
+                            CameraMenuItem(
+                                label = "BRUST",
+                                glyph = CameraMenuGlyph.BURST,
+                                selected = oppoPhotoSettings.fastShutterEnabled,
+                                onClick = {
+                                    onOppoPhotoSettingsChange(
+                                        oppoPhotoSettings.copy(
+                                            fastShutterEnabled = !oppoPhotoSettings.fastShutterEnabled
+                                        )
+                                    )
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                            CameraMenuItem(
+                                label = "STYLES",
+                                glyph = CameraMenuGlyph.STYLES,
+                                selected = if (isProfessionalMode) true else oppoPhotoSettings.customPipelineEnabled,
+                                onClick = {
+                                    if (isProfessionalMode) {
+                                        showRenderingEngineSheet = true
+                                    } else {
+                                        showOppoPipelineSheet = true
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            CameraMenuItem(
+                                label = "FILTER",
+                                glyph = CameraMenuGlyph.FILTER,
+                                selected = false,
+                                onClick = onOpenFiltersClick,
+                                modifier = Modifier.weight(1f)
+                            )
+                            CameraMenuItem(
+                                label = "DEPTH",
+                                glyph = CameraMenuGlyph.DEPTH,
+                                selected = depthEnabled,
+                                onClick = onDepthClick,
+                                modifier = Modifier.weight(1f)
+                            )
+                            CameraMenuItem(
+                                label = "SETTINGS",
+                                icon = Icons.Default.Settings,
+                                onClick = onMoreSettingsClick,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    AnimatedVisibility(
+                        visible = expandedMenuPanel == CameraMenuPanel.PHOTO_ASPECT_RATIO,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        Column {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            VideoSettingExpandedPanel {
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    AspectRatio.sanitizeTopSheetRatios(topSheetAspectRatios).forEach { ratio ->
+                                        VideoOptionChip(
+                                            title = ratio.getDisplayName(),
+                                            selected = aspectRatio == ratio,
+                                            onClick = {
+                                                onAspectRatioChange(ratio)
+                                                expandedMenuPanel = null
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {its video-mode contents.
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(
+                                if (expandedMenuPanel == null) {
+                                    Modifier.weight(1f)
+                                } else {
+                                    Modifier.height(292.dp)
+                                }
+                            ),
+                        verticalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            CameraMenuItem(
                                 label = "FLASH",
                                 icon = if (videoTorchEnabled) AppIcons.FlashOn else AppIcons.FlashOff,
                                 selected = videoTorchEnabled,
@@ -330,15 +385,15 @@ fun CameraTopSheet(
                                 onClick = onVideoTorchToggle,
                                 modifier = Modifier.weight(1f)
                             )
-                            VideoMenuItem(
+                            CameraMenuItem(
                                 label = "EDIT",
-                                glyph = VideoMenuGlyph.EDIT,
+                                glyph = CameraMenuGlyph.EDIT,
                                 onClick = onVideoEditClick,
                                 modifier = Modifier.weight(1f)
                             )
-                            VideoMenuItem(
+                            CameraMenuItem(
                                 label = "ACTION",
-                                glyph = VideoMenuGlyph.ACTION,
+                                glyph = CameraMenuGlyph.ACTION,
                                 selected = videoStabilizationMode == VideoStabilizationMode.ENHANCED,
                                 enabled = videoActionAvailable,
                                 onClick = onVideoActionToggle,
@@ -350,28 +405,28 @@ fun CameraTopSheet(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            VideoMenuItem(
+                            CameraMenuItem(
                                 label = "DUAL CAPTURE",
-                                glyph = VideoMenuGlyph.DUAL_CAPTURE,
+                                glyph = CameraMenuGlyph.DUAL_CAPTURE,
                                 onClick = onVideoDualCaptureClick,
                                 modifier = Modifier.weight(1f)
                             )
-                            VideoMenuItem(
+                            CameraMenuItem(
                                 label = "FORMAT",
                                 centerText = "HDR",
                                 selected = videoHdrEnabled,
                                 onClick = onVideoHdrToggle,
                                 modifier = Modifier.weight(1f)
                             )
-                            VideoMenuItem(
+                            CameraMenuItem(
                                 label = "BITRATE",
                                 centerText = videoBitrate.bitrateMbps.toString(),
-                                selected = expandedVideoPanel == VideoSettingPanel.BITRATE,
+                                selected = expandedMenuPanel == CameraMenuPanel.BITRATE,
                                 onClick = {
-                                    expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.BITRATE) {
+                                    expandedMenuPanel = if (expandedMenuPanel == CameraMenuPanel.BITRATE) {
                                         null
                                     } else {
-                                        VideoSettingPanel.BITRATE
+                                        CameraMenuPanel.BITRATE
                                     }
                                 },
                                 modifier = Modifier.weight(1f)
@@ -382,34 +437,34 @@ fun CameraTopSheet(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            VideoMenuItem(
+                            CameraMenuItem(
                                 label = "LOG",
-                                glyph = VideoMenuGlyph.LOG,
+                                glyph = CameraMenuGlyph.LOG,
                                 selected = videoLogProfile != VideoLogProfile.OFF ||
-                                    expandedVideoPanel == VideoSettingPanel.LOG_PROFILE,
+                                    expandedMenuPanel == CameraMenuPanel.LOG_PROFILE,
                                 onClick = {
-                                    expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.LOG_PROFILE) {
+                                    expandedMenuPanel = if (expandedMenuPanel == CameraMenuPanel.LOG_PROFILE) {
                                         null
                                     } else {
-                                        VideoSettingPanel.LOG_PROFILE
+                                        CameraMenuPanel.LOG_PROFILE
                                     }
                                 },
                                 modifier = Modifier.weight(1f)
                             )
-                            VideoMenuItem(
+                            CameraMenuItem(
                                 label = "ASPECTS RATIO",
-                                glyph = VideoMenuGlyph.ASPECT_RATIO,
-                                selected = expandedVideoPanel == VideoSettingPanel.ASPECT_RATIO,
+                                glyph = CameraMenuGlyph.ASPECT_RATIO,
+                                selected = expandedMenuPanel == CameraMenuPanel.ASPECT_RATIO,
                                 onClick = {
-                                    expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.ASPECT_RATIO) {
+                                    expandedMenuPanel = if (expandedMenuPanel == CameraMenuPanel.ASPECT_RATIO) {
                                         null
                                     } else {
-                                        VideoSettingPanel.ASPECT_RATIO
+                                        CameraMenuPanel.ASPECT_RATIO
                                     }
                                 },
                                 modifier = Modifier.weight(1f)
                             )
-                            VideoMenuItem(
+                            CameraMenuItem(
                                 label = "SETTINGS",
                                 icon = Icons.Default.Settings,
                                 onClick = onMoreSettingsClick,
@@ -419,15 +474,15 @@ fun CameraTopSheet(
                     }
 
                     AnimatedVisibility(
-                        visible = expandedVideoPanel != null,
+                        visible = expandedMenuPanel != null,
                         enter = expandVertically() + fadeIn(),
                         exit = shrinkVertically() + fadeOut()
                     ) {
                         Column {
                             Spacer(modifier = Modifier.height(12.dp))
                             VideoSettingExpandedPanel {
-                                when (expandedVideoPanel) {
-                                    VideoSettingPanel.ASPECT_RATIO -> {
+                                when (expandedMenuPanel) {
+                                    CameraMenuPanel.ASPECT_RATIO -> {
                                         FlowRow(
                                             modifier = Modifier.fillMaxWidth(),
                                             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -439,14 +494,14 @@ fun CameraTopSheet(
                                                     selected = videoAspectRatio == ratio,
                                                     onClick = {
                                                         onVideoAspectRatioChange(ratio)
-                                                        expandedVideoPanel = null
+                                                        expandedMenuPanel = null
                                                     }
                                                 )
                                             }
                                         }
                                     }
 
-                                    VideoSettingPanel.LOG_PROFILE -> {
+                                    CameraMenuPanel.LOG_PROFILE -> {
                                         FlowRow(
                                             modifier = Modifier.fillMaxWidth(),
                                             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -458,14 +513,14 @@ fun CameraTopSheet(
                                                     selected = videoLogProfile == profile,
                                                     onClick = {
                                                         onVideoLogProfileChange(profile)
-                                                        expandedVideoPanel = null
+                                                        expandedMenuPanel = null
                                                     }
                                                 )
                                             }
                                         }
                                     }
 
-                                    VideoSettingPanel.BITRATE -> {
+                                    CameraMenuPanel.BITRATE -> {
                                         FlowRow(
                                             modifier = Modifier.fillMaxWidth(),
                                             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -477,7 +532,7 @@ fun CameraTopSheet(
                                                     selected = videoBitrate == bitrate,
                                                     onClick = {
                                                         onVideoBitrateChange(bitrate)
-                                                        expandedVideoPanel = null
+                                                        expandedMenuPanel = null
                                                     }
                                                 )
                                             }
@@ -491,51 +546,7 @@ fun CameraTopSheet(
                     }
                 }
 
-                if (captureMode == CaptureMode.PHOTO) {
-                    // More Settings Button
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .clickable(onClick = onMoreSettingsClick)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(color = Color.White.copy(alpha = 0.15f))
-                                .padding(16.dp, 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color.White.copy(alpha = 0.1f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Settings,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = stringResource(R.string.settings_title),
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Icon(
-                                imageVector = AppIcons.ChevronRight,
-                                contentDescription = null,
-                                tint = Color.White.copy(alpha = 0.3f),
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                }
+
             }
         }
     }
@@ -719,10 +730,10 @@ private fun OppoPipelineSlider(
 }
 
 @Composable
-private fun VideoMenuItem(
+private fun CameraMenuItem(
     label: String,
     icon: ImageVector? = null,
-    glyph: VideoMenuGlyph? = null,
+    glyph: CameraMenuGlyph? = null,
     centerText: String? = null,
     selected: Boolean = false,
     enabled: Boolean = true,
@@ -756,11 +767,36 @@ private fun VideoMenuItem(
                     tint = Color.White.copy(alpha = if (enabled) 1f else 0.38f),
                     modifier = Modifier.size(34.dp)
                 )
-                glyph != null -> VideoMenuGlyphIcon(
-                    glyph = glyph,
-                    tint = Color.White.copy(alpha = if (enabled) 1f else 0.38f),
-                    modifier = Modifier.size(34.dp)
-                )
+                glyph != null -> Box(
+                    modifier = Modifier.size(34.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CameraMenuGlyphIcon(
+                        glyph = glyph,
+                        tint = Color.White.copy(alpha = if (enabled) 1f else 0.38f),
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    if (glyph == CameraMenuGlyph.PHOTO_ASPECT && centerText != null) {
+                        Text(
+                            text = centerText,
+                            color = Color.White.copy(alpha = if (enabled) 1f else 0.38f),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1
+                        )
+                    }
+                    if (glyph == CameraMenuGlyph.TIMER && centerText != null) {
+                        Text(
+                            text = centerText,
+                            color = Color.White,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.align(Alignment.BottomCenter)
+                                .background(Color.Black.copy(alpha = 0.65f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 2.dp)
+                        )
+                    }
+                }
                 centerText != null -> Text(
                     text = centerText,
                     color = Color.White.copy(alpha = if (enabled) 1f else 0.38f),
@@ -784,8 +820,8 @@ private fun VideoMenuItem(
 }
 
 @Composable
-private fun VideoMenuGlyphIcon(
-    glyph: VideoMenuGlyph,
+private fun CameraMenuGlyphIcon(
+    glyph: CameraMenuGlyph,
     tint: Color,
     modifier: Modifier = Modifier,
 ) {
@@ -804,12 +840,12 @@ private fun VideoMenuGlyphIcon(
         }
 
         when (glyph) {
-            VideoMenuGlyph.EDIT -> {
+            CameraMenuGlyph.EDIT -> {
                 line(17f, 4f, 17f, 18f)
                 line(9f, 11f, 25f, 11f)
                 line(9f, 25f, 25f, 25f)
             }
-            VideoMenuGlyph.ACTION -> {
+            CameraMenuGlyph.ACTION -> {
                 // Motion trails, head, torso and running limbs.
                 line(1f, 10f, 9f, 10f)
                 line(3f, 17f, 8f, 17f)
@@ -823,7 +859,7 @@ private fun VideoMenuGlyphIcon(
                 line(15f, 18f, 22f, 29f)
                 line(23f, 21f, 29f, 27f)
             }
-            VideoMenuGlyph.DUAL_CAPTURE -> {
+            CameraMenuGlyph.DUAL_CAPTURE -> {
                 drawRoundRect(
                     color = tint,
                     topLeft = Offset(3f * scale, 5f * scale),
@@ -841,7 +877,7 @@ private fun VideoMenuGlyphIcon(
                 drawCircle(tint, radius = 2.4f * scale, center = Offset(23.5f * scale, 20f * scale))
                 line(19f, 27f, 28f, 27f)
             }
-            VideoMenuGlyph.LOG -> {
+            CameraMenuGlyph.LOG -> {
                 line(4f, 12f, 4f, 5f)
                 line(4f, 5f, 11f, 5f)
                 line(23f, 5f, 30f, 5f)
@@ -852,7 +888,7 @@ private fun VideoMenuGlyphIcon(
                 line(30f, 29f, 30f, 22f)
                 drawCircle(tint, radius = 3f * scale, center = Offset(17f * scale, 17f * scale))
             }
-            VideoMenuGlyph.ASPECT_RATIO -> {
+            CameraMenuGlyph.ASPECT_RATIO -> {
                 drawCircle(
                     color = tint.copy(alpha = 0.9f),
                     radius = 12.5f * scale,
@@ -867,6 +903,75 @@ private fun VideoMenuGlyphIcon(
                 }
                 line(17f, 18f, 14f, 7f)
                 line(17f, 18f, 19f, 18f)
+            }
+            CameraMenuGlyph.REFOCUS -> {
+                line(4f, 12f, 4f, 5f)
+                line(4f, 5f, 11f, 5f)
+                line(23f, 5f, 30f, 5f)
+                line(30f, 5f, 30f, 12f)
+                line(4f, 22f, 4f, 29f)
+                line(4f, 29f, 11f, 29f)
+                line(23f, 29f, 30f, 29f)
+                line(30f, 29f, 30f, 22f)
+                drawCircle(tint, radius = 4.1f * scale, center = Offset(17f * scale, 17f * scale))
+            }
+            CameraMenuGlyph.LIVE -> {
+                drawCircle(tint, radius = 12f * scale, center = Offset(16f * scale, 17f * scale), style = Stroke(strokeWidth = stroke))
+                drawCircle(tint, radius = 8f * scale, center = Offset(16f * scale, 17f * scale), style = Stroke(strokeWidth = stroke))
+                drawCircle(tint, radius = 3.2f * scale, center = Offset(16f * scale, 17f * scale))
+                drawCircle(Color.Black.copy(alpha = 0.86f), radius = 5.2f * scale, center = Offset(26f * scale, 25f * scale))
+                drawCircle(tint, radius = 4.6f * scale, center = Offset(26f * scale, 25f * scale), style = Stroke(strokeWidth = 1.3f * scale))
+            }
+            CameraMenuGlyph.PHOTO_ASPECT -> {
+                line(4f, 12f, 4f, 5f)
+                line(4f, 5f, 11f, 5f)
+                line(23f, 5f, 30f, 5f)
+                line(30f, 5f, 30f, 12f)
+                line(4f, 22f, 4f, 29f)
+                line(4f, 29f, 11f, 29f)
+                line(23f, 29f, 30f, 29f)
+                line(30f, 29f, 30f, 22f)
+            }
+            CameraMenuGlyph.TIMER_OFF -> {
+                drawCircle(tint, radius = 12.2f * scale, center = Offset(17f * scale, 18f * scale), style = Stroke(strokeWidth = stroke))
+                line(17f, 3f, 17f, 6f)
+                line(12f, 2.5f, 22f, 2.5f)
+                line(5f, 5f, 29f, 29f)
+            }
+            CameraMenuGlyph.TIMER -> {
+                drawCircle(tint, radius = 12.2f * scale, center = Offset(17f * scale, 18f * scale), style = Stroke(strokeWidth = stroke))
+                line(17f, 3f, 17f, 6f)
+                line(12f, 2.5f, 22f, 2.5f)
+                line(17f, 18f, 17f, 10f)
+                line(17f, 18f, 23f, 21f)
+            }
+            CameraMenuGlyph.BURST -> {
+                drawRoundRect(color = tint, topLeft = Offset(9f * scale, 3f * scale), size = Size(21f * scale, 19f * scale), cornerRadius = CornerRadius(2.5f * scale), style = Stroke(strokeWidth = stroke))
+                drawRoundRect(color = tint, topLeft = Offset(6f * scale, 7f * scale), size = Size(21f * scale, 19f * scale), cornerRadius = CornerRadius(2.5f * scale), style = Stroke(strokeWidth = stroke))
+                drawRoundRect(color = tint, topLeft = Offset(3f * scale, 11f * scale), size = Size(21f * scale, 19f * scale), cornerRadius = CornerRadius(2.5f * scale), style = Stroke(strokeWidth = stroke))
+            }
+            CameraMenuGlyph.STYLES -> {
+                line(5f, 10f, 18f, 3f)
+                line(18f, 3f, 30f, 10f)
+                line(30f, 10f, 17f, 18f)
+                line(17f, 18f, 5f, 10f)
+                line(5f, 16f, 18f, 23f)
+                line(18f, 23f, 30f, 16f)
+                line(5f, 22f, 18f, 30f)
+                line(18f, 30f, 30f, 22f)
+            }
+            CameraMenuGlyph.FILTER -> {
+                drawCircle(tint, radius = 8.5f * scale, center = Offset(13f * scale, 13f * scale), style = Stroke(strokeWidth = stroke))
+                drawCircle(tint, radius = 8.5f * scale, center = Offset(21f * scale, 13f * scale), style = Stroke(strokeWidth = stroke))
+                drawCircle(tint, radius = 8.5f * scale, center = Offset(17f * scale, 22f * scale), style = Stroke(strokeWidth = stroke))
+            }
+            CameraMenuGlyph.DEPTH -> {
+                line(4f, 7f, 12f, 7f)
+                line(8f, 14f, 16f, 14f)
+                line(4f, 21f, 12f, 21f)
+                line(20f, 5f, 29f, 14f)
+                line(29f, 14f, 20f, 23f)
+                line(20f, 23f, 16f, 27f)
             }
         }
     }
