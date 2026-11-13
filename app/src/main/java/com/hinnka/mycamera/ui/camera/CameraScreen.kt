@@ -2492,7 +2492,7 @@ fun CaptureButton(
             modifier = Modifier
                 .fillMaxSize()
                 .border(
-                    width = 1.dp,
+                    width = if (captureMode == CaptureMode.VIDEO) 2.dp else 1.dp,
                     color = ringColor,
                     shape = CircleShape
                 )
@@ -2514,14 +2514,8 @@ fun CaptureButton(
         )
         val defaultCenterBackground = when {
             captureMode == CaptureMode.VIDEO -> {
-                Modifier.background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color(0xFFFF6668),
-                            Color(0xFFE4383C)
-                        )
-                    )
-                )
+                // Flat saturated red video shutter, matching the reference capture button.
+                Modifier.background(Color(0xFFFF3038))
             }
             isProfessionalMode -> Modifier.background(AccentColor)
             else -> {
