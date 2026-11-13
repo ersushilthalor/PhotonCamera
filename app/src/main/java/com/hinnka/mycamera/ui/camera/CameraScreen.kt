@@ -1173,7 +1173,9 @@ fun CameraScreen(
         val viewfinder = @Composable {
             Card(
                 modifier = Modifier
-                    .animateContentSize(alignment = Alignment.Center)
+                    // Keep the live GL surface at its final aspect ratio during mode changes.
+                    // animateContentSize() resizes its SurfaceView buffer through intermediate
+                    // heights while the Camera2 session is paused, visibly stretching the last frame.
                     .width(cardWidth)
                     .height(cardHeight),
                 shape = RoundedCornerShape(if (isXpan) XpanViewfinderInnerBorder else 0.dp),
