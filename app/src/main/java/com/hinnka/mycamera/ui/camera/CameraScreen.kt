@@ -891,15 +891,21 @@ fun CameraScreen(
             WindowInsets.navigationBars.getBottom(this).toDp()
         }
         val contentHeight = (height - navigationBarHeight).coerceAtLeast(0.dp)
+        // In video mode, stop the preview at the shutter's lower edge. The mode
+        // selector remains below it instead of being covered by the viewfinder.
+        val videoViewfinderBottom = (
+            contentHeight - (CameraControlsLayoutDefaults.ModeAreaHeight -
+                CameraControlsLayoutDefaults.VerticalOffset)
+        ).coerceAtLeast(0.dp)
         val viewfinderFramePadding = if (isXpan) XpanViewfinderInnerBorder * 2 else 0.dp
         val sideControlSpace = if (isXpan) XpanSideControlReservedWidth else 0.dp
         val maxCardWidth = (width - sideControlSpace * 2)
             .coerceAtLeast(viewfinderFramePadding)
-        val maxCardHeight = if (isXpan) {
-            (contentHeight - topBarBottom - CameraControlsLayoutDefaults.XpanViewfinderClearance)
+        val maxCardHeight = when {
+            isXpan -> (contentHeight - topBarBottom - CameraControlsLayoutDefaults.XpanViewfinderClearance)
                 .coerceAtLeast(viewfinderFramePadding)
-        } else {
-            contentHeight
+            isVideoMode -> videoViewfinderBottom
+            else -> contentHeight
         }
         val maxViewfinderContentWidth = (maxCardWidth - viewfinderFramePadding)
             .coerceAtLeast(0.dp)
@@ -921,12 +927,22 @@ fun CameraScreen(
             ((contentHeight - topBarBottom - cardHeight -
                 CameraControlsLayoutDefaults.CollapsedControlsHeight) / 2).coerceAtLeast(0.dp)
         }
-        val viewfinderTop = (if (placeViewfinderBelowTopBar) {
-            topBarBottom + extraViewfinderTopSpacing
+        val viewfinderTop = if (isVideoMode) {
+            // Anchor the video frame to the shutter bottom; its height is constrained
+            // above, so it cannot extend behind the Photo/Video selector.
+            (videoViewfinderBottom - cardHeight).coerceAtLeast(0.dp)
         } else {
-            ((contentHeight - cardHeight) / 2).coerceAtLeast(0.dp)
-        }) + CameraControlsLayoutDefaults.VerticalOffset
-        val viewfinderTopOverlayPadding = (topBarBottom - viewfinderTop).coerceAtLeast(0.dp)
+            (if (placeViewfinderBelowTopBar) {
+                topBarBottom + extraViewfinderTopSpacing
+            } else {
+                ((contentHeight - cardHeight) / 2).coerceAtLeast(0.dp)
+            }) + CameraControlsLayoutDefaults.VerticalOffset
+        }
+        val viewfinderTopOverlayPadding = if (isVideoMode) {
+            0.dp
+        } else {
+            (topBarBottom - viewfinderTop).coerceAtLeast(0.dp)
+        }
 
         val topBar = @Composable {
             CameraTopBar(
@@ -1645,6 +1661,15 @@ fun CameraScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     viewfinder()
+                    if (isVideoMode) {
+                        // Keep video controls attached to the actual viewfinder edges.
+                        Box(
+                            modifier = Modifier.width(cardWidth).fillMaxHeight(),
+                            contentAlignment = Alignment.TopCenter
+                        ) {
+                            topBar()
+                        }
+                    }
                     if (uiStyle == "OPPO" && activePanel == ActivePanel.NONE && !isXpan) {
                         Box(
                             modifier = Modifier
@@ -1687,7 +1712,7 @@ fun CameraScreen(
                     }
                 }
     
-                topBar()
+                if (!isVideoMode) topBar()
             }
 
             Box(
