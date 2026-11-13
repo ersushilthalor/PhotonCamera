@@ -3,6 +3,8 @@ package com.hinnka.mycamera.ui.camera
 import android.media.AudioDeviceInfo
 import android.os.Build
 import androidx.compose.animation.*
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -19,6 +21,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
@@ -139,27 +142,56 @@ fun CameraTopSheet(
 
     AnimatedVisibility(
         visible = visible,
-        enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
-        exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+        // Match OppoCam's six-dot menu: a compact card that unfolds from the top
+        // instead of a full-width square sheet.
+        enter = fadeIn(animationSpec = tween(170)) +
+            scaleIn(
+                initialScale = 0.80f,
+                animationSpec = spring(dampingRatio = 0.50f, stiffness = 420f)
+            ) +
+            expandVertically(
+                expandFrom = Alignment.Top,
+                animationSpec = spring(dampingRatio = 0.66f, stiffness = 360f)
+            ),
+        exit = fadeOut(animationSpec = tween(130)) +
+            scaleOut(
+                targetScale = 0.94f,
+                animationSpec = tween(130)
+            ) +
+            shrinkVertically(
+                shrinkTowards = Alignment.Top,
+                animationSpec = tween(160)
+            ),
         modifier = modifier
+            .fillMaxWidth()
+            .padding(top = contentTopPadding, start = 14.dp, end = 14.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
-                .background(Color.Black.copy(alpha = 0.8f))
-                // Keep the screen's top inset fixed, but measure content and side padding
-                // in the rotated viewport so landscape controls stay inside the sheet.
-                .padding(top = contentTopPadding)
-                .autoRotate(matchParentSize = true)
-                .padding(horizontal = 24.dp)
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.TopCenter
         ) {
             Column(
                 modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
+                    .widthIn(max = 420.dp)
+                    .fillMaxWidth()
+                    .heightIn(max = 600.dp)
+                    .shadow(
+                        elevation = 18.dp,
+                        shape = RoundedCornerShape(24.dp)
+                    )
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color(0xE51A1A1E))
+                    .border(
+                        width = 1.dp,
+                        color = Color.White.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(24.dp)
+                    )
+                    .padding(horizontal = 18.dp, vertical = 16.dp)
+                    .autoRotate()
             ) {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState())
+                ) {
                 if (captureMode == CaptureMode.PHOTO) {
                     val isProfessionalMode = useRaw && isRawSupported
                     SectionLabel(title = stringResource(R.string.aspect_ratio))
