@@ -41,6 +41,7 @@ import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.roundToInt
 import com.hinnka.mycamera.ui.icons.AppIcons
+import com.hinnka.mycamera.ui.components.glassUiSurface
 
 /**
  * 显示模式：变焦倍率 or 35mm等效焦距
@@ -317,8 +318,11 @@ private fun ZoomPresetPill(
 
     Row(
         modifier = modifier
-            .clip(CircleShape)
-            .background(Color(0xFF25242C))
+            .glassUiSurface(
+                shape = CircleShape,
+                tint = Color(0xDD25242C),
+                rimStrength = 0.9f
+            )
             .padding(horizontal = 4.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -336,8 +340,11 @@ private fun ZoomPresetPill(
                     Box(
                         modifier = Modifier
                             .size(29.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF484651))
+                            .glassUiSurface(
+                                shape = CircleShape,
+                                tint = Color(0xAD6B6975),
+                                rimStrength = 1.15f
+                            )
                     )
                 }
                 val label = when {
