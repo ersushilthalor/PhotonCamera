@@ -282,6 +282,7 @@ fun CameraTopSheet(
                                 label = "BRUST",
                                 glyph = CameraMenuGlyph.BURST,
                                 selected = oppoPhotoSettings.fastShutterEnabled,
+                                enabled = !isProfessionalMode,
                                 onClick = {
                                     onOppoPhotoSettingsChange(
                                         oppoPhotoSettings.copy(
