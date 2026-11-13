@@ -2475,6 +2475,7 @@ fun CaptureButton(
                 )
             },
         shape = CircleShape,
+        backgroundColor = Color(0xFF2D2D2D),
         contentAlignment = Alignment.Center
     ) {
         val ringColor = when {
@@ -2484,7 +2485,7 @@ fun CaptureButton(
                 if (isPaused) Color.White.copy(alpha = 0.8f)
                 else Color.Red.copy(alpha = pulseAlpha)
             }
-            else -> Color.White.copy(alpha = 0.32f)
+            else -> Color(0xFF505050)
         }
 
         Box(
@@ -2502,7 +2503,7 @@ fun CaptureButton(
             targetValue = when {
                 captureMode == CaptureMode.VIDEO && isVideoRecording -> 19.dp
                 progressRingCount > 0 -> CaptureProgressRingDefaults.contentPadding(progressRingCount)
-                else -> 2.dp
+                else -> 3.dp
             },
             animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow),
             label = "centerPadding"
@@ -2665,14 +2666,33 @@ private fun CaptureModeSwitcher(
                     fallbackColor = Color.Transparent
                 )
             }
+            val outerGlassStyle = remember {
+                LiquidGlassStyle(
+                    blurRadius = 0.6.dp,
+                    refractionHeight = 20.dp,
+                    refractionAmount = 14.dp,
+                    saturation = 1.55f,
+                    tint = Color.Transparent,
+                    highlightWidth = 0.45.dp,
+                    highlightBlur = 0.35.dp,
+                    highlightAlpha = 0.42f,
+                    fallbackColor = Color.Transparent
+                )
+            }
+            LiquidGlassSurface(
+                backdrop = modeSwitcherBackdrop,
+                modifier = Modifier.fillMaxSize(),
+                cornerRadius = 19.5.dp,
+                style = outerGlassStyle
+            ) {}
             Box(
                 modifier = Modifier
                     .offset(x = knobOffset)
                     .width(knobWidth)
                     .fillMaxHeight()
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.06f))
-                    .border(0.65.dp, Color.White.copy(alpha = 0.28f), CircleShape)
+                    .background(Color.White.copy(alpha = 0.035f))
+                    .border(0.5.dp, Color.White.copy(alpha = 0.18f), CircleShape)
             ) {
                 LiquidGlassSurface(
                     backdrop = modeSwitcherBackdrop,
