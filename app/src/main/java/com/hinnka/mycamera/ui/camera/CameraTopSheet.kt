@@ -40,8 +40,6 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import com.qmdeve.blurview.widget.BlurView
 import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.ui.theme.OnAccentColor
 import com.hinnka.mycamera.R
@@ -198,7 +196,7 @@ fun CameraTopSheet(
             modifier = Modifier.fillMaxWidth(),
             contentAlignment = Alignment.TopCenter
         ) {
-            Box(
+            Column(
                 modifier = Modifier
                     .widthIn(max = 420.dp)
                     .fillMaxWidth()
@@ -208,32 +206,15 @@ fun CameraTopSheet(
                         shape = RoundedCornerShape(24.dp)
                     )
                     .clip(RoundedCornerShape(24.dp))
+                    .background(Color(0xE51A1A1E))
                     .border(
                         width = 1.dp,
                         color = Color.White.copy(alpha = 0.12f),
                         shape = RoundedCornerShape(24.dp)
                     )
+                    .padding(horizontal = 18.dp, vertical = 16.dp)
                     .autoRotate()
             ) {
-                AndroidView(
-                    modifier = Modifier.matchParentSize(),
-                    factory = { context ->
-                        BlurView(context, null).apply {
-                            val density = context.resources.displayMetrics.density
-                            setBlurRadius(24f * density)
-                            setBlurRounds(2)
-                            setDownsampleFactor(3.5f)
-                            setOverlayColor(android.graphics.Color.argb(150, 26, 26, 30))
-                            setCornerRadius(24f * density)
-                        }
-                    }
-                )
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 600.dp)
-                        .padding(horizontal = 18.dp, vertical = 16.dp)
-                ) {
                 Column(
                     modifier = Modifier.verticalScroll(rememberScrollState())
                 ) {
@@ -633,7 +614,6 @@ fun CameraTopSheet(
 
             }
         }
-            }
     }
     }
 
