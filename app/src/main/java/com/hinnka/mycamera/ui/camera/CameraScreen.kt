@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.paint
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
@@ -112,6 +113,7 @@ private enum class CameraShootingMode {
 }
 
 private const val PreviewTransitionRevealDurationMillis = 800
+private const val PhotoVideoViewfinderExpansionDurationMillis = 300
 private const val RawCaptureTapDebounceMillis = 1000L
 private const val DefaultShutterSpeedNs = 1_000_000_000f / 60f
 private const val DefaultIso = 100f
@@ -225,6 +227,15 @@ fun CameraScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
+    var previousPreviewCaptureMode by remember { mutableStateOf(state.captureMode) }
+    val isPhotoVideoModeTransition = previousPreviewCaptureMode != state.captureMode
+
+    LaunchedEffect(state.captureMode) {
+        if (isPhotoVideoModeTransition) {
+            delay(PhotoVideoViewfinderExpansionDurationMillis.toLong())
+        }
+        previousPreviewCaptureMode = state.captureMode
+    }
     val uiStyle by viewModel.uiStyle.collectAsState()
     val isCameraInitialized by viewModel.isInitialized.collectAsState()
     val latestPhoto by galleryViewModel.latestPhoto.collectAsState()
@@ -986,6 +997,25 @@ fun CameraScreen(
         } else {
             (topBarBottom - viewfinderTop).coerceAtLeast(0.dp)
         }
+        val viewfinderBoundsAnimationSpec = if (isPhotoVideoModeTransition) {
+            tween(
+                durationMillis = PhotoVideoViewfinderExpansionDurationMillis,
+                easing = FastOutSlowInEasing
+            )
+        } else {
+            snap()
+        }
+        val animatedViewfinderHeight by animateDpAsState(
+            targetValue = cardHeight,
+            animationSpec = viewfinderBoundsAnimationSpec,
+            label = "photoVideoViewfinderHeight"
+        )
+        val animatedViewfinderCenterY by animateDpAsState(
+            targetValue = viewfinderTop + cardHeight / 2,
+            animationSpec = viewfinderBoundsAnimationSpec,
+            label = "photoVideoViewfinderCenter"
+        )
+        val animatedViewfinderTop = animatedViewfinderCenterY - animatedViewfinderHeight / 2
 
         val topBar = @Composable {
             CameraTopBar(
@@ -1707,9 +1737,10 @@ fun CameraScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(cardHeight)
+                        .height(animatedViewfinderHeight)
                         .align(Alignment.TopCenter)
-                        .offset(y = viewfinderTop + (if (isVideoMode) 3.dp else 0.dp))
+                        .offset(y = animatedViewfinderTop + (if (isVideoMode) 3.dp else 0.dp))
+                        .clipToBounds()
                         .onGloballyPositioned { coordinates ->
                             viewfinderAreaBounds = coordinates.boundsInRoot()
                         },
@@ -1717,7 +1748,7 @@ fun CameraScreen(
                 ) {
                     Box(
                         modifier = Modifier
-                            .fillMaxSize()
+                            .requiredSize(cardWidth, cardHeight)
                             .liquidGlassBackdropSource(videoTopBarBackdrop)
                     ) {
                         viewfinder()
@@ -1728,7 +1759,7 @@ fun CameraScreen(
                         Box(
                             modifier = Modifier
                                 .width(cardWidth)
-                                .fillMaxHeight()
+                                .requiredHeight(cardHeight)
                                 // Keep video top controls at their original screen position
                                 // while the viewfinder itself is shifted down by 3dp.
                                 .offset(y = (-3).dp),
@@ -1753,7 +1784,7 @@ fun CameraScreen(
                         Box(
                             modifier = Modifier
                                 .width(cardWidth)
-                                .height(cardHeight)
+                                .requiredHeight(cardHeight)
                                 .align(Alignment.Center)
                         ) {
                             Box(
