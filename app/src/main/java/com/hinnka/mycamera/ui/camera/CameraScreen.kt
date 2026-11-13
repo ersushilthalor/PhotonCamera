@@ -1674,7 +1674,8 @@ fun CameraScreen(
                         viewfinder()
                     }
                     if (isVideoMode) {
-                        // Keep video controls attached to the actual viewfinder edges.
+                        // Keep video top controls at their previous screen position,
+                        // independent of the viewfinder's vertical offset.
                         Box(
                             modifier = Modifier
                                 .width(cardWidth)
