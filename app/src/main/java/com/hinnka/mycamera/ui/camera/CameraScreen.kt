@@ -2183,9 +2183,11 @@ private fun Controls(
                     onTap = onCaptureTap,
                     onLongPressStart = { viewModel.startContinuousCapture() },
                     onLongPressEnd = { viewModel.stopContinuousCapture() },
-                    modifier = Modifier.onGloballyPositioned { coordinates ->
-                        onCaptureButtonBoundsChanged(coordinates.boundsInRoot())
-                    },
+                    modifier = Modifier
+                        .offset(y = (-2).dp)
+                        .onGloballyPositioned { coordinates ->
+                            onCaptureButtonBoundsChanged(coordinates.boundsInRoot())
+                        },
                 )
 
                 if (state.videoRecordingState.isRecording) {
