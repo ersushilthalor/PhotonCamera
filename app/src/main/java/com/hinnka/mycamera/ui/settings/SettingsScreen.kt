@@ -3115,7 +3115,7 @@ fun TextInputSettingItem(
 
     if (showDialog) {
         var tempValue by remember { mutableStateOf(value) }
-        AppAppAlertDialog(
+        AppAlertDialog(
             onDismissRequest = { showDialog = false },
             title = { Text(text = title) },
             text = {
