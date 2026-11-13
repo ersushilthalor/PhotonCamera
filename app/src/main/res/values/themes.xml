@@ -9,7 +9,7 @@
     <style name="Theme.MyCamera.Splash" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/black</item>
         <item name="android:windowBackground">@color/black</item>
-        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
         <item name="splashScreenIconSize">112dp</item>
         <item name="postSplashScreenTheme">@style/Theme.MyCamera</item>
     </style>
