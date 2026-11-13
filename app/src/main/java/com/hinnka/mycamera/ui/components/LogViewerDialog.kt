@@ -58,12 +58,19 @@ fun LogViewerDialog(
             dismissOnClickOutside = true
         )
     ) {
+        GlassDialogBackdropEffect(radius = 32.dp)
         Surface(
             modifier = modifier
                 .fillMaxWidth(0.95f)
-                .fillMaxHeight(0.9f),
+                .fillMaxHeight(0.9f)
+                .glassUiSurface(
+                    shape = RoundedCornerShape(16.dp),
+                    tint = Color(0xE62B2F3A),
+                    rimStrength = 1f
+                ),
             shape = RoundedCornerShape(16.dp),
-            color = Color(0xFF2B2F3A)
+            color = Color.Transparent,
+            tonalElevation = 0.dp
         ) {
             Column(
                 modifier = Modifier.fillMaxSize()
