@@ -1,6 +1,5 @@
 package com.hinnka.mycamera.ui.camera
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -13,7 +12,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -287,29 +285,21 @@ private fun AspectRatioAction(
             },
         onClick = onClick
     ) {
-        Box(
+        Column(
             modifier = Modifier.size(width = 31.dp, height = 25.dp),
-            contentAlignment = Alignment.Center
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val stroke = 1.45.dp.toPx()
-                val edge = 1.dp.toPx()
-                val corner = 5.dp.toPx()
-                val right = size.width - edge
-                val bottom = size.height - edge
-                drawLine(Color.White, Offset(edge, edge), Offset(edge + corner, edge), stroke)
-                drawLine(Color.White, Offset(edge, edge), Offset(edge, edge + corner), stroke)
-                drawLine(Color.White, Offset(right - corner, edge), Offset(right, edge), stroke)
-                drawLine(Color.White, Offset(right, edge), Offset(right, edge + corner), stroke)
-                drawLine(Color.White, Offset(edge, bottom - corner), Offset(edge, bottom), stroke)
-                drawLine(Color.White, Offset(edge, bottom), Offset(edge + corner, bottom), stroke)
-                drawLine(Color.White, Offset(right - corner, bottom), Offset(right, bottom), stroke)
-                drawLine(Color.White, Offset(right, bottom - corner), Offset(right, bottom), stroke)
-            }
+            Icon(
+                imageVector = AppIcons.Crop169,
+                contentDescription = null,
+                modifier = Modifier.size(width = 22.dp, height = 15.dp),
+                tint = Color.White
+            )
             Text(
                 text = text,
                 color = Color.White,
-                fontSize = 9.sp,
+                fontSize = 8.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 softWrap = false
