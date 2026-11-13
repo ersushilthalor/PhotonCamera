@@ -743,7 +743,7 @@ fun CameraScreen(
     }
 
     if (viewModel.showEnhancedStabilizationUnavailableDialog) {
-        AlertDialog(
+        AppAlertDialog(
             onDismissRequest = viewModel::dismissEnhancedStabilizationUnavailableDialog,
             title = {
                 Text(
@@ -766,7 +766,7 @@ fun CameraScreen(
     }
 
     if (showGhostPermissionDialog) {
-        AlertDialog(
+        AppAlertDialog(
             onDismissRequest = { showGhostPermissionDialog = false },
             title = {
                 Text(
@@ -1665,9 +1665,11 @@ fun CameraScreen(
                                 .align(Alignment.CenterEnd)
                                 .padding(end = 12.dp)
                                 .size(44.dp)
-                                .clip(CircleShape)
-                                .background(Color.Black.copy(alpha = 0.68f))
-                                .border(1.dp, Color.White.copy(alpha = 0.78f), CircleShape)
+                                .glassUiSurface(
+                                    shape = CircleShape,
+                                    tint = Color(0xB80A0C11),
+                                    rimStrength = 1.1f
+                                )
                                 .clickable { zoomJoystickOpen = !zoomJoystickOpen },
                             contentAlignment = Alignment.Center
                         ) {
@@ -2027,16 +2029,11 @@ fun MultipleExposureOverlay(
         ) {
             Row(
                 modifier = Modifier
-                    .background(
-                        brush = Brush.horizontalGradient(
-                            listOf(
-                                Color(0xD90D1117),
-                                Color(0xB8141B22)
-                            )
-                        ),
-                        shape = RoundedCornerShape(20.dp)
+                    .glassUiSurface(
+                        shape = RoundedCornerShape(20.dp),
+                        tint = Color(0xC90D1117),
+                        rimStrength = 0.85f
                     )
-                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(18.dp))
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
