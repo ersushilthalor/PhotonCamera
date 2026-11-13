@@ -17,8 +17,6 @@ import com.hinnka.mycamera.model.ColorRecipeParams
 import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD
 import com.hinnka.mycamera.stabilization.RealtimeStabilizationCoordinator
 import com.hinnka.mycamera.stabilization.StabilizationUseCase
-import com.hinnka.mycamera.stabilization.VideoHorizontalLockState
-import com.hinnka.mycamera.stabilization.applyHorizontalLockMvpMatrix
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.video.VideoEncoderColorConfig
 import com.hinnka.mycamera.video.VideoEncodedColorPipeline
@@ -108,8 +106,6 @@ class RealtimeVideoRenderer(
             )
         }
     }
-    private val horizontalLockMvpMatrix = FloatArray(16)
-    private val horizontalLockRotationMatrix = FloatArray(16)
     private val fullCropRect = floatArrayOf(0f, 0f, 1f, 1f)
     private var cameraCropRect = fullCropRect
     @Volatile private var cameraTransformAxesSwapped: Boolean? = null
@@ -335,18 +331,7 @@ class RealtimeVideoRenderer(
         val firstLayer = layers.first()
         val grainEnabled = finalFilmGrainEnabled
         val firstTargetFbo = if (layers.size > 1 || grainEnabled) intermediateFboId else 0
-        val cameraMvpMatrix = if (VideoHorizontalLockState.isEnabled) {
-            applyHorizontalLockMvpMatrix(
-                baseMvpMatrix = firstPassMvpMatrix,
-                targetWidth = encoderOutputSize.width,
-                targetHeight = encoderOutputSize.height,
-                correctionDegrees = VideoHorizontalLockState.correctionDegrees,
-                output = horizontalLockMvpMatrix,
-                rotationScratch = horizontalLockRotationMatrix,
-            )
-        } else {
-            firstPassMvpMatrix
-        }
+        val cameraMvpMatrix = firstPassMvpMatrix
         drawLayer(
             layer = firstLayer,
             targetFboId = firstTargetFbo,

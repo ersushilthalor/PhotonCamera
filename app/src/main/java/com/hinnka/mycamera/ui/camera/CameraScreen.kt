@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
@@ -79,7 +78,6 @@ import com.hinnka.mycamera.model.LutSelectorMode
 import com.hinnka.mycamera.raw.SpectralFilmSelection
 import com.hinnka.mycamera.ui.components.*
 import com.hinnka.mycamera.utils.OrientationObserver
-import com.hinnka.mycamera.stabilization.VideoHorizontalLockState
 import com.hinnka.mycamera.viewmodel.CameraViewModel
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
 import com.hinnka.mycamera.video.CaptureMode
@@ -847,13 +845,6 @@ fun CameraScreen(
         val backgroundPainter = rememberBackgroundPainter(viewModel)
 
         val isVideoMode = state.captureMode == CaptureMode.VIDEO
-        var horizontalLockEnabled by rememberSaveable { mutableStateOf(false) }
-        LaunchedEffect(isVideoMode, horizontalLockEnabled) {
-            VideoHorizontalLockState.setEnabled(
-                enabled = isVideoMode && horizontalLockEnabled,
-                currentOrientationDegrees = OrientationObserver.horizontalLockOrientationDegrees,
-            )
-        }
         val isPhotoStyleMode = state.captureMode != CaptureMode.VIDEO
         val zoomJoystickSupported =
             !state.useRaw &&
@@ -1344,7 +1335,6 @@ fun CameraScreen(
                                 state.videoConfig.enhancedStabilizationStrength,
                             videoPreviewStabilizationLookahead =
                                 state.videoConfig.enhancedStabilizationLookahead,
-                            horizontalLockEnabled = isVideoMode && horizontalLockEnabled,
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -1711,48 +1701,6 @@ fun CameraScreen(
             }
 
             topBar()
-
-            val horizontalLockButtonOffset = filterButtonBounds?.let { filterBounds ->
-                with(density) {
-                    IntOffset(
-                        x = (filterBounds.center.x - (cameraScreenBounds?.left ?: 0f)).roundToInt() -
-                            20.dp.roundToPx(),
-                        y = (filterBounds.top - (cameraScreenBounds?.top ?: 0f)).roundToInt() -
-                            48.dp.roundToPx(),
-                    )
-                }
-            }
-            if (
-                isVideoMode &&
-                activePanel == ActivePanel.NONE &&
-                horizontalLockButtonOffset != null
-            ) {
-                Box(
-                    modifier = Modifier
-                        .offset { horizontalLockButtonOffset }
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.68f))
-                        .border(
-                            width = 1.dp,
-                            color = if (horizontalLockEnabled) {
-                                AccentColor
-                            } else {
-                                Color.White.copy(alpha = 0.72f)
-                            },
-                            shape = CircleShape,
-                        )
-                        .clickable { horizontalLockEnabled = !horizontalLockEnabled },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = "Horizontal lock",
-                        modifier = Modifier.size(19.dp),
-                        tint = if (horizontalLockEnabled) AccentColor else Color.White,
-                    )
-                }
-            }
 
             CameraBottomControlsLayout(
                 viewfinderBottom = viewfinderTop + cardHeight,
