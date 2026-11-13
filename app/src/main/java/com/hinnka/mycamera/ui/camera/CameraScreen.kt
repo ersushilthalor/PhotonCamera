@@ -2116,41 +2116,11 @@ private fun Controls(
                 .padding(bottom = CameraControlsLayoutDefaults.BottomPadding),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Keep the shutter centered on its own row.
             Box(
                 modifier = Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .padding(start = sideControlInset ?: 32.dp)
-                        .onGloballyPositioned { coordinates ->
-                            onGalleryThumbnailBoundsChanged(coordinates.boundsInRoot())
-                        }
-                        .autoRotate()
-                ) {
-                    GalleryThumbnail(
-                        latestPhoto = latestPhoto,
-                        viewModel = galleryViewModel,
-                        capturedThumbnail = capturedThumbnail,
-                        onCapturedThumbnailLoaded = viewModel::acknowledgeCapturedThumbnail,
-                        onClick = onGalleryClick
-                    )
-                    key(capturedThumbnail?.captureId) {
-                        GalleryProcessingOverlay(
-                            pendingCount = if (capturedThumbnail == null || capturedThumbnail?.bitmap != null ||
-                                capturedThumbnail?.finalThumbnailLoaded == true
-                            ) {
-                                captureProcessingState.pendingCount
-                            } else {
-                                0
-                            },
-                            completedCount = captureProcessingState.completedCount,
-                            modifier = Modifier.matchParentSize()
-                        )
-                    }
-                }
-
                 CaptureButton(
                     captureMode = state.captureMode,
                     isProfessionalMode = state.useRaw && state.isRawSupported,
@@ -2164,7 +2134,7 @@ private fun Controls(
                         !useMultipleExposure && fastShutterEnabled,
                     multipleExposureEnabled = useMultipleExposure && state.captureMode == CaptureMode.PHOTO,
                     multipleExposureProgress = multipleExposureState.capturedCount.toFloat() /
-                            multipleExposureState.targetCount.coerceAtLeast(1).toFloat(),
+                        multipleExposureState.targetCount.coerceAtLeast(1).toFloat(),
                     customStyle = if (uiStyle == "OPPO" && state.captureMode != CaptureMode.VIDEO) {
                         CaptureButtonStyle.COLOR
                     } else {
@@ -2207,6 +2177,65 @@ private fun Controls(
                         )
                     }
                 }
+            }
+
+            Spacer(modifier = Modifier.height(CameraControlsLayoutDefaults.ModeSwitcherSpacing))
+
+            // Match the reference: gallery, Photo/Video selector and camera switch
+            // share one horizontal row beneath the centered shutter.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(CameraControlsLayoutDefaults.ModeSwitcherHeight),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = sideControlInset ?: 32.dp)
+                        .onGloballyPositioned { coordinates ->
+                            onGalleryThumbnailBoundsChanged(coordinates.boundsInRoot())
+                        }
+                        .autoRotate()
+                ) {
+                    GalleryThumbnail(
+                        latestPhoto = latestPhoto,
+                        viewModel = galleryViewModel,
+                        capturedThumbnail = capturedThumbnail,
+                        onCapturedThumbnailLoaded = viewModel::acknowledgeCapturedThumbnail,
+                        onClick = onGalleryClick
+                    )
+                    key(capturedThumbnail?.captureId) {
+                        GalleryProcessingOverlay(
+                            pendingCount = if (
+                                capturedThumbnail == null ||
+                                capturedThumbnail?.bitmap != null ||
+                                capturedThumbnail?.finalThumbnailLoaded == true
+                            ) {
+                                captureProcessingState.pendingCount
+                            } else {
+                                0
+                            },
+                            completedCount = captureProcessingState.completedCount,
+                            modifier = Modifier.matchParentSize()
+                        )
+                    }
+                }
+
+                CaptureModeSwitcher(
+                    oppoStyle = uiStyle == "OPPO",
+                    modeSwitcherBackdrop = modeSwitcherBackdrop,
+                    // Pro/RAW remains an internal capture option, not a visible mode.
+                    shootingMode = if (state.captureMode == CaptureMode.VIDEO) {
+                        CameraShootingMode.VIDEO
+                    } else {
+                        CameraShootingMode.PHOTO
+                    },
+                    enabled = modeSwitchEnabled &&
+                        !state.videoRecordingState.isRecording &&
+                        !state.videoRecordingState.isProcessing,
+                    onModeSelected = onCaptureModeSelected
+                )
 
                 PhysicalButton(
                     onClick = {
@@ -2219,7 +2248,8 @@ private fun Controls(
                         .padding(end = sideControlInset ?: 40.dp)
                         .size(CameraControlsLayoutDefaults.SideButtonSize)
                         .autoRotate(),
-                    shape = CircleShape
+                    shape = CircleShape,
+                    backgroundColor = Color.White.copy(alpha = 0.12f)
                 ) {
                     Icon(
                         imageVector = AppIcons.Cameraswitch,
@@ -2231,24 +2261,6 @@ private fun Controls(
                     )
                 }
             }
-
-            Spacer(modifier = Modifier.height(CameraControlsLayoutDefaults.ModeSwitcherSpacing))
-
-            CaptureModeSwitcher(
-                oppoStyle = uiStyle == "OPPO",
-                modeSwitcherBackdrop = modeSwitcherBackdrop,
-                // Pro/RAW remains an internal capture option, but is no longer a
-                // separate item in the visible Photo/Video mode switcher.
-                shootingMode = if (state.captureMode == CaptureMode.VIDEO) {
-                    CameraShootingMode.VIDEO
-                } else {
-                    CameraShootingMode.PHOTO
-                },
-                enabled = modeSwitchEnabled &&
-                    !state.videoRecordingState.isRecording &&
-                    !state.videoRecordingState.isProcessing,
-                onModeSelected = onCaptureModeSelected
-            )
         }
     }
 }
@@ -2262,7 +2274,7 @@ private fun GalleryProcessingOverlay(
 ) {
     val completionAlpha = remember { Animatable(0f) }
     var lastAcknowledgedCompletion by remember { mutableLongStateOf(completedCount) }
-    val thumbnailShape = RoundedCornerShape(10.dp)
+    val thumbnailShape = CircleShape
 
     LaunchedEffect(pendingCount, completedCount) {
         if (pendingCount > 0) {
@@ -2579,19 +2591,25 @@ private fun CaptureModeSwitcher(
         modifier = Modifier
             .width(171.dp)
             .height(CameraControlsLayoutDefaults.ModeSwitcherHeight)
-            .clip(RoundedCornerShape(18.dp))
-            .background(if (oppoStyle) Color(0xFF202020) else Color.Black.copy(alpha = 0.28f))
-            .border(
-                width = 0.5.dp,
-                color = if (oppoStyle) Color(0xFF333333) else Color.White.copy(alpha = 0.18f),
-                shape = RoundedCornerShape(18.dp)
+            .clip(if (oppoStyle) RoundedCornerShape(18.dp) else CircleShape)
+            .background(if (oppoStyle) Color(0xFF202020) else Color.White.copy(alpha = 0.13f))
+            .then(
+                if (oppoStyle) {
+                    Modifier.border(
+                        width = 0.5.dp,
+                        color = Color(0xFF333333),
+                        shape = RoundedCornerShape(18.dp)
+                    )
+                } else {
+                    Modifier
+                }
             )
             .padding(3.dp)
     ) {
         // The visible switcher contains only Photo and Video. Pro/RAW capture
         // internals are preserved but are not exposed as a separate UI mode.
         val knobWidth = maxWidth / 2
-        val selectedIndex = if (shootingMode == CameraShootingMode.VIDEO) 1 else 0
+        val selectedIndex = if (shootingMode == CameraShootingMode.VIDEO) 0 else 1
         val knobOffset by animateDpAsState(
             targetValue = knobWidth * selectedIndex,
             animationSpec = tween(durationMillis = 220),
@@ -2625,29 +2643,27 @@ private fun CaptureModeSwitcher(
                     fallbackColor = Color.Transparent
                 )
             }
-            LiquidGlassSurface(
-                backdrop = modeSwitcherBackdrop,
+            Box(
                 modifier = Modifier
                     .offset(x = knobOffset)
                     .width(knobWidth)
-                    .fillMaxHeight(),
-                cornerRadius = 15.dp,
-                style = liquidGlassStyle
-            ) {}
+                    .fillMaxHeight()
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.06f))
+                    .border(0.65.dp, Color.White.copy(alpha = 0.28f), CircleShape)
+            ) {
+                LiquidGlassSurface(
+                    backdrop = modeSwitcherBackdrop,
+                    modifier = Modifier.fillMaxSize(),
+                    cornerRadius = 19.5.dp,
+                    style = liquidGlassStyle
+                ) {}
+            }
         }
         Row(
             modifier = Modifier.fillMaxSize(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            ModeSwitcherItem(
-                label = stringResource(R.string.capture_mode_photo) +
-                    if (oppoStyle && shootingMode != CameraShootingMode.VIDEO) " ▴" else "",
-                selected = shootingMode != CameraShootingMode.VIDEO,
-                enabled = enabled,
-                onClick = { onModeSelected(CameraShootingMode.PHOTO) },
-                modifier = Modifier.weight(1f),
-                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.White
-            )
             ModeSwitcherItem(
                 label = stringResource(R.string.capture_mode_video) +
                     if (oppoStyle && shootingMode == CameraShootingMode.VIDEO) " ▴" else "",
@@ -2655,7 +2671,16 @@ private fun CaptureModeSwitcher(
                 enabled = enabled,
                 onClick = { onModeSelected(CameraShootingMode.VIDEO) },
                 modifier = Modifier.weight(1f),
-                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.White
+                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color(0xFFFFD400)
+            )
+            ModeSwitcherItem(
+                label = stringResource(R.string.capture_mode_photo) +
+                    if (oppoStyle && shootingMode != CameraShootingMode.VIDEO) " ▴" else "",
+                selected = shootingMode != CameraShootingMode.VIDEO,
+                enabled = enabled,
+                onClick = { onModeSelected(CameraShootingMode.PHOTO) },
+                modifier = Modifier.weight(1f),
+                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color(0xFFFFD400)
             )
         }
     }
@@ -2684,8 +2709,8 @@ private fun ModeSwitcherItem(
                 enabled -> Color.White.copy(alpha = 0.82f)
                 else -> Color.White.copy(alpha = 0.3f)
             },
-            fontSize = 12.sp,
-            lineHeight = 14.sp,
+            fontSize = 14.sp,
+            lineHeight = 16.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             maxLines = 1
         )
