@@ -19,6 +19,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -26,6 +27,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -66,6 +69,7 @@ fun CameraTopBar(
     onVideoHdrToggle: () -> Unit,
     onSettingsClick: () -> Unit,
     glassBackdrop: LiquidGlassBackdrop,
+    onVideoGlassBoundsChanged: (Rect?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     if (captureMode == CaptureMode.VIDEO) {
@@ -82,6 +86,7 @@ fun CameraTopBar(
             onVideoHdrToggle = onVideoHdrToggle,
             onSettingsClick = onSettingsClick,
             glassBackdrop = glassBackdrop,
+            onGlassBoundsChanged = onVideoGlassBoundsChanged,
             modifier = modifier
         )
         return
@@ -238,6 +243,7 @@ private fun VideoTopBar(
     onVideoHdrToggle: () -> Unit,
     onSettingsClick: () -> Unit,
     glassBackdrop: LiquidGlassBackdrop,
+    onGlassBoundsChanged: (Rect?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var stabilizationMenuExpanded by remember { mutableStateOf(false) }
@@ -285,6 +291,7 @@ private fun VideoTopBar(
                 modifier = Modifier
                     .height(36.dp)
                     .clip(CircleShape)
+                    .onGloballyPositioned { onGlassBoundsChanged(it.boundsInRoot()) }
             ) {
                 LiquidGlassSurface(
                     backdrop = glassBackdrop,

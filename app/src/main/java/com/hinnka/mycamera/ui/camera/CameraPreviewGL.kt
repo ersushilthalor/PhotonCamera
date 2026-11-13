@@ -13,6 +13,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
@@ -77,6 +80,7 @@ fun CameraPreviewGL(
     videoLogProfile: VideoLogProfile = VideoLogProfile.OFF,
     isEyeFocusBusy: Boolean = false,
     onGLSurfaceViewReady: ((CameraGLSurfaceView) -> Unit)? = null,
+    onPreviewBoundsChanged: (Rect) -> Unit = {},
     isAutoFocus: Boolean = true,
     focusPeakingEnabled: Boolean = true,
     stabilizationCoordinator: RealtimeStabilizationCoordinator? = null,
@@ -124,7 +128,8 @@ fun CameraPreviewGL(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black),
+            .background(Color.Black)
+            .onGloballyPositioned { onPreviewBoundsChanged(it.boundsInRoot()) },
         contentAlignment = Alignment.Center
     ) {
 

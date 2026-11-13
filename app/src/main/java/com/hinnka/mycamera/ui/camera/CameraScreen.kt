@@ -284,6 +284,9 @@ fun CameraScreen(
     var captureAnimationJob by remember { mutableStateOf<Job?>(null) }
     var cameraScreenBounds by remember { mutableStateOf<Rect?>(null) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
+    var previewGlBounds by remember { mutableStateOf<Rect?>(null) }
+    var videoTopBarGlassBounds by remember { mutableStateOf<Rect?>(null) }
+    var cameraGLSurfaceView by remember { mutableStateOf<CameraGLSurfaceView?>(null) }
     var zoomJoystickOpen by remember { mutableStateOf(false) }
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
     var zoomBarBounds by remember { mutableStateOf<Rect?>(null) }
@@ -877,6 +880,45 @@ fun CameraScreen(
             isVideoMode && state.videoConfig.aspectRatio == VideoAspectRatio.OPEN_GATE
 
         val density = LocalDensity.current
+
+        LaunchedEffect(
+            state.captureMode,
+            previewGlBounds,
+            videoTopBarGlassBounds,
+            cameraGLSurfaceView,
+        ) {
+            val previewRect = previewGlBounds
+            val pillRect = videoTopBarGlassBounds
+            val glView = cameraGLSurfaceView
+            if (glView == null) return@LaunchedEffect
+
+            if (
+                state.captureMode != CaptureMode.VIDEO ||
+                previewRect == null ||
+                pillRect == null ||
+                previewRect.width <= 0f ||
+                previewRect.height <= 0f
+            ) {
+                glView.setLiquidGlassOverlay(null, 0f, 0f)
+                return@LaunchedEffect
+            }
+
+            val left = ((pillRect.left - previewRect.left) / previewRect.width).coerceIn(0f, 1f)
+            val top = ((pillRect.top - previewRect.top) / previewRect.height).coerceIn(0f, 1f)
+            val right = ((pillRect.right - previewRect.left) / previewRect.width).coerceIn(0f, 1f)
+            val bottom = ((pillRect.bottom - previewRect.top) / previewRect.height).coerceIn(0f, 1f)
+            if (right <= left || bottom <= top) {
+                glView.setLiquidGlassOverlay(null, 0f, 0f)
+                return@LaunchedEffect
+            }
+
+            // Compose reports top-left coordinates; the GL preview texture uses a bottom-left origin.
+            glView.setLiquidGlassOverlay(
+                bounds = floatArrayOf(left, 1f - bottom, right, 1f - top),
+                cornerRadiusPx = with(density) { 18.dp.toPx() },
+                blurRadiusPx = with(density) { 20.dp.toPx() },
+            )
+        }
         val width = with(density) { constraints.maxWidth.toDp() }
         val height = with(density) { constraints.maxHeight.toDp() }
         val topSafePadding = cameraTopSafePadding()
@@ -979,6 +1021,7 @@ fun CameraScreen(
                     activePanel = if (activePanel == ActivePanel.SETTINGS) ActivePanel.NONE else ActivePanel.SETTINGS
                 },
                 glassBackdrop = videoTopBarBackdrop,
+                onVideoGlassBoundsChanged = { videoTopBarGlassBounds = it },
                 modifier = Modifier
                     .padding(top = topSafePadding)
                     .offset(y = topBarOffset)
@@ -1269,6 +1312,8 @@ fun CameraScreen(
                                 previewSurfaceTexture = surfaceTexture
                             },
                             onSurfaceDestroyed = { surfaceTexture ->
+                                previewGlBounds = null
+                                cameraGLSurfaceView = null
                                 if (previewSurfaceTexture === surfaceTexture) {
                                     previewSurfaceTexture = null
                                 }
@@ -1306,7 +1351,9 @@ fun CameraScreen(
                             onFirstPreviewFrame = viewModel::onFirstPreviewFrame,
                             onGLSurfaceViewReady = {
                                 viewModel.glSurfaceView = it
+                                cameraGLSurfaceView = it
                             },
+                            onPreviewBoundsChanged = { previewGlBounds = it },
                             livePhotoRecorder = viewModel.livePhotoRecorder,
                             videoLogProfile = state.videoConfig.logProfile,
                             isEyeFocusBusy = viewModel.isEyeFocusBusy,

@@ -332,6 +332,18 @@ class CameraGLSurfaceView @JvmOverloads constructor(
 
     fun getRenderSurface(): Surface? = currentSurface
 
+    fun setLiquidGlassOverlay(
+        bounds: FloatArray?,
+        cornerRadiusPx: Float,
+        blurRadiusPx: Float,
+    ) {
+        val safeBounds = bounds?.copyOf()
+        queueEvent {
+            renderer.setLiquidGlassOverlay(safeBounds, cornerRadiusPx, blurRadiusPx)
+            requestRender()
+        }
+    }
+
     fun setSourceCrop(crop: PhantomPipCrop) {
         queueEvent {
             renderer.setSourceCrop(crop)
