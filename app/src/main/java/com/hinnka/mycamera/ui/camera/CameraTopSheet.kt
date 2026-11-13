@@ -50,6 +50,7 @@ import com.hinnka.mycamera.raw.SpectralFilmSelection
 import com.hinnka.mycamera.ui.components.AppModalBottomSheet
 import com.hinnka.mycamera.ui.components.RawDcpLensOption
 import com.hinnka.mycamera.ui.components.RawRenderingEngineSettingsPanel
+import com.hinnka.mycamera.ui.components.glassUiSurface
 import com.hinnka.mycamera.video.*
 import com.hinnka.mycamera.video.VideoCodec
 import com.hinnka.mycamera.ui.icons.AppIcons
@@ -189,8 +190,11 @@ fun CameraTopSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
-                .background(Color.Black.copy(alpha = 0.8f))
+                .glassUiSurface(
+                    shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp),
+                    tint = Color(0xC9191B22),
+                    rimStrength = 0.9f
+                )
                 // Keep the screen's top inset fixed, but measure content and side padding
                 // in the rotated viewport so landscape controls stay inside the sheet.
                 .padding(top = contentTopPadding)
@@ -361,7 +365,7 @@ fun CameraTopSheet(
                             }
                         }
                     }
-                } else {its video-mode contents.
+                } else {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -753,12 +757,10 @@ private fun CameraMenuItem(
         Box(
             modifier = Modifier
                 .size(68.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.56f))
-                .border(
-                    width = 1.dp,
-                    color = Color.White.copy(alpha = if (selected) 0.28f else 0.11f),
-                    shape = CircleShape
+                .glassUiSurface(
+                    shape = CircleShape,
+                    tint = Color(0xA90B0D12),
+                    rimStrength = if (selected) 1.35f else 0.8f
                 ),
             contentAlignment = Alignment.Center
         ) {
@@ -803,9 +805,11 @@ private fun CameraMenuItem(
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
                                 .size(11.dp)
-                                .clip(CircleShape)
-                                .background(Color.Black.copy(alpha = 0.92f))
-                                .border(1.dp, Color.White, CircleShape),
+                                .glassUiSurface(
+                                    shape = CircleShape,
+                                    tint = Color(0xE31B1D22),
+                                    rimStrength = 1.1f
+                                ),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -885,14 +889,14 @@ private fun CameraMenuGlyphIcon(
                     topLeft = Offset(3f * scale, 5f * scale),
                     size = Size(23f * scale, 17f * scale),
                     cornerRadius = CornerRadius(2.5f * scale),
-                    style = Stroke(strokeWidth = stroke)
+                    style = Stroke(width = stroke)
                 )
                 drawRoundRect(
                     color = tint,
                     topLeft = Offset(10f * scale, 12f * scale),
                     size = Size(21f * scale, 17f * scale),
                     cornerRadius = CornerRadius(2.5f * scale),
-                    style = Stroke(strokeWidth = stroke)
+                    style = Stroke(width = stroke)
                 )
                 drawCircle(tint, radius = 2.4f * scale, center = Offset(23.5f * scale, 20f * scale))
                 line(19f, 27f, 28f, 27f)
@@ -936,11 +940,11 @@ private fun CameraMenuGlyphIcon(
                 drawCircle(tint, radius = 4.1f * scale, center = Offset(17f * scale, 17f * scale))
             }
             CameraMenuGlyph.LIVE -> {
-                drawCircle(tint, radius = 12f * scale, center = Offset(16f * scale, 17f * scale), style = Stroke(strokeWidth = stroke))
-                drawCircle(tint, radius = 8f * scale, center = Offset(16f * scale, 17f * scale), style = Stroke(strokeWidth = stroke))
+                drawCircle(tint, radius = 12f * scale, center = Offset(16f * scale, 17f * scale), style = Stroke(width = stroke))
+                drawCircle(tint, radius = 8f * scale, center = Offset(16f * scale, 17f * scale), style = Stroke(width = stroke))
                 drawCircle(tint, radius = 3.2f * scale, center = Offset(16f * scale, 17f * scale))
                 drawCircle(Color.Black.copy(alpha = 0.86f), radius = 5.2f * scale, center = Offset(26f * scale, 25f * scale))
-                drawCircle(tint, radius = 4.6f * scale, center = Offset(26f * scale, 25f * scale), style = Stroke(strokeWidth = 1.3f * scale))
+                drawCircle(tint, radius = 4.6f * scale, center = Offset(26f * scale, 25f * scale), style = Stroke(width = 1.3f * scale))
             }
             CameraMenuGlyph.PHOTO_ASPECT -> {
                 line(4f, 12f, 4f, 5f)
@@ -953,22 +957,22 @@ private fun CameraMenuGlyphIcon(
                 line(30f, 29f, 30f, 22f)
             }
             CameraMenuGlyph.TIMER_OFF -> {
-                drawCircle(tint, radius = 12.2f * scale, center = Offset(17f * scale, 18f * scale), style = Stroke(strokeWidth = stroke))
+                drawCircle(tint, radius = 12.2f * scale, center = Offset(17f * scale, 18f * scale), style = Stroke(width = stroke))
                 line(17f, 3f, 17f, 6f)
                 line(12f, 2.5f, 22f, 2.5f)
                 line(5f, 5f, 29f, 29f)
             }
             CameraMenuGlyph.TIMER -> {
-                drawCircle(tint, radius = 12.2f * scale, center = Offset(17f * scale, 18f * scale), style = Stroke(strokeWidth = stroke))
+                drawCircle(tint, radius = 12.2f * scale, center = Offset(17f * scale, 18f * scale), style = Stroke(width = stroke))
                 line(17f, 3f, 17f, 6f)
                 line(12f, 2.5f, 22f, 2.5f)
                 line(17f, 18f, 17f, 10f)
                 line(17f, 18f, 23f, 21f)
             }
             CameraMenuGlyph.BURST -> {
-                drawRoundRect(color = tint, topLeft = Offset(9f * scale, 3f * scale), size = Size(21f * scale, 19f * scale), cornerRadius = CornerRadius(2.5f * scale), style = Stroke(strokeWidth = stroke))
-                drawRoundRect(color = tint, topLeft = Offset(6f * scale, 7f * scale), size = Size(21f * scale, 19f * scale), cornerRadius = CornerRadius(2.5f * scale), style = Stroke(strokeWidth = stroke))
-                drawRoundRect(color = tint, topLeft = Offset(3f * scale, 11f * scale), size = Size(21f * scale, 19f * scale), cornerRadius = CornerRadius(2.5f * scale), style = Stroke(strokeWidth = stroke))
+                drawRoundRect(color = tint, topLeft = Offset(9f * scale, 3f * scale), size = Size(21f * scale, 19f * scale), cornerRadius = CornerRadius(2.5f * scale), style = Stroke(width = stroke))
+                drawRoundRect(color = tint, topLeft = Offset(6f * scale, 7f * scale), size = Size(21f * scale, 19f * scale), cornerRadius = CornerRadius(2.5f * scale), style = Stroke(width = stroke))
+                drawRoundRect(color = tint, topLeft = Offset(3f * scale, 11f * scale), size = Size(21f * scale, 19f * scale), cornerRadius = CornerRadius(2.5f * scale), style = Stroke(width = stroke))
             }
             CameraMenuGlyph.STYLES -> {
                 line(5f, 10f, 18f, 3f)
@@ -981,9 +985,9 @@ private fun CameraMenuGlyphIcon(
                 line(18f, 30f, 30f, 22f)
             }
             CameraMenuGlyph.FILTER -> {
-                drawCircle(tint, radius = 8.5f * scale, center = Offset(13f * scale, 13f * scale), style = Stroke(strokeWidth = stroke))
-                drawCircle(tint, radius = 8.5f * scale, center = Offset(21f * scale, 13f * scale), style = Stroke(strokeWidth = stroke))
-                drawCircle(tint, radius = 8.5f * scale, center = Offset(17f * scale, 22f * scale), style = Stroke(strokeWidth = stroke))
+                drawCircle(tint, radius = 8.5f * scale, center = Offset(13f * scale, 13f * scale), style = Stroke(width = stroke))
+                drawCircle(tint, radius = 8.5f * scale, center = Offset(21f * scale, 13f * scale), style = Stroke(width = stroke))
+                drawCircle(tint, radius = 8.5f * scale, center = Offset(17f * scale, 22f * scale), style = Stroke(width = stroke))
             }
             CameraMenuGlyph.DEPTH -> {
                 line(4f, 7f, 12f, 7f)
@@ -1009,8 +1013,10 @@ private fun VideoSettingTile(
         modifier = modifier
             .height(40.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (expanded) AccentColor else Color.White.copy(alpha = 0.14f)
+            .glassUiSurface(
+                shape = RoundedCornerShape(8.dp),
+                tint = if (expanded) AccentColor else Color(0x251F2128),
+                rimStrength = if (expanded) 1.15f else 0.75f
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 4.dp),
@@ -1052,8 +1058,11 @@ private fun VideoSettingExpandedPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color.White.copy(alpha = 0.08f))
+            .glassUiSurface(
+                shape = RoundedCornerShape(14.dp),
+                tint = Color(0xB51A1C22),
+                rimStrength = 0.8f
+            )
             .padding(14.dp),
         content = content
     )
@@ -1069,8 +1078,10 @@ private fun VideoOptionChip(
         modifier = Modifier
             .heightIn(min = 36.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (selected) AccentColor else Color.White.copy(alpha = 0.12f)
+            .glassUiSurface(
+                shape = RoundedCornerShape(8.dp),
+                tint = if (selected) AccentColor else Color(0x251F2128),
+                rimStrength = if (selected) 1.15f else 0.75f
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -1295,8 +1306,11 @@ fun QuickSettingValue(
     Box(
         modifier = modifier
             .height(48.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = 0.15f))
+            .glassUiSurface(
+                shape = RoundedCornerShape(8.dp),
+                tint = Color(0x251F2128),
+                rimStrength = 0.75f
+            )
             .clickable { onClick() }
             .padding(horizontal = 8.dp, vertical = 6.dp),
         contentAlignment = Alignment.CenterStart
@@ -1329,8 +1343,11 @@ fun QuickSettingButton(
     Box(
         modifier = modifier
             .height(48.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = 0.15f))
+            .glassUiSurface(
+                shape = RoundedCornerShape(8.dp),
+                tint = Color(0x251F2128),
+                rimStrength = 0.75f
+            )
             .clickable { onClick() }
             .padding(horizontal = 8.dp, vertical = 6.dp),
         contentAlignment = Alignment.CenterStart
@@ -1368,11 +1385,10 @@ fun QuickSettingButton2(
     Box(
         modifier = modifier
             .height(48.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (checked) AccentColor else Color.White.copy(
-                    alpha = 0.15f
-                )
+            .glassUiSurface(
+                shape = RoundedCornerShape(8.dp),
+                tint = if (checked) AccentColor else Color(0x251F2128),
+                rimStrength = if (checked) 1.15f else 0.75f
             )
             .clickable { onClick() }
             .padding(horizontal = 8.dp, vertical = 6.dp),
@@ -1411,11 +1427,10 @@ fun QuickSettingToggle(
     Box(
         modifier = modifier
             .height(48.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (checked) AccentColor.copy(alpha = contentAlpha) else Color.White.copy(
-                    alpha = 0.15f
-                )
+            .glassUiSurface(
+                shape = RoundedCornerShape(8.dp),
+                tint = if (checked) AccentColor.copy(alpha = contentAlpha) else Color(0x251F2128),
+                rimStrength = if (checked) 1.15f else 0.75f
             )
             .clickable(enabled = enabled) { onCheckedChange(!checked) }
             .padding(horizontal = 8.dp, vertical = 6.dp),

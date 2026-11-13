@@ -7,6 +7,7 @@ import android.view.Window
 import android.view.WindowManager
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -35,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.layout
@@ -153,7 +155,18 @@ fun AppModalBottomSheet(
     )
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
-        modifier = modifier,
+        modifier = modifier.border(
+            width = 0.85.dp,
+            brush = Brush.linearGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = 0.30f),
+                    Color.White.copy(alpha = 0.07f),
+                    Color.White.copy(alpha = 0.12f),
+                    Color.White.copy(alpha = 0.24f),
+                )
+            ),
+            shape = shape ?: SheetShape
+        ),
         sheetState = sheetState,
         shape = shape ?: SheetShape,
         containerColor = containerColor ?: AppPanelMaterial.Tint.copy(alpha = tintAlpha),

@@ -30,20 +30,21 @@ fun PaymentDialog(
     onPurchase: () -> Unit
 ) {
     Dialog(onDismissRequest = onDismiss) {
+        GlassDialogBackdropEffect()
         Card(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
             shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A))
+            colors = CardDefaults.cardColors(containerColor = Color.Transparent)
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color(0xFF2C2C2C), Color(0xFF1A1A1A))
-                        )
+                    .glassUiSurface(
+                        shape = RoundedCornerShape(24.dp),
+                        tint = Color(0xD91B1D24),
+                        rimStrength = 1.1f
                     )
             ) {
                 Column(

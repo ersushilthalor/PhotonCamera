@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Fill
@@ -31,8 +30,11 @@ fun HistogramView(
         modifier = modifier
             .width(120.dp)
             .height(30.dp)
-            .clip(RoundedCornerShape(4.dp))
-            .background(Color.Black.copy(alpha = 0.4f))
+            .glassUiSurface(
+                shape = RoundedCornerShape(6.dp),
+                tint = Color(0xA80A0C11),
+                rimStrength = 0.75f
+            )
             .padding(4.dp)
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
