@@ -107,16 +107,16 @@ fun CameraTopBar(
                     else R.string.camera_capture_format_jpeg
                 ),
                 color = Color.White,
-                fontSize = 14.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Medium
             )
             Spacer(modifier = Modifier.width(3.dp))
             Text(
                 text = stringResource(R.string.camera_capture_resolution_48),
                 color = Color.White.copy(alpha = 0.72f),
-                fontSize = 10.sp,
+                fontSize = 8.sp,
                 fontWeight = FontWeight.Normal,
-                modifier = Modifier.padding(top = 4.dp)
+                modifier = Modifier.padding(top = 3.dp)
             )
         }
 
@@ -141,7 +141,7 @@ fun CameraTopBar(
                         2 -> AppIcons.FlashlightOn
                         else -> AppIcons.FlashOff
                     },
-                    modifier = Modifier.size(20.dp).autoRotate(),
+                    modifier = Modifier.size(18.dp).autoRotate(),
                     contentDescription = null,
                     tint = Color.White
                 )
@@ -154,7 +154,7 @@ fun CameraTopBar(
                 Icon(
                     painter = painterResource(R.drawable.ic_live_photo),
                     contentDescription = null,
-                    modifier = Modifier.size(20.dp).autoRotate(),
+                    modifier = Modifier.size(18.dp).autoRotate(),
                     tint = if (useLivePhoto) AccentColor else Color.White
                 )
                 if (!useLivePhoto) {
@@ -189,7 +189,7 @@ private fun TopBarActionButton(
 ) {
     Box(
         modifier = Modifier
-            .size(32.dp)
+            .size(30.dp)
             .clip(CircleShape)
             .clickable(role = Role.Button, onClick = onClick)
             .semantics { this.contentDescription = contentDescription }
@@ -202,15 +202,15 @@ private fun TopBarActionButton(
 @Composable
 private fun SixDotMenuIcon() {
     Column(
-        verticalArrangement = Arrangement.spacedBy(3.dp),
+        verticalArrangement = Arrangement.spacedBy(2.5.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         repeat(2) {
-            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(2.5.dp)) {
                 repeat(3) {
                     Box(
                         modifier = Modifier
-                            .size(3.dp)
+                            .size(2.5.dp)
                             .clip(CircleShape)
                             .background(Color.White)
                     )
@@ -326,7 +326,7 @@ private fun VideoTopBar(
                         Icon(
                             imageVector = Icons.Default.Settings,
                             contentDescription = stringResource(R.string.settings),
-                            modifier = Modifier.size(20.dp).autoRotate(),
+                            modifier = Modifier.size(18.dp).autoRotate(),
                             tint = Color.White
                         )
                     }
@@ -415,7 +415,7 @@ private fun VideoActionIcon(
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            modifier = Modifier.size(20.dp).autoRotate(),
+            modifier = Modifier.size(18.dp).autoRotate(),
             tint = if (enabled) {
                 if (active) AccentColor else Color.White
             } else {
@@ -502,7 +502,7 @@ private fun RecordingHud(
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold
             )
-            Box(Modifier.size(3.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.4f)))
+            Box(Modifier.size(2.5.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.4f)))
             Text(
                 text = "${videoConfig.fps.fps} FPS",
                 color = Color.White.copy(alpha = 0.6f),
@@ -510,7 +510,7 @@ private fun RecordingHud(
                 fontWeight = FontWeight.Bold
             )
             if (videoConfig.logProfile != VideoLogProfile.OFF) {
-                Box(Modifier.size(3.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.4f)))
+                Box(Modifier.size(2.5.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.4f)))
                 Text(
                     text = "LOG",
                     color = AccentColor.copy(alpha = 0.8f),
