@@ -1386,7 +1386,7 @@ fun CameraScreen(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .offset(
-                                    y = if (state.captureMode == CaptureMode.VIDEO) 1.dp else 0.dp
+                                    y = if (state.captureMode == CaptureMode.VIDEO) 3.dp else 0.dp
                                 )
                         )
                     }
