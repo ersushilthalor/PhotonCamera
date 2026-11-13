@@ -999,13 +999,13 @@ fun CameraScreen(
         } else {
             (topBarBottom - viewfinderTop).coerceAtLeast(0.dp)
         }
-        val viewfinderBoundsAnimationSpec = if (isPhotoVideoModeTransition) {
-            tween(
+        val viewfinderBoundsAnimationSpec: FiniteAnimationSpec<Dp> = if (isPhotoVideoModeTransition) {
+            tween<Dp>(
                 durationMillis = PhotoVideoViewfinderExpansionDurationMillis,
                 easing = FastOutSlowInEasing
             )
         } else {
-            snap()
+            snap<Dp>()
         }
         val animatedViewfinderHeight by animateDpAsState(
             targetValue = cardHeight,
