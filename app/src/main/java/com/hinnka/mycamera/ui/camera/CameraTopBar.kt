@@ -49,6 +49,9 @@ fun CameraTopBar(
     onHistogramToggle: () -> Unit,
     useLivePhoto: Boolean,
     onLivePhotoToggle: () -> Unit,
+    useRaw: Boolean,
+    rawSupported: Boolean,
+    onRawToggle: () -> Unit,
     videoConfig: VideoConfig,
     videoCapabilities: VideoCapabilities,
     onVideoTorchToggle: () -> Unit,
@@ -81,83 +84,123 @@ fun CameraTopBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 32.dp, bottom = 8.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+            .padding(top = 32.dp, start = 16.dp, end = 16.dp, bottom = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        PhysicalButton(
-            modifier = Modifier.size(36.dp),
-            onClick = onFlashToggle
+        // The left capsule is a single RAW/JPEG toggle. The small numeric label
+        // mirrors the compact 48 MP indicator in the reference camera UI.
+        Row(
+            modifier = Modifier
+                .height(36.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.13f))
+                .clickable(enabled = rawSupported, onClick = onRawToggle)
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = when (flashMode) {
-                    0 -> AppIcons.FlashOff
-                    1 -> AppIcons.FlashOn
-                    2 -> AppIcons.FlashlightOn
-                    else -> AppIcons.FlashOff
-                },
-                modifier = Modifier.size(20.dp).autoRotate(),
-                contentDescription = stringResource(R.string.flash),
-                tint = Color.White
+            Text(
+                text = stringResource(
+                    if (useRaw && rawSupported) R.string.gallery_raw_badge
+                    else R.string.camera_capture_format_jpeg
+                ),
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.width(3.dp))
+            Text(
+                text = stringResource(R.string.camera_capture_resolution_48),
+                color = Color.White.copy(alpha = 0.72f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Normal
             )
         }
 
-        PhysicalButton(
-            modifier = Modifier.size(36.dp),
-            onClick = onTimerToggle
+        // One continuous capsule holds Flash, Motion Photo and the six-dot menu.
+        Row(
+            modifier = Modifier
+                .height(36.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.13f))
+                .padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            if (timerSeconds > 0) {
-                Text(
-                    text = "${timerSeconds}s",
-                    color = AccentColor,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.autoRotate()
-                )
-            } else {
+            TopBarActionButton(
+                onClick = onFlashToggle,
+                contentDescription = stringResource(R.string.flash)
+            ) {
                 Icon(
-                    imageVector = AppIcons.Timer,
-                    contentDescription = stringResource(R.string.timer),
+                    imageVector = when (flashMode) {
+                        0 -> AppIcons.FlashOff
+                        1 -> AppIcons.FlashOn
+                        2 -> AppIcons.FlashlightOn
+                        else -> AppIcons.FlashOff
+                    },
                     modifier = Modifier.size(20.dp).autoRotate(),
+                    contentDescription = null,
                     tint = Color.White
                 )
             }
-        }
 
-        PhysicalButton(
-            modifier = Modifier.size(36.dp),
-            onClick = onLivePhotoToggle
-        ) {
-            Icon(
-                painterResource(R.drawable.ic_live_photo),
-                contentDescription = stringResource(R.string.settings_use_live_photo),
-                modifier = Modifier.size(20.dp).autoRotate(),
-                tint = if (useLivePhoto) AccentColor else Color.White
-            )
-        }
+            TopBarActionButton(
+                onClick = onLivePhotoToggle,
+                contentDescription = stringResource(R.string.settings_use_live_photo)
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_live_photo),
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp).autoRotate(),
+                    tint = if (useLivePhoto) AccentColor else Color.White
+                )
+            }
 
-        PhysicalButton(
-            modifier = Modifier.size(36.dp),
-            onClick = onHistogramToggle
-        ) {
-            Icon(
-                imageVector = AppIcons.BarChart,
-                contentDescription = stringResource(R.string.histogram),
-                modifier = Modifier.size(20.dp).autoRotate(),
-                tint = if (showHistogram) AccentColor else Color.White
-            )
+            TopBarActionButton(
+                onClick = onSettingsClick,
+                contentDescription = stringResource(R.string.settings)
+            ) {
+                SixDotMenuIcon()
+            }
         }
+    }
+}
 
-        PhysicalButton(
-            modifier = Modifier.size(36.dp),
-            onClick = onSettingsClick
-        ) {
-            Icon(
-                imageVector = Icons.Default.Settings,
-                contentDescription = stringResource(R.string.settings),
-                modifier = Modifier.size(20.dp).autoRotate(),
-                tint = Color.White
-            )
+
+@Composable
+private fun TopBarActionButton(
+    onClick: () -> Unit,
+    contentDescription: String,
+    content: @Composable BoxScope.() -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+            .autoRotate(),
+        contentAlignment = Alignment.Center,
+        content = content
+    )
+}
+
+@Composable
+private fun SixDotMenuIcon() {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        repeat(2) {
+            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                repeat(3) {
+                    Box(
+                        modifier = Modifier
+                            .size(3.dp)
+                            .clip(CircleShape)
+                            .background(Color.White)
+                    )
+                }
+            }
         }
     }
 }
