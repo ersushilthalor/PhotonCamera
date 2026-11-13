@@ -1,6 +1,7 @@
 package com.hinnka.mycamera.ui.camera
 
 import android.graphics.SurfaceTexture
+import android.os.SystemClock
 import android.util.Size
 import androidx.compose.foundation.background
 import com.hinnka.mycamera.utils.PLog
@@ -157,9 +158,9 @@ fun CameraPreviewGL(
                     )
                 }
         ) {
-            // Recreate the preview surface when its buffer size or capture mode changes.
-            key(previewSize.width, previewSize.height, captureMode) {
-                AndroidView(
+            // Keep one GL/EGL surface for the lifetime of this preview slot. Buffer-size and
+            // capture-mode changes are applied to the existing renderer in the update block.
+            AndroidView(
                     factory = { ctx ->
                         CameraGLSurfaceView(ctx).apply {
                             glSurfaceViewRef = this
@@ -276,6 +277,13 @@ fun CameraPreviewGL(
                                     notifiedPreviewSize = previewSize
                                     notifiedResumeGeneration = resumeGeneration
                                     notifiedSurfaceTexture = surfaceTexture
+                                    PLog.i(
+                                        "CameraPreviewGL",
+                                        "onSurfaceTextureReady: mode=$captureMode, " +
+                                            "preview=${previewSize.width}x${previewSize.height}, " +
+                                            "surface=${System.identityHashCode(surfaceTexture)}, " +
+                                            "elapsedRealtimeMs=${SystemClock.elapsedRealtime()}"
+                                    )
                                     onSurfaceTextureReady(surfaceTexture)
                                 }
                             }
@@ -311,7 +319,6 @@ fun CameraPreviewGL(
                     },
                     modifier = Modifier.fillMaxSize()
                 )
-            }
 
             // 对焦指示器
             FocusIndicator(

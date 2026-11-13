@@ -128,6 +128,18 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         }
     }
 
+    fun markPreviewTransitionStart(
+        sessionReconfigureStartedAtElapsedMs: Long,
+        modeSwitchTapAtElapsedMs: Long?,
+    ) {
+        queueEvent {
+            renderer.markPreviewTransitionStart(
+                sessionReconfigureStartedAtElapsedMs = sessionReconfigureStartedAtElapsedMs,
+                modeSwitchTapAtElapsedMs = modeSwitchTapAtElapsedMs,
+            )
+        }
+    }
+
     fun setStabilizationInputSize(width: Int, height: Int) {
         queueEvent {
             renderer.setStabilizationInputSize(width, height)

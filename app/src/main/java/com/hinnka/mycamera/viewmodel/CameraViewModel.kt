@@ -1030,6 +1030,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun applyCameraFeatureUpdate(
         update: CameraFeatureUpdate,
         reconfigureCameraIfNeeded: Boolean = true,
+        captureModeSwitchTapTimestampMs: Long? = null,
     ) {
         val prefs = userPreferencesRepository.userPreferences.first()
         var desiredUseRaw = prefs.useRaw
@@ -1140,8 +1141,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 cameraController.setVideoLogProfile(prefs.videoLogProfile)
             }
             resolveLutIdForMode(prefs, targetCaptureMode)?.let(::applyLut)
-            currentSurfaceTexture = null
-            cameraController.closeCamera()
+            val surfaceTexture = currentSurfaceTexture
+            if (surfaceTexture != null) {
+                val previewView = glSurfaceView
+                cameraController.reconfigureCaptureMode(
+                    surfaceTexture = surfaceTexture,
+                    modeSwitchTapTimestampMs = captureModeSwitchTapTimestampMs,
+                ) { sessionStartMs, tapTimestampMs ->
+                    previewView?.markPreviewTransitionStart(
+                        sessionReconfigureStartedAtElapsedMs = sessionStartMs,
+                        modeSwitchTapAtElapsedMs = tapTimestampMs,
+                    )
+                }
+            } else {
+                PLog.d(TAG, "Capture mode changed before preview SurfaceTexture is ready; initial camera open will use the new mode")
+            }
         }
 
         update.frameId?.let {
@@ -4053,6 +4067,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * change then owns the single camera restart required by the operation.
      */
     fun setShootingMode(mode: CaptureMode, useRaw: Boolean?) {
+        val tapTimestampMs = SystemClock.elapsedRealtime()
+        PLog.i(
+            TAG,
+            "Mode-switch tap: from=${state.value.captureMode}, to=$mode, " +
+                "recording=${state.value.videoRecordingState.isRecording}, " +
+                "processing=${state.value.videoRecordingState.isProcessing}, " +
+                "elapsedRealtimeMs=$tapTimestampMs"
+        )
         if (state.value.videoRecordingState.isRecording ||
             state.value.videoRecordingState.isProcessing
         ) {
@@ -4069,7 +4091,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 CameraFeatureUpdate(
                     captureMode = SettingValue(mode),
                     useRaw = useRaw?.let(::SettingValue),
-                )
+                ),
+                captureModeSwitchTapTimestampMs = tapTimestampMs,
             )
         }
     }

@@ -516,6 +516,22 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private var lastCaptureWidth = 0
     private var lastCaptureHeight = 0
     private var firstFrameRendered = false
+    private var pendingModeSwitchReconfigureStartedAtMs: Long? = null
+    private var pendingModeSwitchTapAtMs: Long? = null
+
+    /** Called on the GL thread after the old capture session has been retired. */
+    fun markPreviewTransitionStart(
+        sessionReconfigureStartedAtElapsedMs: Long,
+        modeSwitchTapAtElapsedMs: Long?,
+    ) {
+        pendingModeSwitchReconfigureStartedAtMs = sessionReconfigureStartedAtElapsedMs
+        pendingModeSwitchTapAtMs = modeSwitchTapAtElapsedMs
+        PLog.i(
+            TAG,
+            "Mode-switch trace armed: sessionStartElapsedRealtimeMs=$sessionReconfigureStartedAtElapsedMs, " +
+                "tapElapsedRealtimeMs=$modeSwitchTapAtElapsedMs"
+        )
+    }
 
     /**
      * Surface 创建时调用
@@ -1288,6 +1304,21 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 finalDisplayHeight = viewportHeight,
                 compositeFinalDisplay = false
             )
+        }
+        if (cameraFrameUpdated) {
+            val reconfigureStartedAtMs = pendingModeSwitchReconfigureStartedAtMs
+            if (reconfigureStartedAtMs != null) {
+                val firstFrameAtMs = SystemClock.elapsedRealtime()
+                val tapAtMs = pendingModeSwitchTapAtMs
+                PLog.i(
+                    TAG,
+                    "Mode-switch first preview frame: elapsedRealtimeMs=$firstFrameAtMs, " +
+                        "sessionReconfigureToFirstFrameMs=${(firstFrameAtMs - reconfigureStartedAtMs).coerceAtLeast(0L)}, " +
+                        "tapToFirstFrameMs=${tapAtMs?.let { (firstFrameAtMs - it).coerceAtLeast(0L) }}"
+                )
+                pendingModeSwitchReconfigureStartedAtMs = null
+                pendingModeSwitchTapAtMs = null
+            }
         }
         if (cameraFrameUpdated && !firstFrameRendered) {
             firstFrameRendered = true

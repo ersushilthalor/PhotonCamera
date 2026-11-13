@@ -150,6 +150,13 @@ class Camera2Controller(private val context: Context) {
         val preserveVideoRecording: Boolean,
     )
 
+    private data class CaptureModeReconfigureRequest(
+        val generation: Int,
+        val targetCaptureMode: CaptureMode,
+        val tapTimestampMs: Long?,
+        val onStarted: ((sessionStartElapsedRealtimeMs: Long, tapTimestampMs: Long?) -> Unit)?,
+    )
+
     private enum class CameraDeviceLifecycle {
         CLOSED,
         OPENING,
@@ -272,6 +279,9 @@ class Camera2Controller(private val context: Context) {
     )
     private var lifecycleClosingCameraDevice: CameraDevice? = null
     private var pendingCameraOpenRequest: CameraOpenRequest? = null
+    private val captureModeReconfigureGeneration = AtomicInteger()
+    @Volatile
+    private var pendingCaptureModeReconfigureRequest: CaptureModeReconfigureRequest? = null
     @Volatile
     private var releaseCloseLatch: java.util.concurrent.CountDownLatch? = null
     private var captureSession: CameraCaptureSession? = null
@@ -2526,6 +2536,80 @@ class Camera2Controller(private val context: Context) {
     // ==================== 相机控制 ====================
 
     /**
+     * Rebuilds mode-specific Camera2 outputs and the capture session while retaining the
+     * currently open CameraDevice and the GL-owned SurfaceTexture.
+     */
+    fun reconfigureCaptureMode(
+        surfaceTexture: SurfaceTexture,
+        modeSwitchTapTimestampMs: Long? = null,
+        onSessionReconfigureStarted: ((sessionStartElapsedRealtimeMs: Long, tapTimestampMs: Long?) -> Unit)? = null,
+    ) {
+        val request = CaptureModeReconfigureRequest(
+            generation = captureModeReconfigureGeneration.incrementAndGet(),
+            targetCaptureMode = _state.value.captureMode,
+            tapTimestampMs = modeSwitchTapTimestampMs,
+            onStarted = onSessionReconfigureStarted,
+        )
+        pendingCaptureModeReconfigureRequest = request
+        val handler = cameraHandler
+        if (handler == null) {
+            PLog.w(TAG, "Capture-mode reconfigure deferred: camera handler is unavailable")
+            return
+        }
+        handler.post {
+            if (pendingCaptureModeReconfigureRequest !== request) {
+                PLog.d(TAG, "Skipping superseded capture-mode reconfigure request ${request.generation}")
+                return@post
+            }
+            val device = cameraDevice
+            when {
+                cameraDeviceLifecycle == CameraDeviceLifecycle.OPEN &&
+                    device != null && previewSurfaceTexture === surfaceTexture -> {
+                    pendingCaptureModeReconfigureRequest = null
+                    beginCaptureModeSessionReconfigure(surfaceTexture, device, request)
+                }
+                cameraDeviceLifecycle == CameraDeviceLifecycle.OPENING -> {
+                    PLog.d(
+                        TAG,
+                        "Capture-mode reconfigure ${request.generation} deferred while CameraDevice is opening; " +
+                            "the open callback will reconcile the captured mode"
+                    )
+                }
+                else -> {
+                    pendingCaptureModeReconfigureRequest = null
+                    PLog.i(
+                        TAG,
+                        "Capture-mode reconfigure falling back to normal camera open: " +
+                            "lifecycle=$cameraDeviceLifecycle, sameSurface=${previewSurfaceTexture === surfaceTexture}"
+                    )
+                    openCamera(surfaceTexture)
+                }
+            }
+        }
+    }
+
+    private fun beginCaptureModeSessionReconfigure(
+        surfaceTexture: SurfaceTexture,
+        existingCameraDevice: CameraDevice,
+        request: CaptureModeReconfigureRequest?,
+    ) {
+        val sessionStartMs = SystemClock.elapsedRealtime()
+        PLog.i(
+            TAG,
+            "Capture-mode session reconfigure start: mode=${_state.value.captureMode}, " +
+                "cameraDeviceReused=true, generation=${request?.generation}, " +
+                "tapToSessionReconfigureMs=${request?.tapTimestampMs?.let { (sessionStartMs - it).coerceAtLeast(0L) }}, " +
+                "elapsedRealtimeMs=$sessionStartMs"
+        )
+        clearCameraSessionState("capture mode switch")
+        request?.onStarted?.invoke(sessionStartMs, request.tapTimestampMs)
+        openCameraNow(
+            CameraOpenRequest(surfaceTexture = surfaceTexture, preserveVideoRecording = false),
+            reuseCameraDevice = existingCameraDevice,
+        )
+    }
+
+    /**
      * 打开相机并开始预览
      *
      * @param surfaceTexture SurfaceTexture 用于预览
@@ -2565,11 +2649,18 @@ class Camera2Controller(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    private fun openCameraNow(request: CameraOpenRequest) {
+    private fun openCameraNow(
+        request: CameraOpenRequest,
+        reuseCameraDevice: CameraDevice? = null,
+    ) {
         val surfaceTexture = request.surfaceTexture
         val preserveVideoRecording = request.preserveVideoRecording
         clearPointFocusState()
-        val openGeneration = ++cameraOpenGeneration
+        val openGeneration = if (reuseCameraDevice == null) {
+            ++cameraOpenGeneration
+        } else {
+            cameraOpenGeneration
+        }
 
         // 确保在权限已授予后才发现相机（延迟初始化）
         if (_state.value.availableCameras.isEmpty()) {
@@ -2620,15 +2711,38 @@ class Camera2Controller(private val context: Context) {
             override fun onOpened(camera: CameraDevice) {
                 if (
                     openGeneration != cameraOpenGeneration ||
-                    cameraDeviceLifecycle != CameraDeviceLifecycle.OPENING
+                    (reuseCameraDevice == null && cameraDeviceLifecycle != CameraDeviceLifecycle.OPENING) ||
+                    (reuseCameraDevice != null &&
+                        (cameraDeviceLifecycle != CameraDeviceLifecycle.OPEN ||
+                            cameraDevice !== reuseCameraDevice || camera !== reuseCameraDevice))
                 ) {
                     PLog.w(TAG, "Ignoring stale camera open callback: camera=${camera.id}")
-                    closeCameraDeviceAndAwait(camera, "stale camera open", blocksLifecycle = false)
+                    if (reuseCameraDevice == null || camera !== reuseCameraDevice) {
+                        closeCameraDeviceAndAwait(camera, "stale camera open", blocksLifecycle = false)
+                    }
                     return
                 }
-                PLog.d(TAG, "Camera opened: ${camera.id}")
+                PLog.d(TAG, "Camera opened/reused: ${camera.id}")
                 cameraDeviceLifecycle = CameraDeviceLifecycle.OPEN
                 cameraDevice = camera
+                val pendingReconfigure = pendingCaptureModeReconfigureRequest
+                if (captureMode != _state.value.captureMode ||
+                    pendingReconfigure?.targetCaptureMode?.let { it != captureMode } == true
+                ) {
+                    PLog.i(
+                        TAG,
+                        "Camera open completed with stale capture mode: opened=$captureMode, " +
+                            "current=${_state.value.captureMode}; rebuilding outputs on the same CameraDevice"
+                    )
+                    if (pendingReconfigure != null) {
+                        pendingCaptureModeReconfigureRequest = null
+                    }
+                    beginCaptureModeSessionReconfigure(surfaceTexture, camera, pendingReconfigure)
+                    return
+                }
+                if (pendingReconfigure?.targetCaptureMode == captureMode) {
+                    pendingCaptureModeReconfigureRequest = null
+                }
                 if (restartCameraForRawCaptureOutputMismatch("camera opened")) {
                     return
                 }
@@ -3077,7 +3191,12 @@ class Camera2Controller(private val context: Context) {
 
             PLog.d(TAG, "Opening camera: open=$openCameraId, selected=$cameraId")
 
-            cameraManager.openCamera(openCameraId, cameraStateCallback, cameraHandler)
+            if (reuseCameraDevice != null) {
+                PLog.i(TAG, "Reusing CameraDevice ${reuseCameraDevice.id} for capture-mode session rebuild")
+                cameraStateCallback.onOpened(reuseCameraDevice)
+            } else {
+                cameraManager.openCamera(openCameraId, cameraStateCallback, cameraHandler)
+            }
 
         } catch (e: Exception) {
             handleCameraOpenFailure(
