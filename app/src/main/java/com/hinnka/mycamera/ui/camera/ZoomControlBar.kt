@@ -9,8 +9,6 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -41,7 +39,6 @@ import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.roundToInt
-import com.hinnka.mycamera.ui.icons.AppIcons
 
 /**
  * 显示模式：变焦倍率 or 35mm等效焦距
@@ -91,8 +88,6 @@ fun ZoomControlBar(
     val zoomStops = viewModel.allZoomStops(lensZoomStops, mainCamera, currentCamera, customFocalLengths, hiddenFocalLengths)
 
     val cameraState by viewModel.state.collectAsState()
-    val isLogVideo = cameraState.captureMode == CaptureMode.VIDEO &&
-        cameraState.videoConfig.logProfile.isEnabled
     val minZoom = remember(cameraState.availableCameras) {
         cameraState.availableCameras.filter { it.lensType != LensType.FRONT }.minOfOrNull { it.minZoom * it.displayIntrinsicZoomRatio } ?: 1f
     }
@@ -190,61 +185,10 @@ fun ZoomControlBar(
             },
         contentAlignment = Alignment.Center
     ) {
-        AnimatedVisibility(
-            visible = !isContinuousZooming,
-            enter = fadeIn() + expandHorizontally(),
-            exit = fadeOut() + shrinkHorizontally(),
-            modifier = Modifier.align(Alignment.CenterStart)
-        ) {
-            // Display Mode Toggle (Left)
-            IconButton(
-                onClick = {
-                    viewModel.saveZoomDisplayMode(displayMode.next())
-                },
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    imageVector = AppIcons.SwapHoriz,
-                    contentDescription = stringResource(R.string.toggle_display_mode),
-                    modifier = Modifier
-                        .size(32.dp)
-                        .padding(8.dp),
-                    tint = Color.White
-                )
-            }
-        }
-
-        AnimatedVisibility(
-            visible = !isContinuousZooming && !isLogVideo,
-            enter = fadeIn() + expandHorizontally(),
-            exit = fadeOut() + shrinkHorizontally(),
-            modifier = Modifier.align(Alignment.CenterEnd)
-        ) {
-            // 右侧滤镜按钮
-            IconButton(
-                onClick = onFilterClick,
-                modifier = Modifier
-                    .size(32.dp)
-                    .onGloballyPositioned { coordinates ->
-                        onFilterButtonBoundsChanged(coordinates.boundsInRoot())
-                    }
-            ) {
-                Icon(
-                    imageVector = if (isLogVideo) AppIcons.Palette else AppIcons.AutoAwesome,
-                    contentDescription = stringResource(if (isLogVideo) R.string.filter else R.string.filters_panel),
-                    modifier = Modifier
-                        .size(32.dp)
-                        .padding(8.dp),
-                    tint = AccentColor
-                )
-            }
-        }
-
         // Zoom Ruler (Center)
         Box(
             modifier = Modifier
                 .fillMaxHeight()
-                .padding(horizontal = if (isContinuousZooming) 0.dp else 40.dp)
                 .fillMaxWidth(),
             contentAlignment = Alignment.Center
         ) {
