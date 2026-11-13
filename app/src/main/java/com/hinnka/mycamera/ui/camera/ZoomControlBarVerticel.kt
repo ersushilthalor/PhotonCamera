@@ -8,10 +8,8 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,8 +19,6 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -39,7 +35,6 @@ import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.CameraInfo
 import com.hinnka.mycamera.camera.LensType
 import com.hinnka.mycamera.viewmodel.CameraViewModel
-import com.hinnka.mycamera.video.CaptureMode
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.exp
@@ -84,8 +79,6 @@ fun ZoomControlBarVerticel(
     }
 
     val cameraState by viewModel.state.collectAsState()
-    val isLogVideo = cameraState.captureMode == CaptureMode.VIDEO &&
-        cameraState.videoConfig.logProfile.isEnabled
     val minZoom = remember(cameraState.availableCameras) {
         cameraState.availableCameras.filter { it.lensType != LensType.FRONT }.minOfOrNull { it.minZoom * it.displayIntrinsicZoomRatio } ?: 1f
     }
@@ -209,56 +202,6 @@ fun ZoomControlBarVerticel(
             },
         contentAlignment = Alignment.Center
     ) {
-        AnimatedVisibility(
-            visible = !isContinuousZooming,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically(),
-            modifier = Modifier.align(Alignment.TopCenter)
-        ) {
-            // Display Mode Toggle (Top)
-            IconButton(
-                onClick = {
-                    viewModel.saveZoomDisplayMode(displayMode.next())
-                },
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    imageVector = AppIcons.SwapHoriz,
-                    contentDescription = stringResource(R.string.toggle_display_mode),
-                    modifier = Modifier.size(32.dp)
-                        .background(Color.Black.copy(alpha = 0.3f), CircleShape)
-                        .padding(8.dp),
-                    tint = Color.White
-                )
-            }
-        }
-
-        AnimatedVisibility(
-            visible = !isContinuousZooming,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically(),
-            modifier = Modifier.align(Alignment.BottomCenter)
-        ) {
-            // 底部滤镜按钮
-            IconButton(
-                onClick = onFilterClick,
-                modifier = Modifier
-                    .size(32.dp)
-                    .onGloballyPositioned { coordinates ->
-                        onFilterButtonBoundsChanged(coordinates.boundsInRoot())
-                    }
-            ) {
-                Icon(
-                    imageVector = if (isLogVideo) AppIcons.Palette else AppIcons.AutoAwesome,
-                    contentDescription = stringResource(if (isLogVideo) R.string.filter else R.string.filters_panel),
-                    modifier = Modifier.size(32.dp)
-                        .background(Color.Black.copy(alpha = 0.3f), CircleShape)
-                        .padding(8.dp),
-                    tint = AccentColor
-                )
-            }
-        }
-
         // Zoom Ruler (Center)
         Box(
             modifier = Modifier
