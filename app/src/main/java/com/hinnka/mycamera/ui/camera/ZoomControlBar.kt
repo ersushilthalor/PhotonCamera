@@ -4,6 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -316,10 +317,7 @@ private fun ZoomPresetPill(
     val selectedPreset = visiblePresets.firstOrNull { abs(it - zoomRatio) <= 0.05f }
 
     Row(
-        modifier = modifier
-            .clip(CircleShape)
-            .background(Color(0xFF25242C))
-            .padding(horizontal = 4.dp, vertical = 2.dp),
+        modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -329,7 +327,10 @@ private fun ZoomPresetPill(
                 modifier = Modifier
                     .width(37.dp)
                     .height(29.dp)
-                    .clickable { onPresetClick(preset) },
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { onPresetClick(preset) },
                 contentAlignment = Alignment.Center
             ) {
                 if (selected) {
@@ -386,7 +387,7 @@ fun ZoomContinuousRuler(
             modifier = Modifier
                 .fillMaxSize()
                 .clip(CircleShape)
-                .background(Color(0xFF292929))
+                .background(Color.Black.copy(alpha = 0.4f))
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val safeZoom = zoomRatio.coerceAtLeast(0.001f).toDouble()
@@ -443,7 +444,7 @@ fun ZoomContinuousRuler(
                     .padding(end = 6.dp)
                     .size(25.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF3A3A3A))
+                    .background(Color.Black.copy(alpha = 0.4f))
                     .clickable(onClick = onClose)
                     .semantics { contentDescription = closeDescription },
                 contentAlignment = Alignment.Center

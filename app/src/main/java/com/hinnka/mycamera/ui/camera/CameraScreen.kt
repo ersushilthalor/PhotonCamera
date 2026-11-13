@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.paint
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
@@ -112,6 +113,7 @@ private enum class CameraShootingMode {
 }
 
 private const val PreviewTransitionRevealDurationMillis = 800
+private const val PhotoVideoViewfinderExpansionDurationMillis = 300
 private const val RawCaptureTapDebounceMillis = 1000L
 private const val DefaultShutterSpeedNs = 1_000_000_000f / 60f
 private const val DefaultIso = 100f
@@ -121,6 +123,8 @@ private val CameraTopBarBaseTopPadding = 32.dp
 private val CameraTopBarBaseHeight = 80.dp
 private val VideoTopBarBaseHeight = 80.dp
 private val VideoTopBarLoweredOffset = 36.dp
+private val VideoViewfinderAdditionalOffset = 20.dp
+private val VideoViewfinderVerticalOffset = 3.dp + VideoViewfinderAdditionalOffset
 private val XpanViewfinderInnerBorder = 4.dp
 private val XpanSideControlReservedWidth = 56.dp
 
@@ -225,6 +229,15 @@ fun CameraScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
+    var previousPreviewCaptureMode by remember { mutableStateOf(state.captureMode) }
+    val isPhotoVideoModeTransition = previousPreviewCaptureMode != state.captureMode
+
+    LaunchedEffect(state.captureMode) {
+        if (isPhotoVideoModeTransition) {
+            delay(PhotoVideoViewfinderExpansionDurationMillis.toLong())
+        }
+        previousPreviewCaptureMode = state.captureMode
+    }
     val uiStyle by viewModel.uiStyle.collectAsState()
     val isCameraInitialized by viewModel.isInitialized.collectAsState()
     val latestPhoto by galleryViewModel.latestPhoto.collectAsState()
@@ -284,6 +297,9 @@ fun CameraScreen(
     var captureAnimationJob by remember { mutableStateOf<Job?>(null) }
     var cameraScreenBounds by remember { mutableStateOf<Rect?>(null) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
+    var previewGlBounds by remember { mutableStateOf<Rect?>(null) }
+    var videoTopBarGlassBounds by remember { mutableStateOf<Rect?>(null) }
+    var cameraGLSurfaceView by remember { mutableStateOf<CameraGLSurfaceView?>(null) }
     var zoomJoystickOpen by remember { mutableStateOf(false) }
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
     var zoomBarBounds by remember { mutableStateOf<Rect?>(null) }
@@ -842,6 +858,8 @@ fun CameraScreen(
     ) {
 
         val backgroundPainter = rememberBackgroundPainter(viewModel)
+        val modeSwitcherBackdrop = rememberLiquidGlassBackdrop()
+        val videoTopBarBackdrop = rememberLiquidGlassBackdrop()
 
         val isVideoMode = state.captureMode == CaptureMode.VIDEO
         val isPhotoStyleMode = state.captureMode != CaptureMode.VIDEO
@@ -875,6 +893,45 @@ fun CameraScreen(
             isVideoMode && state.videoConfig.aspectRatio == VideoAspectRatio.OPEN_GATE
 
         val density = LocalDensity.current
+
+        LaunchedEffect(
+            state.captureMode,
+            previewGlBounds,
+            videoTopBarGlassBounds,
+            cameraGLSurfaceView,
+        ) {
+            val previewRect = previewGlBounds
+            val pillRect = videoTopBarGlassBounds
+            val glView = cameraGLSurfaceView
+            if (glView == null) return@LaunchedEffect
+
+            if (
+                state.captureMode != CaptureMode.VIDEO ||
+                previewRect == null ||
+                pillRect == null ||
+                previewRect.width <= 0f ||
+                previewRect.height <= 0f
+            ) {
+                glView.setLiquidGlassOverlay(null, 0f, 0f)
+                return@LaunchedEffect
+            }
+
+            val left = ((pillRect.left - previewRect.left) / previewRect.width).coerceIn(0f, 1f)
+            val top = ((pillRect.top - previewRect.top) / previewRect.height).coerceIn(0f, 1f)
+            val right = ((pillRect.right - previewRect.left) / previewRect.width).coerceIn(0f, 1f)
+            val bottom = ((pillRect.bottom - previewRect.top) / previewRect.height).coerceIn(0f, 1f)
+            if (right <= left || bottom <= top) {
+                glView.setLiquidGlassOverlay(null, 0f, 0f)
+                return@LaunchedEffect
+            }
+
+            // Compose reports top-left coordinates; the GL preview texture uses a bottom-left origin.
+            glView.setLiquidGlassOverlay(
+                bounds = floatArrayOf(left, 1f - bottom, right, 1f - top),
+                cornerRadiusPx = with(density) { 18.dp.toPx() },
+                blurRadiusPx = with(density) { 20.dp.toPx() },
+            )
+        }
         val width = with(density) { constraints.maxWidth.toDp() }
         val height = with(density) { constraints.maxHeight.toDp() }
         val topSafePadding = cameraTopSafePadding()
@@ -890,15 +947,21 @@ fun CameraScreen(
             WindowInsets.navigationBars.getBottom(this).toDp()
         }
         val contentHeight = (height - navigationBarHeight).coerceAtLeast(0.dp)
+        // In video mode, stop the preview at the shutter's lower edge. The mode
+        // selector remains below it instead of being covered by the viewfinder.
+        val videoViewfinderBottom = (
+            contentHeight - (CameraControlsLayoutDefaults.ModeAreaHeight -
+                CameraControlsLayoutDefaults.VerticalOffset)
+        ).coerceAtLeast(0.dp)
         val viewfinderFramePadding = if (isXpan) XpanViewfinderInnerBorder * 2 else 0.dp
         val sideControlSpace = if (isXpan) XpanSideControlReservedWidth else 0.dp
         val maxCardWidth = (width - sideControlSpace * 2)
             .coerceAtLeast(viewfinderFramePadding)
-        val maxCardHeight = if (isXpan) {
-            (contentHeight - topBarBottom - CameraControlsLayoutDefaults.XpanViewfinderClearance)
+        val maxCardHeight = when {
+            isXpan -> (contentHeight - topBarBottom - CameraControlsLayoutDefaults.XpanViewfinderClearance)
                 .coerceAtLeast(viewfinderFramePadding)
-        } else {
-            contentHeight
+            isVideoMode -> videoViewfinderBottom
+            else -> contentHeight
         }
         val maxViewfinderContentWidth = (maxCardWidth - viewfinderFramePadding)
             .coerceAtLeast(0.dp)
@@ -920,12 +983,41 @@ fun CameraScreen(
             ((contentHeight - topBarBottom - cardHeight -
                 CameraControlsLayoutDefaults.CollapsedControlsHeight) / 2).coerceAtLeast(0.dp)
         }
-        val viewfinderTop = if (placeViewfinderBelowTopBar) {
-            topBarBottom + extraViewfinderTopSpacing
+        val viewfinderTop = if (isVideoMode) {
+            // Anchor the video frame to the shutter bottom; its height is constrained
+            // above, so it cannot extend behind the Photo/Video selector.
+            (videoViewfinderBottom - cardHeight).coerceAtLeast(0.dp)
         } else {
-            ((contentHeight - cardHeight) / 2).coerceAtLeast(0.dp)
+            (if (placeViewfinderBelowTopBar) {
+                topBarBottom + extraViewfinderTopSpacing
+            } else {
+                ((contentHeight - cardHeight) / 2).coerceAtLeast(0.dp)
+            }) + CameraControlsLayoutDefaults.VerticalOffset
         }
-        val viewfinderTopOverlayPadding = (topBarBottom - viewfinderTop).coerceAtLeast(0.dp)
+        val viewfinderTopOverlayPadding = if (isVideoMode) {
+            0.dp
+        } else {
+            (topBarBottom - viewfinderTop).coerceAtLeast(0.dp)
+        }
+        val viewfinderBoundsAnimationSpec: FiniteAnimationSpec<Dp> = if (isPhotoVideoModeTransition) {
+            tween<Dp>(
+                durationMillis = PhotoVideoViewfinderExpansionDurationMillis,
+                easing = FastOutSlowInEasing
+            )
+        } else {
+            snap<Dp>()
+        }
+        val animatedViewfinderHeight by animateDpAsState(
+            targetValue = cardHeight,
+            animationSpec = viewfinderBoundsAnimationSpec,
+            label = "photoVideoViewfinderHeight"
+        )
+        val animatedViewfinderCenterY by animateDpAsState(
+            targetValue = viewfinderTop + cardHeight / 2,
+            animationSpec = viewfinderBoundsAnimationSpec,
+            label = "photoVideoViewfinderCenter"
+        )
+        val animatedViewfinderTop = animatedViewfinderCenterY - animatedViewfinderHeight / 2
 
         val topBar = @Composable {
             CameraTopBar(
@@ -936,14 +1028,11 @@ fun CameraScreen(
                 onFlashToggle = {
                     viewModel.toggleFlash()
                 },
-                timerSeconds = state.timerSeconds,
-                onTimerToggle = { viewModel.toggleTimer() },
-                showHistogram = viewModel.showHistogram,
-                onHistogramToggle = {
-                    viewModel.saveShowHistogram(!viewModel.showHistogram)
-                },
                 useLivePhoto = useLivePhoto,
                 onLivePhotoToggle = { viewModel.setUseLivePhoto(!state.useLivePhoto) },
+                useRaw = useRaw && state.isRawSupported,
+                rawSupported = state.isRawSupported,
+                onRawToggle = { viewModel.toggleRaw() },
                 videoConfig = state.videoConfig,
                 videoCapabilities = state.videoCapabilities,
                 onVideoTorchToggle = { viewModel.setVideoTorchEnabled(!state.videoConfig.torchEnabled) },
@@ -963,6 +1052,8 @@ fun CameraScreen(
                 onSettingsClick = {
                     activePanel = if (activePanel == ActivePanel.SETTINGS) ActivePanel.NONE else ActivePanel.SETTINGS
                 },
+                glassBackdrop = videoTopBarBackdrop,
+                onVideoGlassBoundsChanged = { videoTopBarGlassBounds = it },
                 modifier = Modifier
                     .padding(top = topSafePadding)
                     .offset(y = topBarOffset)
@@ -1114,7 +1205,9 @@ fun CameraScreen(
         val viewfinder = @Composable {
             Card(
                 modifier = Modifier
-                    .animateContentSize(alignment = Alignment.Center)
+                    // Keep the live GL surface at its final aspect ratio during mode changes.
+                    // animateContentSize() resizes its SurfaceView buffer through intermediate
+                    // heights while the Camera2 session is paused, visibly stretching the last frame.
                     .width(cardWidth)
                     .height(cardHeight),
                 shape = RoundedCornerShape(if (isXpan) XpanViewfinderInnerBorder else 0.dp),
@@ -1253,6 +1346,8 @@ fun CameraScreen(
                                 previewSurfaceTexture = surfaceTexture
                             },
                             onSurfaceDestroyed = { surfaceTexture ->
+                                previewGlBounds = null
+                                cameraGLSurfaceView = null
                                 if (previewSurfaceTexture === surfaceTexture) {
                                     previewSurfaceTexture = null
                                 }
@@ -1290,7 +1385,9 @@ fun CameraScreen(
                             onFirstPreviewFrame = viewModel::onFirstPreviewFrame,
                             onGLSurfaceViewReady = {
                                 viewModel.glSurfaceView = it
+                                cameraGLSurfaceView = it
                             },
+                            onPreviewBoundsChanged = { previewGlBounds = it },
                             livePhotoRecorder = viewModel.livePhotoRecorder,
                             videoLogProfile = state.videoConfig.logProfile,
                             isEyeFocusBusy = viewModel.isEyeFocusBusy,
@@ -1318,7 +1415,11 @@ fun CameraScreen(
                                 state.videoConfig.enhancedStabilizationStrength,
                             videoPreviewStabilizationLookahead =
                                 state.videoConfig.enhancedStabilizationLookahead,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .offset(
+                                    y = if (state.captureMode == CaptureMode.VIDEO) 3.dp else 0.dp
+                                )
                         )
                     }
 
@@ -1506,7 +1607,8 @@ fun CameraScreen(
                 val sideControlsBottom = minOf(
                     viewfinderTop + cardHeight,
                     contentHeight - CameraControlsLayoutDefaults.CaptureAreaHeight -
-                        CameraControlsLayoutDefaults.CaptureClearance
+                        CameraControlsLayoutDefaults.CaptureClearance +
+                        CameraControlsLayoutDefaults.VerticalOffset
                 )
                 val sideControlsHeight = (sideControlsBottom - viewfinderTop)
                     .coerceIn(0.dp, cardHeight)
@@ -1581,6 +1683,7 @@ fun CameraScreen(
                 onSwitchCameraClick = ::switchCameraWithPreviewTransition,
                 onCaptureModeSelected = ::setShootingModeImmediately,
                 modeSwitchEnabled = !previewTransitionActive,
+                modeSwitcherBackdrop = modeSwitcherBackdrop,
                 onCaptureTap = {
                     val shouldDebounceRawCapture =
                         state.useRaw && state.captureMode == CaptureMode.PHOTO
@@ -1621,98 +1724,133 @@ fun CameraScreen(
             )
         }
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .paint(backgroundPainter, contentScale = ContentScale.Crop)
-                .navigationBarsPadding(),
-        ) {
-            // The viewfinder is always the bottom layer. Its selected aspect ratio is fitted
-            // to the full available area before camera controls are overlaid.
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Capture only the content behind the bottom controls. The controls stay outside
+            // this layer so the liquid-glass surface cannot sample itself.
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(cardHeight)
-                    .align(Alignment.TopCenter)
-                    .offset(y = viewfinderTop)
-                    .onGloballyPositioned { coordinates ->
-                        viewfinderAreaBounds = coordinates.boundsInRoot()
-                    },
-                contentAlignment = Alignment.Center
+                    .fillMaxSize()
+                    .liquidGlassBackdropSource(modeSwitcherBackdrop)
+                    .paint(backgroundPainter, contentScale = ContentScale.Crop)
+                    .navigationBarsPadding(),
             ) {
-                viewfinder()
-                if (uiStyle == "OPPO" && activePanel == ActivePanel.NONE && !isXpan) {
+                // The viewfinder is always the bottom layer. Its selected aspect ratio is fitted
+                // to the full available area before camera controls are overlaid.
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(animatedViewfinderHeight)
+                        .align(Alignment.TopCenter)
+                        .offset(y = animatedViewfinderTop + (if (isVideoMode) VideoViewfinderVerticalOffset else 0.dp))
+                        .clipToBounds()
+                        .onGloballyPositioned { coordinates ->
+                            viewfinderAreaBounds = coordinates.boundsInRoot()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
                     Box(
                         modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp)
-                            .height(CameraControlsLayoutDefaults.ZoomBarHeight),
-                        contentAlignment = Alignment.Center
+                            .requiredSize(cardWidth, cardHeight)
+                            .liquidGlassBackdropSource(videoTopBarBackdrop)
                     ) {
-                        zoomBar()
+                        viewfinder()
                     }
-                }
-                if (canShowZoomJoystick) {
-                    Box(
-                        modifier = Modifier
-                            .width(cardWidth)
-                            .height(cardHeight)
-                            .align(Alignment.Center)
-                    ) {
+                    if (isVideoMode) {
+                        // Keep video top controls at their previous screen position,
+                        // independent of the viewfinder's vertical offset.
                         Box(
                             modifier = Modifier
-                                .align(Alignment.CenterEnd)
-                                .padding(end = 12.dp)
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(Color.Black.copy(alpha = 0.68f))
-                                .border(1.dp, Color.White.copy(alpha = 0.78f), CircleShape)
-                                .clickable { zoomJoystickOpen = !zoomJoystickOpen },
-                            contentAlignment = Alignment.Center
+                                .width(cardWidth)
+                                .requiredHeight(cardHeight)
+                                // Keep video top controls at their original screen position
+                                // while the viewfinder itself is shifted down.
+                                .offset(y = -VideoViewfinderVerticalOffset),
+                            contentAlignment = Alignment.TopCenter
                         ) {
-                            Text("🕹", fontSize = 23.sp)
-                        }
-                        if (zoomJoystickOpen) {
-                            ZoomPanJoystick(
-                                modifier = Modifier.align(Alignment.Center),
-                                onPanBy = viewModel::panZoomBy,
-                            )
+                            topBar()
                         }
                     }
-                }
-            }
-
-            topBar()
-
-            CameraBottomControlsLayout(
-                viewfinderBottom = viewfinderTop + cardHeight,
-                modifier = Modifier.fillMaxSize(),
-                zoomBar = {
-                    // Panel visibility changes the zoom content, not the space used to
-                    // position the parameter row beneath it. XPAN has no horizontal bar.
-                    if (uiStyle != "OPPO" || isXpan) {
+                    if (uiStyle == "OPPO" && activePanel == ActivePanel.NONE && !isXpan) {
                         Box(
-                            modifier = if (isXpan) Modifier else Modifier
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
                                 .fillMaxWidth()
+                                .padding(bottom = 8.dp)
                                 .height(CameraControlsLayoutDefaults.ZoomBarHeight)
+                                .offset(y = -VideoViewfinderAdditionalOffset),
+                            contentAlignment = Alignment.Center
                         ) {
                             zoomBar()
                         }
-                    } else {
-                        Spacer(modifier = Modifier.height(0.dp))
                     }
-                },
-                // Hide the manual controls (EV/Tv/ISO/AF/AWB and their value ruler)
-                // in both Photo and Video modes without changing capture functionality.
-                parameterRuler = {},
-                parameterBar = {},
-                captureControls = {
-                    controls(Modifier.fillMaxWidth())
+                    if (canShowZoomJoystick) {
+                        Box(
+                            modifier = Modifier
+                                .width(cardWidth)
+                                .requiredHeight(cardHeight)
+                                .align(Alignment.Center)
+                                .offset(y = -VideoViewfinderAdditionalOffset)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.CenterEnd)
+                                    .padding(end = 12.dp)
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(alpha = 0.68f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.78f), CircleShape)
+                                    .clickable { zoomJoystickOpen = !zoomJoystickOpen },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("🕹", fontSize = 23.sp)
+                            }
+                            if (zoomJoystickOpen) {
+                                ZoomPanJoystick(
+                                    modifier = Modifier.align(Alignment.Center),
+                                    onPanBy = viewModel::panZoomBy,
+                                )
+                            }
+                        }
+                    }
                 }
-            )
+    
+                if (!isVideoMode) topBar()
+            }
 
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .navigationBarsPadding()
+            ) {
+                CameraBottomControlsLayout(
+                    viewfinderBottom = viewfinderTop + cardHeight,
+                    modifier = Modifier.fillMaxSize(),
+                    zoomBar = {
+                        // Panel visibility changes the zoom content, not the space used to
+                        // position the parameter row beneath it. XPAN has no horizontal bar.
+                        if (uiStyle != "OPPO" || isXpan) {
+                            Box(
+                                modifier = if (isXpan) Modifier else Modifier
+                                    .fillMaxWidth()
+                                    .height(CameraControlsLayoutDefaults.ZoomBarHeight)
+                            ) {
+                                zoomBar()
+                            }
+                        } else {
+                            Spacer(modifier = Modifier.height(0.dp))
+                        }
+                    },
+                    // Hide the manual controls (EV/Tv/ISO/AF/AWB and their value ruler)
+                    // in both Photo and Video modes without changing capture functionality.
+                    parameterRuler = {},
+                    parameterBar = {},
+                    captureControls = {
+                        controls(Modifier.fillMaxWidth())
+                    }
+                )
+            }
         }
+
         val panelDismissBounds = if (isXpan) {
             viewfinderAreaBounds ?: previewBounds
         } else {
@@ -1735,63 +1873,8 @@ fun CameraScreen(
             aspectRatio = state.aspectRatio,
             topSheetAspectRatios = topSheetAspectRatios,
             onAspectRatioChange = { runPreviewTransition { viewModel.setAspectRatio(it) } },
-            useLivePhoto = useLivePhoto,
-            onLivePhotoToggle = { viewModel.setUseLivePhoto(!useLivePhoto) },
-            timerSeconds = state.timerSeconds,
-            onTimerToggle = { viewModel.toggleTimer() },
-            depthEnabled = state.isVirtualApertureEnabled,
-            onDepthClick = {
-                if (com.hinnka.mycamera.ml.DepthModelManager.isInstalled(context)) {
-                    viewModel.setVirtualApertureAuto(!state.isVirtualApertureEnabled)
-                } else {
-                    android.widget.Toast.makeText(
-                        context,
-                        "Install a Depth Model in Settings to use Depth",
-                        android.widget.Toast.LENGTH_SHORT
-                    ).show()
-                }
-            },
-            onOpenFiltersClick = {
-                activePanel = ActivePanel.FILTERS
-            },
             videoAspectRatio = state.videoConfig.aspectRatio,
             onVideoAspectRatioChange = { runPreviewTransition { viewModel.setVideoAspectRatio(it) } },
-            videoTorchEnabled = state.videoConfig.torchEnabled,
-            videoTorchAvailable = state.videoCapabilities.supportsTorch,
-            onVideoTorchToggle = {
-                viewModel.setVideoTorchEnabled(!state.videoConfig.torchEnabled)
-            },
-            videoHdrEnabled = videoHdrEnabled,
-            onVideoHdrToggle = {
-                viewModel.setVideoHdrEnabled(!videoHdrEnabled)
-            },
-            videoStabilizationMode = state.videoConfig.stabilizationMode,
-            videoActionAvailable =
-                VideoStabilizationMode.ENHANCED in state.videoCapabilities.availableStabilizationModes &&
-                    !state.videoRecordingState.isRecording &&
-                    !state.videoRecordingState.isProcessing,
-            onVideoActionToggle = {
-                val nextMode = if (state.videoConfig.stabilizationMode == VideoStabilizationMode.ENHANCED) {
-                    if (VideoStabilizationMode.OIS in state.videoCapabilities.availableStabilizationModes) {
-                        VideoStabilizationMode.OIS
-                    } else {
-                        VideoStabilizationMode.OFF
-                    }
-                } else {
-                    VideoStabilizationMode.ENHANCED
-                }
-                viewModel.setVideoStabilizationMode(nextMode)
-            },
-            onVideoEditClick = {
-                activePanel = ActivePanel.EDIT
-            },
-            onVideoDualCaptureClick = {
-                android.widget.Toast.makeText(
-                    context,
-                    "Coming soon",
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
-            },
             videoLogProfile = state.videoConfig.logProfile,
             availableVideoLogProfiles = state.videoCapabilities.availableLogProfiles,
             onVideoLogProfileChange = { viewModel.setVideoLogProfile(it) },
@@ -2135,6 +2218,7 @@ private fun Controls(
     onSwitchCameraClick: () -> Unit,
     onCaptureModeSelected: (CameraShootingMode) -> Unit,
     modeSwitchEnabled: Boolean,
+    modeSwitcherBackdrop: LiquidGlassBackdrop,
     onCaptureTap: () -> Unit,
     onGalleryClick: () -> Unit,
     sideControlInset: Dp?,
@@ -2156,41 +2240,11 @@ private fun Controls(
                 .padding(bottom = CameraControlsLayoutDefaults.BottomPadding),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Keep the shutter centered on its own row.
             Box(
                 modifier = Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .padding(start = sideControlInset ?: 32.dp)
-                        .onGloballyPositioned { coordinates ->
-                            onGalleryThumbnailBoundsChanged(coordinates.boundsInRoot())
-                        }
-                        .autoRotate()
-                ) {
-                    GalleryThumbnail(
-                        latestPhoto = latestPhoto,
-                        viewModel = galleryViewModel,
-                        capturedThumbnail = capturedThumbnail,
-                        onCapturedThumbnailLoaded = viewModel::acknowledgeCapturedThumbnail,
-                        onClick = onGalleryClick
-                    )
-                    key(capturedThumbnail?.captureId) {
-                        GalleryProcessingOverlay(
-                            pendingCount = if (capturedThumbnail == null || capturedThumbnail?.bitmap != null ||
-                                capturedThumbnail?.finalThumbnailLoaded == true
-                            ) {
-                                captureProcessingState.pendingCount
-                            } else {
-                                0
-                            },
-                            completedCount = captureProcessingState.completedCount,
-                            modifier = Modifier.matchParentSize()
-                        )
-                    }
-                }
-
                 CaptureButton(
                     captureMode = state.captureMode,
                     isProfessionalMode = state.useRaw && state.isRawSupported,
@@ -2204,7 +2258,7 @@ private fun Controls(
                         !useMultipleExposure && fastShutterEnabled,
                     multipleExposureEnabled = useMultipleExposure && state.captureMode == CaptureMode.PHOTO,
                     multipleExposureProgress = multipleExposureState.capturedCount.toFloat() /
-                            multipleExposureState.targetCount.coerceAtLeast(1).toFloat(),
+                        multipleExposureState.targetCount.coerceAtLeast(1).toFloat(),
                     customStyle = if (uiStyle == "OPPO" && state.captureMode != CaptureMode.VIDEO) {
                         CaptureButtonStyle.COLOR
                     } else {
@@ -2219,9 +2273,13 @@ private fun Controls(
                     onTap = onCaptureTap,
                     onLongPressStart = { viewModel.startContinuousCapture() },
                     onLongPressEnd = { viewModel.stopContinuousCapture() },
-                    modifier = Modifier.onGloballyPositioned { coordinates ->
-                        onCaptureButtonBoundsChanged(coordinates.boundsInRoot())
-                    },
+                    modifier = Modifier
+                        .offset(
+                            y = if (state.captureMode == CaptureMode.VIDEO) (-1).dp else (-2).dp
+                        )
+                        .onGloballyPositioned { coordinates ->
+                            onCaptureButtonBoundsChanged(coordinates.boundsInRoot())
+                        },
                 )
 
                 if (state.videoRecordingState.isRecording) {
@@ -2247,6 +2305,65 @@ private fun Controls(
                         )
                     }
                 }
+            }
+
+            Spacer(modifier = Modifier.height(CameraControlsLayoutDefaults.ModeSwitcherSpacing))
+
+            // Match the reference: gallery, Photo/Video selector and camera switch
+            // share one horizontal row beneath the centered shutter.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(CameraControlsLayoutDefaults.ModeSwitcherHeight),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = sideControlInset ?: 32.dp)
+                        .onGloballyPositioned { coordinates ->
+                            onGalleryThumbnailBoundsChanged(coordinates.boundsInRoot())
+                        }
+                        .autoRotate()
+                ) {
+                    GalleryThumbnail(
+                        latestPhoto = latestPhoto,
+                        viewModel = galleryViewModel,
+                        capturedThumbnail = capturedThumbnail,
+                        onCapturedThumbnailLoaded = viewModel::acknowledgeCapturedThumbnail,
+                        onClick = onGalleryClick
+                    )
+                    key(capturedThumbnail?.captureId) {
+                        GalleryProcessingOverlay(
+                            pendingCount = if (
+                                capturedThumbnail == null ||
+                                capturedThumbnail?.bitmap != null ||
+                                capturedThumbnail?.finalThumbnailLoaded == true
+                            ) {
+                                captureProcessingState.pendingCount
+                            } else {
+                                0
+                            },
+                            completedCount = captureProcessingState.completedCount,
+                            modifier = Modifier.matchParentSize()
+                        )
+                    }
+                }
+
+                CaptureModeSwitcher(
+                    oppoStyle = uiStyle == "OPPO",
+                    modeSwitcherBackdrop = modeSwitcherBackdrop,
+                    // Pro/RAW remains an internal capture option, not a visible mode.
+                    shootingMode = if (state.captureMode == CaptureMode.VIDEO) {
+                        CameraShootingMode.VIDEO
+                    } else {
+                        CameraShootingMode.PHOTO
+                    },
+                    enabled = modeSwitchEnabled &&
+                        !state.videoRecordingState.isRecording &&
+                        !state.videoRecordingState.isProcessing,
+                    onModeSelected = onCaptureModeSelected
+                )
 
                 PhysicalButton(
                     onClick = {
@@ -2256,13 +2373,14 @@ private fun Controls(
                     },
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
-                        .padding(end = sideControlInset ?: 40.dp)
+                        .padding(end = sideControlInset ?: 32.dp)
                         .size(CameraControlsLayoutDefaults.SideButtonSize)
                         .autoRotate(),
-                    shape = CircleShape
+                    shape = CircleShape,
+                    backgroundColor = Color.White.copy(alpha = 0.12f)
                 ) {
                     Icon(
-                        imageVector = AppIcons.Cameraswitch,
+                        imageVector = AppIcons.RestartAlt,
                         contentDescription = stringResource(R.string.switch_camera),
                         tint = Color.White.copy(
                             alpha = if (state.videoRecordingState.isProcessing) 0.35f else 1f
@@ -2271,23 +2389,6 @@ private fun Controls(
                     )
                 }
             }
-
-            Spacer(modifier = Modifier.height(CameraControlsLayoutDefaults.ModeSwitcherSpacing))
-
-            CaptureModeSwitcher(
-                oppoStyle = uiStyle == "OPPO",
-                // Pro/RAW remains an internal capture option, but is no longer a
-                // separate item in the visible Photo/Video mode switcher.
-                shootingMode = if (state.captureMode == CaptureMode.VIDEO) {
-                    CameraShootingMode.VIDEO
-                } else {
-                    CameraShootingMode.PHOTO
-                },
-                enabled = modeSwitchEnabled &&
-                    !state.videoRecordingState.isRecording &&
-                    !state.videoRecordingState.isProcessing,
-                onModeSelected = onCaptureModeSelected
-            )
         }
     }
 }
@@ -2301,7 +2402,7 @@ private fun GalleryProcessingOverlay(
 ) {
     val completionAlpha = remember { Animatable(0f) }
     var lastAcknowledgedCompletion by remember { mutableLongStateOf(completedCount) }
-    val thumbnailShape = RoundedCornerShape(10.dp)
+    val thumbnailShape = CircleShape
 
     LaunchedEffect(pendingCount, completedCount) {
         if (pendingCount > 0) {
@@ -2480,6 +2581,7 @@ fun CaptureButton(
                 )
             },
         shape = CircleShape,
+        backgroundColor = Color(0xFF2D2D2D),
         contentAlignment = Alignment.Center
     ) {
         val ringColor = when {
@@ -2489,14 +2591,14 @@ fun CaptureButton(
                 if (isPaused) Color.White.copy(alpha = 0.8f)
                 else Color.Red.copy(alpha = pulseAlpha)
             }
-            else -> Color.White.copy(alpha = 0.32f)
+            else -> Color(0xFF505050)
         }
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .border(
-                    width = 1.dp,
+                    width = if (captureMode == CaptureMode.VIDEO) 2.dp else 1.dp,
                     color = ringColor,
                     shape = CircleShape
                 )
@@ -2507,7 +2609,7 @@ fun CaptureButton(
             targetValue = when {
                 captureMode == CaptureMode.VIDEO && isVideoRecording -> 19.dp
                 progressRingCount > 0 -> CaptureProgressRingDefaults.contentPadding(progressRingCount)
-                else -> 2.dp
+                else -> 3.dp
             },
             animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow),
             label = "centerPadding"
@@ -2518,14 +2620,8 @@ fun CaptureButton(
         )
         val defaultCenterBackground = when {
             captureMode == CaptureMode.VIDEO -> {
-                Modifier.background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color(0xFFFF6668),
-                            Color(0xFFE4383C)
-                        )
-                    )
-                )
+                // Flat saturated red video shutter, matching the reference capture button.
+                Modifier.background(Color(0xFFFF3038))
             }
             isProfessionalMode -> Modifier.background(AccentColor)
             else -> {
@@ -2609,6 +2705,7 @@ private fun rememberPhotoCaptureProgress(progress: PhotoCaptureProgress?): State
 @Composable
 private fun CaptureModeSwitcher(
     oppoStyle: Boolean,
+    modeSwitcherBackdrop: LiquidGlassBackdrop,
     shootingMode: CameraShootingMode,
     enabled: Boolean,
     onModeSelected: (CameraShootingMode) -> Unit
@@ -2617,58 +2714,116 @@ private fun CaptureModeSwitcher(
         modifier = Modifier
             .width(171.dp)
             .height(CameraControlsLayoutDefaults.ModeSwitcherHeight)
-            .clip(RoundedCornerShape(18.dp))
-            .background(if (oppoStyle) Color(0xFF202020) else Color.Black.copy(alpha = 0.28f))
-            .border(
-                width = 0.5.dp,
-                color = if (oppoStyle) Color(0xFF333333) else Color.White.copy(alpha = 0.18f),
-                shape = RoundedCornerShape(18.dp)
-            )
+            .clip(if (oppoStyle) RoundedCornerShape(18.dp) else CircleShape)
+            .background(if (oppoStyle) Color(0xFF202020) else Color.White.copy(alpha = 0.13f))
             .padding(3.dp)
     ) {
         // The visible switcher contains only Photo and Video. Pro/RAW capture
         // internals are preserved but are not exposed as a separate UI mode.
         val knobWidth = maxWidth / 2
-        val selectedIndex = if (shootingMode == CameraShootingMode.VIDEO) 1 else 0
+        val selectedIndex = if (shootingMode == CameraShootingMode.VIDEO) 0 else 1
         val knobOffset by animateDpAsState(
             targetValue = knobWidth * selectedIndex,
             animationSpec = tween(durationMillis = 220),
             label = "modeSwitcher"
         )
-        val selectedBackground by animateColorAsState(
-            targetValue = if (oppoStyle) Color(0xFF303030) else Color.White,
-            animationSpec = tween(durationMillis = 220),
-            label = "modeSwitcherColor"
-        )
-        Box(
-            modifier = Modifier
-                .offset(x = knobOffset)
-                .width(knobWidth)
-                .fillMaxHeight()
-                .clip(RoundedCornerShape(15.dp))
-                .background(selectedBackground)
-        )
+        if (oppoStyle) {
+            val selectedBackground by animateColorAsState(
+                targetValue = Color(0xFF303030),
+                animationSpec = tween(durationMillis = 220),
+                label = "modeSwitcherColor"
+            )
+            Box(
+                modifier = Modifier
+                    .offset(x = knobOffset)
+                    .width(knobWidth)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(selectedBackground)
+            )
+        } else {
+            val liquidGlassStyle = remember {
+                LiquidGlassStyle(
+                    // A nearly clear lens: keep the selected half visibly transparent and refractive.
+                    blurRadius = 0.5.dp,
+                    refractionHeight = 18.dp,
+                    refractionAmount = 16.dp,
+                    saturation = 1.45f,
+                    tint = Color(0x12FFFFFF),
+                    highlightWidth = 0.65.dp,
+                    highlightBlur = 0.4.dp,
+                    highlightAlpha = 0.58f,
+                    fallbackColor = Color(0x18FFFFFF)
+                )
+            }
+            val outerGlassStyle = remember {
+                LiquidGlassStyle(
+                    // Keep the outer track neutral grey; the selected inner half supplies the lens effect.
+                    blurRadius = 8.dp,
+                    refractionHeight = 20.dp,
+                    refractionAmount = 0.dp,
+                    saturation = 1.0f,
+                    tint = Color(0x66707070),
+                    highlightWidth = 0.dp,
+                    highlightBlur = 0.dp,
+                    highlightAlpha = 0f,
+                    fallbackColor = Color(0xCC707070)
+                )
+            }
+            // Capture the rendered grey outer track as a separate backdrop.
+            // The selected inner glass must refract this surface, not the dark camera
+            // scene behind the entire mode switcher.
+            val selectedGlassBackdrop = rememberLiquidGlassBackdrop()
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .liquidGlassBackdropSource(selectedGlassBackdrop)
+            ) {
+                LiquidGlassSurface(
+                    backdrop = modeSwitcherBackdrop,
+                    modifier = Modifier.fillMaxSize(),
+                    cornerRadius = 19.5.dp,
+                    style = outerGlassStyle
+                ) {}
+            }
+            Box(
+                modifier = Modifier
+                    .offset(x = knobOffset)
+                    .width(knobWidth)
+                    .fillMaxHeight()
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.035f))
+                    .border(0.5.dp, Color.White.copy(alpha = 0.18f), CircleShape)
+            ) {
+                LiquidGlassSurface(
+                    backdrop = selectedGlassBackdrop,
+                    modifier = Modifier.fillMaxSize(),
+                    cornerRadius = 19.5.dp,
+                    style = liquidGlassStyle
+                ) {}
+            }
+        }
         Row(
             modifier = Modifier.fillMaxSize(),
             verticalAlignment = Alignment.CenterVertically
         ) {
             ModeSwitcherItem(
-                label = stringResource(R.string.capture_mode_photo) +
-                    if (oppoStyle && shootingMode != CameraShootingMode.VIDEO) " ▴" else "",
-                selected = shootingMode != CameraShootingMode.VIDEO,
-                enabled = enabled,
-                onClick = { onModeSelected(CameraShootingMode.PHOTO) },
-                modifier = Modifier.weight(1f),
-                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.Black
-            )
-            ModeSwitcherItem(
-                label = stringResource(R.string.capture_mode_video) +
+                label = stringResource(R.string.capture_mode_video).uppercase() +
                     if (oppoStyle && shootingMode == CameraShootingMode.VIDEO) " ▴" else "",
                 selected = shootingMode == CameraShootingMode.VIDEO,
                 enabled = enabled,
                 onClick = { onModeSelected(CameraShootingMode.VIDEO) },
                 modifier = Modifier.weight(1f),
-                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.Black
+                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color(0xFFFFD400)
+            )
+            ModeSwitcherItem(
+                label = stringResource(R.string.capture_mode_photo).uppercase() +
+                    if (oppoStyle && shootingMode != CameraShootingMode.VIDEO) " ▴" else "",
+                selected = shootingMode != CameraShootingMode.VIDEO,
+                enabled = enabled,
+                onClick = { onModeSelected(CameraShootingMode.PHOTO) },
+                modifier = Modifier.weight(1f),
+                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color(0xFFFFD400)
             )
         }
     }
@@ -2697,8 +2852,8 @@ private fun ModeSwitcherItem(
                 enabled -> Color.White.copy(alpha = 0.82f)
                 else -> Color.White.copy(alpha = 0.3f)
             },
-            fontSize = 12.sp,
-            lineHeight = 14.sp,
+            fontSize = 14.sp,
+            lineHeight = 16.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             maxLines = 1
         )

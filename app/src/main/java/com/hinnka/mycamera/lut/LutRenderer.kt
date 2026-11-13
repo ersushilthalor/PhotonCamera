@@ -45,6 +45,52 @@ enum class PreviewCaptureSource {
     Original
 }
 
+private val LIQUID_GLASS_BLUR_FRAGMENT_SHADER = """
+    #version 300 es
+    precision highp float;
+    in vec2 vTexCoord;
+    out vec4 fragColor;
+    uniform sampler2D uInputTexture;
+    uniform vec2 uTexelStep;
+
+    void main() {
+        vec3 color = texture(uInputTexture, vTexCoord).rgb * 0.227027;
+        color += texture(uInputTexture, vTexCoord + uTexelStep * 1.384615).rgb * 0.316216;
+        color += texture(uInputTexture, vTexCoord - uTexelStep * 1.384615).rgb * 0.316216;
+        color += texture(uInputTexture, vTexCoord + uTexelStep * 3.230769).rgb * 0.070270;
+        color += texture(uInputTexture, vTexCoord - uTexelStep * 3.230769).rgb * 0.070270;
+        fragColor = vec4(color, 1.0);
+    }
+""".trimIndent()
+
+private val LIQUID_GLASS_OVERLAY_FRAGMENT_SHADER = """
+    #version 300 es
+    precision highp float;
+    in vec2 vTexCoord;
+    out vec4 fragColor;
+    uniform sampler2D uBlurTexture;
+    uniform vec4 uOverlayRect;
+    uniform vec2 uViewportSize;
+    uniform float uCornerRadiusPx;
+
+    float roundedRectDistance(vec2 point, vec2 halfSize, float radius) {
+        vec2 q = abs(point) - halfSize + vec2(radius);
+        return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - radius;
+    }
+
+    void main() {
+        vec2 rectSize = (uOverlayRect.zw - uOverlayRect.xy) * uViewportSize;
+        vec2 localPosition = (vTexCoord - uOverlayRect.xy) * uViewportSize;
+        vec2 centeredPosition = localPosition - rectSize * 0.5;
+        float radius = clamp(uCornerRadiusPx, 0.0, min(rectSize.x, rectSize.y) * 0.5);
+        float distanceToEdge = roundedRectDistance(centeredPosition, rectSize * 0.5, radius);
+        float antiAlias = max(fwidth(distanceToEdge), 0.75);
+        float alpha = 1.0 - smoothstep(-antiAlias, antiAlias, distanceToEdge);
+        if (alpha <= 0.001) discard;
+        fragColor = vec4(texture(uBlurTexture, vTexCoord).rgb, alpha);
+    }
+""".trimIndent()
+
 class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private val appContext = context.applicationContext
     companion object {
@@ -213,6 +259,25 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private var focusPeakingTextureId: Int = 0
     private var focusPeakingFboWidth: Int = 0
     private var focusPeakingFboHeight: Int = 0
+
+    // The same camera preview texture is downsampled and blurred for the glass pill.
+    // No additional Camera2 output, stream, or capture session is created.
+    private var liquidGlassBlurProgramId: Int = 0
+    private var liquidGlassOverlayProgramId: Int = 0
+    private val liquidGlassBlurTextureIds = IntArray(2)
+    private val liquidGlassBlurFboIds = IntArray(2)
+    private var liquidGlassBlurWidth = 0
+    private var liquidGlassBlurHeight = 0
+    private var liquidGlassBaseTextureId = 0
+    private var liquidGlassBaseFboId = 0
+    private var liquidGlassBaseWidth = 0
+    private var liquidGlassBaseHeight = 0
+    @Volatile
+    private var liquidGlassOverlayBounds: FloatArray? = null
+    @Volatile
+    private var liquidGlassOverlayCornerRadiusPx = 0f
+    @Volatile
+    private var liquidGlassOverlayBlurRadiusPx = 0f
 
     // SurfaceTexture 变换矩阵
     private val stMatrix = FloatArray(16).apply { Matrix.setIdentityM(this, 0) }
@@ -516,6 +581,22 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     private var lastCaptureWidth = 0
     private var lastCaptureHeight = 0
     private var firstFrameRendered = false
+    private var pendingModeSwitchReconfigureStartedAtMs: Long? = null
+    private var pendingModeSwitchTapAtMs: Long? = null
+
+    /** Called on the GL thread after the old capture session has been retired. */
+    fun markPreviewTransitionStart(
+        sessionReconfigureStartedAtElapsedMs: Long,
+        modeSwitchTapAtElapsedMs: Long?,
+    ) {
+        pendingModeSwitchReconfigureStartedAtMs = sessionReconfigureStartedAtElapsedMs
+        pendingModeSwitchTapAtMs = modeSwitchTapAtElapsedMs
+        PLog.i(
+            TAG,
+            "Mode-switch trace armed: sessionStartElapsedRealtimeMs=$sessionReconfigureStartedAtElapsedMs, " +
+                "tapElapsedRealtimeMs=$modeSwitchTapAtElapsedMs"
+        )
+    }
 
     /**
      * Surface 创建时调用
@@ -654,6 +735,16 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         focusPeakingTextureId = 0
         focusPeakingFboWidth = 0
         focusPeakingFboHeight = 0
+        liquidGlassBlurProgramId = 0
+        liquidGlassOverlayProgramId = 0
+        liquidGlassBlurTextureIds.fill(0)
+        liquidGlassBlurFboIds.fill(0)
+        liquidGlassBlurWidth = 0
+        liquidGlassBlurHeight = 0
+        liquidGlassBaseTextureId = 0
+        liquidGlassBaseFboId = 0
+        liquidGlassBaseWidth = 0
+        liquidGlassBaseHeight = 0
         lastCaptureWidth = 0
         lastCaptureHeight = 0
         viewportWidth = 0
@@ -1088,7 +1179,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             filmGrainEnabled ||
             eyeFocusSamplingNeeded ||
             hasDualLayer ||
-            (!isAutoFocus && focusPeakingEnabled)
+            (!isAutoFocus && focusPeakingEnabled) ||
+            liquidGlassOverlayBounds != null
         if (requestedFbo && !isMainFboReady(viewportWidth, viewportHeight)) {
             initFbo(viewportWidth, viewportHeight)
         }
@@ -1220,16 +1312,50 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 currentTexId = renderFocusPeaking(currentTexId, currentWidth, currentHeight)
             }
 
-            // 显示到屏幕
-            if (postProcessEffectEnabled && !postProcessMaterialized) {
+            // The blur is composited from this frame's final preview texture, underneath
+            // Compose controls. The icon/text layer itself remains sharp.
+            val glassOverlayBounds = liquidGlassOverlayBounds
+            var finalDisplayTextureId = currentTexId
+            var needsHdfCompositeForSampling = postProcessEffectEnabled && !postProcessMaterialized
+            if (glassOverlayBounds != null) {
+                val glassDisplayTextureId = if (needsHdfCompositeForSampling) {
+                    if (setupLiquidGlassBaseFramebuffer(viewportWidth, viewportHeight)) {
+                        drawPostProcessEffects(
+                            liquidGlassBaseFboId,
+                            viewportWidth,
+                            viewportHeight,
+                            currentTexId,
+                        )
+                        liquidGlassBaseTextureId
+                    } else {
+                        null
+                    }
+                } else {
+                    currentTexId
+                }
+
+                if (glassDisplayTextureId != null) {
+                    drawFboToScreen(0, viewportWidth, viewportHeight, glassDisplayTextureId)
+                    renderLiquidGlassBlurOverlay(
+                        sourceTextureId = glassDisplayTextureId,
+                        width = viewportWidth,
+                        height = viewportHeight,
+                        bounds = glassOverlayBounds,
+                    )
+                    finalDisplayTextureId = glassDisplayTextureId
+                    // The effects have already been materialized into liquidGlassBaseTextureId.
+                    needsHdfCompositeForSampling = false
+                } else {
+                    // Preserve the normal post-processing path if the optional glass target cannot be allocated.
+                    drawPostProcessEffects(0, viewportWidth, viewportHeight, currentTexId)
+                }
+            } else if (needsHdfCompositeForSampling) {
                 drawPostProcessEffects(0, viewportWidth, viewportHeight, currentTexId)
             } else {
                 drawFboToScreen(0, viewportWidth, viewportHeight, currentTexId)
             }
-            val finalDisplayTextureId = currentTexId
             val finalDisplayWidth = viewportWidth
             val finalDisplayHeight = viewportHeight
-            val needsHdfCompositeForSampling = postProcessEffectEnabled && !postProcessMaterialized
             val sampleTimeNanos = SystemClock.elapsedRealtimeNanos()
             if (
                 cameraFrameUpdated &&
@@ -1288,6 +1414,21 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 finalDisplayHeight = viewportHeight,
                 compositeFinalDisplay = false
             )
+        }
+        if (cameraFrameUpdated) {
+            val reconfigureStartedAtMs = pendingModeSwitchReconfigureStartedAtMs
+            if (reconfigureStartedAtMs != null) {
+                val firstFrameAtMs = SystemClock.elapsedRealtime()
+                val tapAtMs = pendingModeSwitchTapAtMs
+                PLog.i(
+                    TAG,
+                    "Mode-switch first preview frame: elapsedRealtimeMs=$firstFrameAtMs, " +
+                        "sessionReconfigureToFirstFrameMs=${(firstFrameAtMs - reconfigureStartedAtMs).coerceAtLeast(0L)}, " +
+                        "tapToFirstFrameMs=${tapAtMs?.let { (firstFrameAtMs - it).coerceAtLeast(0L) }}"
+                )
+                pendingModeSwitchReconfigureStartedAtMs = null
+                pendingModeSwitchTapAtMs = null
+            }
         }
         if (cameraFrameUpdated && !firstFrameRendered) {
             firstFrameRendered = true
@@ -2499,6 +2640,26 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         photoCaptureHeight = height.coerceAtLeast(0)
     }
 
+    /**
+     * Enables a rounded live-preview blur overlay beneath the Compose video icon pill.
+     * Bounds are normalized GL UV coordinates in left/bottom/right/top order.
+     */
+    fun setLiquidGlassOverlay(
+        bounds: FloatArray?,
+        cornerRadiusPx: Float,
+        blurRadiusPx: Float,
+    ) {
+        val safeBounds = bounds?.takeIf {
+            it.size >= 4 &&
+                it[0].isFinite() && it[1].isFinite() &&
+                it[2].isFinite() && it[3].isFinite() &&
+                it[2] > it[0] && it[3] > it[1]
+        }?.copyOf(4)
+        liquidGlassOverlayBounds = safeBounds
+        liquidGlassOverlayCornerRadiusPx = cornerRadiusPx.coerceAtLeast(0f)
+        liquidGlassOverlayBlurRadiusPx = blurRadiusPx.coerceAtLeast(0f)
+    }
+
     fun setSourceCrop(crop: PhantomPipCrop) {
         val normalized = crop.normalized()
         cropRect[0] = normalized.left
@@ -3325,6 +3486,29 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         basicToneTextures.release()
         mgcEisHardwareBufferRenderer.release()
         mgcEisYuvRenderer.release()
+        for (index in 0..1) {
+            if (liquidGlassBlurFboIds[index] != 0) {
+                GLES30.glDeleteFramebuffers(1, intArrayOf(liquidGlassBlurFboIds[index]), 0)
+                liquidGlassBlurFboIds[index] = 0
+            }
+            if (liquidGlassBlurTextureIds[index] != 0) {
+                GLES30.glDeleteTextures(1, intArrayOf(liquidGlassBlurTextureIds[index]), 0)
+                liquidGlassBlurTextureIds[index] = 0
+            }
+        }
+        liquidGlassBlurWidth = 0
+        liquidGlassBlurHeight = 0
+        if (liquidGlassBaseFboId != 0) {
+            GLES30.glDeleteFramebuffers(1, intArrayOf(liquidGlassBaseFboId), 0)
+            liquidGlassBaseFboId = 0
+        }
+        if (liquidGlassBaseTextureId != 0) {
+            GLES30.glDeleteTextures(1, intArrayOf(liquidGlassBaseTextureId), 0)
+            liquidGlassBaseTextureId = 0
+        }
+        liquidGlassBaseWidth = 0
+        liquidGlassBaseHeight = 0
+
         // 删除程序
         colorProgramCache.release()
         enginePreview.release()
@@ -3332,6 +3516,10 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         passthroughProgramId = 0
         GlUtils.deleteProgram(copyProgramId)
         copyProgramId = 0
+        GlUtils.deleteProgram(liquidGlassBlurProgramId)
+        liquidGlassBlurProgramId = 0
+        GlUtils.deleteProgram(liquidGlassOverlayProgramId)
+        liquidGlassOverlayProgramId = 0
 
         // Release the Camera2 preview SurfaceTexture.
         surfaceTexture?.release()
@@ -3520,6 +3708,198 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         } else {
             null
         }
+    }
+
+    private fun ensureLiquidGlassPrograms(): Boolean {
+        if (liquidGlassBlurProgramId == 0) {
+            liquidGlassBlurProgramId = createPostProcessProgram(
+                LIQUID_GLASS_BLUR_FRAGMENT_SHADER,
+                "liquid glass blur",
+            )
+        }
+        if (liquidGlassOverlayProgramId == 0) {
+            liquidGlassOverlayProgramId = createPostProcessProgram(
+                LIQUID_GLASS_OVERLAY_FRAGMENT_SHADER,
+                "liquid glass overlay",
+            )
+        }
+        return liquidGlassBlurProgramId != 0 && liquidGlassOverlayProgramId != 0
+    }
+
+    private fun createLiquidGlassFramebuffer(
+        width: Int,
+        height: Int,
+        label: String,
+    ): Pair<Int, Int>? {
+        if (width <= 0 || height <= 0) return null
+        val texture = IntArray(1)
+        val framebuffer = IntArray(1)
+        GLES30.glGenTextures(1, texture, 0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texture[0])
+        GLES30.glTexImage2D(
+            GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, width, height,
+            0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null,
+        )
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+
+        GLES30.glGenFramebuffers(1, framebuffer, 0)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer[0])
+        GLES30.glFramebufferTexture2D(
+            GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+            GLES30.GL_TEXTURE_2D, texture[0], 0,
+        )
+        val status = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER)
+        val error = GLES30.glGetError()
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        if (status != GLES30.GL_FRAMEBUFFER_COMPLETE || error != GLES30.GL_NO_ERROR) {
+            PLog.e(TAG, "Liquid-glass $label framebuffer incomplete: status=$status glError=$error")
+            GLES30.glDeleteFramebuffers(1, framebuffer, 0)
+            GLES30.glDeleteTextures(1, texture, 0)
+            return null
+        }
+        return texture[0] to framebuffer[0]
+    }
+
+    private fun setupLiquidGlassBlurFramebuffers(width: Int, height: Int): Boolean {
+        val targetWidth = (width / 4).coerceAtLeast(1)
+        val targetHeight = (height / 4).coerceAtLeast(1)
+        if (liquidGlassBlurWidth == targetWidth &&
+            liquidGlassBlurHeight == targetHeight &&
+            liquidGlassBlurTextureIds.all { it != 0 } &&
+            liquidGlassBlurFboIds.all { it != 0 }
+        ) {
+            return true
+        }
+
+        for (index in 0..1) {
+            if (liquidGlassBlurFboIds[index] != 0) {
+                GLES30.glDeleteFramebuffers(1, intArrayOf(liquidGlassBlurFboIds[index]), 0)
+            }
+            if (liquidGlassBlurTextureIds[index] != 0) {
+                GLES30.glDeleteTextures(1, intArrayOf(liquidGlassBlurTextureIds[index]), 0)
+            }
+            liquidGlassBlurFboIds[index] = 0
+            liquidGlassBlurTextureIds[index] = 0
+        }
+        liquidGlassBlurWidth = 0
+        liquidGlassBlurHeight = 0
+
+        for (index in 0..1) {
+            val target = createLiquidGlassFramebuffer(targetWidth, targetHeight, "blur[$index]") ?: run {
+                for (cleanupIndex in 0..1) {
+                    if (liquidGlassBlurFboIds[cleanupIndex] != 0) {
+                        GLES30.glDeleteFramebuffers(1, intArrayOf(liquidGlassBlurFboIds[cleanupIndex]), 0)
+                    }
+                    if (liquidGlassBlurTextureIds[cleanupIndex] != 0) {
+                        GLES30.glDeleteTextures(1, intArrayOf(liquidGlassBlurTextureIds[cleanupIndex]), 0)
+                    }
+                    liquidGlassBlurFboIds[cleanupIndex] = 0
+                    liquidGlassBlurTextureIds[cleanupIndex] = 0
+                }
+                return false
+            }
+            liquidGlassBlurTextureIds[index] = target.first
+            liquidGlassBlurFboIds[index] = target.second
+        }
+        liquidGlassBlurWidth = targetWidth
+        liquidGlassBlurHeight = targetHeight
+        return true
+    }
+
+    private fun setupLiquidGlassBaseFramebuffer(width: Int, height: Int): Boolean {
+        if (liquidGlassBaseTextureId != 0 &&
+            liquidGlassBaseFboId != 0 &&
+            liquidGlassBaseWidth == width &&
+            liquidGlassBaseHeight == height
+        ) {
+            return true
+        }
+        if (liquidGlassBaseFboId != 0) {
+            GLES30.glDeleteFramebuffers(1, intArrayOf(liquidGlassBaseFboId), 0)
+        }
+        if (liquidGlassBaseTextureId != 0) {
+            GLES30.glDeleteTextures(1, intArrayOf(liquidGlassBaseTextureId), 0)
+        }
+        liquidGlassBaseTextureId = 0
+        liquidGlassBaseFboId = 0
+        liquidGlassBaseWidth = 0
+        liquidGlassBaseHeight = 0
+        val target = createLiquidGlassFramebuffer(width, height, "post-process base") ?: return false
+        liquidGlassBaseTextureId = target.first
+        liquidGlassBaseFboId = target.second
+        liquidGlassBaseWidth = width
+        liquidGlassBaseHeight = height
+        return true
+    }
+
+    private fun renderLiquidGlassBlurOverlay(
+        sourceTextureId: Int,
+        width: Int,
+        height: Int,
+        bounds: FloatArray,
+    ) {
+        if (!ensureLiquidGlassPrograms() || !setupLiquidGlassBlurFramebuffers(width, height)) return
+
+        val blurRadius = liquidGlassOverlayBlurRadiusPx
+            .coerceIn(1f, minOf(width, height).toFloat() * 0.24f)
+        GLES30.glDisable(GLES30.GL_BLEND)
+
+        // Horizontal blur + 4x downsample from the final camera preview texture.
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, liquidGlassBlurFboIds[0])
+        GLES30.glViewport(0, 0, liquidGlassBlurWidth, liquidGlassBlurHeight)
+        GLES30.glUseProgram(liquidGlassBlurProgramId)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, sourceTextureId)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(liquidGlassBlurProgramId, "uInputTexture"), 0)
+        GLES30.glUniform2f(
+            GLES30.glGetUniformLocation(liquidGlassBlurProgramId, "uTexelStep"),
+            blurRadius / width.toFloat(),
+            0f,
+        )
+        drawSimpleQuad(liquidGlassBlurProgramId)
+
+        // Vertical blur on the reduced texture.
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, liquidGlassBlurFboIds[1])
+        GLES30.glViewport(0, 0, liquidGlassBlurWidth, liquidGlassBlurHeight)
+        GLES30.glUseProgram(liquidGlassBlurProgramId)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, liquidGlassBlurTextureIds[0])
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(liquidGlassBlurProgramId, "uInputTexture"), 0)
+        GLES30.glUniform2f(
+            GLES30.glGetUniformLocation(liquidGlassBlurProgramId, "uTexelStep"),
+            0f,
+            blurRadius / height.toFloat(),
+        )
+        drawSimpleQuad(liquidGlassBlurProgramId)
+
+        // Blend only inside the rounded pill bounds; Compose draws the crisp icons above it.
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        GLES30.glViewport(0, 0, width, height)
+        GLES30.glEnable(GLES30.GL_BLEND)
+        GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+        GLES30.glUseProgram(liquidGlassOverlayProgramId)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, liquidGlassBlurTextureIds[1])
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, "uBlurTexture"), 0)
+        GLES30.glUniform4f(
+            GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, "uOverlayRect"),
+            bounds[0], bounds[1], bounds[2], bounds[3],
+        )
+        GLES30.glUniform2f(
+            GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, "uViewportSize"),
+            width.toFloat(), height.toFloat(),
+        )
+        GLES30.glUniform1f(
+            GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, "uCornerRadiusPx"),
+            liquidGlassOverlayCornerRadiusPx,
+        )
+        drawSimpleQuad(liquidGlassOverlayProgramId)
+        GLES30.glDisable(GLES30.GL_BLEND)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
     }
 
     private fun ensureHdfBlurPrograms(): Boolean {

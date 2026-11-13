@@ -128,6 +128,18 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         }
     }
 
+    fun markPreviewTransitionStart(
+        sessionReconfigureStartedAtElapsedMs: Long,
+        modeSwitchTapAtElapsedMs: Long?,
+    ) {
+        queueEvent {
+            renderer.markPreviewTransitionStart(
+                sessionReconfigureStartedAtElapsedMs = sessionReconfigureStartedAtElapsedMs,
+                modeSwitchTapAtElapsedMs = modeSwitchTapAtElapsedMs,
+            )
+        }
+    }
+
     fun setStabilizationInputSize(width: Int, height: Int) {
         queueEvent {
             renderer.setStabilizationInputSize(width, height)
@@ -319,6 +331,18 @@ class CameraGLSurfaceView @JvmOverloads constructor(
     fun getSurfaceTexture(): SurfaceTexture? = renderer.getSurfaceTexture()
 
     fun getRenderSurface(): Surface? = currentSurface
+
+    fun setLiquidGlassOverlay(
+        bounds: FloatArray?,
+        cornerRadiusPx: Float,
+        blurRadiusPx: Float,
+    ) {
+        val safeBounds = bounds?.copyOf()
+        queueEvent {
+            renderer.setLiquidGlassOverlay(safeBounds, cornerRadiusPx, blurRadiusPx)
+            requestRender()
+        }
+    }
 
     fun setSourceCrop(crop: PhantomPipCrop) {
         queueEvent {

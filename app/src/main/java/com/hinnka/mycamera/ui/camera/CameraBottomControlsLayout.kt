@@ -12,11 +12,12 @@ import androidx.compose.ui.unit.dp
 internal object CameraControlsLayoutDefaults {
     val ParameterBarHeight = 48.dp
     val ZoomBarHeight = 33.dp
-    val CaptureButtonSize = 72.dp
-    val SideButtonSize = 48.dp
-    val ModeSwitcherHeight = 36.dp
-    val ModeSwitcherSpacing = 30.dp
-    val BottomPadding = 8.dp
+    val CaptureButtonSize = 76.dp
+    val SideButtonSize = 45.dp
+    val ModeSwitcherHeight = 45.dp
+    val ModeSwitcherSpacing = 36.dp
+    val BottomPadding = 55.dp
+    val VerticalOffset = 20.dp
     val CaptureClearance = 8.dp
     val BarSpacing = 4.dp
     val ViewfinderModeSpacing = 12.dp
@@ -57,34 +58,26 @@ internal fun CameraBottomControlsLayout(
         val height = constraints.maxHeight
         val clearance = CameraControlsLayoutDefaults.CaptureClearance.roundToPx()
         val barGap = CameraControlsLayoutDefaults.BarSpacing.roundToPx()
+        val verticalOffset = CameraControlsLayoutDefaults.VerticalOffset.roundToPx()
         val captureTop = height - capture.height
-        val controlsBottom = captureTop - clearance
+        val controlsBottom = captureTop + verticalOffset - clearance
         val previewBottom = viewfinderBottom.roundToPx().coerceAtMost(height)
         val spaceBelowPreview = controlsBottom - previewBottom
 
-        // Choose the parameter row's anchor from the collapsed controls so the ruler's
-        // animated height cannot switch placement branches or move the parameter row.
-        val placeZoomBelowPreview = zoom.height > 0 &&
-            spaceBelowPreview >= parameters.height + zoom.height + barGap
-
-        // Start outside controls at the preview edge instead of leaving all spare space
-        // above them. Any remaining space belongs between the parameters and the shutter.
+        // Keep the zoom row attached to the lower edge of the viewfinder. When the
+        // control cluster needs that same space, the row moves upward rather than below
+        // the preview, preserving the composition shown in the reference layout.
         val parameterTop = when {
             // XPAN uses a side parameter row; its ruler remains above the shutter.
             parameters.height == 0 -> controlsBottom
-            placeZoomBelowPreview -> previewBottom + zoom.height + barGap
             spaceBelowPreview >= parameters.height -> previewBottom
             else -> minOf(controlsBottom, previewBottom - clearance) - parameters.height
         }
         val rulerTop = parameterTop - ruler.height
-        val zoomTop = if (placeZoomBelowPreview) {
-            rulerTop - barGap - zoom.height
-        } else {
-            minOf(previewBottom - clearance, rulerTop - barGap) - zoom.height
-        }
+        val zoomTop = minOf(previewBottom - clearance, rulerTop - barGap) - zoom.height
 
         layout(width, height) {
-            capture.placeRelative((width - capture.width) / 2, captureTop)
+            capture.placeRelative((width - capture.width) / 2, captureTop + verticalOffset)
             parameters.placeRelative((width - parameters.width) / 2, parameterTop)
             ruler.placeRelative((width - ruler.width) / 2, rulerTop)
             zoom.placeRelative((width - zoom.width) / 2, zoomTop)

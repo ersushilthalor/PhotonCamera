@@ -1,6 +1,7 @@
 package com.hinnka.mycamera.ui.camera
 
 import android.graphics.SurfaceTexture
+import android.os.SystemClock
 import android.util.Size
 import androidx.compose.foundation.background
 import com.hinnka.mycamera.utils.PLog
@@ -12,6 +13,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
@@ -76,6 +80,7 @@ fun CameraPreviewGL(
     videoLogProfile: VideoLogProfile = VideoLogProfile.OFF,
     isEyeFocusBusy: Boolean = false,
     onGLSurfaceViewReady: ((CameraGLSurfaceView) -> Unit)? = null,
+    onPreviewBoundsChanged: (Rect) -> Unit = {},
     isAutoFocus: Boolean = true,
     focusPeakingEnabled: Boolean = true,
     stabilizationCoordinator: RealtimeStabilizationCoordinator? = null,
@@ -123,7 +128,8 @@ fun CameraPreviewGL(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black),
+            .background(Color.Black)
+            .onGloballyPositioned { onPreviewBoundsChanged(it.boundsInRoot()) },
         contentAlignment = Alignment.Center
     ) {
 
@@ -157,9 +163,9 @@ fun CameraPreviewGL(
                     )
                 }
         ) {
-            // Recreate the preview surface when its buffer size or capture mode changes.
-            key(previewSize.width, previewSize.height, captureMode) {
-                AndroidView(
+            // Keep one GL/EGL surface for the lifetime of this preview slot. Buffer-size and
+            // capture-mode changes are applied to the existing renderer in the update block.
+            AndroidView(
                     factory = { ctx ->
                         CameraGLSurfaceView(ctx).apply {
                             glSurfaceViewRef = this
@@ -276,6 +282,13 @@ fun CameraPreviewGL(
                                     notifiedPreviewSize = previewSize
                                     notifiedResumeGeneration = resumeGeneration
                                     notifiedSurfaceTexture = surfaceTexture
+                                    PLog.i(
+                                        "CameraPreviewGL",
+                                        "onSurfaceTextureReady: mode=$captureMode, " +
+                                            "preview=${previewSize.width}x${previewSize.height}, " +
+                                            "surface=${System.identityHashCode(surfaceTexture)}, " +
+                                            "elapsedRealtimeMs=${SystemClock.elapsedRealtime()}"
+                                    )
                                     onSurfaceTextureReady(surfaceTexture)
                                 }
                             }
@@ -311,7 +324,6 @@ fun CameraPreviewGL(
                     },
                     modifier = Modifier.fillMaxSize()
                 )
-            }
 
             // 对焦指示器
             FocusIndicator(
