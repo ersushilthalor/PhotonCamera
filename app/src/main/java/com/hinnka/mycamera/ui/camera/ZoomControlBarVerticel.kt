@@ -366,7 +366,7 @@ private fun ZoomRulerVertical(
             modifier = Modifier
                 .height(adaptiveMetrics.rulerLength)
                 .fillMaxWidth()
-                .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(16.dp)),
+                .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(16.dp)),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(adaptiveMetrics.spacing, Alignment.CenterVertically)
         ) {
@@ -499,7 +499,7 @@ fun ZoomContinuousRulerVertical(
 
     Box(
         modifier = modifier
-            .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
+            .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
     ) {
         Canvas(modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 24.dp)) {
             val width = size.width
