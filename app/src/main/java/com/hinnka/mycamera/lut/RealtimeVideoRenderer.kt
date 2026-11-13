@@ -331,7 +331,6 @@ class RealtimeVideoRenderer(
         val firstLayer = layers.first()
         val grainEnabled = finalFilmGrainEnabled
         val firstTargetFbo = if (layers.size > 1 || grainEnabled) intermediateFboId else 0
-        val cameraMvpMatrix = firstPassMvpMatrix
         drawLayer(
             layer = firstLayer,
             targetFboId = firstTargetFbo,
@@ -340,7 +339,7 @@ class RealtimeVideoRenderer(
             textureId = sourceTextureId,
             sourceStMatrix = sourceStMatrix,
             cropRect = sourceCropRect,
-            mvpMatrix = cameraMvpMatrix,
+            mvpMatrix = firstPassMvpMatrix,
             enableVideoLog = videoLogProfile.isEnabled && !cameraInputAlreadyHlg10,
             presentationTimeNs = timestampNs,
         )

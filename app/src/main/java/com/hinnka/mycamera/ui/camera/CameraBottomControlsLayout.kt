@@ -14,8 +14,8 @@ internal object CameraControlsLayoutDefaults {
     val ZoomBarHeight = 33.dp
     val CaptureButtonSize = 72.dp
     val SideButtonSize = 48.dp
-    val ModeSwitcherHeight = 40.dp
-    val ModeSwitcherSpacing = 10.dp
+    val ModeSwitcherHeight = 36.dp
+    val ModeSwitcherSpacing = 30.dp
     val BottomPadding = 8.dp
     val CaptureClearance = 8.dp
     val BarSpacing = 4.dp
@@ -40,7 +40,6 @@ internal fun CameraBottomControlsLayout(
     parameterRuler: @Composable () -> Unit,
     parameterBar: @Composable () -> Unit,
     captureControls: @Composable () -> Unit,
-    captureInsideViewfinder: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Layout(
@@ -58,15 +57,9 @@ internal fun CameraBottomControlsLayout(
         val height = constraints.maxHeight
         val clearance = CameraControlsLayoutDefaults.CaptureClearance.roundToPx()
         val barGap = CameraControlsLayoutDefaults.BarSpacing.roundToPx()
-        val previewBottom = viewfinderBottom.roundToPx().coerceAtMost(height)
-        // Video controls overlay the lower part of the live viewfinder, matching the
-        // reference camera layout. Photo controls retain their existing bottom rail.
-        val captureTop = (if (captureInsideViewfinder) {
-            previewBottom - capture.height - CameraControlsLayoutDefaults.CaptureClearance.roundToPx()
-        } else {
-            height - capture.height
-        }).coerceAtLeast(0)
+        val captureTop = height - capture.height
         val controlsBottom = captureTop - clearance
+        val previewBottom = viewfinderBottom.roundToPx().coerceAtMost(height)
         val spaceBelowPreview = controlsBottom - previewBottom
 
         // Choose the parameter row's anchor from the collapsed controls so the ruler's

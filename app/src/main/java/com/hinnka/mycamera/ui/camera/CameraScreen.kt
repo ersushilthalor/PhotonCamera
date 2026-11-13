@@ -25,7 +25,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -937,34 +936,18 @@ fun CameraScreen(
                 onFlashToggle = {
                     viewModel.toggleFlash()
                 },
+                timerSeconds = state.timerSeconds,
+                onTimerToggle = { viewModel.toggleTimer() },
                 showHistogram = viewModel.showHistogram,
                 onHistogramToggle = {
                     viewModel.saveShowHistogram(!viewModel.showHistogram)
                 },
-                showLevelIndicator = showLevelIndicator,
-                onLevelIndicatorToggle = {
-                    viewModel.setShowLevelIndicator(!showLevelIndicator)
-                },
-                aspectRatioLabel = if (isVideoMode) {
-                    state.videoConfig.aspectRatio.getDisplayName()
-                } else {
-                    state.aspectRatio.getDisplayName()
-                },
-                onAspectRatioClick = {
-                    if (isVideoMode) {
-                        cycleVideoAspectRatio(state)?.let { target ->
-                            runPreviewTransition { viewModel.setVideoAspectRatio(target) }
-                        }
-                    } else {
-                        val ratios = AspectRatio.sanitizeTopSheetRatios(topSheetAspectRatios)
-                        val currentIndex = ratios.indexOf(state.aspectRatio)
-                        val nextIndex = if (currentIndex < 0) 0 else (currentIndex + 1) % ratios.size
-                        runPreviewTransition { viewModel.setAspectRatio(ratios[nextIndex]) }
-                    }
-                },
+                useLivePhoto = useLivePhoto,
+                onLivePhotoToggle = { viewModel.setUseLivePhoto(!state.useLivePhoto) },
                 videoConfig = state.videoConfig,
                 videoCapabilities = state.videoCapabilities,
                 onVideoTorchToggle = { viewModel.setVideoTorchEnabled(!state.videoConfig.torchEnabled) },
+                onVideoStabilizationModeChange = viewModel::setVideoStabilizationMode,
                 onVideoResolutionClick = {
                     if (state.videoConfig.aspectRatio != VideoAspectRatio.OPEN_GATE) {
                         cycleVideoResolution(state)?.let(viewModel::setVideoResolution)
@@ -1704,9 +1687,6 @@ fun CameraScreen(
 
             CameraBottomControlsLayout(
                 viewfinderBottom = viewfinderTop + cardHeight,
-                // Only video moves the mode row, shutter, gallery and camera switcher
-                // into the viewfinder; photo keeps the established bottom control rail.
-                captureInsideViewfinder = state.captureMode == CaptureMode.VIDEO,
                 modifier = Modifier.fillMaxSize(),
                 zoomBar = {
                     // Panel visibility changes the zoom content, not the space used to
@@ -2121,22 +2101,6 @@ private fun Controls(
                 .padding(bottom = CameraControlsLayoutDefaults.BottomPadding),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            CaptureModeSwitcher(
-                            // Pro/RAW remains an internal capture option, but is no longer a
-                            // separate item in the visible Photo/Video mode switcher.
-                            shootingMode = when {
-                                state.captureMode == CaptureMode.VIDEO -> CameraShootingMode.VIDEO
-                                state.useRaw && state.isRawSupported -> CameraShootingMode.PROFESSIONAL
-                                else -> CameraShootingMode.PHOTO
-                            },
-                            enabled = modeSwitchEnabled &&
-                                !state.videoRecordingState.isRecording &&
-                                !state.videoRecordingState.isProcessing,
-                            onModeSelected = onCaptureModeSelected
-                        )
-
-            Spacer(modifier = Modifier.height(CameraControlsLayoutDefaults.ModeSwitcherSpacing))
-
             Box(
                 modifier = Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.Center
@@ -2253,6 +2217,22 @@ private fun Controls(
                 }
             }
 
+            Spacer(modifier = Modifier.height(CameraControlsLayoutDefaults.ModeSwitcherSpacing))
+
+            CaptureModeSwitcher(
+                oppoStyle = uiStyle == "OPPO",
+                // Pro/RAW remains an internal capture option, but is no longer a
+                // separate item in the visible Photo/Video mode switcher.
+                shootingMode = if (state.captureMode == CaptureMode.VIDEO) {
+                    CameraShootingMode.VIDEO
+                } else {
+                    CameraShootingMode.PHOTO
+                },
+                enabled = modeSwitchEnabled &&
+                    !state.videoRecordingState.isRecording &&
+                    !state.videoRecordingState.isProcessing,
+                onModeSelected = onCaptureModeSelected
+            )
         }
     }
 }
@@ -2445,7 +2425,6 @@ fun CaptureButton(
                 )
             },
         shape = CircleShape,
-        backgroundColor = Color.White,
         contentAlignment = Alignment.Center
     ) {
         val ringColor = when {
@@ -2471,7 +2450,7 @@ fun CaptureButton(
         // Center shutter surface
         val centerPadding by animateDpAsState(
             targetValue = when {
-                captureMode == CaptureMode.VIDEO -> 24.dp
+                captureMode == CaptureMode.VIDEO && isVideoRecording -> 19.dp
                 progressRingCount > 0 -> CaptureProgressRingDefaults.contentPadding(progressRingCount)
                 else -> 2.dp
             },
@@ -2483,7 +2462,16 @@ fun CaptureButton(
             label = "centerCorner"
         )
         val defaultCenterBackground = when {
-            captureMode == CaptureMode.VIDEO -> Modifier.background(Color(0xFFE94343))
+            captureMode == CaptureMode.VIDEO -> {
+                Modifier.background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFFFF6668),
+                            Color(0xFFE4383C)
+                        )
+                    )
+                )
+            }
             isProfessionalMode -> Modifier.background(AccentColor)
             else -> {
                 Modifier.background(
@@ -2565,33 +2553,69 @@ private fun rememberPhotoCaptureProgress(progress: PhotoCaptureProgress?): State
 
 @Composable
 private fun CaptureModeSwitcher(
+    oppoStyle: Boolean,
     shootingMode: CameraShootingMode,
     enabled: Boolean,
     onModeSelected: (CameraShootingMode) -> Unit
 ) {
-    Row(
+    BoxWithConstraints(
         modifier = Modifier
-            .fillMaxWidth()
+            .width(171.dp)
             .height(CameraControlsLayoutDefaults.ModeSwitcherHeight)
-            .padding(horizontal = 12.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (oppoStyle) Color(0xFF202020) else Color.Black.copy(alpha = 0.28f))
+            .border(
+                width = 0.5.dp,
+                color = if (oppoStyle) Color(0xFF333333) else Color.White.copy(alpha = 0.18f),
+                shape = RoundedCornerShape(18.dp)
+            )
+            .padding(3.dp)
     ) {
-        ModeSwitcherItem(
-            label = stringResource(R.string.capture_mode_photo).uppercase(),
-            selected = shootingMode != CameraShootingMode.VIDEO,
-            enabled = enabled,
-            onClick = { onModeSelected(CameraShootingMode.PHOTO) },
-            modifier = Modifier.width(84.dp)
+        // The visible switcher contains only Photo and Video. Pro/RAW capture
+        // internals are preserved but are not exposed as a separate UI mode.
+        val knobWidth = maxWidth / 2
+        val selectedIndex = if (shootingMode == CameraShootingMode.VIDEO) 1 else 0
+        val knobOffset by animateDpAsState(
+            targetValue = knobWidth * selectedIndex,
+            animationSpec = tween(durationMillis = 220),
+            label = "modeSwitcher"
         )
-        Spacer(modifier = Modifier.width(12.dp))
-        ModeSwitcherItem(
-            label = stringResource(R.string.capture_mode_video).uppercase(),
-            selected = shootingMode == CameraShootingMode.VIDEO,
-            enabled = enabled,
-            onClick = { onModeSelected(CameraShootingMode.VIDEO) },
-            modifier = Modifier.width(84.dp)
+        val selectedBackground by animateColorAsState(
+            targetValue = if (oppoStyle) Color(0xFF303030) else Color.White,
+            animationSpec = tween(durationMillis = 220),
+            label = "modeSwitcherColor"
         )
+        Box(
+            modifier = Modifier
+                .offset(x = knobOffset)
+                .width(knobWidth)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(15.dp))
+                .background(selectedBackground)
+        )
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ModeSwitcherItem(
+                label = stringResource(R.string.capture_mode_photo) +
+                    if (oppoStyle && shootingMode != CameraShootingMode.VIDEO) " ▴" else "",
+                selected = shootingMode != CameraShootingMode.VIDEO,
+                enabled = enabled,
+                onClick = { onModeSelected(CameraShootingMode.PHOTO) },
+                modifier = Modifier.weight(1f),
+                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.Black
+            )
+            ModeSwitcherItem(
+                label = stringResource(R.string.capture_mode_video) +
+                    if (oppoStyle && shootingMode == CameraShootingMode.VIDEO) " ▴" else "",
+                selected = shootingMode == CameraShootingMode.VIDEO,
+                enabled = enabled,
+                onClick = { onModeSelected(CameraShootingMode.VIDEO) },
+                modifier = Modifier.weight(1f),
+                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.Black
+            )
+        }
     }
 }
 
@@ -2601,28 +2625,27 @@ private fun ModeSwitcherItem(
     selected: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    selectedContentColor: Color = Color.Black
 ) {
     Box(
         modifier = modifier
-            .height(36.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(if (selected) Color(0xFF303030) else Color.Transparent)
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(20.dp))
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
             color = when {
-                !enabled -> Color.White.copy(alpha = 0.35f)
-                selected -> Color.White
-                else -> Color.White.copy(alpha = 0.88f)
+                selected -> selectedContentColor.copy(alpha = 0.88f)
+                enabled -> Color.White.copy(alpha = 0.82f)
+                else -> Color.White.copy(alpha = 0.3f)
             },
-            fontSize = 13.sp,
-            lineHeight = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            softWrap = false
+            fontSize = 12.sp,
+            lineHeight = 14.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            maxLines = 1
         )
     }
 }

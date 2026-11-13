@@ -26,11 +26,6 @@
     <string name="capture_mode_professional">Pro</string>
     <string name="capture_mode_photo">Photo</string>
     <string name="capture_mode_video">Video</string>
-    <string name="camera_mode_portrait">Portrait</string>
-    <string name="camera_mode_more">More</string>
-    <string name="camera_aspect_ratio">Aspect ratio</string>
-    <string name="camera_level_indicator">Level indicator</string>
-    <string name="camera_hdr">HDR</string>
 
     <!-- Exposure Controls -->
     <string name="camera_parameter_exposure" translatable="false">EV</string>
