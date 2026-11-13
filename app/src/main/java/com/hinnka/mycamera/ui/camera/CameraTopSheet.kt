@@ -539,6 +539,7 @@ fun CameraTopSheet(
                                         }
                                     }
 
+                                    CameraMenuPanel.PHOTO_ASPECT_RATIO -> Unit
                                     null -> Unit
                                 }
                             }
@@ -795,6 +796,24 @@ private fun CameraMenuItem(
                                 .background(Color.Black.copy(alpha = 0.65f), RoundedCornerShape(4.dp))
                                 .padding(horizontal = 2.dp)
                         )
+                    }
+                    if (glyph == CameraMenuGlyph.LIVE) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .size(11.dp)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.92f))
+                                .border(1.dp, Color.White, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "A",
+                                color = Color.White,
+                                fontSize = 7.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
                 centerText != null -> Text(
