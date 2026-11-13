@@ -123,6 +123,8 @@ private val CameraTopBarBaseTopPadding = 32.dp
 private val CameraTopBarBaseHeight = 80.dp
 private val VideoTopBarBaseHeight = 80.dp
 private val VideoTopBarLoweredOffset = 36.dp
+private val VideoViewfinderAdditionalOffset = 20.dp
+private val VideoViewfinderVerticalOffset = 3.dp + VideoViewfinderAdditionalOffset
 private val XpanViewfinderInnerBorder = 4.dp
 private val XpanSideControlReservedWidth = 56.dp
 
@@ -1739,7 +1741,7 @@ fun CameraScreen(
                         .fillMaxWidth()
                         .height(animatedViewfinderHeight)
                         .align(Alignment.TopCenter)
-                        .offset(y = animatedViewfinderTop + (if (isVideoMode) 3.dp else 0.dp))
+                        .offset(y = animatedViewfinderTop + (if (isVideoMode) VideoViewfinderVerticalOffset else 0.dp))
                         .clipToBounds()
                         .onGloballyPositioned { coordinates ->
                             viewfinderAreaBounds = coordinates.boundsInRoot()
@@ -1761,8 +1763,8 @@ fun CameraScreen(
                                 .width(cardWidth)
                                 .requiredHeight(cardHeight)
                                 // Keep video top controls at their original screen position
-                                // while the viewfinder itself is shifted down by 3dp.
-                                .offset(y = (-3).dp),
+                                // while the viewfinder itself is shifted down.
+                                .offset(y = -VideoViewfinderVerticalOffset),
                             contentAlignment = Alignment.TopCenter
                         ) {
                             topBar()
@@ -1774,7 +1776,8 @@ fun CameraScreen(
                                 .align(Alignment.BottomCenter)
                                 .fillMaxWidth()
                                 .padding(bottom = 8.dp)
-                                .height(CameraControlsLayoutDefaults.ZoomBarHeight),
+                                .height(CameraControlsLayoutDefaults.ZoomBarHeight)
+                                .offset(y = -VideoViewfinderAdditionalOffset),
                             contentAlignment = Alignment.Center
                         ) {
                             zoomBar()
@@ -1786,6 +1789,7 @@ fun CameraScreen(
                                 .width(cardWidth)
                                 .requiredHeight(cardHeight)
                                 .align(Alignment.Center)
+                                .offset(y = -VideoViewfinderAdditionalOffset)
                         ) {
                             Box(
                                 modifier = Modifier
