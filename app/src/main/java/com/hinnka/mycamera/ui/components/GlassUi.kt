@@ -81,7 +81,7 @@ fun Modifier.glassUiTile(
  * earlier naturally fall back to the translucent dialog material.
  */
 @Composable
-private fun DialogBackdropBlur(radius: Dp = 30.dp) {
+fun GlassDialogBackdropEffect(radius: Dp = 30.dp) {
     val view = LocalView.current
     val radiusPx = with(LocalDensity.current) { radius.toPx().roundToInt() }
     val window = view.findDialogWindowProvider()
