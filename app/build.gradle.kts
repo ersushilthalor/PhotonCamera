@@ -173,6 +173,9 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.fragment.ktx)
     implementation(libs.androidx.recyclerview)
+
+    // QmBlurView 1.3.0: native C++ Gaussian blur for the camera quick-settings panel.
+    implementation("com.qmdeve.blurview:core:1.3.0")
     
     // ViewModel Compose
     implementation(libs.androidx.lifecycle.viewmodel.compose)
