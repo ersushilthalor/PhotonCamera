@@ -326,7 +326,7 @@ fun CameraTopSheet(
                     // The floating window's outer bounds stay unchanged; only the video
                     // menu content is replaced by the reference's 3x3 circular icon grid.
                     Column(modifier = Modifier.padding(vertical = 16.dp)) {
-                        QuickSettingGrid(columns = 3, itemHeight = 128.dp) { itemModifier ->
+                        QuickSettingGrid(columns = 3, itemHeight = 90.dp) { itemModifier ->
                             VideoMenuItem(
                                 label = "FLASH",
                                 active = videoTorchEnabled,
@@ -836,7 +836,7 @@ private fun VideoMenuItem(
     ) {
         Box(
             modifier = Modifier
-                .size(76.dp)
+                .size(62.dp)
                 .shadow(5.dp, CircleShape)
                 .clip(CircleShape)
                 .background(Color(0xD908080A))
@@ -849,13 +849,13 @@ private fun VideoMenuItem(
         ) {
             icon(iconTint)
         }
-        Spacer(modifier = Modifier.height(7.dp))
+        Spacer(modifier = Modifier.height(3.dp))
         Text(
             text = label,
             color = if (enabled) Color.White else Color.White.copy(alpha = 0.42f),
-            fontSize = 12.sp,
-            lineHeight = 14.sp,
-            letterSpacing = 0.35.sp,
+            fontSize = 11.sp,
+            lineHeight = 12.sp,
+            letterSpacing = 0.30.sp,
             fontWeight = FontWeight.SemiBold,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             maxLines = 2
