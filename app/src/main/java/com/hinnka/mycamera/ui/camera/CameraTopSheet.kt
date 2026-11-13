@@ -506,7 +506,7 @@ fun CameraTopSheet(
                                 .clickable(onClick = onMoreSettingsClick)
                                 .glassUiSurface(
                                     shape = RoundedCornerShape(8.dp),
-                                    tint = Color(0x251FFFFFF),
+                                    tint = Color(0x251F2128),
                                     rimStrength = 0.75f
                                 )
                                 .padding(16.dp, 8.dp),
@@ -894,7 +894,7 @@ private fun VideoSettingTile(
             .clip(RoundedCornerShape(8.dp))
             .glassUiSurface(
                 shape = RoundedCornerShape(8.dp),
-                tint = if (expanded) AccentColor else Color(0x251FFFFFF),
+                tint = if (expanded) AccentColor else Color(0x251F2128),
                 rimStrength = if (expanded) 1.15f else 0.75f
             )
             .clickable(onClick = onClick)
@@ -959,7 +959,7 @@ private fun VideoOptionChip(
             .clip(RoundedCornerShape(8.dp))
             .glassUiSurface(
                 shape = RoundedCornerShape(8.dp),
-                tint = if (selected) AccentColor else Color(0x251FFFFFF),
+                tint = if (selected) AccentColor else Color(0x251F2128),
                 rimStrength = if (selected) 1.15f else 0.75f
             )
             .clickable(onClick = onClick)
@@ -1187,7 +1187,7 @@ fun QuickSettingValue(
             .height(48.dp)
             .glassUiSurface(
                 shape = RoundedCornerShape(8.dp),
-                tint = Color(0x251FFFFFF),
+                tint = Color(0x251F2128),
                 rimStrength = 0.75f
             )
             .clickable { onClick() }
@@ -1224,7 +1224,7 @@ fun QuickSettingButton(
             .height(48.dp)
             .glassUiSurface(
                 shape = RoundedCornerShape(8.dp),
-                tint = Color(0x251FFFFFF),
+                tint = Color(0x251F2128),
                 rimStrength = 0.75f
             )
             .clickable { onClick() }
@@ -1266,7 +1266,7 @@ fun QuickSettingButton2(
             .height(48.dp)
             .glassUiSurface(
                 shape = RoundedCornerShape(8.dp),
-                tint = if (checked) AccentColor else Color(0x251FFFFFF),
+                tint = if (checked) AccentColor else Color(0x251F2128),
                 rimStrength = if (checked) 1.15f else 0.75f
             )
             .clickable { onClick() }
@@ -1308,7 +1308,7 @@ fun QuickSettingToggle(
             .height(48.dp)
             .glassUiSurface(
                 shape = RoundedCornerShape(8.dp),
-                tint = if (checked) AccentColor.copy(alpha = contentAlpha) else Color(0x251FFFFFF),
+                tint = if (checked) AccentColor.copy(alpha = contentAlpha) else Color(0x251F2128),
                 rimStrength = if (checked) 1.15f else 0.75f
             )
             .clickable(enabled = enabled) { onCheckedChange(!checked) }
