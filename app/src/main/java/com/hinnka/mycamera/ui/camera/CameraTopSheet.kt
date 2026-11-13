@@ -169,7 +169,13 @@ fun CameraTopSheet(
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .verticalScroll(rememberScrollState())
+                    .then(
+                        if (captureMode == CaptureMode.PHOTO || expandedVideoPanel != null) {
+                            Modifier.verticalScroll(rememberScrollState())
+                        } else {
+                            Modifier
+                        }
+                    )
             ) {
                 if (captureMode == CaptureMode.PHOTO) {
                     val isProfessionalMode = useRaw && isRawSupported
@@ -289,7 +295,13 @@ fun CameraTopSheet(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 292.dp),
+                            .then(
+                                if (expandedVideoPanel == null) {
+                                    Modifier.weight(1f)
+                                } else {
+                                    Modifier.height(292.dp)
+                                }
+                            ),
                         verticalArrangement = Arrangement.SpaceEvenly
                     ) {
                         Row(
