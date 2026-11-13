@@ -246,7 +246,7 @@ private fun VideoTopBar(
     }
     val videoTopBarGlassStyle = remember {
         LiquidGlassStyle(
-            blurRadius = 10.dp,
+            blurRadius = 20.dp,
             refractionHeight = 18.dp,
             refractionAmount = 4.dp,
             saturation = 1.2f,
