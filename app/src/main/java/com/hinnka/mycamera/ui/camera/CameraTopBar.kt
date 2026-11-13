@@ -299,91 +299,91 @@ private fun VideoTopBar(
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                TopBarActionButton(
-                    onClick = onVideoTorchToggle,
-                    contentDescription = stringResource(R.string.video_torch_chip)
-                ) {
-                    Icon(
-                        imageVector = if (videoConfig.torchEnabled) AppIcons.FlashlightOn else AppIcons.FlashlightOff,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp).autoRotate(),
-                        tint = when {
-                            !videoCapabilities.supportsTorch -> Color.White.copy(alpha = 0.3f)
-                            videoConfig.torchEnabled -> AccentColor
-                            else -> Color.White
-                        }
-                    )
-                }
-
-                Box {
                     TopBarActionButton(
-                        onClick = {
-                            if (!isRecording && videoCapabilities.availableStabilizationModes.isNotEmpty()) {
-                                stabilizationMenuExpanded = true
-                            }
-                        },
-                        contentDescription = stringResource(R.string.settings_video_stabilization_default)
+                        onClick = onVideoTorchToggle,
+                        contentDescription = stringResource(R.string.video_torch_chip)
                     ) {
                         Icon(
-                            imageVector = AppIcons.Stabilization,
+                            imageVector = if (videoConfig.torchEnabled) AppIcons.FlashlightOn else AppIcons.FlashlightOff,
                             contentDescription = null,
                             modifier = Modifier.size(18.dp).autoRotate(),
                             tint = when {
-                                videoCapabilities.availableStabilizationModes.isEmpty() ->
-                                    Color.White.copy(alpha = 0.3f)
-                                isRecording -> Color.White.copy(alpha = 0.55f)
-                                videoConfig.stabilizationMode != VideoStabilizationMode.OFF -> AccentColor
+                                !videoCapabilities.supportsTorch -> Color.White.copy(alpha = 0.3f)
+                                videoConfig.torchEnabled -> AccentColor
                                 else -> Color.White
                             }
                         )
                     }
-                    DropdownMenu(
-                        expanded = stabilizationMenuExpanded,
-                        onDismissRequest = { stabilizationMenuExpanded = false }
-                    ) {
-                        videoCapabilities.availableStabilizationModes.forEach { mode ->
-                            DropdownMenuItem(
-                                text = { Text(videoStabilizationModeLabel(mode)) },
-                                onClick = {
-                                    stabilizationMenuExpanded = false
-                                    onVideoStabilizationModeChange(mode)
-                                },
-                                trailingIcon = if (mode == videoConfig.stabilizationMode) {
-                                    {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = null
-                                        )
-                                    }
-                                } else null
+
+                    Box {
+                        TopBarActionButton(
+                            onClick = {
+                                if (!isRecording && videoCapabilities.availableStabilizationModes.isNotEmpty()) {
+                                    stabilizationMenuExpanded = true
+                                }
+                            },
+                            contentDescription = stringResource(R.string.settings_video_stabilization_default)
+                        ) {
+                            Icon(
+                                imageVector = AppIcons.Stabilization,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp).autoRotate(),
+                                tint = when {
+                                    videoCapabilities.availableStabilizationModes.isEmpty() ->
+                                        Color.White.copy(alpha = 0.3f)
+                                    isRecording -> Color.White.copy(alpha = 0.55f)
+                                    videoConfig.stabilizationMode != VideoStabilizationMode.OFF -> AccentColor
+                                    else -> Color.White
+                                }
                             )
                         }
-                    }
-                }
-
-                TopBarActionButton(
-                    onClick = {
-                        if (!videoConfig.logProfile.isEnabled) onVideoHdrToggle()
-                    },
-                    contentDescription = "HDR"
-                ) {
-                    Icon(
-                        imageVector = AppIcons.Contrast,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp).autoRotate(),
-                        tint = when {
-                            videoConfig.logProfile.isEnabled -> Color.White.copy(alpha = 0.3f)
-                            videoHdrEnabled -> AccentColor
-                            else -> Color.White
+                        DropdownMenu(
+                            expanded = stabilizationMenuExpanded,
+                            onDismissRequest = { stabilizationMenuExpanded = false }
+                        ) {
+                            videoCapabilities.availableStabilizationModes.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = { Text(videoStabilizationModeLabel(mode)) },
+                                    onClick = {
+                                        stabilizationMenuExpanded = false
+                                        onVideoStabilizationModeChange(mode)
+                                    },
+                                    trailingIcon = if (mode == videoConfig.stabilizationMode) {
+                                        {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null
+                                            )
+                                        }
+                                    } else null
+                                )
+                            }
                         }
-                    )
-                }
+                    }
 
-                TopBarActionButton(
-                    onClick = onSettingsClick,
-                    contentDescription = stringResource(R.string.settings)
-                ) {
-                    SixDotMenuIcon()
+                    TopBarActionButton(
+                        onClick = {
+                            if (!videoConfig.logProfile.isEnabled) onVideoHdrToggle()
+                        },
+                        contentDescription = "HDR"
+                    ) {
+                        Icon(
+                            imageVector = AppIcons.Contrast,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp).autoRotate(),
+                            tint = when {
+                                videoConfig.logProfile.isEnabled -> Color.White.copy(alpha = 0.3f)
+                                videoHdrEnabled -> AccentColor
+                                else -> Color.White
+                            }
+                        )
+                    }
+
+                    TopBarActionButton(
+                        onClick = onSettingsClick,
+                        contentDescription = stringResource(R.string.settings)
+                    ) {
+                        SixDotMenuIcon()
                 }
                 }
             }
@@ -417,16 +417,16 @@ private fun VideoParameterCluster(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-        val isOpenGate = videoConfig.aspectRatio == VideoAspectRatio.OPEN_GATE
-        val resLabel = if (isOpenGate) {
-            stringResource(R.string.video_resolution_max)
-        } else when (videoConfig.resolution) {
-            VideoResolutionPreset.UHD_2160P -> "4K"
-            VideoResolutionPreset.FHD_1080P -> "1080p"
-            VideoResolutionPreset.HD_720P -> "720p"
-        }
-        ParameterText(resLabel, onResolutionClick, enabled = !isOpenGate)
-        ParameterText(videoConfig.fps.fps.toString(), onFpsClick)
+            val isOpenGate = videoConfig.aspectRatio == VideoAspectRatio.OPEN_GATE
+            val resLabel = if (isOpenGate) {
+                stringResource(R.string.video_resolution_max)
+            } else when (videoConfig.resolution) {
+                VideoResolutionPreset.UHD_2160P -> "4K"
+                VideoResolutionPreset.FHD_1080P -> "1080p"
+                VideoResolutionPreset.HD_720P -> "720p"
+            }
+            ParameterText(resLabel, onResolutionClick, enabled = !isOpenGate)
+            ParameterText(videoConfig.fps.fps.toString(), onFpsClick)
         }
     }
 }
