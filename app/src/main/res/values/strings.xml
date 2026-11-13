@@ -1425,4 +1425,8 @@
     <string name="oppo_refocus_plane_count">Plane %1$d of %2$d</string>
     <string name="oppo_refocus_near">Near</string>
     <string name="oppo_refocus_far">Far</string>
+    <string name="camera_quick_menu_burst">Burst</string>
+    <string name="camera_quick_menu_styles">Styles</string>
+    <string name="camera_quick_menu_filter">Filter</string>
+    <string name="camera_quick_menu_aspect">Aspect</string>
 </resources>

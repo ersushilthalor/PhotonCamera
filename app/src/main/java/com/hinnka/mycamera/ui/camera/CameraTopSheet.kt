@@ -49,6 +49,12 @@ import com.hinnka.mycamera.ui.components.RawRenderingEngineSettingsPanel
 import com.hinnka.mycamera.video.*
 import com.hinnka.mycamera.video.VideoCodec
 import com.hinnka.mycamera.ui.icons.AppIcons
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.painterResource
+import com.hinnka.mycamera.ui.components.LiquidGlassBackdrop
+import com.hinnka.mycamera.ui.components.LiquidGlassSurface
+import com.hinnka.mycamera.ui.components.LiquidGlassStyle
 
 private enum class VideoSettingPanel {
     ASPECT_RATIO,
@@ -59,6 +65,18 @@ private enum class VideoSettingPanel {
 }
 
 private val CameraTopSheetContentTopPadding = 32.dp
+
+private val PhotoQuickMenuGlassStyle = LiquidGlassStyle(
+    blurRadius = 18.dp,
+    refractionHeight = 24.dp,
+    refractionAmount = 18.dp,
+    saturation = 1.18f,
+    tint = Color(0x68090A10),
+    highlightWidth = 0.8.dp,
+    highlightBlur = 0.7.dp,
+    highlightAlpha = 0.42f,
+    fallbackColor = Color(0xE51A1A1E)
+)
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -119,6 +137,14 @@ fun CameraTopSheet(
     oppoPhotoSettings: OppoPhotoSettings,
     onOppoPhotoSettingsChange: (OppoPhotoSettings) -> Unit,
     refocusAvailable: Boolean,
+    glassBackdrop: LiquidGlassBackdrop,
+    useLivePhoto: Boolean,
+    onLivePhotoToggle: () -> Unit,
+    timerSeconds: Int,
+    onTimerClick: () -> Unit,
+    isVirtualApertureEnabled: Boolean,
+    onVirtualApertureToggle: () -> Unit,
+    onLutClick: () -> Unit,
     contentTopPadding: Dp = CameraTopSheetContentTopPadding,
     modifier: Modifier = Modifier
 ) {
@@ -171,140 +197,78 @@ fun CameraTopSheet(
             modifier = Modifier.fillMaxWidth(),
             contentAlignment = Alignment.TopCenter
         ) {
-            Column(
+            Box(
                 modifier = Modifier
                     .widthIn(max = 420.dp)
                     .fillMaxWidth()
-                    .heightIn(max = 600.dp)
                     .shadow(
                         elevation = 18.dp,
                         shape = RoundedCornerShape(24.dp)
                     )
                     .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xE51A1A1E))
-                    .border(
-                        width = 1.dp,
-                        color = Color.White.copy(alpha = 0.12f),
-                        shape = RoundedCornerShape(24.dp)
-                    )
-                    .padding(horizontal = 18.dp, vertical = 16.dp)
-                    .autoRotate()
             ) {
-                Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState())
-                ) {
                 if (captureMode == CaptureMode.PHOTO) {
-                    val isProfessionalMode = useRaw && isRawSupported
-                    SectionLabel(title = stringResource(R.string.aspect_ratio))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    LiquidGlassSurface(
+                        backdrop = glassBackdrop,
+                        modifier = Modifier.matchParentSize(),
+                        cornerRadius = 24.dp,
+                        style = PhotoQuickMenuGlassStyle
+                    ) {}
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .background(Color(0xE51A1A1E))
+                    )
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 600.dp)
+                        .border(
+                            width = 1.dp,
+                            color = Color.White.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(24.dp)
+                        )
+                        .padding(horizontal = 18.dp, vertical = 16.dp)
+                        .autoRotate()
+                ) {
+                    Column(
+                        modifier = Modifier.verticalScroll(rememberScrollState())
                     ) {
-                        AspectRatio.sanitizeTopSheetRatios(topSheetAspectRatios).forEach { ratio ->
-                            val isSelected = aspectRatio == ratio
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .heightIn(min = 40.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(
-                                        if (isSelected) AccentColor else Color.White.copy(
-                                            alpha = 0.12f
-                                        )
-                                    )
-                                    .clickable { onAspectRatioChange(ratio) }
-                                    .padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = ratio.getDisplayName(),
-                                    color = if (isSelected) OnAccentColor else Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                if (captureMode == CaptureMode.PHOTO) {
+                    PhotoQuickMenuGrid(
+                        aspectRatio = aspectRatio,
+                        topSheetAspectRatios = topSheetAspectRatios,
+                        onAspectRatioChange = onAspectRatioChange,
+                        refocusEnabled = oppoPhotoSettings.refocusEnabled,
+                        refocusAvailable = refocusAvailable,
+                        onRefocusToggle = {
+                            val enabled = !oppoPhotoSettings.refocusEnabled
+                            onOppoPhotoSettingsChange(
+                                oppoPhotoSettings.copy(
+                                    refocusEnabled = enabled,
+                                    autoHdrEnabled = if (enabled) false else oppoPhotoSettings.autoHdrEnabled
                                 )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    QuickSettingGrid { itemModifier ->
-                        if (isProfessionalMode) {
-                            QuickSettingButton2(
-                                title = stringResource(R.string.settings_raw_color_engine),
-                                checked = true,
-                                onClick = { showRenderingEngineSheet = true },
-                                modifier = itemModifier
                             )
-                        } else {
-                            QuickSettingToggle(
-                                title = stringResource(R.string.oppo_auto_hdr),
-                                checked = oppoPhotoSettings.autoHdrEnabled,
-                                onCheckedChange = { enabled ->
-                                    onOppoPhotoSettingsChange(
-                                        oppoPhotoSettings.copy(
-                                            autoHdrEnabled = enabled,
-                                            refocusEnabled = if (enabled) false else oppoPhotoSettings.refocusEnabled,
-                                        )
-                                    )
-                                },
-                                modifier = itemModifier
-                            )
-                            QuickSettingToggle(
-                                title = stringResource(R.string.oppo_fast_shutter),
-                                checked = oppoPhotoSettings.fastShutterEnabled,
-                                onCheckedChange = {
-                                    onOppoPhotoSettingsChange(oppoPhotoSettings.copy(fastShutterEnabled = it))
-                                },
-                                modifier = itemModifier
-                            )
-                            QuickSettingToggle(
-                                title = stringResource(R.string.oppo_refocus),
-                                checked = oppoPhotoSettings.refocusEnabled,
-                                onCheckedChange = { enabled ->
-                                    onOppoPhotoSettingsChange(
-                                        oppoPhotoSettings.copy(
-                                            refocusEnabled = enabled,
-                                            autoHdrEnabled = if (enabled) false else oppoPhotoSettings.autoHdrEnabled,
-                                        )
-                                    )
-                                },
-                                enabled = refocusAvailable,
-                                modifier = itemModifier
-                            )
-                            QuickSettingButton2(
-                                title = stringResource(R.string.oppo_custom_pipeline),
-                                checked = oppoPhotoSettings.customPipelineEnabled,
-                                onClick = { showOppoPipelineSheet = true },
-                                modifier = itemModifier
-                            )
-                        }
-                        MeteringModeQuickSetting(
-                            meteringMode = meteringMode,
-                            onMeteringModeChange = onMeteringModeChange,
-                            modifier = itemModifier
-                        )
-                        ToolboxQuickSetting(
-                            onToolboxClick = onToolboxClick,
-                            modifier = itemModifier
-                        )
-                        ContentManagementQuickSetting(
-                            onClick = { showContentManagementOptions = !showContentManagementOptions },
-                            modifier = itemModifier
-                        )
-                    }
-
-                    ContentManagementOptionsPanel(
-                        visible = showContentManagementOptions,
-                        onFilterManageClick = {
-                            handleContentManagementAction(onFilterManageClick)
                         },
-                        onFrameManageClick = {
-                            handleContentManagementAction(onFrameManageClick)
+                        useLivePhoto = useLivePhoto,
+                        onLivePhotoToggle = onLivePhotoToggle,
+                        timerSeconds = timerSeconds,
+                        onTimerClick = onTimerClick,
+                        burstEnabled = oppoPhotoSettings.fastShutterEnabled,
+                        burstAvailable = !(useRaw && isRawSupported),
+                        onBurstToggle = {
+                            onOppoPhotoSettingsChange(
+                                oppoPhotoSettings.copy(fastShutterEnabled = !oppoPhotoSettings.fastShutterEnabled)
+                            )
                         },
-                        onPresetManageClick = {
-                            handleContentManagementAction(onPresetManageClick)
-                        }
+                        stylesEnabled = oppoPhotoSettings.customPipelineEnabled,
+                        onStylesClick = { showOppoPipelineSheet = true },
+                        isVirtualApertureEnabled = isVirtualApertureEnabled,
+                        onVirtualApertureToggle = onVirtualApertureToggle,
+                        onFilterClick = onLutClick,
+                        onSettingsClick = onMoreSettingsClick
                     )
                 } else {
                     SectionLabel(title = stringResource(R.string.video_aspect_chip))
@@ -600,6 +564,278 @@ fun CameraTopSheet(
                 )
             }
         }
+    }
+}
+
+
+@Composable
+private fun PhotoQuickMenuGrid(
+    aspectRatio: AspectRatio,
+    topSheetAspectRatios: List<AspectRatio>,
+    onAspectRatioChange: (AspectRatio) -> Unit,
+    refocusEnabled: Boolean,
+    refocusAvailable: Boolean,
+    onRefocusToggle: () -> Unit,
+    useLivePhoto: Boolean,
+    onLivePhotoToggle: () -> Unit,
+    timerSeconds: Int,
+    onTimerClick: () -> Unit,
+    burstEnabled: Boolean,
+    burstAvailable: Boolean,
+    onBurstToggle: () -> Unit,
+    stylesEnabled: Boolean,
+    onStylesClick: () -> Unit,
+    isVirtualApertureEnabled: Boolean,
+    onVirtualApertureToggle: () -> Unit,
+    onFilterClick: () -> Unit,
+    onSettingsClick: () -> Unit
+) {
+    val availableRatios = AspectRatio.sanitizeTopSheetRatios(topSheetAspectRatios)
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            PhotoQuickMenuItem(
+                title = stringResource(R.string.oppo_refocus).uppercase(),
+                checked = refocusEnabled,
+                enabled = refocusAvailable,
+                onClick = onRefocusToggle,
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = AppIcons.CameraAlt,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(39.dp)
+                )
+            }
+            PhotoQuickMenuItem(
+                title = stringResource(R.string.settings_use_live_photo).uppercase(),
+                checked = useLivePhoto,
+                onClick = onLivePhotoToggle,
+                modifier = Modifier.weight(1f)
+            ) {
+                Box {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_live_photo),
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(39.dp)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .offset(x = 3.dp, y = 3.dp)
+                            .size(18.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF17171D))
+                            .border(1.dp, Color.White.copy(alpha = 0.8f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("A", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            PhotoQuickMenuItem(
+                title = stringResource(R.string.camera_quick_menu_aspect).uppercase(),
+                checked = false,
+                onClick = {
+                    if (availableRatios.isNotEmpty()) {
+                        val nextIndex = (availableRatios.indexOf(aspectRatio) + 1)
+                            .coerceAtLeast(0) % availableRatios.size
+                        onAspectRatioChange(availableRatios[nextIndex])
+                    }
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = AppIcons.Crop169,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(42.dp)
+                    )
+                    Text(
+                        text = aspectRatio.getDisplayName(),
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color.Black.copy(alpha = 0.28f))
+                            .padding(horizontal = 3.dp, vertical = 1.dp)
+                    )
+                }
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            PhotoQuickMenuItem(
+                title = stringResource(R.string.timer).uppercase(),
+                checked = timerSeconds > 0,
+                onClick = onTimerClick,
+                modifier = Modifier.weight(1f)
+            ) {
+                Box {
+                    Icon(
+                        imageVector = AppIcons.Timer,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(41.dp)
+                    )
+                    if (timerSeconds > 0) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .offset(x = 5.dp, y = (-4).dp)
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .background(AccentColor),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = timerSeconds.toString(),
+                                color = OnAccentColor,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+            PhotoQuickMenuItem(
+                title = stringResource(R.string.camera_quick_menu_burst).uppercase(),
+                checked = burstEnabled,
+                enabled = burstAvailable,
+                onClick = onBurstToggle,
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = AppIcons.BurstMode,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(41.dp)
+                )
+            }
+            PhotoQuickMenuItem(
+                title = stringResource(R.string.camera_quick_menu_styles).uppercase(),
+                checked = stylesEnabled,
+                onClick = onStylesClick,
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = AppIcons.FilterFrames,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(41.dp)
+                )
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            PhotoQuickMenuItem(
+                title = stringResource(R.string.camera_quick_menu_filter).uppercase(),
+                checked = false,
+                onClick = onFilterClick,
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = AppIcons.FilterVintage,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(41.dp)
+                )
+            }
+            PhotoQuickMenuItem(
+                title = stringResource(R.string.virtual_aperture).uppercase(),
+                checked = isVirtualApertureEnabled,
+                onClick = onVirtualApertureToggle,
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = AppIcons.Layers,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(41.dp)
+                )
+            }
+            PhotoQuickMenuItem(
+                title = stringResource(R.string.settings).uppercase(),
+                checked = false,
+                onClick = onSettingsClick,
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(41.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhotoQuickMenuItem(
+    title: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: @Composable BoxScope.() -> Unit
+) {
+    Column(
+        modifier = modifier
+            .height(128.dp)
+            .graphicsLayer { alpha = if (enabled) 1f else 0.38f },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Top
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(top = 3.dp)
+                .size(72.dp)
+                .clip(CircleShape)
+                .background(Color(0xB90A0A10))
+                .border(
+                    width = if (checked) 1.3.dp else 1.dp,
+                    color = if (checked) AccentColor.copy(alpha = 0.9f) else Color.White.copy(alpha = 0.08f),
+                    shape = CircleShape
+                )
+                .clickable(enabled = enabled, onClick = onClick),
+            contentAlignment = Alignment.Center
+        ) {
+            icon()
+            if (checked) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(8.dp)
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(AccentColor)
+                )
+            }
+        }
+        Text(
+            text = title,
+            color = Color.White.copy(alpha = if (enabled) 0.98f else 0.45f),
+            fontSize = 14.sp,
+            lineHeight = 17.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.25.sp,
+            maxLines = 1,
+            modifier = Modifier.padding(top = 7.dp)
+        )
     }
 }
 

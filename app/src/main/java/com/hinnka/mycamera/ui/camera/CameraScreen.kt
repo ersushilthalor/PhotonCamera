@@ -1814,7 +1814,7 @@ fun CameraScreen(
                     }
                 }
     
-                if (!isVideoMode) topBar()
+                if (!isVideoMode && activePanel != ActivePanel.SETTINGS) topBar()
             }
 
             Box(
@@ -1952,6 +1952,16 @@ fun CameraScreen(
             oppoPhotoSettings = oppoPhotoSettings,
             onOppoPhotoSettingsChange = viewModel::updateOppoPhotoSettings,
             refocusAvailable = state.minimumFocusDistance > 0f,
+            glassBackdrop = modeSwitcherBackdrop,
+            useLivePhoto = useLivePhoto,
+            onLivePhotoToggle = { viewModel.setUseLivePhoto(!state.useLivePhoto) },
+            timerSeconds = state.timerSeconds,
+            onTimerClick = viewModel::toggleTimer,
+            isVirtualApertureEnabled = state.isVirtualApertureEnabled,
+            onVirtualApertureToggle = {
+                viewModel.setVirtualApertureAuto(!state.isVirtualApertureEnabled)
+            },
+            onLutClick = { activePanel = ActivePanel.FILTERS },
             contentTopPadding = CameraTopBarBaseTopPadding + topSafePadding
         )
 
