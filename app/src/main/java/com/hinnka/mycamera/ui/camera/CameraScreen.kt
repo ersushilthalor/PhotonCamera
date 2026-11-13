@@ -1676,7 +1676,12 @@ fun CameraScreen(
                     if (isVideoMode) {
                         // Keep video controls attached to the actual viewfinder edges.
                         Box(
-                            modifier = Modifier.width(cardWidth).fillMaxHeight(),
+                            modifier = Modifier
+                                .width(cardWidth)
+                                .fillMaxHeight()
+                                // Keep video top controls at their original screen position
+                                // while the viewfinder itself is shifted down by 3dp.
+                                .offset(y = (-3).dp),
                             contentAlignment = Alignment.TopCenter
                         ) {
                             topBar()
