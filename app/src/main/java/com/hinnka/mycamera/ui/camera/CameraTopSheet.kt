@@ -889,14 +889,14 @@ private fun CameraMenuGlyphIcon(
                     topLeft = Offset(3f * scale, 5f * scale),
                     size = Size(23f * scale, 17f * scale),
                     cornerRadius = CornerRadius(2.5f * scale),
-                    style = Stroke(strokeWidth = stroke)
+                    style = Stroke(width = stroke)
                 )
                 drawRoundRect(
                     color = tint,
                     topLeft = Offset(10f * scale, 12f * scale),
                     size = Size(21f * scale, 17f * scale),
                     cornerRadius = CornerRadius(2.5f * scale),
-                    style = Stroke(strokeWidth = stroke)
+                    style = Stroke(width = stroke)
                 )
                 drawCircle(tint, radius = 2.4f * scale, center = Offset(23.5f * scale, 20f * scale))
                 line(19f, 27f, 28f, 27f)
@@ -940,11 +940,11 @@ private fun CameraMenuGlyphIcon(
                 drawCircle(tint, radius = 4.1f * scale, center = Offset(17f * scale, 17f * scale))
             }
             CameraMenuGlyph.LIVE -> {
-                drawCircle(tint, radius = 12f * scale, center = Offset(16f * scale, 17f * scale), style = Stroke(strokeWidth = stroke))
-                drawCircle(tint, radius = 8f * scale, center = Offset(16f * scale, 17f * scale), style = Stroke(strokeWidth = stroke))
+                drawCircle(tint, radius = 12f * scale, center = Offset(16f * scale, 17f * scale), style = Stroke(width = stroke))
+                drawCircle(tint, radius = 8f * scale, center = Offset(16f * scale, 17f * scale), style = Stroke(width = stroke))
                 drawCircle(tint, radius = 3.2f * scale, center = Offset(16f * scale, 17f * scale))
                 drawCircle(Color.Black.copy(alpha = 0.86f), radius = 5.2f * scale, center = Offset(26f * scale, 25f * scale))
-                drawCircle(tint, radius = 4.6f * scale, center = Offset(26f * scale, 25f * scale), style = Stroke(strokeWidth = 1.3f * scale))
+                drawCircle(tint, radius = 4.6f * scale, center = Offset(26f * scale, 25f * scale), style = Stroke(width = 1.3f * scale))
             }
             CameraMenuGlyph.PHOTO_ASPECT -> {
                 line(4f, 12f, 4f, 5f)
@@ -957,22 +957,22 @@ private fun CameraMenuGlyphIcon(
                 line(30f, 29f, 30f, 22f)
             }
             CameraMenuGlyph.TIMER_OFF -> {
-                drawCircle(tint, radius = 12.2f * scale, center = Offset(17f * scale, 18f * scale), style = Stroke(strokeWidth = stroke))
+                drawCircle(tint, radius = 12.2f * scale, center = Offset(17f * scale, 18f * scale), style = Stroke(width = stroke))
                 line(17f, 3f, 17f, 6f)
                 line(12f, 2.5f, 22f, 2.5f)
                 line(5f, 5f, 29f, 29f)
             }
             CameraMenuGlyph.TIMER -> {
-                drawCircle(tint, radius = 12.2f * scale, center = Offset(17f * scale, 18f * scale), style = Stroke(strokeWidth = stroke))
+                drawCircle(tint, radius = 12.2f * scale, center = Offset(17f * scale, 18f * scale), style = Stroke(width = stroke))
                 line(17f, 3f, 17f, 6f)
                 line(12f, 2.5f, 22f, 2.5f)
                 line(17f, 18f, 17f, 10f)
                 line(17f, 18f, 23f, 21f)
             }
             CameraMenuGlyph.BURST -> {
-                drawRoundRect(color = tint, topLeft = Offset(9f * scale, 3f * scale), size = Size(21f * scale, 19f * scale), cornerRadius = CornerRadius(2.5f * scale), style = Stroke(strokeWidth = stroke))
-                drawRoundRect(color = tint, topLeft = Offset(6f * scale, 7f * scale), size = Size(21f * scale, 19f * scale), cornerRadius = CornerRadius(2.5f * scale), style = Stroke(strokeWidth = stroke))
-                drawRoundRect(color = tint, topLeft = Offset(3f * scale, 11f * scale), size = Size(21f * scale, 19f * scale), cornerRadius = CornerRadius(2.5f * scale), style = Stroke(strokeWidth = stroke))
+                drawRoundRect(color = tint, topLeft = Offset(9f * scale, 3f * scale), size = Size(21f * scale, 19f * scale), cornerRadius = CornerRadius(2.5f * scale), style = Stroke(width = stroke))
+                drawRoundRect(color = tint, topLeft = Offset(6f * scale, 7f * scale), size = Size(21f * scale, 19f * scale), cornerRadius = CornerRadius(2.5f * scale), style = Stroke(width = stroke))
+                drawRoundRect(color = tint, topLeft = Offset(3f * scale, 11f * scale), size = Size(21f * scale, 19f * scale), cornerRadius = CornerRadius(2.5f * scale), style = Stroke(width = stroke))
             }
             CameraMenuGlyph.STYLES -> {
                 line(5f, 10f, 18f, 3f)
@@ -985,9 +985,9 @@ private fun CameraMenuGlyphIcon(
                 line(18f, 30f, 30f, 22f)
             }
             CameraMenuGlyph.FILTER -> {
-                drawCircle(tint, radius = 8.5f * scale, center = Offset(13f * scale, 13f * scale), style = Stroke(strokeWidth = stroke))
-                drawCircle(tint, radius = 8.5f * scale, center = Offset(21f * scale, 13f * scale), style = Stroke(strokeWidth = stroke))
-                drawCircle(tint, radius = 8.5f * scale, center = Offset(17f * scale, 22f * scale), style = Stroke(strokeWidth = stroke))
+                drawCircle(tint, radius = 8.5f * scale, center = Offset(13f * scale, 13f * scale), style = Stroke(width = stroke))
+                drawCircle(tint, radius = 8.5f * scale, center = Offset(21f * scale, 13f * scale), style = Stroke(width = stroke))
+                drawCircle(tint, radius = 8.5f * scale, center = Offset(17f * scale, 22f * scale), style = Stroke(width = stroke))
             }
             CameraMenuGlyph.DEPTH -> {
                 line(4f, 7f, 12f, 7f)
