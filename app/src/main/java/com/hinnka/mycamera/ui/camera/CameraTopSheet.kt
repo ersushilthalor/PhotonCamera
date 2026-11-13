@@ -4,6 +4,7 @@ import android.media.AudioDeviceInfo
 import android.os.Build
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -21,7 +22,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -52,6 +58,14 @@ private enum class VideoSettingPanel {
     ASPECT_RATIO,
     LOG_PROFILE,
     BITRATE
+}
+
+private enum class VideoMenuGlyph {
+    EDIT,
+    ACTION,
+    DUAL_CAPTURE,
+    LOG,
+    ASPECT_RATIO
 }
 
 private val CameraTopSheetContentTopPadding = 32.dp
@@ -318,13 +332,13 @@ fun CameraTopSheet(
                             )
                             VideoMenuItem(
                                 label = "EDIT",
-                                icon = Icons.Default.Exposure,
+                                glyph = VideoMenuGlyph.EDIT,
                                 onClick = onVideoEditClick,
                                 modifier = Modifier.weight(1f)
                             )
                             VideoMenuItem(
                                 label = "ACTION",
-                                icon = Icons.Default.DirectionsRun,
+                                glyph = VideoMenuGlyph.ACTION,
                                 selected = videoStabilizationMode == VideoStabilizationMode.ENHANCED,
                                 enabled = videoActionAvailable,
                                 onClick = onVideoActionToggle,
@@ -338,7 +352,7 @@ fun CameraTopSheet(
                         ) {
                             VideoMenuItem(
                                 label = "DUAL CAPTURE",
-                                icon = Icons.Default.Phonelink,
+                                glyph = VideoMenuGlyph.DUAL_CAPTURE,
                                 onClick = onVideoDualCaptureClick,
                                 modifier = Modifier.weight(1f)
                             )
@@ -370,7 +384,7 @@ fun CameraTopSheet(
                         ) {
                             VideoMenuItem(
                                 label = "LOG",
-                                icon = Icons.Default.CenterFocusStrong,
+                                glyph = VideoMenuGlyph.LOG,
                                 selected = videoLogProfile != VideoLogProfile.OFF ||
                                     expandedVideoPanel == VideoSettingPanel.LOG_PROFILE,
                                 onClick = {
@@ -384,7 +398,7 @@ fun CameraTopSheet(
                             )
                             VideoMenuItem(
                                 label = "ASPECTS RATIO",
-                                icon = Icons.Default.ShutterSpeed,
+                                glyph = VideoMenuGlyph.ASPECT_RATIO,
                                 selected = expandedVideoPanel == VideoSettingPanel.ASPECT_RATIO,
                                 onClick = {
                                     expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.ASPECT_RATIO) {
@@ -708,6 +722,7 @@ private fun OppoPipelineSlider(
 private fun VideoMenuItem(
     label: String,
     icon: ImageVector? = null,
+    glyph: VideoMenuGlyph? = null,
     centerText: String? = null,
     selected: Boolean = false,
     enabled: Boolean = true,
@@ -741,6 +756,11 @@ private fun VideoMenuItem(
                     tint = Color.White.copy(alpha = if (enabled) 1f else 0.38f),
                     modifier = Modifier.size(34.dp)
                 )
+                glyph != null -> VideoMenuGlyphIcon(
+                    glyph = glyph,
+                    tint = Color.White.copy(alpha = if (enabled) 1f else 0.38f),
+                    modifier = Modifier.size(34.dp)
+                )
                 centerText != null -> Text(
                     text = centerText,
                     color = Color.White.copy(alpha = if (enabled) 1f else 0.38f),
@@ -760,6 +780,95 @@ private fun VideoMenuItem(
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             maxLines = 2
         )
+    }
+}
+
+@Composable
+private fun VideoMenuGlyphIcon(
+    glyph: VideoMenuGlyph,
+    tint: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier) {
+        val scale = size.minDimension / 34f
+        val stroke = 2.2f * scale
+
+        fun line(x1: Float, y1: Float, x2: Float, y2: Float) {
+            drawLine(
+                color = tint,
+                start = Offset(x1 * scale, y1 * scale),
+                end = Offset(x2 * scale, y2 * scale),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round
+            )
+        }
+
+        when (glyph) {
+            VideoMenuGlyph.EDIT -> {
+                line(17f, 4f, 17f, 18f)
+                line(9f, 11f, 25f, 11f)
+                line(9f, 25f, 25f, 25f)
+            }
+            VideoMenuGlyph.ACTION -> {
+                // Motion trails, head, torso and running limbs.
+                line(1f, 10f, 9f, 10f)
+                line(3f, 17f, 8f, 17f)
+                line(1f, 24f, 7f, 24f)
+                drawCircle(tint, radius = 3.2f * scale, center = Offset(23f * scale, 5.5f * scale))
+                line(19f, 10f, 15f, 18f)
+                line(15f, 18f, 23f, 21f)
+                line(18f, 12f, 25f, 14f)
+                line(18f, 12f, 25f, 9f)
+                line(15f, 18f, 9f, 27f)
+                line(15f, 18f, 22f, 29f)
+                line(23f, 21f, 29f, 27f)
+            }
+            VideoMenuGlyph.DUAL_CAPTURE -> {
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(3f * scale, 5f * scale),
+                    size = Size(23f * scale, 17f * scale),
+                    cornerRadius = CornerRadius(2.5f * scale),
+                    style = Stroke(strokeWidth = stroke)
+                )
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(10f * scale, 12f * scale),
+                    size = Size(21f * scale, 17f * scale),
+                    cornerRadius = CornerRadius(2.5f * scale),
+                    style = Stroke(strokeWidth = stroke)
+                )
+                drawCircle(tint, radius = 2.4f * scale, center = Offset(23.5f * scale, 20f * scale))
+                line(19f, 27f, 28f, 27f)
+            }
+            VideoMenuGlyph.LOG -> {
+                line(4f, 12f, 4f, 5f)
+                line(4f, 5f, 11f, 5f)
+                line(23f, 5f, 30f, 5f)
+                line(30f, 5f, 30f, 12f)
+                line(4f, 22f, 4f, 29f)
+                line(4f, 29f, 11f, 29f)
+                line(23f, 29f, 30f, 29f)
+                line(30f, 29f, 30f, 22f)
+                drawCircle(tint, radius = 3f * scale, center = Offset(17f * scale, 17f * scale))
+            }
+            VideoMenuGlyph.ASPECT_RATIO -> {
+                drawCircle(
+                    color = tint.copy(alpha = 0.9f),
+                    radius = 12.5f * scale,
+                    center = Offset(17f * scale, 18f * scale),
+                    style = Stroke(width = 1.8f * scale)
+                )
+                for (index in 0 until 12) {
+                    val angle = index * (Math.PI / 6.0) - Math.PI / 2.0
+                    val x = 17f + kotlin.math.cos(angle).toFloat() * 14.5f
+                    val y = 18f + kotlin.math.sin(angle).toFloat() * 14.5f
+                    drawCircle(tint, radius = 0.9f * scale, center = Offset(x * scale, y * scale))
+                }
+                line(17f, 18f, 14f, 7f)
+                line(17f, 18f, 19f, 18f)
+            }
+        }
     }
 }
 
