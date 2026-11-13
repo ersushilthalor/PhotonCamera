@@ -29,6 +29,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -82,6 +83,12 @@ fun CameraTopSheet(
     onVideoLogProfileChange: (VideoLogProfile) -> Unit,
     videoBitrate: VideoBitratePreset,
     onVideoBitrateChange: (VideoBitratePreset) -> Unit,
+    useLivePhoto: Boolean,
+    onLivePhotoToggle: () -> Unit,
+    timerSeconds: Int,
+    onTimerToggle: () -> Unit,
+    onPhotoFilterClick: () -> Unit,
+    onPhotoDepthClick: () -> Unit,
     videoTorchEnabled: Boolean,
     onVideoTorchToggle: () -> Unit,
     videoHdrEnabled: Boolean,
@@ -139,6 +146,7 @@ fun CameraTopSheet(
     modifier: Modifier = Modifier
 ) {
     var expandedVideoPanel by rememberSaveable { mutableStateOf<VideoSettingPanel?>(null) }
+    var showPhotoAspectOptions by rememberSaveable { mutableStateOf(false) }
     var showRenderingEngineSheet by rememberSaveable { mutableStateOf(false) }
     var showOppoPipelineSheet by rememberSaveable { mutableStateOf(false) }
     var showContentManagementOptions by rememberSaveable { mutableStateOf(false) }
@@ -149,6 +157,7 @@ fun CameraTopSheet(
 
     LaunchedEffect(visible, captureMode) {
         showContentManagementOptions = false
+        showPhotoAspectOptions = false
     }
 
     LaunchedEffect(useRaw) {
@@ -211,117 +220,134 @@ fun CameraTopSheet(
                 ) {
                 if (captureMode == CaptureMode.PHOTO) {
                     val isProfessionalMode = useRaw && isRawSupported
-                    SectionLabel(title = stringResource(R.string.aspect_ratio))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        AspectRatio.sanitizeTopSheetRatios(topSheetAspectRatios).forEach { ratio ->
-                            val isSelected = aspectRatio == ratio
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .heightIn(min = 40.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(
-                                        if (isSelected) AccentColor else Color.White.copy(
-                                            alpha = 0.12f
-                                        )
-                                    )
-                                    .clickable { onAspectRatioChange(ratio) }
-                                    .padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = ratio.getDisplayName(),
-                                    color = if (isSelected) OnAccentColor else Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    QuickSettingGrid { itemModifier ->
-                        if (isProfessionalMode) {
-                            QuickSettingButton2(
-                                title = stringResource(R.string.settings_raw_color_engine),
-                                checked = true,
-                                onClick = { showRenderingEngineSheet = true },
-                                modifier = itemModifier
-                            )
-                        } else {
-                            QuickSettingToggle(
-                                title = stringResource(R.string.oppo_auto_hdr),
-                                checked = oppoPhotoSettings.autoHdrEnabled,
-                                onCheckedChange = { enabled ->
-                                    onOppoPhotoSettingsChange(
-                                        oppoPhotoSettings.copy(
-                                            autoHdrEnabled = enabled,
-                                            refocusEnabled = if (enabled) false else oppoPhotoSettings.refocusEnabled,
-                                        )
-                                    )
-                                },
-                                modifier = itemModifier
-                            )
-                            QuickSettingToggle(
-                                title = stringResource(R.string.oppo_fast_shutter),
-                                checked = oppoPhotoSettings.fastShutterEnabled,
-                                onCheckedChange = {
-                                    onOppoPhotoSettingsChange(oppoPhotoSettings.copy(fastShutterEnabled = it))
-                                },
-                                modifier = itemModifier
-                            )
-                            QuickSettingToggle(
-                                title = stringResource(R.string.oppo_refocus),
-                                checked = oppoPhotoSettings.refocusEnabled,
-                                onCheckedChange = { enabled ->
+                    Column(modifier = Modifier.padding(vertical = 16.dp)) {
+                        QuickSettingGrid(columns = 3, itemHeight = 90.dp) { itemModifier ->
+                            VideoMenuItem(
+                                label = "REFOCUS",
+                                active = oppoPhotoSettings.refocusEnabled,
+                                enabled = refocusAvailable && !isProfessionalMode,
+                                modifier = itemModifier,
+                                onClick = {
+                                    val enabled = !oppoPhotoSettings.refocusEnabled
                                     onOppoPhotoSettingsChange(
                                         oppoPhotoSettings.copy(
                                             refocusEnabled = enabled,
-                                            autoHdrEnabled = if (enabled) false else oppoPhotoSettings.autoHdrEnabled,
+                                            autoHdrEnabled = if (enabled) false else oppoPhotoSettings.autoHdrEnabled
                                         )
                                     )
-                                },
-                                enabled = refocusAvailable,
-                                modifier = itemModifier
-                            )
-                            QuickSettingButton2(
-                                title = stringResource(R.string.oppo_custom_pipeline),
-                                checked = oppoPhotoSettings.customPipelineEnabled,
-                                onClick = { showOppoPipelineSheet = true },
-                                modifier = itemModifier
-                            )
+                                }
+                            ) { tint ->
+                                PhotoRefocusGlyph(tint)
+                            }
+                            VideoMenuItem(
+                                label = "LIVE",
+                                active = useLivePhoto,
+                                modifier = itemModifier,
+                                onClick = onLivePhotoToggle
+                            ) { tint ->
+                                PhotoLiveGlyph(tint)
+                            }
+                            VideoMenuItem(
+                                label = "ASPECT",
+                                modifier = itemModifier,
+                                onClick = { showPhotoAspectOptions = !showPhotoAspectOptions }
+                            ) { tint ->
+                                PhotoAspectGlyph(tint, aspectRatio.getDisplayName())
+                            }
+                            VideoMenuItem(
+                                label = "TIMER",
+                                active = timerSeconds > 0,
+                                modifier = itemModifier,
+                                onClick = onTimerToggle
+                            ) { tint ->
+                                PhotoTimerGlyph(tint, timerSeconds)
+                            }
+                            VideoMenuItem(
+                                label = "BRUST",
+                                active = oppoPhotoSettings.fastShutterEnabled,
+                                enabled = !isProfessionalMode,
+                                modifier = itemModifier,
+                                onClick = {
+                                    onOppoPhotoSettingsChange(
+                                        oppoPhotoSettings.copy(
+                                            fastShutterEnabled = !oppoPhotoSettings.fastShutterEnabled
+                                        )
+                                    )
+                                }
+                            ) { tint ->
+                                PhotoBurstGlyph(tint)
+                            }
+                            VideoMenuItem(
+                                label = "STYLES",
+                                active = if (isProfessionalMode) true else oppoPhotoSettings.customPipelineEnabled,
+                                modifier = itemModifier,
+                                onClick = {
+                                    if (isProfessionalMode) {
+                                        showRenderingEngineSheet = true
+                                    } else {
+                                        showOppoPipelineSheet = true
+                                    }
+                                }
+                            ) { tint ->
+                                PhotoStylesGlyph(tint)
+                            }
+                            VideoMenuItem(
+                                label = "FILTER",
+                                modifier = itemModifier,
+                                onClick = onPhotoFilterClick
+                            ) { tint ->
+                                PhotoFilterGlyph(tint)
+                            }
+                            VideoMenuItem(
+                                label = "DEPTH",
+                                modifier = itemModifier,
+                                onClick = onPhotoDepthClick
+                            ) { tint ->
+                                PhotoDepthGlyph(tint)
+                            }
+                            VideoMenuItem(
+                                label = "SETTINGS",
+                                modifier = itemModifier,
+                                onClick = onMoreSettingsClick
+                            ) { tint ->
+                                Icon(
+                                    imageVector = Icons.Default.Settings,
+                                    contentDescription = null,
+                                    tint = tint,
+                                    modifier = Modifier.size(34.dp)
+                                )
+                            }
                         }
-                        MeteringModeQuickSetting(
-                            meteringMode = meteringMode,
-                            onMeteringModeChange = onMeteringModeChange,
-                            modifier = itemModifier
-                        )
-                        ToolboxQuickSetting(
-                            onToolboxClick = onToolboxClick,
-                            modifier = itemModifier
-                        )
-                        ContentManagementQuickSetting(
-                            onClick = { showContentManagementOptions = !showContentManagementOptions },
-                            modifier = itemModifier
-                        )
-                    }
 
-                    ContentManagementOptionsPanel(
-                        visible = showContentManagementOptions,
-                        onFilterManageClick = {
-                            handleContentManagementAction(onFilterManageClick)
-                        },
-                        onFrameManageClick = {
-                            handleContentManagementAction(onFrameManageClick)
-                        },
-                        onPresetManageClick = {
-                            handleContentManagementAction(onPresetManageClick)
+                        AnimatedVisibility(
+                            visible = showPhotoAspectOptions,
+                            enter = expandVertically() + fadeIn(),
+                            exit = shrinkVertically() + fadeOut()
+                        ) {
+                            Column {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                VideoSettingExpandedPanel {
+                                    FlowRow(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        AspectRatio.sanitizeTopSheetRatios(topSheetAspectRatios).forEach { ratio ->
+                                            VideoOptionChip(
+                                                title = ratio.getDisplayName(),
+                                                selected = aspectRatio == ratio,
+                                                onClick = {
+                                                    showPhotoAspectOptions = false
+                                                    onAspectRatioChange(ratio)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
-                    )
+                    }
+                }
                 } else {
                     // The floating window's outer bounds stay unchanged; only the video
                     // menu content is replaced by the reference's 3x3 circular icon grid.
@@ -586,52 +612,7 @@ fun CameraTopSheet(
                     }
                 }
 
-                if (captureMode == CaptureMode.PHOTO) {
-                    // Keep the legacy footer in Photo mode. Video mode now has Settings
-                    // as the ninth item in the reference grid above.
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .clickable(onClick = onMoreSettingsClick)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(color = Color.White.copy(alpha = 0.15f))
-                                .padding(16.dp, 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color.White.copy(alpha = 0.1f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Settings,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = stringResource(R.string.settings_title),
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Icon(
-                                imageVector = AppIcons.ChevronRight,
-                                contentDescription = null,
-                                tint = Color.White.copy(alpha = 0.3f),
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                }
+
             }
         }
     }
@@ -812,6 +793,192 @@ private fun OppoPipelineSlider(
             )
         }
         Slider(value = value, onValueChange = onValueChange, valueRange = range)
+    }
+}
+
+@Composable
+private fun PhotoRefocusGlyph(tint: Color) {
+    Canvas(modifier = Modifier.size(38.dp)) {
+        val stroke = 2.2.dp.toPx()
+        val left = size.width * 0.14f
+        val right = size.width * 0.86f
+        val top = size.height * 0.14f
+        val bottom = size.height * 0.86f
+        val leg = size.width * 0.22f
+        drawLine(tint, Offset(left, top + leg), Offset(left, top), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(left, top), Offset(left + leg, top), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(right - leg, top), Offset(right, top), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(right, top), Offset(right, top + leg), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(left, bottom - leg), Offset(left, bottom), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(left, bottom), Offset(left + leg, bottom), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(right - leg, bottom), Offset(right, bottom), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(right, bottom), Offset(right, bottom - leg), stroke, cap = StrokeCap.Round)
+        drawCircle(tint, radius = 3.5.dp.toPx(), center = Offset(size.width / 2f, size.height / 2f))
+    }
+}
+
+@Composable
+private fun PhotoLiveGlyph(tint: Color) {
+    Box(modifier = Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.matchParentSize()) {
+            val center = Offset(size.width * 0.46f, size.height * 0.47f)
+            val base = size.minDimension * 0.35f
+            val stroke = 1.8.dp.toPx()
+            drawCircle(tint, radius = base, center = center, style = Stroke(width = stroke))
+            drawCircle(tint, radius = base * 0.72f, center = center, style = Stroke(width = stroke))
+            drawCircle(tint, radius = base * 0.40f, center = center, style = Stroke(width = stroke))
+            drawCircle(tint, radius = base * 0.12f, center = center)
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .size(17.dp)
+                .clip(CircleShape)
+                .background(Color.White),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("A", color = Color(0xFF17171B), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun PhotoAspectGlyph(tint: Color, ratioLabel: String) {
+    Box(modifier = Modifier.size(38.dp), contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.matchParentSize()) {
+            val stroke = 2.1.dp.toPx()
+            val left = size.width * 0.08f
+            val right = size.width * 0.92f
+            val top = size.height * 0.12f
+            val bottom = size.height * 0.88f
+            val leg = size.width * 0.20f
+            drawLine(tint, Offset(left, top + leg), Offset(left, top), stroke, cap = StrokeCap.Round)
+            drawLine(tint, Offset(left, top), Offset(left + leg, top), stroke, cap = StrokeCap.Round)
+            drawLine(tint, Offset(right - leg, top), Offset(right, top), stroke, cap = StrokeCap.Round)
+            drawLine(tint, Offset(right, top), Offset(right, top + leg), stroke, cap = StrokeCap.Round)
+            drawLine(tint, Offset(left, bottom - leg), Offset(left, bottom), stroke, cap = StrokeCap.Round)
+            drawLine(tint, Offset(left, bottom), Offset(left + leg, bottom), stroke, cap = StrokeCap.Round)
+            drawLine(tint, Offset(right - leg, bottom), Offset(right, bottom), stroke, cap = StrokeCap.Round)
+            drawLine(tint, Offset(right, bottom), Offset(right, bottom - leg), stroke, cap = StrokeCap.Round)
+        }
+        Text(
+            text = ratioLabel,
+            color = tint,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
+private fun PhotoTimerGlyph(tint: Color, timerSeconds: Int) {
+    Canvas(modifier = Modifier.size(38.dp)) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val radius = size.minDimension * 0.34f
+        val stroke = 2.2.dp.toPx()
+        drawCircle(tint, radius = radius, center = center, style = Stroke(width = stroke))
+        drawLine(tint, Offset(center.x, center.y - radius * 0.60f), center, stroke, cap = StrokeCap.Round)
+        drawLine(tint, center, Offset(center.x + radius * 0.48f, center.y + radius * 0.30f), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(center.x, center.y - radius - 4.dp.toPx()), Offset(center.x, center.y - radius - 1.dp.toPx()), stroke, cap = StrokeCap.Round)
+        if (timerSeconds == 0) {
+            drawLine(
+                tint,
+                Offset(size.width * 0.16f, size.height * 0.16f),
+                Offset(size.width * 0.84f, size.height * 0.84f),
+                stroke,
+                cap = StrokeCap.Round
+            )
+        }
+    }
+}
+
+@Composable
+private fun PhotoBurstGlyph(tint: Color) {
+    Canvas(modifier = Modifier.size(40.dp)) {
+        val stroke = 1.9.dp.toPx()
+        val radius = CornerRadius(3.dp.toPx())
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(size.width * 0.28f, size.height * 0.08f),
+            size = Size(size.width * 0.62f, size.height * 0.54f),
+            cornerRadius = radius,
+            style = Stroke(width = stroke)
+        )
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(size.width * 0.16f, size.height * 0.22f),
+            size = Size(size.width * 0.62f, size.height * 0.54f),
+            cornerRadius = radius,
+            style = Stroke(width = stroke)
+        )
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(size.width * 0.05f, size.height * 0.36f),
+            size = Size(size.width * 0.62f, size.height * 0.54f),
+            cornerRadius = radius,
+            style = Stroke(width = stroke)
+        )
+    }
+}
+
+@Composable
+private fun PhotoStylesGlyph(tint: Color) {
+    Canvas(modifier = Modifier.size(40.dp)) {
+        val stroke = 2.0.dp.toPx()
+        fun drawLayer(left: Float, top: Float, right: Float, bottom: Float) {
+            val path = Path().apply {
+                moveTo(left, top + size.height * 0.10f)
+                lineTo(right - size.width * 0.08f, top)
+                lineTo(right, bottom - size.height * 0.10f)
+                lineTo(left + size.width * 0.08f, bottom)
+                close()
+            }
+            drawPath(path, tint, style = Stroke(width = stroke))
+        }
+        drawLayer(size.width * 0.25f, size.height * 0.04f, size.width * 0.84f, size.height * 0.77f)
+        drawLayer(size.width * 0.12f, size.height * 0.18f, size.width * 0.71f, size.height * 0.90f)
+    }
+}
+
+@Composable
+private fun PhotoFilterGlyph(tint: Color) {
+    Canvas(modifier = Modifier.size(40.dp)) {
+        val stroke = 2.1.dp.toPx()
+        drawCircle(tint, radius = size.minDimension * 0.23f, center = Offset(size.width * 0.42f, size.height * 0.38f), style = Stroke(width = stroke))
+        drawCircle(tint, radius = size.minDimension * 0.23f, center = Offset(size.width * 0.60f, size.height * 0.58f), style = Stroke(width = stroke))
+        drawCircle(tint, radius = size.minDimension * 0.23f, center = Offset(size.width * 0.35f, size.height * 0.65f), style = Stroke(width = stroke))
+    }
+}
+
+@Composable
+private fun PhotoDepthGlyph(tint: Color) {
+    Canvas(modifier = Modifier.size(40.dp)) {
+        val stroke = 2.2.dp.toPx()
+        val left = size.width * 0.19f
+        val right = size.width * 0.80f
+        val top = size.height * 0.16f
+        val bottom = size.height * 0.84f
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(left, top),
+            size = Size(size.width * 0.54f, size.height * 0.68f),
+            cornerRadius = CornerRadius(4.dp.toPx()),
+            style = Stroke(width = stroke)
+        )
+        drawRoundRect(
+            color = tint.copy(alpha = 0.72f),
+            topLeft = Offset(size.width * 0.34f, size.height * 0.27f),
+            size = Size(size.width * 0.48f, size.height * 0.57f),
+            cornerRadius = CornerRadius(4.dp.toPx()),
+            style = Stroke(width = stroke)
+        )
+        drawLine(
+            tint,
+            Offset(size.width * 0.13f, bottom),
+            Offset(size.width * 0.83f, top),
+            stroke,
+            cap = StrokeCap.Round
+        )
     }
 }
 
