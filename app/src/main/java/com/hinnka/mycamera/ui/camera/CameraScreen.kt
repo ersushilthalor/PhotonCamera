@@ -1880,6 +1880,18 @@ fun CameraScreen(
             onVideoLogProfileChange = { viewModel.setVideoLogProfile(it) },
             videoBitrate = state.videoConfig.bitrate,
             onVideoBitrateChange = { viewModel.setVideoBitrate(it) },
+            useLivePhoto = useLivePhoto,
+            onLivePhotoToggle = { viewModel.setUseLivePhoto(!useLivePhoto) },
+            timerSeconds = state.timerSeconds,
+            onTimerToggle = viewModel::toggleTimer,
+            onPhotoFilterClick = { activePanel = ActivePanel.FILTERS },
+            onPhotoDepthClick = {
+                android.widget.Toast.makeText(
+                    context,
+                    "Depth map is generated with Refocus captures",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            },
             videoTorchEnabled = state.videoConfig.torchEnabled,
             onVideoTorchToggle = {
                 viewModel.setVideoTorchEnabled(!state.videoConfig.torchEnabled)
