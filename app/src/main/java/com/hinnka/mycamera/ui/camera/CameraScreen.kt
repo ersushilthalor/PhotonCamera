@@ -1660,7 +1660,7 @@ fun CameraScreen(
                         .fillMaxWidth()
                         .height(cardHeight)
                         .align(Alignment.TopCenter)
-                        .offset(y = viewfinderTop)
+                        .offset(y = viewfinderTop + (if (isVideoMode) 3.dp else 0.dp))
                         .onGloballyPositioned { coordinates ->
                             viewfinderAreaBounds = coordinates.boundsInRoot()
                         },
@@ -2184,7 +2184,9 @@ private fun Controls(
                     onLongPressStart = { viewModel.startContinuousCapture() },
                     onLongPressEnd = { viewModel.stopContinuousCapture() },
                     modifier = Modifier
-                        .offset(y = (-2).dp)
+                        .offset(
+                            y = if (state.captureMode == CaptureMode.VIDEO) (-1).dp else (-2).dp
+                        )
                         .onGloballyPositioned { coordinates ->
                             onCaptureButtonBoundsChanged(coordinates.boundsInRoot())
                         },
