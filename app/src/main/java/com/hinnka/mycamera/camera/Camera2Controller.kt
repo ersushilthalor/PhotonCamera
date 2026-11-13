@@ -152,6 +152,7 @@ class Camera2Controller(private val context: Context) {
 
     private data class CaptureModeReconfigureRequest(
         val generation: Int,
+        val surfaceTexture: SurfaceTexture,
         val targetCaptureMode: CaptureMode,
         val tapTimestampMs: Long?,
         val onStarted: ((sessionStartElapsedRealtimeMs: Long, tapTimestampMs: Long?) -> Unit)?,
@@ -282,6 +283,8 @@ class Camera2Controller(private val context: Context) {
     private val captureModeReconfigureGeneration = AtomicInteger()
     @Volatile
     private var pendingCaptureModeReconfigureRequest: CaptureModeReconfigureRequest? = null
+    @Volatile
+    private var captureModeReconfiguringSurfaceTexture: SurfaceTexture? = null
     @Volatile
     private var releaseCloseLatch: java.util.concurrent.CountDownLatch? = null
     private var captureSession: CameraCaptureSession? = null
@@ -2546,6 +2549,7 @@ class Camera2Controller(private val context: Context) {
     ) {
         val request = CaptureModeReconfigureRequest(
             generation = captureModeReconfigureGeneration.incrementAndGet(),
+            surfaceTexture = surfaceTexture,
             targetCaptureMode = _state.value.captureMode,
             tapTimestampMs = modeSwitchTapTimestampMs,
             onStarted = onSessionReconfigureStarted,
@@ -2593,6 +2597,7 @@ class Camera2Controller(private val context: Context) {
         existingCameraDevice: CameraDevice,
         request: CaptureModeReconfigureRequest?,
     ) {
+        captureModeReconfiguringSurfaceTexture = surfaceTexture
         val sessionStartMs = SystemClock.elapsedRealtime()
         PLog.i(
             TAG,
@@ -2616,6 +2621,8 @@ class Camera2Controller(private val context: Context) {
      */
     @SuppressLint("MissingPermission")
     fun openCamera(surfaceTexture: SurfaceTexture, preserveVideoRecording: Boolean = false) {
+        cancelPendingCaptureModeReconfigure("normal camera open request")
+        captureModeReconfiguringSurfaceTexture = null
         val handler = cameraHandler
         if (handler != null && Looper.myLooper() != handler.looper) {
             handler.post {
@@ -2638,6 +2645,13 @@ class Camera2Controller(private val context: Context) {
                 PLog.d(TAG, "Camera open queued while previous device is closing")
             }
         }
+    }
+
+    private fun cancelPendingCaptureModeReconfigure(reason: String) {
+        val pending = pendingCaptureModeReconfigureRequest ?: return
+        pendingCaptureModeReconfigureRequest = null
+        captureModeReconfigureGeneration.incrementAndGet()
+        PLog.d(TAG, "Cancelled pending capture-mode reconfigure ${pending.generation}: $reason")
     }
 
     private fun openPendingCameraRequest() {
@@ -3086,6 +3100,9 @@ class Camera2Controller(private val context: Context) {
             }
 
             // 配置 SurfaceTexture
+            if (captureModeReconfiguringSurfaceTexture === surfaceTexture) {
+                captureModeReconfiguringSurfaceTexture = null
+            }
             previewSurfaceTexture = surfaceTexture
             previewSurface = Surface(surfaceTexture)
 
@@ -9774,10 +9791,14 @@ class Camera2Controller(private val context: Context) {
         }
         val expectedSurfaceIsCurrent = previewSurfaceTexture === expectedSurfaceTexture
         val expectedSurfaceIsPending = pendingCameraOpenRequest?.surfaceTexture === expectedSurfaceTexture
+        val expectedSurfaceIsReconfiguring =
+            captureModeReconfiguringSurfaceTexture === expectedSurfaceTexture ||
+                pendingCaptureModeReconfigureRequest?.surfaceTexture === expectedSurfaceTexture
         if (
             expectedSurfaceTexture != null &&
             !expectedSurfaceIsCurrent &&
-            !expectedSurfaceIsPending
+            !expectedSurfaceIsPending &&
+            !expectedSurfaceIsReconfiguring
         ) {
             PLog.d(
                 TAG,
@@ -9787,6 +9808,8 @@ class Camera2Controller(private val context: Context) {
             )
             return
         }
+        cancelPendingCaptureModeReconfigure("camera close request")
+        captureModeReconfiguringSurfaceTexture = null
         closeCameraInternal(
             preserveVideoRecording = preserveVideoRecording,
             clearPendingOpen = true,
@@ -9804,6 +9827,7 @@ class Camera2Controller(private val context: Context) {
             burstGyroRecorder.stop()
             pendingFrameMetadata.clear()
             cameraOpenGeneration++
+            captureModeReconfiguringSurfaceTexture = null
             val lifecycleBeforeClose = cameraDeviceLifecycle
             val keepVideoRecording = preserveVideoRecording && _state.value.videoRecordingState.isRecording
             if (keepVideoRecording) {
