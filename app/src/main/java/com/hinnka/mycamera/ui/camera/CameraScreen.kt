@@ -937,12 +937,6 @@ fun CameraScreen(
                 onFlashToggle = {
                     viewModel.toggleFlash()
                 },
-                timerSeconds = state.timerSeconds,
-                onTimerToggle = { viewModel.toggleTimer() },
-                showHistogram = viewModel.showHistogram,
-                onHistogramToggle = {
-                    viewModel.saveShowHistogram(!viewModel.showHistogram)
-                },
                 useLivePhoto = useLivePhoto,
                 onLivePhotoToggle = { viewModel.setUseLivePhoto(!state.useLivePhoto) },
                 useRaw = useRaw && state.isRawSupported,
