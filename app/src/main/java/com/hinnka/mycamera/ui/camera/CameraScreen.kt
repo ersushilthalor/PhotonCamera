@@ -2691,9 +2691,9 @@ private fun CaptureModeSwitcher(
                     refractionAmount = 0.dp,
                     saturation = 1.0f,
                     tint = Color(0x66707070),
-                    highlightWidth = 0.5.dp,
-                    highlightBlur = 0.5.dp,
-                    highlightAlpha = 0.30f,
+                    highlightWidth = 0.dp,
+                    highlightBlur = 0.dp,
+                    highlightAlpha = 0f,
                     fallbackColor = Color(0xCC707070)
                 )
             }
