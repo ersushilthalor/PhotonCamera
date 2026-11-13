@@ -347,7 +347,6 @@ fun CameraTopSheet(
                             }
                         }
                     }
-                }
                 } else {
                     // The floating window's outer bounds stay unchanged; only the video
                     // menu content is replaced by the reference's 3x3 circular icon grid.
