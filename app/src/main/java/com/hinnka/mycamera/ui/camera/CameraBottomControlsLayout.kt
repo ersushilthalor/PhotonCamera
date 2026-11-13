@@ -13,11 +13,11 @@ internal object CameraControlsLayoutDefaults {
     val ParameterBarHeight = 48.dp
     val ZoomBarHeight = 33.dp
     val CaptureButtonSize = 76.dp
-    val SideButtonSize = 48.dp
+    val SideButtonSize = 45.dp
     val ModeSwitcherHeight = 45.dp
     val ModeSwitcherSpacing = 36.dp
     val BottomPadding = 55.dp
-    val VerticalOffset = 36.dp
+    val VerticalOffset = 20.dp
     val CaptureClearance = 8.dp
     val BarSpacing = 4.dp
     val ViewfinderModeSpacing = 12.dp
