@@ -843,6 +843,7 @@ fun CameraScreen(
 
         val backgroundPainter = rememberBackgroundPainter(viewModel)
         val modeSwitcherBackdrop = rememberLiquidGlassBackdrop()
+        val videoTopBarBackdrop = rememberLiquidGlassBackdrop()
 
         val isVideoMode = state.captureMode == CaptureMode.VIDEO
         val isPhotoStyleMode = state.captureMode != CaptureMode.VIDEO
@@ -977,6 +978,7 @@ fun CameraScreen(
                 onSettingsClick = {
                     activePanel = if (activePanel == ActivePanel.SETTINGS) ActivePanel.NONE else ActivePanel.SETTINGS
                 },
+                glassBackdrop = videoTopBarBackdrop,
                 modifier = Modifier
                     .padding(top = topSafePadding)
                     .offset(y = topBarOffset)
@@ -1664,7 +1666,13 @@ fun CameraScreen(
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    viewfinder()
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .liquidGlassBackdropSource(videoTopBarBackdrop)
+                    ) {
+                        viewfinder()
+                    }
                     if (isVideoMode) {
                         // Keep video controls attached to the actual viewfinder edges.
                         Box(
@@ -2653,28 +2661,30 @@ private fun CaptureModeSwitcher(
         } else {
             val liquidGlassStyle = remember {
                 LiquidGlassStyle(
-                    blurRadius = 10.dp,
+                    // A nearly clear lens: keep the selected half visibly transparent and refractive.
+                    blurRadius = 0.5.dp,
                     refractionHeight = 18.dp,
-                    refractionAmount = 0.dp,
-                    saturation = 1.15f,
-                    tint = Color(0x26000000),
+                    refractionAmount = 16.dp,
+                    saturation = 1.45f,
+                    tint = Color(0x12FFFFFF),
                     highlightWidth = 0.65.dp,
                     highlightBlur = 0.4.dp,
-                    highlightAlpha = 0.42f,
-                    fallbackColor = Color(0xB31B1B1B)
+                    highlightAlpha = 0.58f,
+                    fallbackColor = Color(0x18FFFFFF)
                 )
             }
             val outerGlassStyle = remember {
                 LiquidGlassStyle(
-                    blurRadius = 14.dp,
+                    // Keep the outer track neutral grey; the selected inner half supplies the lens effect.
+                    blurRadius = 8.dp,
                     refractionHeight = 20.dp,
                     refractionAmount = 0.dp,
-                    saturation = 1.12f,
-                    tint = Color(0x40000000),
-                    highlightWidth = 0.45.dp,
-                    highlightBlur = 0.35.dp,
-                    highlightAlpha = 0.36f,
-                    fallbackColor = Color(0xC21B1B1B)
+                    saturation = 1.0f,
+                    tint = Color(0x66707070),
+                    highlightWidth = 0.5.dp,
+                    highlightBlur = 0.5.dp,
+                    highlightAlpha = 0.30f,
+                    fallbackColor = Color(0xCC707070)
                 )
             }
             LiquidGlassSurface(
