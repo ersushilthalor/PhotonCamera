@@ -11,7 +11,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -236,6 +235,10 @@ private fun VideoTopBar(
     modifier: Modifier = Modifier
 ) {
     var stabilizationMenuExpanded by remember { mutableStateOf(false) }
+    LaunchedEffect(isRecording) {
+        if (isRecording) stabilizationMenuExpanded = false
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -248,88 +251,109 @@ private fun VideoTopBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            if (isRecording) {
-                RecordingHud(
-                    elapsedMs = recordingElapsedMs,
-                    videoConfig = videoConfig
-                )
-            } else {
-                VideoParameterCluster(
-                    videoConfig = videoConfig,
-                    onResolutionClick = onVideoResolutionClick,
-                    onFpsClick = onVideoFpsClick
-                )
-            }
+            // Match the photo-mode format capsule: resolution and frame rate stay visible,
+            // including during recording, and each value remains independently tappable.
+            VideoParameterCluster(
+                videoConfig = videoConfig,
+                onResolutionClick = onVideoResolutionClick,
+                onFpsClick = onVideoFpsClick
+            )
 
-            // Keep live controls available while recording. HDR changes the active
-            // recording color layer; torch updates the Camera2 repeating request.
+            // Use the same compact grouped control capsule and touch targets as photo mode.
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                modifier = Modifier
+                    .height(36.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.13f))
+                    .padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (!videoConfig.logProfile.isEnabled) {
-                    IconButton(onClick = onVideoHdrToggle) {
-                        Text(
-                            text = "HDR",
-                            color = Color.White.copy(alpha = if (videoHdrEnabled) 1f else 0.65f),
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.autoRotate()
-                        )
-                    }
-                }
-
-                VideoActionIcon(
-                    icon = if (videoConfig.torchEnabled) AppIcons.FlashlightOn else AppIcons.FlashlightOff,
-                    active = videoConfig.torchEnabled,
-                    enabled = videoCapabilities.supportsTorch,
+                TopBarActionButton(
                     onClick = onVideoTorchToggle,
                     contentDescription = stringResource(R.string.video_torch_chip)
-                )
+                ) {
+                    Icon(
+                        imageVector = if (videoConfig.torchEnabled) AppIcons.FlashlightOn else AppIcons.FlashlightOff,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp).autoRotate(),
+                        tint = when {
+                            !videoCapabilities.supportsTorch -> Color.White.copy(alpha = 0.3f)
+                            videoConfig.torchEnabled -> AccentColor
+                            else -> Color.White
+                        }
+                    )
+                }
 
-                if (!isRecording && videoCapabilities.availableStabilizationModes.size > 1) {
-                    Box {
-                        VideoActionIcon(
-                            icon = AppIcons.Stabilization,
-                            active = videoConfig.stabilizationMode != VideoStabilizationMode.OFF,
-                            enabled = true,
-                            onClick = { stabilizationMenuExpanded = true },
-                            contentDescription = stringResource(R.string.settings_video_stabilization_default)
-                        )
-                        DropdownMenu(
-                            expanded = stabilizationMenuExpanded,
-                            onDismissRequest = { stabilizationMenuExpanded = false }
-                        ) {
-                            videoCapabilities.availableStabilizationModes.forEach { mode ->
-                                DropdownMenuItem(
-                                    text = { Text(videoStabilizationModeLabel(mode)) },
-                                    onClick = {
-                                        stabilizationMenuExpanded = false
-                                        onVideoStabilizationModeChange(mode)
-                                    },
-                                    trailingIcon = if (mode == videoConfig.stabilizationMode) {
-                                        {
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = null
-                                            )
-                                        }
-                                    } else null
-                                )
+                Box {
+                    TopBarActionButton(
+                        onClick = {
+                            if (!isRecording && videoCapabilities.availableStabilizationModes.isNotEmpty()) {
+                                stabilizationMenuExpanded = true
                             }
+                        },
+                        contentDescription = stringResource(R.string.settings_video_stabilization_default)
+                    ) {
+                        Icon(
+                            imageVector = AppIcons.Stabilization,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp).autoRotate(),
+                            tint = when {
+                                videoCapabilities.availableStabilizationModes.isEmpty() ->
+                                    Color.White.copy(alpha = 0.3f)
+                                isRecording -> Color.White.copy(alpha = 0.55f)
+                                videoConfig.stabilizationMode != VideoStabilizationMode.OFF -> AccentColor
+                                else -> Color.White
+                            }
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = stabilizationMenuExpanded,
+                        onDismissRequest = { stabilizationMenuExpanded = false }
+                    ) {
+                        videoCapabilities.availableStabilizationModes.forEach { mode ->
+                            DropdownMenuItem(
+                                text = { Text(videoStabilizationModeLabel(mode)) },
+                                onClick = {
+                                    stabilizationMenuExpanded = false
+                                    onVideoStabilizationModeChange(mode)
+                                },
+                                trailingIcon = if (mode == videoConfig.stabilizationMode) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null
+                                        )
+                                    }
+                                } else null
+                            )
                         }
                     }
                 }
 
-                if (!isRecording) {
-                    IconButton(onClick = onSettingsClick) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = stringResource(R.string.settings),
-                            modifier = Modifier.size(18.dp).autoRotate(),
-                            tint = Color.White
-                        )
-                    }
+                TopBarActionButton(
+                    onClick = {
+                        if (!videoConfig.logProfile.isEnabled) onVideoHdrToggle()
+                    },
+                    contentDescription = "HDR"
+                ) {
+                    Icon(
+                        imageVector = AppIcons.Contrast,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp).autoRotate(),
+                        tint = when {
+                            videoConfig.logProfile.isEnabled -> Color.White.copy(alpha = 0.3f)
+                            videoHdrEnabled -> AccentColor
+                            else -> Color.White
+                        }
+                    )
+                }
+
+                TopBarActionButton(
+                    onClick = onSettingsClick,
+                    contentDescription = stringResource(R.string.settings)
+                ) {
+                    SixDotMenuIcon()
                 }
             }
         }
@@ -342,30 +366,25 @@ private fun VideoParameterCluster(
     onResolutionClick: () -> Unit,
     onFpsClick: () -> Unit
 ) {
-    Surface(
-        color = Color.Black.copy(alpha = 0.35f),
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+    Row(
+        modifier = Modifier
+            .height(36.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.13f))
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            val isOpenGate = videoConfig.aspectRatio == VideoAspectRatio.OPEN_GATE
-            val resLabel = if (isOpenGate) {
-                stringResource(R.string.video_resolution_max)
-            } else when (videoConfig.resolution) {
-                VideoResolutionPreset.UHD_2160P -> "4K"
-                VideoResolutionPreset.FHD_1080P -> "1080p"
-                VideoResolutionPreset.HD_720P -> "720p"
-            }
-            ParameterText(resLabel, onResolutionClick, enabled = !isOpenGate)
-
-            ParameterDivider()
-
-            ParameterText("${videoConfig.fps.fps} fps", onFpsClick)
+        val isOpenGate = videoConfig.aspectRatio == VideoAspectRatio.OPEN_GATE
+        val resLabel = if (isOpenGate) {
+            stringResource(R.string.video_resolution_max)
+        } else when (videoConfig.resolution) {
+            VideoResolutionPreset.UHD_2160P -> "4K"
+            VideoResolutionPreset.FHD_1080P -> "1080p"
+            VideoResolutionPreset.HD_720P -> "720p"
         }
+        ParameterText(resLabel, onResolutionClick, enabled = !isOpenGate)
+        ParameterText(videoConfig.fps.fps.toString(), onFpsClick)
     }
 }
 
@@ -380,8 +399,9 @@ private fun ParameterText(
         text = text,
         color = if (enabled) tint else tint.copy(alpha = 0.4f),
         style = MaterialTheme.typography.labelLarge.copy(
-            fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            fontFamily = FontFamily.Default,
             letterSpacing = 0.sp
         ),
         modifier = Modifier
