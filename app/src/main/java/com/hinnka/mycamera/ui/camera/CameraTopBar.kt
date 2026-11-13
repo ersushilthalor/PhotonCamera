@@ -3,6 +3,7 @@ package com.hinnka.mycamera.ui.camera
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +18,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -24,9 +27,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.R
-import com.hinnka.mycamera.ui.components.PhysicalButton
 import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VideoCapabilities
@@ -43,10 +49,6 @@ fun CameraTopBar(
     recordingElapsedMs: Long,
     flashMode: Int,
     onFlashToggle: () -> Unit,
-    timerSeconds: Int,
-    onTimerToggle: () -> Unit,
-    showHistogram: Boolean,
-    onHistogramToggle: () -> Unit,
     useLivePhoto: Boolean,
     onLivePhotoToggle: () -> Unit,
     useRaw: Boolean,
@@ -84,7 +86,7 @@ fun CameraTopBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 32.dp, start = 16.dp, end = 16.dp, bottom = 8.dp),
+            .padding(top = 32.dp, start = 8.dp, end = 8.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -113,7 +115,8 @@ fun CameraTopBar(
                 text = stringResource(R.string.camera_capture_resolution_48),
                 color = Color.White.copy(alpha = 0.72f),
                 fontSize = 10.sp,
-                fontWeight = FontWeight.Normal
+                fontWeight = FontWeight.Normal,
+                modifier = Modifier.padding(top = 4.dp)
             )
         }
 
@@ -154,6 +157,17 @@ fun CameraTopBar(
                     modifier = Modifier.size(20.dp).autoRotate(),
                     tint = if (useLivePhoto) AccentColor else Color.White
                 )
+                if (!useLivePhoto) {
+                    Canvas(modifier = Modifier.size(20.dp)) {
+                        drawLine(
+                            color = Color.White,
+                            start = Offset(size.width * 0.22f, size.height * 0.22f),
+                            end = Offset(size.width * 0.78f, size.height * 0.78f),
+                            strokeWidth = 1.5.dp.toPx(),
+                            cap = StrokeCap.Round
+                        )
+                    }
+                }
             }
 
             TopBarActionButton(
@@ -177,7 +191,8 @@ private fun TopBarActionButton(
         modifier = Modifier
             .size(32.dp)
             .clip(CircleShape)
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { this.contentDescription = contentDescription }
             .autoRotate(),
         contentAlignment = Alignment.Center,
         content = content
