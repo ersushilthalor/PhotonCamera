@@ -3656,7 +3656,6 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         } catch (e: Exception) {
             PLog.e(TAG, "Error shutting down metering executor", e)
         }
-        nightVisionEstimator.close()
         // 释放 SurfaceTexture
         surfaceTexture?.release()
         surfaceTexture = null
