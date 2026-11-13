@@ -316,10 +316,7 @@ private fun ZoomPresetPill(
     val selectedPreset = visiblePresets.firstOrNull { abs(it - zoomRatio) <= 0.05f }
 
     Row(
-        modifier = modifier
-            .clip(CircleShape)
-            .background(Color.Black.copy(alpha = 0.4f))
-            .padding(horizontal = 4.dp, vertical = 2.dp),
+        modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
