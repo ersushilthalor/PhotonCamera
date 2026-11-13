@@ -84,17 +84,21 @@ fun Modifier.glassUiTile(
 fun GlassDialogBackdropEffect(radius: Dp = 30.dp) {
     val view = LocalView.current
     val radiusPx = with(LocalDensity.current) { radius.toPx().roundToInt() }
-    val window = view.findDialogWindowProvider()
+    val dialogWindow = view.findDialogWindowProvider()?.window
 
-    DisposableEffect(window, radiusPx) {
-        if (window != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
-            window.attributes = window.attributes.apply { blurBehindRadius = radiusPx }
+    DisposableEffect(dialogWindow, radiusPx) {
+        if (dialogWindow != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            dialogWindow.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+            dialogWindow.attributes = dialogWindow.attributes.apply {
+                setBlurBehindRadius(radiusPx)
+            }
         }
         onDispose {
-            if (window != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                window.attributes = window.attributes.apply { blurBehindRadius = 0 }
-                window.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+            if (dialogWindow != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                dialogWindow.attributes = dialogWindow.attributes.apply {
+                    setBlurBehindRadius(0)
+                    flags = flags and WindowManager.LayoutParams.FLAG_BLUR_BEHIND.inv()
+                }
             }
         }
     }
