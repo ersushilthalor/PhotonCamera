@@ -1429,4 +1429,6 @@
     <string name="camera_quick_menu_styles">Styles</string>
     <string name="camera_quick_menu_filter">Filter</string>
     <string name="camera_quick_menu_aspect">Aspect</string>
+    <string name="camera_quick_menu_live">Live</string>
+    <string name="camera_quick_menu_depth">Depth</string>
 </resources>

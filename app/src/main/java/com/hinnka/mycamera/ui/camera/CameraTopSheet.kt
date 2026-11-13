@@ -614,7 +614,7 @@ private fun PhotoQuickMenuGrid(
                 )
             }
             PhotoQuickMenuItem(
-                title = stringResource(R.string.settings_use_live_photo).uppercase(),
+                title = stringResource(R.string.camera_quick_menu_live).uppercase(),
                 checked = useLivePhoto,
                 onClick = onLivePhotoToggle,
                 modifier = Modifier.weight(1f)
@@ -755,7 +755,7 @@ private fun PhotoQuickMenuGrid(
                 )
             }
             PhotoQuickMenuItem(
-                title = stringResource(R.string.virtual_aperture).uppercase(),
+                title = stringResource(R.string.camera_quick_menu_depth).uppercase(),
                 checked = isVirtualApertureEnabled,
                 onClick = onVirtualApertureToggle,
                 modifier = Modifier.weight(1f)

@@ -1755,7 +1755,7 @@ fun CameraScreen(
                     ) {
                         viewfinder()
                     }
-                    if (isVideoMode) {
+                    if (isVideoMode && activePanel != ActivePanel.SETTINGS) {
                         // Keep video top controls at their previous screen position,
                         // independent of the viewfinder's vertical offset.
                         Box(
