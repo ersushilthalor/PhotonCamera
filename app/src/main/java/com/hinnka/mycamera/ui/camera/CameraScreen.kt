@@ -921,11 +921,11 @@ fun CameraScreen(
             ((contentHeight - topBarBottom - cardHeight -
                 CameraControlsLayoutDefaults.CollapsedControlsHeight) / 2).coerceAtLeast(0.dp)
         }
-        val viewfinderTop = if (placeViewfinderBelowTopBar) {
+        val viewfinderTop = (if (placeViewfinderBelowTopBar) {
             topBarBottom + extraViewfinderTopSpacing
         } else {
             ((contentHeight - cardHeight) / 2).coerceAtLeast(0.dp)
-        }
+        }) + CameraControlsLayoutDefaults.VerticalOffset
         val viewfinderTopOverlayPadding = (topBarBottom - viewfinderTop).coerceAtLeast(0.dp)
 
         val topBar = @Composable {
@@ -1507,7 +1507,8 @@ fun CameraScreen(
                 val sideControlsBottom = minOf(
                     viewfinderTop + cardHeight,
                     contentHeight - CameraControlsLayoutDefaults.CaptureAreaHeight -
-                        CameraControlsLayoutDefaults.CaptureClearance
+                        CameraControlsLayoutDefaults.CaptureClearance +
+                        CameraControlsLayoutDefaults.VerticalOffset
                 )
                 val sideControlsHeight = (sideControlsBottom - viewfinderTop)
                     .coerceIn(0.dp, cardHeight)

@@ -17,6 +17,7 @@ internal object CameraControlsLayoutDefaults {
     val ModeSwitcherHeight = 45.dp
     val ModeSwitcherSpacing = 36.dp
     val BottomPadding = 55.dp
+    val VerticalOffset = 36.dp
     val CaptureClearance = 8.dp
     val BarSpacing = 4.dp
     val ViewfinderModeSpacing = 12.dp
@@ -57,8 +58,9 @@ internal fun CameraBottomControlsLayout(
         val height = constraints.maxHeight
         val clearance = CameraControlsLayoutDefaults.CaptureClearance.roundToPx()
         val barGap = CameraControlsLayoutDefaults.BarSpacing.roundToPx()
+        val verticalOffset = CameraControlsLayoutDefaults.VerticalOffset.roundToPx()
         val captureTop = height - capture.height
-        val controlsBottom = captureTop - clearance
+        val controlsBottom = captureTop + verticalOffset - clearance
         val previewBottom = viewfinderBottom.roundToPx().coerceAtMost(height)
         val spaceBelowPreview = controlsBottom - previewBottom
 
@@ -75,7 +77,7 @@ internal fun CameraBottomControlsLayout(
         val zoomTop = minOf(previewBottom - clearance, rulerTop - barGap) - zoom.height
 
         layout(width, height) {
-            capture.placeRelative((width - capture.width) / 2, captureTop)
+            capture.placeRelative((width - capture.width) / 2, captureTop + verticalOffset)
             parameters.placeRelative((width - parameters.width) / 2, parameterTop)
             ruler.placeRelative((width - ruler.width) / 2, rulerTop)
             zoom.placeRelative((width - zoom.width) / 2, zoomTop)
