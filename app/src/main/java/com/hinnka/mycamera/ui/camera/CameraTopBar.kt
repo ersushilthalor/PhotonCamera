@@ -116,7 +116,7 @@ fun CameraTopBar(
             )
             Spacer(modifier = Modifier.width(3.dp))
             Text(
-                text = stringResource(R.string.camera_capture_resolution_48),
+                text = stringResource(R.string.camera_capture_resolution_12),
                 color = Color.White.copy(alpha = 0.72f),
                 fontSize = 8.sp,
                 fontWeight = FontWeight.Normal,
