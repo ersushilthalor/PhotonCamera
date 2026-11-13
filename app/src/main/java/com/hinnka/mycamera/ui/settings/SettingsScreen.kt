@@ -1,6 +1,8 @@
 package com.hinnka.mycamera.ui.settings
 
 import com.hinnka.mycamera.ui.components.AppModalBottomSheet
+import com.hinnka.mycamera.ui.components.AppAlertDialog
+import com.hinnka.mycamera.ui.components.glassUiSurface
 
 import android.content.Context
 import android.content.Intent
@@ -52,7 +54,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.ripple.RippleAlpha
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -844,7 +845,7 @@ fun SettingsScreen(
     }
 
     if (showGhostPermissionDialog) {
-        AlertDialog(
+        AppAlertDialog(
             onDismissRequest = { showGhostPermissionDialog = false },
             title = {
                 Text(
@@ -914,7 +915,7 @@ fun SettingsScreen(
     if (showInstallUpdateDialog) {
         val apkFile = downloadedUpdateApk
         if (apkFile != null) {
-            AlertDialog(
+            AppAlertDialog(
                 onDismissRequest = { showInstallUpdateDialog = false },
                 title = {
                     Text(
@@ -2383,7 +2384,7 @@ fun SettingsScreen(
     }
 
     if (showCustomAIModelDialog) {
-        AlertDialog(
+        AppAlertDialog(
             onDismissRequest = { showCustomAIModelDialog = false },
             title = { Text(text = stringResource(R.string.settings_ai_model_custom_dialog_title)) },
             text = {
@@ -2707,7 +2708,7 @@ private fun AspectRatioDialog(
     val parsedHeight = customHeight.toIntOrNull()
     val canAddCustomRatio = parsedWidth != null && parsedHeight != null && parsedWidth > 0 && parsedHeight > 0
 
-    AlertDialog(
+    AppAlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Color(0xFF1A1A1A),
         title = {
@@ -3114,7 +3115,7 @@ fun TextInputSettingItem(
 
     if (showDialog) {
         var tempValue by remember { mutableStateOf(value) }
-        androidx.compose.material3.AlertDialog(
+        AppAppAlertDialog(
             onDismissRequest = { showDialog = false },
             title = { Text(text = title) },
             text = {
@@ -3227,7 +3228,11 @@ fun DropdownSettingItem(
             DropdownMenu(
                 expanded = expanded,
                 onDismissRequest = { expanded = false },
-                modifier = Modifier.background(Color(0xFF2C2C2E))
+                modifier = Modifier.glassUiSurface(
+                    shape = RoundedCornerShape(12.dp),
+                    tint = Color(0xED2C2C2E),
+                    rimStrength = 0.95f
+                )
             ) {
                 if (isLoading) {
                     DropdownMenuItem(
@@ -3644,7 +3649,7 @@ private fun CustomVendorKeysDialog(
     }
     val isDraftValid = isKeyNameValid && isValueValid && !hasDuplicate
 
-    AlertDialog(
+    AppAlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
@@ -4065,7 +4070,7 @@ private fun ExternalLensStabilizationDialog(
     val canApply = !enabled ||
         (selectedCameraId.isNotBlank() && magnificationValid)
 
-    AlertDialog(
+    AppAlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Color(0xFF1A1A1A),
         title = { Text(stringResource(R.string.settings_external_lens_stabilization)) },
@@ -4289,7 +4294,7 @@ private fun AddIszLensDialog(
         cfaCorrectionMode = rawCfaCorrectionMode
     )
 
-    AlertDialog(
+    AppAlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Color(0xFF1A1A1A),
         title = { Text(stringResource(R.string.settings_add_isz_lens)) },
@@ -5485,7 +5490,7 @@ fun DefaultFocalLengthSetting(
     }
 
     if (showAddDialog) {
-        AlertDialog(
+        AppAlertDialog(
             onDismissRequest = { showAddDialog = false; inputValue = "" },
             title = { Text(stringResource(R.string.settings_custom_focal_length_add)) },
             text = {
