@@ -2581,7 +2581,7 @@ private fun CaptureModeSwitcher(
             label = "modeSwitcher"
         )
         val selectedBackground by animateColorAsState(
-            targetValue = if (oppoStyle) Color(0xFF303030) else Color.White,
+            targetValue = if (oppoStyle) Color(0xFF303030) else Color.White.copy(alpha = 0.4f),
             animationSpec = tween(durationMillis = 220),
             label = "modeSwitcherColor"
         )
