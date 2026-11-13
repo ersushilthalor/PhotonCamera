@@ -5,6 +5,7 @@ import android.os.Build
 import androidx.compose.animation.*
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,7 +24,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -231,6 +239,21 @@ fun CameraTopSheet(
                         .padding(horizontal = 18.dp, vertical = 16.dp)
                         .autoRotate()
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 2.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(40.dp)
+                                .height(4.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.42f))
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(18.dp))
                     Column(
                         modifier = Modifier.verticalScroll(rememberScrollState())
                     ) {
@@ -459,51 +482,6 @@ fun CameraTopSheet(
                     }
                 }
 
-                if (captureMode == CaptureMode.PHOTO) {
-                // More Settings Button
-                Box(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .clickable(onClick = onMoreSettingsClick)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(color = Color.White.copy(alpha = 0.15f))
-                            .padding(16.dp, 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color.White.copy(alpha = 0.1f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = stringResource(R.string.settings_title),
-                            color = Color.White,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Icon(
-                            imageVector = AppIcons.ChevronRight,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.3f),
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-                }
             }
         }
     }
@@ -567,6 +545,254 @@ fun CameraTopSheet(
 }
 
 
+
+private enum class OppoQuickMenuGlyph {
+    REFOCUS,
+    LIVE,
+    ASPECT,
+    TIMER,
+    BURST,
+    STYLES,
+    FILTER,
+    DEPTH,
+    SETTINGS,
+    FLASH,
+    EDIT,
+    ACTION,
+    DUAL_CAPTURE,
+    LOG
+}
+
+/**
+ * Oppo-style quick-menu glyphs drawn as clean, rounded vector strokes.
+ * Drawing them here keeps the icon family optically consistent at every density.
+ */
+@Composable
+private fun OppoQuickMenuGlyphIcon(
+    glyph: OppoQuickMenuGlyph,
+    ratioLabel: String? = null,
+    modifier: Modifier = Modifier.size(40.dp)
+) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.matchParentSize()) {
+            val unit = minOf(size.width, size.height) / 40f
+            val cx = size.width / 2f
+            val cy = size.height / 2f
+            val white = Color.White
+            val stroke = Stroke(
+                width = 2.8f * unit,
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round
+            )
+            fun point(x: Float, y: Float) = Offset(cx + x * unit, cy + y * unit)
+            fun line(x1: Float, y1: Float, x2: Float, y2: Float, width: Float = 2.8f) {
+                drawLine(
+                    color = white,
+                    start = point(x1, y1),
+                    end = point(x2, y2),
+                    strokeWidth = width * unit,
+                    cap = StrokeCap.Round
+                )
+            }
+
+            when (glyph) {
+                OppoQuickMenuGlyph.REFOCUS -> {
+                    val path = Path().apply {
+                        moveTo(point(-13f, -6f).x, point(-13f, -6f).y)
+                        lineTo(point(-13f, -11f).x, point(-13f, -11f).y)
+                        quadraticTo(point(-13f, -14f).x, point(-13f, -14f).y, point(-10f, -14f).x, point(-10f, -14f).y)
+                        lineTo(point(-6f, -14f).x, point(-6f, -14f).y)
+                        moveTo(point(6f, -14f).x, point(6f, -14f).y)
+                        lineTo(point(10f, -14f).x, point(10f, -14f).y)
+                        quadraticTo(point(13f, -14f).x, point(13f, -14f).y, point(13f, -11f).x, point(13f, -11f).y)
+                        lineTo(point(13f, -6f).x, point(13f, -6f).y)
+                        moveTo(point(13f, 6f).x, point(13f, 6f).y)
+                        lineTo(point(13f, 11f).x, point(13f, 11f).y)
+                        quadraticTo(point(13f, 14f).x, point(13f, 14f).y, point(10f, 14f).x, point(10f, 14f).y)
+                        lineTo(point(6f, 14f).x, point(6f, 14f).y)
+                        moveTo(point(-6f, 14f).x, point(-6f, 14f).y)
+                        lineTo(point(-10f, 14f).x, point(-10f, 14f).y)
+                        quadraticTo(point(-13f, 14f).x, point(-13f, 14f).y, point(-13f, 11f).x, point(-13f, 11f).y)
+                        lineTo(point(-13f, 6f).x, point(-13f, 6f).y)
+                    }
+                    drawPath(path, white, style = stroke)
+                    drawCircle(white, radius = 3.1f * unit, center = point(0f, 0f))
+                }
+
+                OppoQuickMenuGlyph.LIVE -> {
+                    drawCircle(white, 16.2f * unit, point(0f, 0f), style = stroke)
+                    drawCircle(white, 10.4f * unit, point(0f, 0f), style = stroke)
+                    drawCircle(white, 4.5f * unit, point(0f, 0f), style = stroke)
+                    drawCircle(white, 1.8f * unit, point(0f, 0f))
+                }
+
+                OppoQuickMenuGlyph.ASPECT -> {
+                    val path = Path().apply {
+                        moveTo(point(-15f, -7f).x, point(-15f, -7f).y)
+                        lineTo(point(-15f, -12f).x, point(-15f, -12f).y)
+                        quadraticTo(point(-15f, -15f).x, point(-15f, -15f).y, point(-12f, -15f).x, point(-12f, -15f).y)
+                        lineTo(point(-7f, -15f).x, point(-7f, -15f).y)
+                        moveTo(point(7f, -15f).x, point(7f, -15f).y)
+                        lineTo(point(12f, -15f).x, point(12f, -15f).y)
+                        quadraticTo(point(15f, -15f).x, point(15f, -15f).y, point(15f, -12f).x, point(15f, -12f).y)
+                        lineTo(point(15f, -7f).x, point(15f, -7f).y)
+                        moveTo(point(15f, 7f).x, point(15f, 7f).y)
+                        lineTo(point(15f, 12f).x, point(15f, 12f).y)
+                        quadraticTo(point(15f, 15f).x, point(15f, 15f).y, point(12f, 15f).x, point(12f, 15f).y)
+                        lineTo(point(7f, 15f).x, point(7f, 15f).y)
+                        moveTo(point(-7f, 15f).x, point(-7f, 15f).y)
+                        lineTo(point(-12f, 15f).x, point(-12f, 15f).y)
+                        quadraticTo(point(-15f, 15f).x, point(-15f, 15f).y, point(-15f, 12f).x, point(-15f, 12f).y)
+                        lineTo(point(-15f, 7f).x, point(-15f, 7f).y)
+                    }
+                    drawPath(path, white, style = stroke)
+                }
+
+                OppoQuickMenuGlyph.TIMER -> {
+                    drawArc(
+                        color = white,
+                        startAngle = 43f,
+                        sweepAngle = 292f,
+                        useCenter = false,
+                        topLeft = point(-14f, -14f),
+                        size = Size(28f * unit, 28f * unit),
+                        style = stroke
+                    )
+                    line(-16f, -16f, 16f, 16f, 3.3f)
+                }
+
+                OppoQuickMenuGlyph.BURST -> {
+                    drawRoundRect(white, point(-4f, -17f), Size(20f * unit, 17f * unit), CornerRadius(3f * unit), style = stroke)
+                    drawRoundRect(white, point(-9f, -13f), Size(20f * unit, 17f * unit), CornerRadius(3f * unit), style = stroke)
+                    drawRoundRect(white, point(-14f, -9f), Size(20f * unit, 17f * unit), CornerRadius(3f * unit), style = stroke)
+                }
+
+                OppoQuickMenuGlyph.STYLES -> {
+                    fun card(dx: Float, dy: Float) {
+                        val path = Path().apply {
+                            moveTo(point(-11f + dx, -8f + dy).x, point(-11f + dx, -8f + dy).y)
+                            lineTo(point(1f + dx, -16f + dy).x, point(1f + dx, -16f + dy).y)
+                            lineTo(point(14f + dx, -8f + dy).x, point(14f + dx, -8f + dy).y)
+                            lineTo(point(14f + dx, 10f + dy).x, point(14f + dx, 10f + dy).y)
+                            lineTo(point(1f + dx, 18f + dy).x, point(1f + dx, 18f + dy).y)
+                            lineTo(point(-11f + dx, 10f + dy).x, point(-11f + dx, 10f + dy).y)
+                            close()
+                        }
+                        drawPath(path, white, style = stroke)
+                    }
+                    card(6f, -5f)
+                    card(0f, 0f)
+                    card(-6f, 5f)
+                }
+
+                OppoQuickMenuGlyph.FILTER -> {
+                    drawCircle(white.copy(alpha = 0.55f), 8.7f * unit, point(-5f, 3f), style = Stroke(2.8f * unit, cap = StrokeCap.Round))
+                    drawCircle(white, 8.7f * unit, point(5f, 3f), style = Stroke(2.8f * unit, cap = StrokeCap.Round))
+                    drawCircle(white, 8.7f * unit, point(0f, -5f), style = Stroke(2.8f * unit, cap = StrokeCap.Round))
+                }
+
+                OppoQuickMenuGlyph.DEPTH -> {
+                    val glyphPath = Path().apply {
+                        moveTo(point(-8f, 13f).x, point(-8f, 13f).y)
+                        cubicTo(
+                            point(-2f, 13f).x, point(-2f, 13f).y,
+                            point(-2f, 8f).x, point(-2f, 8f).y,
+                            point(-2f, 2f).x, point(-2f, 2f).y
+                        )
+                        lineTo(point(-2f, -5f).x, point(-2f, -5f).y)
+                        cubicTo(
+                            point(-2f, -13f).x, point(-2f, -13f).y,
+                            point(3f, -15f).x, point(3f, -15f).y,
+                            point(10f, -15f).x, point(10f, -15f).y
+                        )
+                        moveTo(point(-8f, 0f).x, point(-8f, 0f).y)
+                        lineTo(point(7f, 0f).x, point(7f, 0f).y)
+                    }
+                    drawPath(glyphPath, white, style = Stroke(3.2f * unit, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                    line(-16f, -15f, 15f, 16f, 3.4f)
+                }
+
+                OppoQuickMenuGlyph.SETTINGS -> {
+                    val gear = Path()
+                    for (index in 0 until 32) {
+                        val angle = -Math.PI / 2.0 + index * (Math.PI * 2.0 / 32.0)
+                        val radius = if (index % 4 < 2) 16.5 else 20.0
+                        val x = cx + kotlin.math.cos(angle).toFloat() * radius.toFloat() * unit
+                        val y = cy + kotlin.math.sin(angle).toFloat() * radius.toFloat() * unit
+                        if (index == 0) gear.moveTo(x, y) else gear.lineTo(x, y)
+                    }
+                    gear.close()
+                    drawPath(gear, white, style = stroke)
+                    drawCircle(white, 5.2f * unit, point(0f, 0f), style = stroke)
+                }
+
+                OppoQuickMenuGlyph.FLASH -> {
+                    val bolt = Path().apply {
+                        moveTo(point(2f, -18f).x, point(2f, -18f).y)
+                        lineTo(point(-10f, 2f).x, point(-10f, 2f).y)
+                        lineTo(point(-1f, 2f).x, point(-1f, 2f).y)
+                        lineTo(point(-4f, 18f).x, point(-4f, 18f).y)
+                        lineTo(point(11f, -4f).x, point(11f, -4f).y)
+                        lineTo(point(2f, -4f).x, point(2f, -4f).y)
+                        close()
+                    }
+                    drawPath(bolt, white, style = Stroke(2.8f * unit, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                }
+
+                OppoQuickMenuGlyph.EDIT -> {
+                    line(-15f, -10f, 15f, -10f, 2.5f)
+                    line(-15f, 0f, 15f, 0f, 2.5f)
+                    line(-15f, 10f, 15f, 10f, 2.5f)
+                    drawCircle(white, 3.6f * unit, point(-5f, -10f))
+                    drawCircle(white, 3.6f * unit, point(7f, 0f))
+                    drawCircle(white, 3.6f * unit, point(-1f, 10f))
+                }
+
+                OppoQuickMenuGlyph.ACTION -> {
+                    drawCircle(white, 6f * unit, point(0f, 0f), style = stroke)
+                    drawArc(white, 205f, 125f, false, point(-17f, -17f), Size(34f * unit, 34f * unit), style = stroke)
+                    drawArc(white, 25f, 125f, false, point(-17f, -17f), Size(34f * unit, 34f * unit), style = stroke)
+                }
+
+                OppoQuickMenuGlyph.DUAL_CAPTURE -> {
+                    drawRoundRect(white, point(-6f, -16f), Size(21f * unit, 27f * unit), CornerRadius(2.5f * unit), style = stroke)
+                    drawRoundRect(white, point(-14f, -9f), Size(21f * unit, 25f * unit), CornerRadius(2.5f * unit), style = stroke)
+                }
+
+                OppoQuickMenuGlyph.LOG -> {
+                    val eye = Path().apply {
+                        moveTo(point(-17f, 0f).x, point(-17f, 0f).y)
+                        cubicTo(
+                            point(-9f, -11f).x, point(-9f, -11f).y,
+                            point(9f, -11f).x, point(9f, -11f).y,
+                            point(17f, 0f).x, point(17f, 0f).y
+                        )
+                        cubicTo(
+                            point(9f, 11f).x, point(9f, 11f).y,
+                            point(-9f, 11f).x, point(-9f, 11f).y,
+                            point(-17f, 0f).x, point(-17f, 0f).y
+                        )
+                        close()
+                    }
+                    drawPath(eye, white, style = stroke)
+                    drawCircle(white, 4.3f * unit, point(0f, 0f), style = stroke)
+                }
+            }
+        }
+
+        if (glyph == OppoQuickMenuGlyph.ASPECT && !ratioLabel.isNullOrBlank()) {
+            Text(
+                text = ratioLabel,
+                color = Color.White,
+                fontSize = 14.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.35).sp
+            )
+        }
+    }
+}
+
 @Composable
 private fun PhotoQuickMenuGrid(
     aspectRatio: AspectRatio,
@@ -605,12 +831,7 @@ private fun PhotoQuickMenuGrid(
                 onClick = onRefocusToggle,
                 modifier = Modifier.weight(1f)
             ) {
-                Icon(
-                    imageVector = AppIcons.CameraAlt,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(39.dp)
-                )
+                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.REFOCUS, modifier = Modifier.size(42.dp))
             }
             PhotoQuickMenuItem(
                 title = stringResource(R.string.camera_quick_menu_live).uppercase(),
@@ -619,12 +840,7 @@ private fun PhotoQuickMenuGrid(
                 modifier = Modifier.weight(1f)
             ) {
                 Box {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_live_photo),
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(39.dp)
-                    )
+                    OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.LIVE, modifier = Modifier.size(42.dp))
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
@@ -651,24 +867,11 @@ private fun PhotoQuickMenuGrid(
                 },
                 modifier = Modifier.weight(1f)
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = AppIcons.Crop169,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(42.dp)
-                    )
-                    Text(
-                        text = aspectRatio.getDisplayName(),
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color.Black.copy(alpha = 0.28f))
-                            .padding(horizontal = 3.dp, vertical = 1.dp)
-                    )
-                }
+                OppoQuickMenuGlyphIcon(
+                    OppoQuickMenuGlyph.ASPECT,
+                    ratioLabel = aspectRatio.getDisplayName(),
+                    modifier = Modifier.size(44.dp)
+                )
             }
         }
         Row(
@@ -682,12 +885,7 @@ private fun PhotoQuickMenuGrid(
                 modifier = Modifier.weight(1f)
             ) {
                 Box {
-                    Icon(
-                        imageVector = AppIcons.Timer,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(41.dp)
-                    )
+                    OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.TIMER, modifier = Modifier.size(42.dp))
                     if (timerSeconds > 0) {
                         Box(
                             modifier = Modifier
@@ -715,12 +913,7 @@ private fun PhotoQuickMenuGrid(
                 onClick = onBurstToggle,
                 modifier = Modifier.weight(1f)
             ) {
-                Icon(
-                    imageVector = AppIcons.BurstMode,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(41.dp)
-                )
+                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.BURST, modifier = Modifier.size(42.dp))
             }
             PhotoQuickMenuItem(
                 title = stringResource(R.string.camera_quick_menu_styles).uppercase(),
@@ -728,12 +921,7 @@ private fun PhotoQuickMenuGrid(
                 onClick = onStylesClick,
                 modifier = Modifier.weight(1f)
             ) {
-                Icon(
-                    imageVector = AppIcons.FilterFrames,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(41.dp)
-                )
+                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.STYLES, modifier = Modifier.size(42.dp))
             }
         }
         Row(
@@ -746,12 +934,7 @@ private fun PhotoQuickMenuGrid(
                 onClick = onFilterClick,
                 modifier = Modifier.weight(1f)
             ) {
-                Icon(
-                    imageVector = AppIcons.FilterVintage,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(41.dp)
-                )
+                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.FILTER, modifier = Modifier.size(42.dp))
             }
             PhotoQuickMenuItem(
                 title = stringResource(R.string.camera_quick_menu_depth).uppercase(),
@@ -759,12 +942,7 @@ private fun PhotoQuickMenuGrid(
                 onClick = onVirtualApertureToggle,
                 modifier = Modifier.weight(1f)
             ) {
-                Icon(
-                    imageVector = AppIcons.Layers,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(41.dp)
-                )
+                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.DEPTH, modifier = Modifier.size(42.dp))
             }
             PhotoQuickMenuItem(
                 title = stringResource(R.string.settings).uppercase(),
@@ -772,12 +950,7 @@ private fun PhotoQuickMenuGrid(
                 onClick = onSettingsClick,
                 modifier = Modifier.weight(1f)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(41.dp)
-                )
+                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.SETTINGS, modifier = Modifier.size(42.dp))
             }
         }
     }
@@ -832,12 +1005,7 @@ private fun VideoQuickMenuGrid(
                 onClick = onVideoTorchToggle,
                 modifier = Modifier.weight(1f)
             ) {
-                Icon(
-                    imageVector = if (videoTorchEnabled) AppIcons.FlashOn else AppIcons.FlashOff,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(39.dp)
-                )
+                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.FLASH, modifier = Modifier.size(42.dp))
             }
             PhotoQuickMenuItem(
                 title = stringResource(R.string.edit).uppercase(),
@@ -845,12 +1013,7 @@ private fun VideoQuickMenuGrid(
                 onClick = onEditClick,
                 modifier = Modifier.weight(1f)
             ) {
-                Icon(
-                    imageVector = AppIcons.Tune,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(39.dp)
-                )
+                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.EDIT, modifier = Modifier.size(42.dp))
             }
             PhotoQuickMenuItem(
                 title = stringResource(R.string.video_quick_menu_action).uppercase(),
@@ -869,12 +1032,7 @@ private fun VideoQuickMenuGrid(
                 },
                 modifier = Modifier.weight(1f)
             ) {
-                Icon(
-                    imageVector = AppIcons.DirectionsWalk,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(39.dp)
-                )
+                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.ACTION, modifier = Modifier.size(42.dp))
             }
         }
         Row(
@@ -887,12 +1045,7 @@ private fun VideoQuickMenuGrid(
                 onClick = onDualCaptureClick,
                 modifier = Modifier.weight(1f)
             ) {
-                Icon(
-                    imageVector = AppIcons.PictureInPictureAlt,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(39.dp)
-                )
+                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.DUAL_CAPTURE, modifier = Modifier.size(42.dp))
             }
             PhotoQuickMenuItem(
                 title = stringResource(R.string.video_quick_menu_format).uppercase(),
@@ -931,12 +1084,7 @@ private fun VideoQuickMenuGrid(
                 onClick = onLogClick,
                 modifier = Modifier.weight(1f)
             ) {
-                Icon(
-                    imageVector = AppIcons.Visibility,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(39.dp)
-                )
+                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.LOG, modifier = Modifier.size(42.dp))
             }
             PhotoQuickMenuItem(
                 title = stringResource(R.string.video_quick_menu_aspect_ratio).uppercase(),
@@ -944,24 +1092,11 @@ private fun VideoQuickMenuGrid(
                 onClick = onAspectRatioClick,
                 modifier = Modifier.weight(1f)
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = AppIcons.Crop169,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(42.dp)
-                    )
-                    Text(
-                        text = videoAspectRatioLabel(videoAspectRatio),
-                        color = Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color.Black.copy(alpha = 0.35f))
-                            .padding(horizontal = 3.dp, vertical = 1.dp)
-                    )
-                }
+                OppoQuickMenuGlyphIcon(
+                    OppoQuickMenuGlyph.ASPECT,
+                    ratioLabel = videoAspectRatioLabel(videoAspectRatio),
+                    modifier = Modifier.size(44.dp)
+                )
             }
             PhotoQuickMenuItem(
                 title = stringResource(R.string.settings).uppercase(),
@@ -969,12 +1104,7 @@ private fun VideoQuickMenuGrid(
                 onClick = onSettingsClick,
                 modifier = Modifier.weight(1f)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(39.dp)
-                )
+                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.SETTINGS, modifier = Modifier.size(42.dp))
             }
         }
     }
@@ -1001,34 +1131,24 @@ private fun PhotoQuickMenuItem(
                 .padding(top = 3.dp)
                 .size(72.dp)
                 .clip(CircleShape)
-                .background(Color(0xB90A0A10))
+                .background(Color(0xEB090A10))
                 .border(
-                    width = if (checked) 1.3.dp else 1.dp,
-                    color = if (checked) AccentColor.copy(alpha = 0.9f) else Color.White.copy(alpha = 0.08f),
+                    width = 1.dp,
+                    color = Color.White.copy(alpha = if (checked) 0.30f else 0.11f),
                     shape = CircleShape
                 )
                 .clickable(enabled = enabled, onClick = onClick),
             contentAlignment = Alignment.Center
         ) {
             icon()
-            if (checked) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(8.dp)
-                        .size(7.dp)
-                        .clip(CircleShape)
-                        .background(AccentColor)
-                )
-            }
         }
         Text(
             text = title,
             color = Color.White.copy(alpha = if (enabled) 0.98f else 0.45f),
-            fontSize = 14.sp,
-            lineHeight = 17.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.25.sp,
+            fontSize = 15.sp,
+            lineHeight = 18.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.35.sp,
             maxLines = 1,
             modifier = Modifier.padding(top = 7.dp)
         )
