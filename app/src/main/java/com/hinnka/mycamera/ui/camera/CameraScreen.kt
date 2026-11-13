@@ -2697,12 +2697,22 @@ private fun CaptureModeSwitcher(
                     fallbackColor = Color(0xCC707070)
                 )
             }
-            LiquidGlassSurface(
-                backdrop = modeSwitcherBackdrop,
-                modifier = Modifier.fillMaxSize(),
-                cornerRadius = 19.5.dp,
-                style = outerGlassStyle
-            ) {}
+            // Capture the rendered grey outer track as a separate backdrop.
+            // The selected inner glass must refract this surface, not the dark camera
+            // scene behind the entire mode switcher.
+            val selectedGlassBackdrop = rememberLiquidGlassBackdrop()
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .liquidGlassBackdropSource(selectedGlassBackdrop)
+            ) {
+                LiquidGlassSurface(
+                    backdrop = modeSwitcherBackdrop,
+                    modifier = Modifier.fillMaxSize(),
+                    cornerRadius = 19.5.dp,
+                    style = outerGlassStyle
+                ) {}
+            }
             Box(
                 modifier = Modifier
                     .offset(x = knobOffset)
@@ -2713,7 +2723,7 @@ private fun CaptureModeSwitcher(
                     .border(0.5.dp, Color.White.copy(alpha = 0.18f), CircleShape)
             ) {
                 LiquidGlassSurface(
-                    backdrop = modeSwitcherBackdrop,
+                    backdrop = selectedGlassBackdrop,
                     modifier = Modifier.fillMaxSize(),
                     cornerRadius = 19.5.dp,
                     style = liquidGlassStyle
