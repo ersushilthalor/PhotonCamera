@@ -72,7 +72,7 @@ fun Modifier.glassUiTile(
     selectedTint: Color = Color(0xCCFFFFFF),
 ): Modifier = glassUiSurface(
     shape = shape,
-    tint = if (selected) selectedTint else Color(0x251FFFFFF),
+    tint = if (selected) selectedTint else Color(0x251F2128),
     rimStrength = if (selected) 1.15f else 0.8f,
 )
 
@@ -124,7 +124,7 @@ fun AppAlertDialog(
     text: (@Composable () -> Unit)? = null,
     icon: (@Composable () -> Unit)? = null,
     shape: Shape = RoundedCornerShape(26.dp),
-    containerColor: Color = Color(0xE31B1D22),
+    containerColor: Color = Color(0xCC1B1D22),
     iconContentColor: Color = Color.White,
     titleContentColor: Color = Color.White,
     textContentColor: Color = Color.White.copy(alpha = 0.88f),
@@ -133,17 +133,13 @@ fun AppAlertDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismissRequest,
-        confirmButton = confirmButton,
+        confirmButton = {
+            DialogBackdropBlur()
+            confirmButton()
+        },
         modifier = modifier,
         dismissButton = dismissButton,
-        title = title?.let { content ->
-            {
-                Box {
-                    DialogBackdropBlur()
-                    content()
-                }
-            }
-        },
+        title = title,
         text = text,
         icon = icon,
         shape = shape,
