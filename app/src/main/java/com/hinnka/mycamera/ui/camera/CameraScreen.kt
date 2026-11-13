@@ -2679,17 +2679,6 @@ private fun CaptureModeSwitcher(
             .height(CameraControlsLayoutDefaults.ModeSwitcherHeight)
             .clip(if (oppoStyle) RoundedCornerShape(18.dp) else CircleShape)
             .background(if (oppoStyle) Color(0xFF202020) else Color.White.copy(alpha = 0.13f))
-            .then(
-                if (oppoStyle) {
-                    Modifier.border(
-                        width = 0.5.dp,
-                        color = Color(0xFF333333),
-                        shape = RoundedCornerShape(18.dp)
-                    )
-                } else {
-                    Modifier
-                }
-            )
             .padding(3.dp)
     ) {
         // The visible switcher contains only Photo and Video. Pro/RAW capture
