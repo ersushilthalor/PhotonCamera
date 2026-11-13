@@ -3,11 +3,7 @@ package com.hinnka.mycamera.ui.camera
 import android.media.AudioDeviceInfo
 import android.os.Build
 import androidx.compose.animation.*
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -23,15 +19,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -57,35 +45,16 @@ import com.hinnka.mycamera.ui.components.RawRenderingEngineSettingsPanel
 import com.hinnka.mycamera.video.*
 import com.hinnka.mycamera.video.VideoCodec
 import com.hinnka.mycamera.ui.icons.AppIcons
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.res.painterResource
-import com.hinnka.mycamera.ui.components.LiquidGlassBackdrop
-import com.hinnka.mycamera.ui.components.LiquidGlassSurface
-import com.hinnka.mycamera.ui.components.LiquidGlassStyle
 
 private enum class VideoSettingPanel {
     ASPECT_RATIO,
     LOG_PROFILE,
     BITRATE,
     CODEC,
-    MICROPHONE,
-    FORMAT
+    MICROPHONE
 }
 
 private val CameraTopSheetContentTopPadding = 32.dp
-
-private val PhotoQuickMenuGlassStyle = LiquidGlassStyle(
-    blurRadius = 18.dp,
-    refractionHeight = 24.dp,
-    refractionAmount = 18.dp,
-    saturation = 1.18f,
-    tint = Color(0x68090A10),
-    highlightWidth = 0.8.dp,
-    highlightBlur = 0.7.dp,
-    highlightAlpha = 0.42f,
-    fallbackColor = Color(0xE51A1A1E)
-)
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -104,17 +73,6 @@ fun CameraTopSheet(
     onVideoBitrateChange: (VideoBitratePreset) -> Unit,
     videoCodec: VideoCodec,
     onVideoCodecChange: (VideoCodec) -> Unit,
-    videoHdrEnabled: Boolean,
-    onVideoHdrToggle: () -> Unit,
-    videoTorchEnabled: Boolean,
-    videoTorchSupported: Boolean,
-    onVideoTorchToggle: () -> Unit,
-    videoStabilizationMode: VideoStabilizationMode,
-    availableVideoStabilizationModes: List<VideoStabilizationMode>,
-    isVideoRecording: Boolean,
-    onVideoStabilizationModeChange: (VideoStabilizationMode) -> Unit,
-    onEditClick: () -> Unit,
-    onDualCaptureClick: () -> Unit,
     videoAudioInputId: String,
     videoAudioInputOptions: List<VideoAudioInputOption>,
     onVideoAudioInputChange: (String) -> Unit,
@@ -157,22 +115,20 @@ fun CameraTopSheet(
     oppoPhotoSettings: OppoPhotoSettings,
     onOppoPhotoSettingsChange: (OppoPhotoSettings) -> Unit,
     refocusAvailable: Boolean,
-    glassBackdrop: LiquidGlassBackdrop,
-    useLivePhoto: Boolean,
-    onLivePhotoToggle: () -> Unit,
-    timerSeconds: Int,
-    onTimerClick: () -> Unit,
-    isVirtualApertureEnabled: Boolean,
-    onVirtualApertureToggle: () -> Unit,
-    onLutClick: () -> Unit,
     contentTopPadding: Dp = CameraTopSheetContentTopPadding,
     modifier: Modifier = Modifier
 ) {
     var expandedVideoPanel by rememberSaveable { mutableStateOf<VideoSettingPanel?>(null) }
     var showRenderingEngineSheet by rememberSaveable { mutableStateOf(false) }
     var showOppoPipelineSheet by rememberSaveable { mutableStateOf(false) }
+    var showContentManagementOptions by rememberSaveable { mutableStateOf(false) }
+    fun handleContentManagementAction(action: () -> Unit) {
+        showContentManagementOptions = false
+        action()
+    }
+
     LaunchedEffect(visible, captureMode) {
-        expandedVideoPanel = null
+        showContentManagementOptions = false
     }
 
     LaunchedEffect(useRaw) {
@@ -183,143 +139,224 @@ fun CameraTopSheet(
 
     AnimatedVisibility(
         visible = visible,
-        // Match OppoCam's six-dot menu: a compact card that unfolds from the top
-        // instead of a full-width square sheet.
-        enter = fadeIn(animationSpec = tween(170)) +
-            scaleIn(
-                initialScale = 0.80f,
-                animationSpec = spring(dampingRatio = 0.50f, stiffness = 420f)
-            ) +
-            expandVertically(
-                expandFrom = Alignment.Top,
-                animationSpec = spring(dampingRatio = 0.66f, stiffness = 360f)
-            ),
-        exit = fadeOut(animationSpec = tween(130)) +
-            scaleOut(
-                targetScale = 0.94f,
-                animationSpec = tween(130)
-            ) +
-            shrinkVertically(
-                shrinkTowards = Alignment.Top,
-                animationSpec = tween(160)
-            ),
+        enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+        exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
         modifier = modifier
-            .fillMaxWidth()
-            .padding(top = contentTopPadding, start = 14.dp, end = 14.dp)
     ) {
-        Box(
-            modifier = Modifier.fillMaxWidth(),
-            contentAlignment = Alignment.TopCenter
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
+                .background(Color.Black.copy(alpha = 0.8f))
+                // Keep the screen's top inset fixed, but measure content and side padding
+                // in the rotated viewport so landscape controls stay inside the sheet.
+                .padding(top = contentTopPadding)
+                .autoRotate(matchParentSize = true)
+                .padding(horizontal = 24.dp)
         ) {
-            Box(
+            Column(
                 modifier = Modifier
-                    .widthIn(max = 420.dp)
-                    .fillMaxWidth()
-                    .shadow(
-                        elevation = 18.dp,
-                        shape = RoundedCornerShape(24.dp)
-                    )
-                    .clip(RoundedCornerShape(24.dp))
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
             ) {
-                LiquidGlassSurface(
-                    backdrop = glassBackdrop,
-                    modifier = Modifier.matchParentSize(),
-                    cornerRadius = 24.dp,
-                    style = PhotoQuickMenuGlassStyle
-                ) {}
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 600.dp)
-                        .border(
-                            width = 1.dp,
-                            color = Color.White.copy(alpha = 0.12f),
-                            shape = RoundedCornerShape(24.dp)
-                        )
-                        .padding(horizontal = 18.dp, vertical = 16.dp)
-                        .autoRotate()
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 2.dp),
-                        contentAlignment = Alignment.Center
+                if (captureMode == CaptureMode.PHOTO) {
+                    val isProfessionalMode = useRaw && isRawSupported
+                    SectionLabel(title = stringResource(R.string.aspect_ratio))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .width(40.dp)
-                                .height(4.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.42f))
+                        AspectRatio.sanitizeTopSheetRatios(topSheetAspectRatios).forEach { ratio ->
+                            val isSelected = aspectRatio == ratio
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 40.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        if (isSelected) AccentColor else Color.White.copy(
+                                            alpha = 0.12f
+                                        )
+                                    )
+                                    .clickable { onAspectRatioChange(ratio) }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = ratio.getDisplayName(),
+                                    color = if (isSelected) OnAccentColor else Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    QuickSettingGrid { itemModifier ->
+                        if (isProfessionalMode) {
+                            QuickSettingButton2(
+                                title = stringResource(R.string.settings_raw_color_engine),
+                                checked = true,
+                                onClick = { showRenderingEngineSheet = true },
+                                modifier = itemModifier
+                            )
+                        } else {
+                            QuickSettingToggle(
+                                title = stringResource(R.string.oppo_auto_hdr),
+                                checked = oppoPhotoSettings.autoHdrEnabled,
+                                onCheckedChange = { enabled ->
+                                    onOppoPhotoSettingsChange(
+                                        oppoPhotoSettings.copy(
+                                            autoHdrEnabled = enabled,
+                                            refocusEnabled = if (enabled) false else oppoPhotoSettings.refocusEnabled,
+                                        )
+                                    )
+                                },
+                                modifier = itemModifier
+                            )
+                            QuickSettingToggle(
+                                title = stringResource(R.string.oppo_fast_shutter),
+                                checked = oppoPhotoSettings.fastShutterEnabled,
+                                onCheckedChange = {
+                                    onOppoPhotoSettingsChange(oppoPhotoSettings.copy(fastShutterEnabled = it))
+                                },
+                                modifier = itemModifier
+                            )
+                            QuickSettingToggle(
+                                title = stringResource(R.string.oppo_refocus),
+                                checked = oppoPhotoSettings.refocusEnabled,
+                                onCheckedChange = { enabled ->
+                                    onOppoPhotoSettingsChange(
+                                        oppoPhotoSettings.copy(
+                                            refocusEnabled = enabled,
+                                            autoHdrEnabled = if (enabled) false else oppoPhotoSettings.autoHdrEnabled,
+                                        )
+                                    )
+                                },
+                                enabled = refocusAvailable,
+                                modifier = itemModifier
+                            )
+                            QuickSettingButton2(
+                                title = stringResource(R.string.oppo_custom_pipeline),
+                                checked = oppoPhotoSettings.customPipelineEnabled,
+                                onClick = { showOppoPipelineSheet = true },
+                                modifier = itemModifier
+                            )
+                        }
+                        MeteringModeQuickSetting(
+                            meteringMode = meteringMode,
+                            onMeteringModeChange = onMeteringModeChange,
+                            modifier = itemModifier
+                        )
+                        ToolboxQuickSetting(
+                            onToolboxClick = onToolboxClick,
+                            modifier = itemModifier
+                        )
+                        ContentManagementQuickSetting(
+                            onClick = { showContentManagementOptions = !showContentManagementOptions },
+                            modifier = itemModifier
                         )
                     }
-                    Spacer(modifier = Modifier.height(18.dp))
-                    Column(
-                        modifier = Modifier.verticalScroll(rememberScrollState())
-                    ) {
-                if (captureMode == CaptureMode.PHOTO) {
-                    PhotoQuickMenuGrid(
-                        aspectRatio = aspectRatio,
-                        topSheetAspectRatios = topSheetAspectRatios,
-                        onAspectRatioChange = onAspectRatioChange,
-                        refocusEnabled = oppoPhotoSettings.refocusEnabled,
-                        refocusAvailable = refocusAvailable,
-                        onRefocusToggle = {
-                            val enabled = !oppoPhotoSettings.refocusEnabled
-                            onOppoPhotoSettingsChange(
-                                oppoPhotoSettings.copy(
-                                    refocusEnabled = enabled,
-                                    autoHdrEnabled = if (enabled) false else oppoPhotoSettings.autoHdrEnabled
-                                )
-                            )
+
+                    ContentManagementOptionsPanel(
+                        visible = showContentManagementOptions,
+                        onFilterManageClick = {
+                            handleContentManagementAction(onFilterManageClick)
                         },
-                        useLivePhoto = useLivePhoto,
-                        onLivePhotoToggle = onLivePhotoToggle,
-                        timerSeconds = timerSeconds,
-                        onTimerClick = onTimerClick,
-                        burstEnabled = oppoPhotoSettings.fastShutterEnabled,
-                        burstAvailable = !(useRaw && isRawSupported),
-                        onBurstToggle = {
-                            onOppoPhotoSettingsChange(
-                                oppoPhotoSettings.copy(fastShutterEnabled = !oppoPhotoSettings.fastShutterEnabled)
-                            )
+                        onFrameManageClick = {
+                            handleContentManagementAction(onFrameManageClick)
                         },
-                        stylesEnabled = oppoPhotoSettings.customPipelineEnabled,
-                        onStylesClick = { showOppoPipelineSheet = true },
-                        isVirtualApertureEnabled = isVirtualApertureEnabled,
-                        onVirtualApertureToggle = onVirtualApertureToggle,
-                        onFilterClick = onLutClick,
-                        onSettingsClick = onMoreSettingsClick
+                        onPresetManageClick = {
+                            handleContentManagementAction(onPresetManageClick)
+                        }
                     )
                 } else {
-                    VideoQuickMenuGrid(
-                        videoTorchEnabled = videoTorchEnabled,
-                        videoTorchSupported = videoTorchSupported,
-                        isVideoRecording = isVideoRecording,
-                        onVideoTorchToggle = onVideoTorchToggle,
-                        videoStabilizationMode = videoStabilizationMode,
-                        availableVideoStabilizationModes = availableVideoStabilizationModes,
-                        onVideoStabilizationModeChange = onVideoStabilizationModeChange,
-                        onEditClick = onEditClick,
-                        onDualCaptureClick = onDualCaptureClick,
-                        videoHdrEnabled = videoHdrEnabled,
-                        onFormatClick = {
-                            expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.FORMAT) null else VideoSettingPanel.FORMAT
-                        },
-                        videoBitrate = videoBitrate,
-                        onBitrateClick = {
-                            expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.BITRATE) null else VideoSettingPanel.BITRATE
-                        },
-                        videoLogProfile = videoLogProfile,
-                        onLogClick = {
-                            expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.LOG_PROFILE) null else VideoSettingPanel.LOG_PROFILE
-                        },
-                        videoAspectRatio = videoAspectRatio,
-                        onAspectRatioClick = {
-                            expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.ASPECT_RATIO) null else VideoSettingPanel.ASPECT_RATIO
-                        },
-                        onSettingsClick = onMoreSettingsClick
-                    )
+                    SectionLabel(title = stringResource(R.string.video_aspect_chip))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        VideoAspectRatio.entries.forEach { ratio ->
+                            val isSelected = videoAspectRatio == ratio
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 40.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        if (isSelected) AccentColor else Color.White.copy(
+                                            alpha = 0.12f
+                                        )
+                                    )
+                                    .clickable { onVideoAspectRatioChange(ratio) }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = videoAspectRatioLabel(ratio),
+                                    color = if (isSelected) OnAccentColor else Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+
+                    if (videoAspectRatio == VideoAspectRatio.OPEN_GATE) {
+                        Text(
+                            text = stringResource(R.string.video_open_gate_resolution_description),
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    QuickSettingGrid(columns = 2, itemHeight = 40.dp) { itemModifier ->
+                        VideoSettingTile(
+                            title = stringResource(R.string.video_log_chip),
+                            summary = videoLogProfileLabel(videoLogProfile),
+                            expanded = expandedVideoPanel == VideoSettingPanel.LOG_PROFILE,
+                            onClick = {
+                                expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.LOG_PROFILE) null else VideoSettingPanel.LOG_PROFILE
+                            },
+                            modifier = itemModifier
+                        )
+                        VideoSettingTile(
+                            title = stringResource(R.string.video_bitrate_chip),
+                            summary = "${videoBitrate.bitrateMbps}M",
+                            expanded = expandedVideoPanel == VideoSettingPanel.BITRATE,
+                            onClick = {
+                                expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.BITRATE) null else VideoSettingPanel.BITRATE
+                            },
+                            modifier = itemModifier
+                        )
+                        VideoSettingTile(
+                            title = stringResource(R.string.video_codec_chip),
+                            summary = videoCodec.displayName,
+                            expanded = expandedVideoPanel == VideoSettingPanel.CODEC,
+                            onClick = {
+                                expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.CODEC) null else VideoSettingPanel.CODEC
+                            },
+                            modifier = itemModifier
+                        )
+                        VideoSettingTile(
+                            title = stringResource(R.string.video_microphone_title),
+                            summary = selectedVideoAudioInputLabel(
+                                selectedAudioInputId = videoAudioInputId,
+                                options = videoAudioInputOptions
+                            ),
+                            expanded = expandedVideoPanel == VideoSettingPanel.MICROPHONE,
+                            onClick = {
+                                expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.MICROPHONE) null else VideoSettingPanel.MICROPHONE
+                            },
+                            modifier = itemModifier
+                        )
+                    }
 
                     AnimatedVisibility(
                         visible = expandedVideoPanel != null,
@@ -330,30 +367,6 @@ fun CameraTopSheet(
                             Spacer(modifier = Modifier.height(12.dp))
                             VideoSettingExpandedPanel {
                                 when (expandedVideoPanel) {
-                                    VideoSettingPanel.ASPECT_RATIO -> {
-                                        FlowRow(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            VideoAspectRatio.entries.forEach { ratio ->
-                                                VideoOptionChip(
-                                                    title = videoAspectRatioLabel(ratio),
-                                                    selected = videoAspectRatio == ratio,
-                                                    onClick = { onVideoAspectRatioChange(ratio) }
-                                                )
-                                            }
-                                        }
-                                        if (videoAspectRatio == VideoAspectRatio.OPEN_GATE) {
-                                            Text(
-                                                text = stringResource(R.string.video_open_gate_resolution_description),
-                                                color = Color.White.copy(alpha = 0.6f),
-                                                fontSize = 12.sp,
-                                                modifier = Modifier.padding(top = 8.dp)
-                                            )
-                                        }
-                                    }
-
                                     VideoSettingPanel.LOG_PROFILE -> {
                                         FlowRow(
                                             modifier = Modifier.fillMaxWidth(),
@@ -361,9 +374,10 @@ fun CameraTopSheet(
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
                                             availableVideoLogProfiles.forEach { profile ->
+                                                val isSelected = videoLogProfile == profile
                                                 VideoOptionChip(
                                                     title = videoLogProfileLabel(profile),
-                                                    selected = videoLogProfile == profile,
+                                                    selected = isSelected,
                                                     onClick = { onVideoLogProfileChange(profile) }
                                                 )
                                             }
@@ -382,58 +396,6 @@ fun CameraTopSheet(
                                                     selected = videoBitrate == bitrate,
                                                     onClick = { onVideoBitrateChange(bitrate) }
                                                 )
-                                            }
-                                        }
-                                    }
-
-                                    VideoSettingPanel.FORMAT -> {
-                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            VideoOptionChip(
-                                                title = stringResource(R.string.hdr_label),
-                                                selected = videoHdrEnabled,
-                                                onClick = {
-                                                    if (!videoLogProfile.isEnabled) onVideoHdrToggle()
-                                                }
-                                            )
-                                            if (videoLogProfile.isEnabled) {
-                                                Text(
-                                                    text = stringResource(R.string.video_hdr_disabled_log),
-                                                    color = Color.White.copy(alpha = 0.58f),
-                                                    fontSize = 12.sp
-                                                )
-                                            }
-                                            SectionLabel(title = stringResource(R.string.video_codec_chip))
-                                            FlowRow(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                            ) {
-                                                VideoCodec.entries.forEach { codec ->
-                                                    VideoOptionChip(
-                                                        title = codec.displayName,
-                                                        selected = videoCodec == codec,
-                                                        onClick = { onVideoCodecChange(codec) }
-                                                    )
-                                                }
-                                            }
-                                            SectionLabel(title = stringResource(R.string.video_microphone_title))
-                                            FlowRow(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                            ) {
-                                                VideoOptionChip(
-                                                    title = stringResource(R.string.video_microphone_auto),
-                                                    selected = videoAudioInputId == VIDEO_AUDIO_INPUT_AUTO,
-                                                    onClick = { onVideoAudioInputChange(VIDEO_AUDIO_INPUT_AUTO) }
-                                                )
-                                                videoAudioInputOptions.forEach { option ->
-                                                    VideoOptionChip(
-                                                        title = videoAudioInputLabel(option),
-                                                        selected = videoAudioInputId == option.id,
-                                                        onClick = { onVideoAudioInputChange(option.id) }
-                                                    )
-                                                }
                                             }
                                         }
                                     }
@@ -475,17 +437,80 @@ fun CameraTopSheet(
                                         }
                                     }
 
-                                    null -> Unit
+                                    else -> Unit
                                 }
                             }
                         }
                     }
                 }
 
+                if (captureMode == CaptureMode.VIDEO) {
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    ContentManagementQuickSetting(
+                        onClick = { showContentManagementOptions = !showContentManagementOptions },
+                        modifier = Modifier.fillMaxWidth().height(40.dp)
+                    )
+
+                    ContentManagementOptionsPanel(
+                        visible = showContentManagementOptions,
+                        onFilterManageClick = {
+                            handleContentManagementAction(onFilterManageClick)
+                        },
+                        onFrameManageClick = {
+                            handleContentManagementAction(onFrameManageClick)
+                        },
+                        onPresetManageClick = {
+                            handleContentManagementAction(onPresetManageClick)
+                        }
+                    )
+                }
+
+                // More Settings Button
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .clickable(onClick = onMoreSettingsClick)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(color = Color.White.copy(alpha = 0.15f))
+                            .padding(16.dp, 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(alpha = 0.1f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = stringResource(R.string.settings_title),
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Icon(
+                            imageVector = AppIcons.ChevronRight,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.3f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
         }
-    }
-    }
     }
 
     if (showOppoPipelineSheet) {
@@ -541,617 +566,6 @@ fun CameraTopSheet(
                 )
             }
         }
-    }
-}
-
-
-
-private enum class OppoQuickMenuGlyph {
-    REFOCUS,
-    LIVE,
-    ASPECT,
-    TIMER,
-    BURST,
-    STYLES,
-    FILTER,
-    DEPTH,
-    SETTINGS,
-    FLASH,
-    EDIT,
-    ACTION,
-    DUAL_CAPTURE,
-    LOG
-}
-
-/**
- * Oppo-style quick-menu glyphs drawn as clean, rounded vector strokes.
- * Drawing them here keeps the icon family optically consistent at every density.
- */
-@Composable
-private fun OppoQuickMenuGlyphIcon(
-    glyph: OppoQuickMenuGlyph,
-    ratioLabel: String? = null,
-    modifier: Modifier = Modifier.size(40.dp)
-) {
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        Canvas(modifier = Modifier.matchParentSize()) {
-            val unit = minOf(size.width, size.height) / 40f
-            val cx = size.width / 2f
-            val cy = size.height / 2f
-            val white = Color.White
-            val stroke = Stroke(
-                width = 2.8f * unit,
-                cap = StrokeCap.Round,
-                join = StrokeJoin.Round
-            )
-            fun point(x: Float, y: Float) = Offset(cx + x * unit, cy + y * unit)
-            fun line(x1: Float, y1: Float, x2: Float, y2: Float, width: Float = 2.8f) {
-                drawLine(
-                    color = white,
-                    start = point(x1, y1),
-                    end = point(x2, y2),
-                    strokeWidth = width * unit,
-                    cap = StrokeCap.Round
-                )
-            }
-
-            when (glyph) {
-                OppoQuickMenuGlyph.REFOCUS -> {
-                    val path = Path().apply {
-                        moveTo(point(-13f, -6f).x, point(-13f, -6f).y)
-                        lineTo(point(-13f, -11f).x, point(-13f, -11f).y)
-                        quadraticTo(point(-13f, -14f).x, point(-13f, -14f).y, point(-10f, -14f).x, point(-10f, -14f).y)
-                        lineTo(point(-6f, -14f).x, point(-6f, -14f).y)
-                        moveTo(point(6f, -14f).x, point(6f, -14f).y)
-                        lineTo(point(10f, -14f).x, point(10f, -14f).y)
-                        quadraticTo(point(13f, -14f).x, point(13f, -14f).y, point(13f, -11f).x, point(13f, -11f).y)
-                        lineTo(point(13f, -6f).x, point(13f, -6f).y)
-                        moveTo(point(13f, 6f).x, point(13f, 6f).y)
-                        lineTo(point(13f, 11f).x, point(13f, 11f).y)
-                        quadraticTo(point(13f, 14f).x, point(13f, 14f).y, point(10f, 14f).x, point(10f, 14f).y)
-                        lineTo(point(6f, 14f).x, point(6f, 14f).y)
-                        moveTo(point(-6f, 14f).x, point(-6f, 14f).y)
-                        lineTo(point(-10f, 14f).x, point(-10f, 14f).y)
-                        quadraticTo(point(-13f, 14f).x, point(-13f, 14f).y, point(-13f, 11f).x, point(-13f, 11f).y)
-                        lineTo(point(-13f, 6f).x, point(-13f, 6f).y)
-                    }
-                    drawPath(path, white, style = stroke)
-                    drawCircle(white, radius = 3.1f * unit, center = point(0f, 0f))
-                }
-
-                OppoQuickMenuGlyph.LIVE -> {
-                    drawCircle(white, 16.2f * unit, point(0f, 0f), style = stroke)
-                    drawCircle(white, 10.4f * unit, point(0f, 0f), style = stroke)
-                    drawCircle(white, 4.5f * unit, point(0f, 0f), style = stroke)
-                    drawCircle(white, 1.8f * unit, point(0f, 0f))
-                }
-
-                OppoQuickMenuGlyph.ASPECT -> {
-                    val path = Path().apply {
-                        moveTo(point(-15f, -7f).x, point(-15f, -7f).y)
-                        lineTo(point(-15f, -12f).x, point(-15f, -12f).y)
-                        quadraticTo(point(-15f, -15f).x, point(-15f, -15f).y, point(-12f, -15f).x, point(-12f, -15f).y)
-                        lineTo(point(-7f, -15f).x, point(-7f, -15f).y)
-                        moveTo(point(7f, -15f).x, point(7f, -15f).y)
-                        lineTo(point(12f, -15f).x, point(12f, -15f).y)
-                        quadraticTo(point(15f, -15f).x, point(15f, -15f).y, point(15f, -12f).x, point(15f, -12f).y)
-                        lineTo(point(15f, -7f).x, point(15f, -7f).y)
-                        moveTo(point(15f, 7f).x, point(15f, 7f).y)
-                        lineTo(point(15f, 12f).x, point(15f, 12f).y)
-                        quadraticTo(point(15f, 15f).x, point(15f, 15f).y, point(12f, 15f).x, point(12f, 15f).y)
-                        lineTo(point(7f, 15f).x, point(7f, 15f).y)
-                        moveTo(point(-7f, 15f).x, point(-7f, 15f).y)
-                        lineTo(point(-12f, 15f).x, point(-12f, 15f).y)
-                        quadraticTo(point(-15f, 15f).x, point(-15f, 15f).y, point(-15f, 12f).x, point(-15f, 12f).y)
-                        lineTo(point(-15f, 7f).x, point(-15f, 7f).y)
-                    }
-                    drawPath(path, white, style = stroke)
-                }
-
-                OppoQuickMenuGlyph.TIMER -> {
-                    drawArc(
-                        color = white,
-                        startAngle = 43f,
-                        sweepAngle = 292f,
-                        useCenter = false,
-                        topLeft = point(-14f, -14f),
-                        size = Size(28f * unit, 28f * unit),
-                        style = stroke
-                    )
-                    line(-16f, -16f, 16f, 16f, 3.3f)
-                }
-
-                OppoQuickMenuGlyph.BURST -> {
-                    drawRoundRect(white, point(-4f, -17f), Size(20f * unit, 17f * unit), CornerRadius(3f * unit), style = stroke)
-                    drawRoundRect(white, point(-9f, -13f), Size(20f * unit, 17f * unit), CornerRadius(3f * unit), style = stroke)
-                    drawRoundRect(white, point(-14f, -9f), Size(20f * unit, 17f * unit), CornerRadius(3f * unit), style = stroke)
-                }
-
-                OppoQuickMenuGlyph.STYLES -> {
-                    fun card(dx: Float, dy: Float) {
-                        val path = Path().apply {
-                            moveTo(point(-11f + dx, -8f + dy).x, point(-11f + dx, -8f + dy).y)
-                            lineTo(point(1f + dx, -16f + dy).x, point(1f + dx, -16f + dy).y)
-                            lineTo(point(14f + dx, -8f + dy).x, point(14f + dx, -8f + dy).y)
-                            lineTo(point(14f + dx, 10f + dy).x, point(14f + dx, 10f + dy).y)
-                            lineTo(point(1f + dx, 18f + dy).x, point(1f + dx, 18f + dy).y)
-                            lineTo(point(-11f + dx, 10f + dy).x, point(-11f + dx, 10f + dy).y)
-                            close()
-                        }
-                        drawPath(path, white, style = stroke)
-                    }
-                    card(6f, -5f)
-                    card(0f, 0f)
-                    card(-6f, 5f)
-                }
-
-                OppoQuickMenuGlyph.FILTER -> {
-                    drawCircle(white.copy(alpha = 0.55f), 8.7f * unit, point(-5f, 3f), style = Stroke(2.8f * unit, cap = StrokeCap.Round))
-                    drawCircle(white, 8.7f * unit, point(5f, 3f), style = Stroke(2.8f * unit, cap = StrokeCap.Round))
-                    drawCircle(white, 8.7f * unit, point(0f, -5f), style = Stroke(2.8f * unit, cap = StrokeCap.Round))
-                }
-
-                OppoQuickMenuGlyph.DEPTH -> {
-                    val glyphPath = Path().apply {
-                        moveTo(point(-8f, 13f).x, point(-8f, 13f).y)
-                        cubicTo(
-                            point(-2f, 13f).x, point(-2f, 13f).y,
-                            point(-2f, 8f).x, point(-2f, 8f).y,
-                            point(-2f, 2f).x, point(-2f, 2f).y
-                        )
-                        lineTo(point(-2f, -5f).x, point(-2f, -5f).y)
-                        cubicTo(
-                            point(-2f, -13f).x, point(-2f, -13f).y,
-                            point(3f, -15f).x, point(3f, -15f).y,
-                            point(10f, -15f).x, point(10f, -15f).y
-                        )
-                        moveTo(point(-8f, 0f).x, point(-8f, 0f).y)
-                        lineTo(point(7f, 0f).x, point(7f, 0f).y)
-                    }
-                    drawPath(glyphPath, white, style = Stroke(3.2f * unit, cap = StrokeCap.Round, join = StrokeJoin.Round))
-                    line(-16f, -15f, 15f, 16f, 3.4f)
-                }
-
-                OppoQuickMenuGlyph.SETTINGS -> {
-                    val gear = Path()
-                    for (index in 0 until 32) {
-                        val angle = -Math.PI / 2.0 + index * (Math.PI * 2.0 / 32.0)
-                        val radius = if (index % 4 < 2) 16.5 else 20.0
-                        val x = cx + kotlin.math.cos(angle).toFloat() * radius.toFloat() * unit
-                        val y = cy + kotlin.math.sin(angle).toFloat() * radius.toFloat() * unit
-                        if (index == 0) gear.moveTo(x, y) else gear.lineTo(x, y)
-                    }
-                    gear.close()
-                    drawPath(gear, white, style = stroke)
-                    drawCircle(white, 5.2f * unit, point(0f, 0f), style = stroke)
-                }
-
-                OppoQuickMenuGlyph.FLASH -> {
-                    val bolt = Path().apply {
-                        moveTo(point(2f, -18f).x, point(2f, -18f).y)
-                        lineTo(point(-10f, 2f).x, point(-10f, 2f).y)
-                        lineTo(point(-1f, 2f).x, point(-1f, 2f).y)
-                        lineTo(point(-4f, 18f).x, point(-4f, 18f).y)
-                        lineTo(point(11f, -4f).x, point(11f, -4f).y)
-                        lineTo(point(2f, -4f).x, point(2f, -4f).y)
-                        close()
-                    }
-                    drawPath(bolt, white, style = Stroke(2.8f * unit, cap = StrokeCap.Round, join = StrokeJoin.Round))
-                }
-
-                OppoQuickMenuGlyph.EDIT -> {
-                    line(-15f, -10f, 15f, -10f, 2.5f)
-                    line(-15f, 0f, 15f, 0f, 2.5f)
-                    line(-15f, 10f, 15f, 10f, 2.5f)
-                    drawCircle(white, 3.6f * unit, point(-5f, -10f))
-                    drawCircle(white, 3.6f * unit, point(7f, 0f))
-                    drawCircle(white, 3.6f * unit, point(-1f, 10f))
-                }
-
-                OppoQuickMenuGlyph.ACTION -> {
-                    drawCircle(white, 6f * unit, point(0f, 0f), style = stroke)
-                    drawArc(white, 205f, 125f, false, point(-17f, -17f), Size(34f * unit, 34f * unit), style = stroke)
-                    drawArc(white, 25f, 125f, false, point(-17f, -17f), Size(34f * unit, 34f * unit), style = stroke)
-                }
-
-                OppoQuickMenuGlyph.DUAL_CAPTURE -> {
-                    drawRoundRect(white, point(-6f, -16f), Size(21f * unit, 27f * unit), CornerRadius(2.5f * unit), style = stroke)
-                    drawRoundRect(white, point(-14f, -9f), Size(21f * unit, 25f * unit), CornerRadius(2.5f * unit), style = stroke)
-                }
-
-                OppoQuickMenuGlyph.LOG -> {
-                    val eye = Path().apply {
-                        moveTo(point(-17f, 0f).x, point(-17f, 0f).y)
-                        cubicTo(
-                            point(-9f, -11f).x, point(-9f, -11f).y,
-                            point(9f, -11f).x, point(9f, -11f).y,
-                            point(17f, 0f).x, point(17f, 0f).y
-                        )
-                        cubicTo(
-                            point(9f, 11f).x, point(9f, 11f).y,
-                            point(-9f, 11f).x, point(-9f, 11f).y,
-                            point(-17f, 0f).x, point(-17f, 0f).y
-                        )
-                        close()
-                    }
-                    drawPath(eye, white, style = stroke)
-                    drawCircle(white, 4.3f * unit, point(0f, 0f), style = stroke)
-                }
-            }
-        }
-
-        if (glyph == OppoQuickMenuGlyph.ASPECT && !ratioLabel.isNullOrBlank()) {
-            Text(
-                text = ratioLabel,
-                color = Color.White,
-                fontSize = 14.sp,
-                lineHeight = 16.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.35).sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun PhotoQuickMenuGrid(
-    aspectRatio: AspectRatio,
-    topSheetAspectRatios: List<AspectRatio>,
-    onAspectRatioChange: (AspectRatio) -> Unit,
-    refocusEnabled: Boolean,
-    refocusAvailable: Boolean,
-    onRefocusToggle: () -> Unit,
-    useLivePhoto: Boolean,
-    onLivePhotoToggle: () -> Unit,
-    timerSeconds: Int,
-    onTimerClick: () -> Unit,
-    burstEnabled: Boolean,
-    burstAvailable: Boolean,
-    onBurstToggle: () -> Unit,
-    stylesEnabled: Boolean,
-    onStylesClick: () -> Unit,
-    isVirtualApertureEnabled: Boolean,
-    onVirtualApertureToggle: () -> Unit,
-    onFilterClick: () -> Unit,
-    onSettingsClick: () -> Unit
-) {
-    val availableRatios = AspectRatio.sanitizeTopSheetRatios(topSheetAspectRatios)
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            PhotoQuickMenuItem(
-                title = stringResource(R.string.oppo_refocus).uppercase(),
-                checked = refocusEnabled,
-                enabled = refocusAvailable,
-                onClick = onRefocusToggle,
-                modifier = Modifier.weight(1f)
-            ) {
-                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.REFOCUS, modifier = Modifier.size(42.dp))
-            }
-            PhotoQuickMenuItem(
-                title = stringResource(R.string.camera_quick_menu_live).uppercase(),
-                checked = useLivePhoto,
-                onClick = onLivePhotoToggle,
-                modifier = Modifier.weight(1f)
-            ) {
-                Box {
-                    OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.LIVE, modifier = Modifier.size(42.dp))
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .offset(x = 3.dp, y = 3.dp)
-                            .size(18.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF17171D))
-                            .border(1.dp, Color.White.copy(alpha = 0.8f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("A", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-            PhotoQuickMenuItem(
-                title = stringResource(R.string.camera_quick_menu_aspect).uppercase(),
-                checked = false,
-                onClick = {
-                    if (availableRatios.isNotEmpty()) {
-                        val nextIndex = (availableRatios.indexOf(aspectRatio) + 1)
-                            .coerceAtLeast(0) % availableRatios.size
-                        onAspectRatioChange(availableRatios[nextIndex])
-                    }
-                },
-                modifier = Modifier.weight(1f)
-            ) {
-                OppoQuickMenuGlyphIcon(
-                    OppoQuickMenuGlyph.ASPECT,
-                    ratioLabel = aspectRatio.getDisplayName(),
-                    modifier = Modifier.size(44.dp)
-                )
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            PhotoQuickMenuItem(
-                title = stringResource(R.string.timer).uppercase(),
-                checked = timerSeconds > 0,
-                onClick = onTimerClick,
-                modifier = Modifier.weight(1f)
-            ) {
-                Box {
-                    OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.TIMER, modifier = Modifier.size(42.dp))
-                    if (timerSeconds > 0) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .offset(x = 5.dp, y = (-4).dp)
-                                .size(20.dp)
-                                .clip(CircleShape)
-                                .background(AccentColor),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = timerSeconds.toString(),
-                                color = OnAccentColor,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-            }
-            PhotoQuickMenuItem(
-                title = stringResource(R.string.camera_quick_menu_burst).uppercase(),
-                checked = burstEnabled,
-                enabled = burstAvailable,
-                onClick = onBurstToggle,
-                modifier = Modifier.weight(1f)
-            ) {
-                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.BURST, modifier = Modifier.size(42.dp))
-            }
-            PhotoQuickMenuItem(
-                title = stringResource(R.string.camera_quick_menu_styles).uppercase(),
-                checked = stylesEnabled,
-                onClick = onStylesClick,
-                modifier = Modifier.weight(1f)
-            ) {
-                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.STYLES, modifier = Modifier.size(42.dp))
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            PhotoQuickMenuItem(
-                title = stringResource(R.string.camera_quick_menu_filter).uppercase(),
-                checked = false,
-                onClick = onFilterClick,
-                modifier = Modifier.weight(1f)
-            ) {
-                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.FILTER, modifier = Modifier.size(42.dp))
-            }
-            PhotoQuickMenuItem(
-                title = stringResource(R.string.camera_quick_menu_depth).uppercase(),
-                checked = isVirtualApertureEnabled,
-                onClick = onVirtualApertureToggle,
-                modifier = Modifier.weight(1f)
-            ) {
-                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.DEPTH, modifier = Modifier.size(42.dp))
-            }
-            PhotoQuickMenuItem(
-                title = stringResource(R.string.settings).uppercase(),
-                checked = false,
-                onClick = onSettingsClick,
-                modifier = Modifier.weight(1f)
-            ) {
-                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.SETTINGS, modifier = Modifier.size(42.dp))
-            }
-        }
-    }
-}
-
-@Composable
-private fun VideoQuickMenuGrid(
-    videoTorchEnabled: Boolean,
-    videoTorchSupported: Boolean,
-    isVideoRecording: Boolean,
-    onVideoTorchToggle: () -> Unit,
-    videoStabilizationMode: VideoStabilizationMode,
-    availableVideoStabilizationModes: List<VideoStabilizationMode>,
-    onVideoStabilizationModeChange: (VideoStabilizationMode) -> Unit,
-    onEditClick: () -> Unit,
-    onDualCaptureClick: () -> Unit,
-    videoHdrEnabled: Boolean,
-    onFormatClick: () -> Unit,
-    videoBitrate: VideoBitratePreset,
-    onBitrateClick: () -> Unit,
-    videoLogProfile: VideoLogProfile,
-    onLogClick: () -> Unit,
-    videoAspectRatio: VideoAspectRatio,
-    onAspectRatioClick: () -> Unit,
-    onSettingsClick: () -> Unit
-) {
-    val enhancedAvailable = VideoStabilizationMode.ENHANCED in availableVideoStabilizationModes
-    val fallbackStabilizationMode = availableVideoStabilizationModes.firstOrNull {
-        it == VideoStabilizationMode.EIS
-    } ?: availableVideoStabilizationModes.firstOrNull {
-        it != VideoStabilizationMode.ENHANCED
-    } ?: VideoStabilizationMode.OFF
-    var previousStabilizationMode by remember {
-        mutableStateOf(
-            videoStabilizationMode.takeIf { it != VideoStabilizationMode.ENHANCED }
-                ?: fallbackStabilizationMode
-        )
-    }
-
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            PhotoQuickMenuItem(
-                title = stringResource(R.string.flash).uppercase(),
-                checked = videoTorchEnabled,
-                enabled = videoTorchSupported && !isVideoRecording,
-                onClick = onVideoTorchToggle,
-                modifier = Modifier.weight(1f)
-            ) {
-                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.FLASH, modifier = Modifier.size(42.dp))
-            }
-            PhotoQuickMenuItem(
-                title = stringResource(R.string.edit).uppercase(),
-                checked = false,
-                onClick = onEditClick,
-                modifier = Modifier.weight(1f)
-            ) {
-                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.EDIT, modifier = Modifier.size(42.dp))
-            }
-            PhotoQuickMenuItem(
-                title = stringResource(R.string.video_quick_menu_action).uppercase(),
-                checked = videoStabilizationMode == VideoStabilizationMode.ENHANCED,
-                enabled = enhancedAvailable && !isVideoRecording,
-                onClick = {
-                    val nextMode = if (videoStabilizationMode == VideoStabilizationMode.ENHANCED) {
-                        previousStabilizationMode.takeIf {
-                            it in availableVideoStabilizationModes
-                        } ?: fallbackStabilizationMode
-                    } else {
-                        previousStabilizationMode = videoStabilizationMode
-                        VideoStabilizationMode.ENHANCED
-                    }
-                    onVideoStabilizationModeChange(nextMode)
-                },
-                modifier = Modifier.weight(1f)
-            ) {
-                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.ACTION, modifier = Modifier.size(42.dp))
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            PhotoQuickMenuItem(
-                title = stringResource(R.string.video_quick_menu_dual_capture).uppercase(),
-                checked = false,
-                onClick = onDualCaptureClick,
-                modifier = Modifier.weight(1f)
-            ) {
-                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.DUAL_CAPTURE, modifier = Modifier.size(42.dp))
-            }
-            PhotoQuickMenuItem(
-                title = stringResource(R.string.video_quick_menu_format).uppercase(),
-                checked = videoHdrEnabled,
-                onClick = onFormatClick,
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    text = stringResource(R.string.hdr_label),
-                    color = Color.White,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-            PhotoQuickMenuItem(
-                title = stringResource(R.string.video_bitrate_chip).uppercase(),
-                checked = false,
-                onClick = onBitrateClick,
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    text = videoBitrate.bitrateMbps.toString(),
-                    color = Color.White,
-                    fontSize = 27.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            PhotoQuickMenuItem(
-                title = stringResource(R.string.video_log_chip).uppercase(),
-                checked = videoLogProfile.isEnabled,
-                onClick = onLogClick,
-                modifier = Modifier.weight(1f)
-            ) {
-                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.LOG, modifier = Modifier.size(42.dp))
-            }
-            PhotoQuickMenuItem(
-                title = stringResource(R.string.video_quick_menu_aspect_ratio).uppercase(),
-                checked = false,
-                onClick = onAspectRatioClick,
-                modifier = Modifier.weight(1f)
-            ) {
-                OppoQuickMenuGlyphIcon(
-                    OppoQuickMenuGlyph.ASPECT,
-                    ratioLabel = videoAspectRatioLabel(videoAspectRatio),
-                    modifier = Modifier.size(44.dp)
-                )
-            }
-            PhotoQuickMenuItem(
-                title = stringResource(R.string.settings).uppercase(),
-                checked = false,
-                onClick = onSettingsClick,
-                modifier = Modifier.weight(1f)
-            ) {
-                OppoQuickMenuGlyphIcon(OppoQuickMenuGlyph.SETTINGS, modifier = Modifier.size(42.dp))
-            }
-        }
-    }
-}
-
-@Composable
-private fun PhotoQuickMenuItem(
-    title: String,
-    checked: Boolean,
-    enabled: Boolean = true,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    icon: @Composable BoxScope.() -> Unit
-) {
-    Column(
-        modifier = modifier
-            .height(128.dp)
-            .graphicsLayer { alpha = if (enabled) 1f else 0.38f },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Top
-    ) {
-        Box(
-            modifier = Modifier
-                .padding(top = 3.dp)
-                .size(72.dp)
-                .clip(CircleShape)
-                .background(Color(0xEB090A10))
-                .border(
-                    width = 1.dp,
-                    color = Color.White.copy(alpha = if (checked) 0.30f else 0.11f),
-                    shape = CircleShape
-                )
-                .clickable(enabled = enabled, onClick = onClick),
-            contentAlignment = Alignment.Center
-        ) {
-            icon()
-        }
-        Text(
-            text = title,
-            color = Color.White.copy(alpha = if (enabled) 0.98f else 0.45f),
-            fontSize = 15.sp,
-            lineHeight = 18.sp,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = 0.35.sp,
-            maxLines = 1,
-            modifier = Modifier.padding(top = 7.dp)
-        )
     }
 }
 

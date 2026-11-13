@@ -3,7 +3,6 @@ package com.hinnka.mycamera.ui.camera
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.Arrangement
@@ -11,15 +10,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -27,14 +24,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
 import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.R
+import com.hinnka.mycamera.ui.components.PhysicalButton
 import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VideoCapabilities
@@ -43,9 +35,6 @@ import com.hinnka.mycamera.video.VideoLogProfile
 import com.hinnka.mycamera.video.VideoResolutionPreset
 import com.hinnka.mycamera.video.VideoStabilizationMode
 import com.hinnka.mycamera.ui.icons.AppIcons
-import com.hinnka.mycamera.ui.components.LiquidGlassBackdrop
-import com.hinnka.mycamera.ui.components.LiquidGlassSurface
-import com.hinnka.mycamera.ui.components.LiquidGlassStyle
 
 @Composable
 fun CameraTopBar(
@@ -54,11 +43,12 @@ fun CameraTopBar(
     recordingElapsedMs: Long,
     flashMode: Int,
     onFlashToggle: () -> Unit,
+    timerSeconds: Int,
+    onTimerToggle: () -> Unit,
+    showHistogram: Boolean,
+    onHistogramToggle: () -> Unit,
     useLivePhoto: Boolean,
     onLivePhotoToggle: () -> Unit,
-    useRaw: Boolean,
-    rawSupported: Boolean,
-    onRawToggle: () -> Unit,
     videoConfig: VideoConfig,
     videoCapabilities: VideoCapabilities,
     onVideoTorchToggle: () -> Unit,
@@ -68,8 +58,6 @@ fun CameraTopBar(
     videoHdrEnabled: Boolean,
     onVideoHdrToggle: () -> Unit,
     onSettingsClick: () -> Unit,
-    glassBackdrop: LiquidGlassBackdrop,
-    onVideoGlassBoundsChanged: (Rect?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     if (captureMode == CaptureMode.VIDEO) {
@@ -85,8 +73,6 @@ fun CameraTopBar(
             videoHdrEnabled = videoHdrEnabled,
             onVideoHdrToggle = onVideoHdrToggle,
             onSettingsClick = onSettingsClick,
-            glassBackdrop = glassBackdrop,
-            onGlassBoundsChanged = onVideoGlassBoundsChanged,
             modifier = modifier
         )
         return
@@ -95,136 +81,83 @@ fun CameraTopBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 32.dp, start = 8.dp, end = 8.dp, bottom = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+            .padding(top = 32.dp, bottom = 8.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // The left capsule is a single RAW/JPEG toggle. The small numeric label
-        // mirrors the compact 48 MP indicator in the reference camera UI.
-        Row(
-            modifier = Modifier
-                .height(36.dp)
-                .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.13f))
-                .clickable(enabled = rawSupported, onClick = onRawToggle)
-                .padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
+        PhysicalButton(
+            modifier = Modifier.size(36.dp),
+            onClick = onFlashToggle
         ) {
-            Text(
-                text = stringResource(
-                    if (useRaw && rawSupported) R.string.gallery_raw_badge
-                    else R.string.camera_capture_format_jpeg
-                ),
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Spacer(modifier = Modifier.width(3.dp))
-            Text(
-                text = stringResource(R.string.camera_capture_resolution_12),
-                color = Color.White.copy(alpha = 0.72f),
-                fontSize = 8.sp,
-                fontWeight = FontWeight.Normal,
-                modifier = Modifier.padding(top = 3.dp)
+            Icon(
+                imageVector = when (flashMode) {
+                    0 -> AppIcons.FlashOff
+                    1 -> AppIcons.FlashOn
+                    2 -> AppIcons.FlashlightOn
+                    else -> AppIcons.FlashOff
+                },
+                modifier = Modifier.size(20.dp).autoRotate(),
+                contentDescription = stringResource(R.string.flash),
+                tint = Color.White
             )
         }
 
-        // One continuous capsule holds Flash, Motion Photo and the six-dot menu.
-        Row(
-            modifier = Modifier
-                .height(36.dp)
-                .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.13f))
-                .padding(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            verticalAlignment = Alignment.CenterVertically
+        PhysicalButton(
+            modifier = Modifier.size(36.dp),
+            onClick = onTimerToggle
         ) {
-            TopBarActionButton(
-                onClick = onFlashToggle,
-                contentDescription = stringResource(R.string.flash)
-            ) {
+            if (timerSeconds > 0) {
+                Text(
+                    text = "${timerSeconds}s",
+                    color = AccentColor,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.autoRotate()
+                )
+            } else {
                 Icon(
-                    imageVector = when (flashMode) {
-                        0 -> AppIcons.FlashOff
-                        1 -> AppIcons.FlashOn
-                        2 -> AppIcons.FlashlightOn
-                        else -> AppIcons.FlashOff
-                    },
-                    modifier = Modifier.size(18.dp).autoRotate(),
-                    contentDescription = null,
+                    imageVector = AppIcons.Timer,
+                    contentDescription = stringResource(R.string.timer),
+                    modifier = Modifier.size(20.dp).autoRotate(),
                     tint = Color.White
                 )
             }
-
-            TopBarActionButton(
-                onClick = onLivePhotoToggle,
-                contentDescription = stringResource(R.string.settings_use_live_photo)
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_live_photo),
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp).autoRotate(),
-                    tint = if (useLivePhoto) AccentColor else Color.White
-                )
-                if (!useLivePhoto) {
-                    Canvas(modifier = Modifier.size(20.dp)) {
-                        drawLine(
-                            color = Color.White,
-                            start = Offset(size.width * 0.22f, size.height * 0.22f),
-                            end = Offset(size.width * 0.78f, size.height * 0.78f),
-                            strokeWidth = 1.5.dp.toPx(),
-                            cap = StrokeCap.Round
-                        )
-                    }
-                }
-            }
-
-            TopBarActionButton(
-                onClick = onSettingsClick,
-                contentDescription = stringResource(R.string.settings)
-            ) {
-                SixDotMenuIcon()
-            }
         }
-    }
-}
 
+        PhysicalButton(
+            modifier = Modifier.size(36.dp),
+            onClick = onLivePhotoToggle
+        ) {
+            Icon(
+                painterResource(R.drawable.ic_live_photo),
+                contentDescription = stringResource(R.string.settings_use_live_photo),
+                modifier = Modifier.size(20.dp).autoRotate(),
+                tint = if (useLivePhoto) AccentColor else Color.White
+            )
+        }
 
-@Composable
-private fun TopBarActionButton(
-    onClick: () -> Unit,
-    contentDescription: String,
-    content: @Composable BoxScope.() -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .size(30.dp)
-            .clip(CircleShape)
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics { this.contentDescription = contentDescription }
-            .autoRotate(),
-        contentAlignment = Alignment.Center,
-        content = content
-    )
-}
+        PhysicalButton(
+            modifier = Modifier.size(36.dp),
+            onClick = onHistogramToggle
+        ) {
+            Icon(
+                imageVector = AppIcons.BarChart,
+                contentDescription = stringResource(R.string.histogram),
+                modifier = Modifier.size(20.dp).autoRotate(),
+                tint = if (showHistogram) AccentColor else Color.White
+            )
+        }
 
-@Composable
-private fun SixDotMenuIcon() {
-    Column(
-        verticalArrangement = Arrangement.spacedBy(2.5.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        repeat(2) {
-            Row(horizontalArrangement = Arrangement.spacedBy(2.5.dp)) {
-                repeat(3) {
-                    Box(
-                        modifier = Modifier
-                            .size(2.5.dp)
-                            .clip(CircleShape)
-                            .background(Color.White)
-                    )
-                }
-            }
+        PhysicalButton(
+            modifier = Modifier.size(36.dp),
+            onClick = onSettingsClick
+        ) {
+            Icon(
+                imageVector = Icons.Default.Settings,
+                contentDescription = stringResource(R.string.settings),
+                modifier = Modifier.size(20.dp).autoRotate(),
+                tint = Color.White
+            )
         }
     }
 }
@@ -242,32 +175,13 @@ private fun VideoTopBar(
     videoHdrEnabled: Boolean,
     onVideoHdrToggle: () -> Unit,
     onSettingsClick: () -> Unit,
-    glassBackdrop: LiquidGlassBackdrop,
-    onGlassBoundsChanged: (Rect?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var stabilizationMenuExpanded by remember { mutableStateOf(false) }
-    LaunchedEffect(isRecording) {
-        if (isRecording) stabilizationMenuExpanded = false
-    }
-    val videoTopBarGlassStyle = remember {
-        LiquidGlassStyle(
-            blurRadius = 20.dp,
-            refractionHeight = 18.dp,
-            refractionAmount = 4.dp,
-            saturation = 1.2f,
-            tint = Color(0x55000000),
-            highlightWidth = 0.65.dp,
-            highlightBlur = 0.7.dp,
-            highlightAlpha = 0.36f,
-            fallbackColor = Color(0xB3262626)
-        )
-    }
-
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 8.dp, start = 8.dp, end = 8.dp)
+            .padding(top = 24.dp, start = 8.dp, end = 8.dp)
             .height(56.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -276,74 +190,54 @@ private fun VideoTopBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Match the photo-mode format capsule: resolution and frame rate stay visible,
-            // including during recording, and each value remains independently tappable.
-            VideoParameterCluster(
-                videoConfig = videoConfig,
-                glassBackdrop = glassBackdrop,
-                glassStyle = videoTopBarGlassStyle,
-                onResolutionClick = onVideoResolutionClick,
-                onFpsClick = onVideoFpsClick
-            )
+            if (isRecording) {
+                RecordingHud(
+                    elapsedMs = recordingElapsedMs,
+                    videoConfig = videoConfig
+                )
+            } else {
+                VideoParameterCluster(
+                    videoConfig = videoConfig,
+                    onResolutionClick = onVideoResolutionClick,
+                    onFpsClick = onVideoFpsClick
+                )
+            }
 
-            // Use the same compact grouped control capsule and touch targets as photo mode.
-            Box(
-                modifier = Modifier
-                    .height(36.dp)
-                    .clip(CircleShape)
-                    .onGloballyPositioned { onGlassBoundsChanged(it.boundsInRoot()) }
+            // Keep live controls available while recording. HDR changes the active
+            // recording color layer; torch updates the Camera2 repeating request.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                LiquidGlassSurface(
-                    backdrop = glassBackdrop,
-                    modifier = Modifier.matchParentSize(),
-                    cornerRadius = 18.dp,
-                    style = videoTopBarGlassStyle
-                ) {}
-                Row(
-                    modifier = Modifier
-                        .height(36.dp)
-                        .padding(horizontal = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TopBarActionButton(
-                        onClick = onVideoTorchToggle,
-                        contentDescription = stringResource(R.string.video_torch_chip)
-                    ) {
-                        Icon(
-                            imageVector = if (videoConfig.torchEnabled) AppIcons.FlashlightOn else AppIcons.FlashlightOff,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp).autoRotate(),
-                            tint = when {
-                                !videoCapabilities.supportsTorch -> Color.White.copy(alpha = 0.3f)
-                                videoConfig.torchEnabled -> AccentColor
-                                else -> Color.White
-                            }
+                if (!videoConfig.logProfile.isEnabled) {
+                    IconButton(onClick = onVideoHdrToggle) {
+                        Text(
+                            text = "HDR",
+                            color = Color.White.copy(alpha = if (videoHdrEnabled) 1f else 0.65f),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.autoRotate()
                         )
                     }
+                }
 
+                VideoActionIcon(
+                    icon = if (videoConfig.torchEnabled) AppIcons.FlashlightOn else AppIcons.FlashlightOff,
+                    active = videoConfig.torchEnabled,
+                    enabled = videoCapabilities.supportsTorch,
+                    onClick = onVideoTorchToggle,
+                    contentDescription = stringResource(R.string.video_torch_chip)
+                )
+
+                if (!isRecording && videoCapabilities.availableStabilizationModes.size > 1) {
                     Box {
-                        TopBarActionButton(
-                            onClick = {
-                                if (!isRecording && videoCapabilities.availableStabilizationModes.isNotEmpty()) {
-                                    stabilizationMenuExpanded = true
-                                }
-                            },
+                        VideoActionIcon(
+                            icon = AppIcons.Stabilization,
+                            active = videoConfig.stabilizationMode != VideoStabilizationMode.OFF,
+                            enabled = true,
+                            onClick = { stabilizationMenuExpanded = true },
                             contentDescription = stringResource(R.string.settings_video_stabilization_default)
-                        ) {
-                            Icon(
-                                imageVector = AppIcons.Stabilization,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp).autoRotate(),
-                                tint = when {
-                                    videoCapabilities.availableStabilizationModes.isEmpty() ->
-                                        Color.White.copy(alpha = 0.3f)
-                                    isRecording -> Color.White.copy(alpha = 0.55f)
-                                    videoConfig.stabilizationMode != VideoStabilizationMode.OFF -> AccentColor
-                                    else -> Color.White
-                                }
-                            )
-                        }
+                        )
                         DropdownMenu(
                             expanded = stabilizationMenuExpanded,
                             onDismissRequest = { stabilizationMenuExpanded = false }
@@ -367,31 +261,17 @@ private fun VideoTopBar(
                             }
                         }
                     }
+                }
 
-                    TopBarActionButton(
-                        onClick = {
-                            if (!videoConfig.logProfile.isEnabled) onVideoHdrToggle()
-                        },
-                        contentDescription = "HDR"
-                    ) {
+                if (!isRecording) {
+                    IconButton(onClick = onSettingsClick) {
                         Icon(
-                            imageVector = AppIcons.Contrast,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp).autoRotate(),
-                            tint = when {
-                                videoConfig.logProfile.isEnabled -> Color.White.copy(alpha = 0.3f)
-                                videoHdrEnabled -> AccentColor
-                                else -> Color.White
-                            }
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = stringResource(R.string.settings),
+                            modifier = Modifier.size(20.dp).autoRotate(),
+                            tint = Color.White
                         )
                     }
-
-                    TopBarActionButton(
-                        onClick = onSettingsClick,
-                        contentDescription = stringResource(R.string.settings)
-                    ) {
-                        SixDotMenuIcon()
-                }
                 }
             }
         }
@@ -401,28 +281,18 @@ private fun VideoTopBar(
 @Composable
 private fun VideoParameterCluster(
     videoConfig: VideoConfig,
-    glassBackdrop: LiquidGlassBackdrop,
-    glassStyle: LiquidGlassStyle,
     onResolutionClick: () -> Unit,
     onFpsClick: () -> Unit
 ) {
-    Box(
-        modifier = Modifier
-            .height(36.dp)
-            .clip(CircleShape)
+    Surface(
+        color = Color.Black.copy(alpha = 0.35f),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
     ) {
-        LiquidGlassSurface(
-            backdrop = glassBackdrop,
-            modifier = Modifier.matchParentSize(),
-            cornerRadius = 18.dp,
-            style = glassStyle
-        ) {}
         Row(
-            modifier = Modifier
-                .height(36.dp)
-                .padding(horizontal = 12.dp),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             val isOpenGate = videoConfig.aspectRatio == VideoAspectRatio.OPEN_GATE
             val resLabel = if (isOpenGate) {
@@ -433,7 +303,10 @@ private fun VideoParameterCluster(
                 VideoResolutionPreset.HD_720P -> "720p"
             }
             ParameterText(resLabel, onResolutionClick, enabled = !isOpenGate)
-            ParameterText(videoConfig.fps.fps.toString(), onFpsClick)
+
+            ParameterDivider()
+
+            ParameterText("${videoConfig.fps.fps} fps", onFpsClick)
         }
     }
 }
@@ -449,9 +322,8 @@ private fun ParameterText(
         text = text,
         color = if (enabled) tint else tint.copy(alpha = 0.4f),
         style = MaterialTheme.typography.labelLarge.copy(
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
-            fontFamily = FontFamily.Default,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
             letterSpacing = 0.sp
         ),
         modifier = Modifier
@@ -485,7 +357,7 @@ private fun VideoActionIcon(
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            modifier = Modifier.size(18.dp).autoRotate(),
+            modifier = Modifier.size(20.dp).autoRotate(),
             tint = if (enabled) {
                 if (active) AccentColor else Color.White
             } else {
@@ -572,7 +444,7 @@ private fun RecordingHud(
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold
             )
-            Box(Modifier.size(2.5.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.4f)))
+            Box(Modifier.size(3.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.4f)))
             Text(
                 text = "${videoConfig.fps.fps} FPS",
                 color = Color.White.copy(alpha = 0.6f),
@@ -580,7 +452,7 @@ private fun RecordingHud(
                 fontWeight = FontWeight.Bold
             )
             if (videoConfig.logProfile != VideoLogProfile.OFF) {
-                Box(Modifier.size(2.5.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.4f)))
+                Box(Modifier.size(3.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.4f)))
                 Text(
                     text = "LOG",
                     color = AccentColor.copy(alpha = 0.8f),

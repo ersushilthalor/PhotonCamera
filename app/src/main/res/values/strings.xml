@@ -26,9 +26,6 @@
     <string name="capture_mode_professional">Pro</string>
     <string name="capture_mode_photo">Photo</string>
     <string name="capture_mode_video">Video</string>
-    <string name="camera_capture_format_jpeg" translatable="false">JPEG</string>
-    <string name="camera_capture_resolution_48" translatable="false">48</string>
-    <string name="camera_capture_resolution_12" translatable="false">12</string>
 
     <!-- Exposure Controls -->
     <string name="camera_parameter_exposure" translatable="false">EV</string>
@@ -1425,16 +1422,4 @@
     <string name="oppo_refocus_plane_count">Plane %1$d of %2$d</string>
     <string name="oppo_refocus_near">Near</string>
     <string name="oppo_refocus_far">Far</string>
-    <string name="camera_quick_menu_burst">Burst</string>
-    <string name="camera_quick_menu_styles">Styles</string>
-    <string name="camera_quick_menu_filter">Filter</string>
-    <string name="camera_quick_menu_aspect">Aspect</string>
-    <string name="camera_quick_menu_live">Live</string>
-    <string name="camera_quick_menu_depth">Depth</string>
-    <string name="video_quick_menu_action">Action</string>
-    <string name="video_quick_menu_dual_capture">Dual Capture</string>
-    <string name="video_quick_menu_format">Format</string>
-    <string name="video_quick_menu_aspect_ratio">Aspect Ratio</string>
-    <string name="dual_capture_coming_soon">Coming soon</string>
-    <string name="video_hdr_disabled_log">HDR is unavailable while a Log profile is active.</string>
 </resources>
