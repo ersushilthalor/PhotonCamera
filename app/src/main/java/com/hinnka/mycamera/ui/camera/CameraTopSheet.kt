@@ -365,7 +365,7 @@ fun CameraTopSheet(
                             }
                         }
                     }
-                } else {its video-mode contents.
+                } else {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
