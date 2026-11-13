@@ -40,6 +40,9 @@ import com.hinnka.mycamera.video.VideoLogProfile
 import com.hinnka.mycamera.video.VideoResolutionPreset
 import com.hinnka.mycamera.video.VideoStabilizationMode
 import com.hinnka.mycamera.ui.icons.AppIcons
+import com.hinnka.mycamera.ui.components.LiquidGlassBackdrop
+import com.hinnka.mycamera.ui.components.LiquidGlassSurface
+import com.hinnka.mycamera.ui.components.LiquidGlassStyle
 
 @Composable
 fun CameraTopBar(
@@ -62,6 +65,7 @@ fun CameraTopBar(
     videoHdrEnabled: Boolean,
     onVideoHdrToggle: () -> Unit,
     onSettingsClick: () -> Unit,
+    glassBackdrop: LiquidGlassBackdrop,
     modifier: Modifier = Modifier
 ) {
     if (captureMode == CaptureMode.VIDEO) {
@@ -77,6 +81,7 @@ fun CameraTopBar(
             videoHdrEnabled = videoHdrEnabled,
             onVideoHdrToggle = onVideoHdrToggle,
             onSettingsClick = onSettingsClick,
+            glassBackdrop = glassBackdrop,
             modifier = modifier
         )
         return
@@ -232,11 +237,25 @@ private fun VideoTopBar(
     videoHdrEnabled: Boolean,
     onVideoHdrToggle: () -> Unit,
     onSettingsClick: () -> Unit,
+    glassBackdrop: LiquidGlassBackdrop,
     modifier: Modifier = Modifier
 ) {
     var stabilizationMenuExpanded by remember { mutableStateOf(false) }
     LaunchedEffect(isRecording) {
         if (isRecording) stabilizationMenuExpanded = false
+    }
+    val videoTopBarGlassStyle = remember {
+        LiquidGlassStyle(
+            blurRadius = 10.dp,
+            refractionHeight = 18.dp,
+            refractionAmount = 4.dp,
+            saturation = 1.2f,
+            tint = Color(0x55000000),
+            highlightWidth = 0.65.dp,
+            highlightBlur = 0.7.dp,
+            highlightAlpha = 0.36f,
+            fallbackColor = Color(0xB3262626)
+        )
     }
 
     Box(
@@ -255,20 +274,31 @@ private fun VideoTopBar(
             // including during recording, and each value remains independently tappable.
             VideoParameterCluster(
                 videoConfig = videoConfig,
+                glassBackdrop = glassBackdrop,
+                glassStyle = videoTopBarGlassStyle,
                 onResolutionClick = onVideoResolutionClick,
                 onFpsClick = onVideoFpsClick
             )
 
             // Use the same compact grouped control capsule and touch targets as photo mode.
-            Row(
+            Box(
                 modifier = Modifier
                     .height(36.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.13f))
-                    .padding(horizontal = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.CenterVertically
             ) {
+                LiquidGlassSurface(
+                    backdrop = glassBackdrop,
+                    modifier = Modifier.matchParentSize(),
+                    cornerRadius = 18.dp,
+                    style = videoTopBarGlassStyle
+                ) {}
+                Row(
+                    modifier = Modifier
+                        .height(36.dp)
+                        .padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                 TopBarActionButton(
                     onClick = onVideoTorchToggle,
                     contentDescription = stringResource(R.string.video_torch_chip)
@@ -355,6 +385,7 @@ private fun VideoTopBar(
                 ) {
                     SixDotMenuIcon()
                 }
+                }
             }
         }
     }
@@ -363,18 +394,29 @@ private fun VideoTopBar(
 @Composable
 private fun VideoParameterCluster(
     videoConfig: VideoConfig,
+    glassBackdrop: LiquidGlassBackdrop,
+    glassStyle: LiquidGlassStyle,
     onResolutionClick: () -> Unit,
     onFpsClick: () -> Unit
 ) {
-    Row(
+    Box(
         modifier = Modifier
             .height(36.dp)
             .clip(CircleShape)
-            .background(Color.White.copy(alpha = 0.13f))
-            .padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        LiquidGlassSurface(
+            backdrop = glassBackdrop,
+            modifier = Modifier.matchParentSize(),
+            cornerRadius = 18.dp,
+            style = glassStyle
+        ) {}
+        Row(
+            modifier = Modifier
+                .height(36.dp)
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
         val isOpenGate = videoConfig.aspectRatio == VideoAspectRatio.OPEN_GATE
         val resLabel = if (isOpenGate) {
             stringResource(R.string.video_resolution_max)
@@ -385,6 +427,7 @@ private fun VideoParameterCluster(
         }
         ParameterText(resLabel, onResolutionClick, enabled = !isOpenGate)
         ParameterText(videoConfig.fps.fps.toString(), onFpsClick)
+        }
     }
 }
 
