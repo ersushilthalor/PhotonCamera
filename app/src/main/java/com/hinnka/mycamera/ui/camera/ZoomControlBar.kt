@@ -318,7 +318,7 @@ private fun ZoomPresetPill(
     Row(
         modifier = modifier
             .clip(CircleShape)
-            .background(Color(0xFF25242C))
+            .background(Color.Black.copy(alpha = 0.4f))
             .padding(horizontal = 4.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -386,7 +386,7 @@ fun ZoomContinuousRuler(
             modifier = Modifier
                 .fillMaxSize()
                 .clip(CircleShape)
-                .background(Color(0xFF292929))
+                .background(Color.Black.copy(alpha = 0.4f))
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val safeZoom = zoomRatio.coerceAtLeast(0.001f).toDouble()
@@ -443,7 +443,7 @@ fun ZoomContinuousRuler(
                     .padding(end = 6.dp)
                     .size(25.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF3A3A3A))
+                    .background(Color.Black.copy(alpha = 0.4f))
                     .clickable(onClick = onClose)
                     .semantics { contentDescription = closeDescription },
                 contentAlignment = Alignment.Center
