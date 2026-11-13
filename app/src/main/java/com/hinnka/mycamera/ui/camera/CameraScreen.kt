@@ -842,6 +842,7 @@ fun CameraScreen(
     ) {
 
         val backgroundPainter = rememberBackgroundPainter(viewModel)
+        val modeSwitcherBackdrop = rememberLiquidGlassBackdrop()
 
         val isVideoMode = state.captureMode == CaptureMode.VIDEO
         val isPhotoStyleMode = state.captureMode != CaptureMode.VIDEO
@@ -1581,6 +1582,7 @@ fun CameraScreen(
                 onSwitchCameraClick = ::switchCameraWithPreviewTransition,
                 onCaptureModeSelected = ::setShootingModeImmediately,
                 modeSwitchEnabled = !previewTransitionActive,
+                modeSwitcherBackdrop = modeSwitcherBackdrop,
                 onCaptureTap = {
                     val shouldDebounceRawCapture =
                         state.useRaw && state.captureMode == CaptureMode.PHOTO
@@ -1621,98 +1623,109 @@ fun CameraScreen(
             )
         }
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .paint(backgroundPainter, contentScale = ContentScale.Crop)
-                .navigationBarsPadding(),
-        ) {
-            // The viewfinder is always the bottom layer. Its selected aspect ratio is fitted
-            // to the full available area before camera controls are overlaid.
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Capture only the content behind the bottom controls. The controls stay outside
+            // this layer so the liquid-glass surface cannot sample itself.
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(cardHeight)
-                    .align(Alignment.TopCenter)
-                    .offset(y = viewfinderTop)
-                    .onGloballyPositioned { coordinates ->
-                        viewfinderAreaBounds = coordinates.boundsInRoot()
-                    },
-                contentAlignment = Alignment.Center
+                    .fillMaxSize()
+                    .liquidGlassBackdropSource(modeSwitcherBackdrop)
+                    .paint(backgroundPainter, contentScale = ContentScale.Crop)
+                    .navigationBarsPadding(),
             ) {
-                viewfinder()
-                if (uiStyle == "OPPO" && activePanel == ActivePanel.NONE && !isXpan) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp)
-                            .height(CameraControlsLayoutDefaults.ZoomBarHeight),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        zoomBar()
-                    }
-                }
-                if (canShowZoomJoystick) {
-                    Box(
-                        modifier = Modifier
-                            .width(cardWidth)
-                            .height(cardHeight)
-                            .align(Alignment.Center)
-                    ) {
+                // The viewfinder is always the bottom layer. Its selected aspect ratio is fitted
+                // to the full available area before camera controls are overlaid.
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(cardHeight)
+                        .align(Alignment.TopCenter)
+                        .offset(y = viewfinderTop)
+                        .onGloballyPositioned { coordinates ->
+                            viewfinderAreaBounds = coordinates.boundsInRoot()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    viewfinder()
+                    if (uiStyle == "OPPO" && activePanel == ActivePanel.NONE && !isXpan) {
                         Box(
                             modifier = Modifier
-                                .align(Alignment.CenterEnd)
-                                .padding(end = 12.dp)
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(Color.Black.copy(alpha = 0.68f))
-                                .border(1.dp, Color.White.copy(alpha = 0.78f), CircleShape)
-                                .clickable { zoomJoystickOpen = !zoomJoystickOpen },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("🕹", fontSize = 23.sp)
-                        }
-                        if (zoomJoystickOpen) {
-                            ZoomPanJoystick(
-                                modifier = Modifier.align(Alignment.Center),
-                                onPanBy = viewModel::panZoomBy,
-                            )
-                        }
-                    }
-                }
-            }
-
-            topBar()
-
-            CameraBottomControlsLayout(
-                viewfinderBottom = viewfinderTop + cardHeight,
-                modifier = Modifier.fillMaxSize(),
-                zoomBar = {
-                    // Panel visibility changes the zoom content, not the space used to
-                    // position the parameter row beneath it. XPAN has no horizontal bar.
-                    if (uiStyle != "OPPO" || isXpan) {
-                        Box(
-                            modifier = if (isXpan) Modifier else Modifier
+                                .align(Alignment.BottomCenter)
                                 .fillMaxWidth()
-                                .height(CameraControlsLayoutDefaults.ZoomBarHeight)
+                                .padding(bottom = 8.dp)
+                                .height(CameraControlsLayoutDefaults.ZoomBarHeight),
+                            contentAlignment = Alignment.Center
                         ) {
                             zoomBar()
                         }
-                    } else {
-                        Spacer(modifier = Modifier.height(0.dp))
                     }
-                },
-                // Hide the manual controls (EV/Tv/ISO/AF/AWB and their value ruler)
-                // in both Photo and Video modes without changing capture functionality.
-                parameterRuler = {},
-                parameterBar = {},
-                captureControls = {
-                    controls(Modifier.fillMaxWidth())
+                    if (canShowZoomJoystick) {
+                        Box(
+                            modifier = Modifier
+                                .width(cardWidth)
+                                .height(cardHeight)
+                                .align(Alignment.Center)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.CenterEnd)
+                                    .padding(end = 12.dp)
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(alpha = 0.68f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.78f), CircleShape)
+                                    .clickable { zoomJoystickOpen = !zoomJoystickOpen },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("🕹", fontSize = 23.sp)
+                            }
+                            if (zoomJoystickOpen) {
+                                ZoomPanJoystick(
+                                    modifier = Modifier.align(Alignment.Center),
+                                    onPanBy = viewModel::panZoomBy,
+                                )
+                            }
+                        }
+                    }
                 }
-            )
+    
+                topBar()
+            }
 
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .navigationBarsPadding()
+            ) {
+                CameraBottomControlsLayout(
+                    viewfinderBottom = viewfinderTop + cardHeight,
+                    modifier = Modifier.fillMaxSize(),
+                    zoomBar = {
+                        // Panel visibility changes the zoom content, not the space used to
+                        // position the parameter row beneath it. XPAN has no horizontal bar.
+                        if (uiStyle != "OPPO" || isXpan) {
+                            Box(
+                                modifier = if (isXpan) Modifier else Modifier
+                                    .fillMaxWidth()
+                                    .height(CameraControlsLayoutDefaults.ZoomBarHeight)
+                            ) {
+                                zoomBar()
+                            }
+                        } else {
+                            Spacer(modifier = Modifier.height(0.dp))
+                        }
+                    },
+                    // Hide the manual controls (EV/Tv/ISO/AF/AWB and their value ruler)
+                    // in both Photo and Video modes without changing capture functionality.
+                    parameterRuler = {},
+                    parameterBar = {},
+                    captureControls = {
+                        controls(Modifier.fillMaxWidth())
+                    }
+                )
+            }
         }
+
         val panelDismissBounds = if (isXpan) {
             viewfinderAreaBounds ?: previewBounds
         } else {
@@ -2080,6 +2093,7 @@ private fun Controls(
     onSwitchCameraClick: () -> Unit,
     onCaptureModeSelected: (CameraShootingMode) -> Unit,
     modeSwitchEnabled: Boolean,
+    modeSwitcherBackdrop: LiquidGlassBackdrop,
     onCaptureTap: () -> Unit,
     onGalleryClick: () -> Unit,
     sideControlInset: Dp?,
@@ -2221,6 +2235,7 @@ private fun Controls(
 
             CaptureModeSwitcher(
                 oppoStyle = uiStyle == "OPPO",
+                modeSwitcherBackdrop = modeSwitcherBackdrop,
                 // Pro/RAW remains an internal capture option, but is no longer a
                 // separate item in the visible Photo/Video mode switcher.
                 shootingMode = if (state.captureMode == CaptureMode.VIDEO) {
@@ -2554,6 +2569,7 @@ private fun rememberPhotoCaptureProgress(progress: PhotoCaptureProgress?): State
 @Composable
 private fun CaptureModeSwitcher(
     oppoStyle: Boolean,
+    modeSwitcherBackdrop: LiquidGlassBackdrop,
     shootingMode: CameraShootingMode,
     enabled: Boolean,
     onModeSelected: (CameraShootingMode) -> Unit
@@ -2580,19 +2596,44 @@ private fun CaptureModeSwitcher(
             animationSpec = tween(durationMillis = 220),
             label = "modeSwitcher"
         )
-        val selectedBackground by animateColorAsState(
-            targetValue = if (oppoStyle) Color(0xFF303030) else Color.White.copy(alpha = 0.4f),
-            animationSpec = tween(durationMillis = 220),
-            label = "modeSwitcherColor"
-        )
-        Box(
-            modifier = Modifier
-                .offset(x = knobOffset)
-                .width(knobWidth)
-                .fillMaxHeight()
-                .clip(RoundedCornerShape(15.dp))
-                .background(selectedBackground)
-        )
+        if (oppoStyle) {
+            val selectedBackground by animateColorAsState(
+                targetValue = Color(0xFF303030),
+                animationSpec = tween(durationMillis = 220),
+                label = "modeSwitcherColor"
+            )
+            Box(
+                modifier = Modifier
+                    .offset(x = knobOffset)
+                    .width(knobWidth)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(selectedBackground)
+            )
+        } else {
+            val liquidGlassStyle = remember {
+                LiquidGlassStyle(
+                    blurRadius = 0.5.dp,
+                    refractionHeight = 18.dp,
+                    refractionAmount = 16.dp,
+                    saturation = 1.7f,
+                    tint = Color.Transparent,
+                    highlightWidth = 0.65.dp,
+                    highlightBlur = 0.4.dp,
+                    highlightAlpha = 0.72f,
+                    fallbackColor = Color.Transparent
+                )
+            }
+            LiquidGlassSurface(
+                backdrop = modeSwitcherBackdrop,
+                modifier = Modifier
+                    .offset(x = knobOffset)
+                    .width(knobWidth)
+                    .fillMaxHeight(),
+                cornerRadius = 15.dp,
+                style = liquidGlassStyle
+            ) {}
+        }
         Row(
             modifier = Modifier.fillMaxSize(),
             verticalAlignment = Alignment.CenterVertically
@@ -2604,7 +2645,7 @@ private fun CaptureModeSwitcher(
                 enabled = enabled,
                 onClick = { onModeSelected(CameraShootingMode.PHOTO) },
                 modifier = Modifier.weight(1f),
-                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.Black
+                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.White
             )
             ModeSwitcherItem(
                 label = stringResource(R.string.capture_mode_video) +
@@ -2613,7 +2654,7 @@ private fun CaptureModeSwitcher(
                 enabled = enabled,
                 onClick = { onModeSelected(CameraShootingMode.VIDEO) },
                 modifier = Modifier.weight(1f),
-                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.Black
+                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color.White
             )
         }
     }
