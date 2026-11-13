@@ -28,6 +28,7 @@
     <string name="capture_mode_video">Video</string>
     <string name="camera_capture_format_jpeg" translatable="false">JPEG</string>
     <string name="camera_capture_resolution_48" translatable="false">48</string>
+    <string name="camera_capture_resolution_12" translatable="false">12</string>
 
     <!-- Exposure Controls -->
     <string name="camera_parameter_exposure" translatable="false">EV</string>
