@@ -45,7 +45,7 @@ enum class PreviewCaptureSource {
     Original
 }
 
-private const val LIQUID_GLASS_BLUR_FRAGMENT_SHADER = """
+private val LIQUID_GLASS_BLUR_FRAGMENT_SHADER = """
     #version 300 es
     precision highp float;
     in vec2 vTexCoord;
@@ -63,7 +63,7 @@ private const val LIQUID_GLASS_BLUR_FRAGMENT_SHADER = """
     }
 """.trimIndent()
 
-private const val LIQUID_GLASS_OVERLAY_FRAGMENT_SHADER = """
+private val LIQUID_GLASS_OVERLAY_FRAGMENT_SHADER = """
     #version 300 es
     precision highp float;
     in vec2 vTexCoord;
