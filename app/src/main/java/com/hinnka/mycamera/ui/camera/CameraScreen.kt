@@ -947,7 +947,9 @@ fun CameraScreen(
                 }
 
                 if (liquidGlassSettings.enabled) {
-                    if (state.captureMode == CaptureMode.VIDEO) {
+                    // The toolbar is removed while the settings panel is open, so
+                    // its previous glass bounds must not leave a duplicate overlay behind.
+                    if (state.captureMode == CaptureMode.VIDEO && activePanel == ActivePanel.NONE) {
                         appendOverlay(videoTopBarLeftGlassBounds, liquidGlassSettings.tintAlpha * 0.25f)
                         appendOverlay(videoTopBarGlassBounds, liquidGlassSettings.tintAlpha * 0.25f)
                     }
