@@ -6077,36 +6077,72 @@ private fun CaptureButtonAppearanceItem(
     modifier: Modifier = Modifier,
     preview: @Composable () -> Unit
 ) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color.White.copy(alpha = 0.06f))
-            .border(
-                width = 2.dp,
-                color = if (selected) AccentColor else Color.White.copy(alpha = 0.12f),
-                shape = RoundedCornerShape(12.dp)
-            )
-            .clickable(onClick = onClick)
-            .padding(vertical = 10.dp, horizontal = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Box(
-            modifier = Modifier.height(48.dp),
-            contentAlignment = Alignment.Center
+    val backdrop = LocalSettingsPrismalBackdrop.current
+    val tileContent: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
+        Column(
+            modifier = Modifier.weight(1f),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            preview()
+            Box(
+                modifier = Modifier.height(48.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                preview()
+            }
+            Text(
+                text = label,
+                color = if (selected) AccentColor else Color.White.copy(alpha = 0.7f),
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
-        Text(
-            text = label,
-            color = if (selected) Color.White else Color.White.copy(alpha = 0.7f),
-            fontSize = 12.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+    }
+
+    if (backdrop != null) {
+        PrismalGlassButton(
+            onClick = onClick,
+            backdrop = backdrop,
+            modifier = modifier,
+            height = null,
+            shape = { PrismalRoundedRectangle(14.dp) },
+            contentPadding = PaddingValues(vertical = 10.dp, horizontal = 6.dp),
+            horizontalArrangement = Arrangement.Center,
+            nestedGlassSource = LocalPrismalParentGlassLayer.current,
+            content = tileContent
         )
+    } else {
+        Column(
+            modifier = modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.White.copy(alpha = 0.06f))
+                .border(
+                    width = 2.dp,
+                    color = if (selected) AccentColor else Color.White.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                .clickable(onClick = onClick)
+                .padding(vertical = 10.dp, horizontal = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier.height(48.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                preview()
+            }
+            Text(
+                text = label,
+                color = if (selected) Color.White else Color.White.copy(alpha = 0.7f),
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }
-
 @Composable
 private fun BackgroundItem(
     name: String,
