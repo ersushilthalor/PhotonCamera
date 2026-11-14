@@ -162,7 +162,7 @@ android {
 
 dependencies {
     // Matches the Maven publication declared in Prismal/build.gradle.kts of the supplied v1.0.7 source.
-    implementation("com.github.styropyr0:Prismal:1.0.7")
+    implementation("com.github.styropyr0:PrismalAGSL:Prismal:v1.0.7")
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
