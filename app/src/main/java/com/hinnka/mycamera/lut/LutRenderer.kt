@@ -115,11 +115,11 @@ private val LIQUID_GLASS_REFRACTION_FRAGMENT_SHADER = """
         vec3 color = texture(uInputTexture, sampleUv).rgb;
         float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
         color = mix(vec3(luminance), color, 1.16);
-        color = mix(color, vec3(0.035, 0.045, 0.060), clamp(uTintAlpha, 0.0, 0.28));
+        // A restrained cool-blue tint, rather than the old charcoal overlay.
+        color = mix(color, vec3(0.58, 0.74, 0.93), clamp(uTintAlpha, 0.0, 0.13));
 
-        // Kyant Highlight.Default-style directional rim; icons and text remain
-        // Compose-rendered above this GPU surface and stay crisp.
-        float rimWidth = max(1.0, fwidth(distanceToEdge) * 1.6);
+        // A fine, directional blue-white highlight replaces the heavy dark-looking rim.
+        float rimWidth = max(1.0, fwidth(distanceToEdge) * 1.25);
         float rim = 1.0 - smoothstep(0.0, rimWidth, abs(distanceToEdge));
         vec2 highlightGradient = roundedRectGradient(
             centeredPosition,
@@ -127,10 +127,10 @@ private val LIQUID_GLASS_REFRACTION_FRAGMENT_SHADER = """
             gradientRadius
         );
         float directionalLight = pow(
-            abs(dot(safeDirection(highlightGradient), vec2(0.70710678, 0.70710678))),
+            max(dot(safeDirection(highlightGradient), vec2(-0.60, 0.80)), 0.0),
             2.0
         );
-        color += vec3(0.45, 0.52, 0.62) * directionalLight * rim * 0.58;
+        color += vec3(0.70, 0.82, 0.98) * directionalLight * rim * 0.24;
         fragColor = vec4(max(color, vec3(0.0)), coverage);
     }
 """.trimIndent()
