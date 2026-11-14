@@ -90,6 +90,7 @@ object DualCaptureCapabilities {
             }?.key ?: continue
             val back = metadata.getValue(backId)
             val front = metadata.getValue(frontId)
+            if (!supportsFps(back, fps) || !supportsFps(front, fps)) continue
             val backMap = back.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: continue
             val frontMap = front.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: continue
             val backSizes = backMap.getOutputSizes(SurfaceTexture::class.java)?.toList().orEmpty()
@@ -131,6 +132,11 @@ object DualCaptureCapabilities {
             null,
             "A concurrent front + rear pair exists, but no common camera stream and hardware encoder combination supports the selected frame rate."
         )
+    }
+
+    private fun supportsFps(characteristics: CameraCharacteristics, fps: Int): Boolean {
+        val ranges = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+        return ranges?.any { it.lower <= fps && it.upper >= fps } == true
     }
 
     private fun chooseInput(
