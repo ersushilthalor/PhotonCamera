@@ -151,8 +151,9 @@ private val LIQUID_GLASS_REFRACTION_FRAGMENT_SHADER = """
         if (coverage <= 0.001) discard;
 
         float insideDepth = max(-distanceToEdge, 0.0);
-        float verticalPosition = clamp(localPosition.y / max(rectSize.y, 1.0), 0.0, 1.0);
-        float bottomWeight = mix(clamp(uGradientBottomWeight, 0.0, 1.0), 1.0, smoothstep(0.0, 0.65, verticalPosition));
+        float verticalPosition = 1.0 - clamp(localPosition.y / max(rectSize.y, 1.0), 0.0, 1.0);
+        float bottomRegion = smoothstep(0.5, 1.0, verticalPosition);
+        float bottomWeight = mix(1.0, clamp(uGradientBottomWeight, 0.0, 1.0), bottomRegion);
         float refractionProgress = clamp(
             1.0 - insideDepth / max(uRefractionHeightPx, 1.0),
             0.0,
