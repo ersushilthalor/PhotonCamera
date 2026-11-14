@@ -72,7 +72,6 @@ import com.hinnka.mycamera.camera.FocusPointSource
 import com.hinnka.mycamera.camera.PhotoCaptureProgress
 import com.hinnka.mycamera.data.CaptureButtonStyle
 import com.hinnka.mycamera.data.LiquidGlassSettingsStore
-import com.hinnka.mycamera.data.LiquidGlassPipelineTier
 import com.hinnka.mycamera.data.DevelopAnimationStyle
 import com.hinnka.mycamera.model.CameraPreset
 import com.hinnka.mycamera.model.ColorRecipeParams
@@ -239,7 +238,6 @@ fun CameraScreen(
     val focusPeakingEnabled by viewModel.focusPeakingEnabled.collectAsState(initial = true)
     val eyeFocusEnabled by viewModel.eyeFocusEnabled.collectAsState()
     val keepScreenOn by viewModel.keepScreenOn.collectAsState(initial = false)
-    val cameraMenuTransparency by viewModel.cameraMenuTransparency.collectAsState()
     val liquidGlassSettings by LiquidGlassSettingsStore.settings.collectAsState()
     LaunchedEffect(context) {
         LiquidGlassSettingsStore.load(context.applicationContext)
@@ -898,7 +896,6 @@ fun CameraScreen(
             activePanel,
             previewGlBounds,
             cameraTopSheetGlassBounds,
-            cameraMenuTransparency,
             liquidGlassSettings,
             cameraGLSurfaceView,
         ) {
@@ -935,21 +932,14 @@ fun CameraScreen(
                     add(tintAlpha.coerceIn(0f, 0.75f))
                 }
 
-                if (activePanel == ActivePanel.SETTINGS) {
-                    // The six-dot menu uses the same optical Liquid Glass pipeline as the
-                    // toolbar. Do not replace it with the old STANDARD frosted-blur panel.
-                    appendOverlay(cameraTopSheetGlassBounds, liquidGlassSettings.tintAlpha * 0.25f)
+                if (activePanel == ActivePanel.SETTINGS && liquidGlassSettings.enabled) {
+                    // Use the shared Liquid Glass settings without a menu-only tint or pipeline override.
+                    appendOverlay(cameraTopSheetGlassBounds, liquidGlassSettings.tintAlpha)
                 }
             }.toFloatArray()
 
-            val overlaySettings = if (activePanel == ActivePanel.SETTINGS) {
-                liquidGlassSettings.copy(
-                    enabled = true,
-                    pipeline = LiquidGlassPipelineTier.LIQUID,
-                )
-            } else {
-                liquidGlassSettings
-            }
+            // The six-dot menu and the rest of the live preview share one renderer and one settings state.
+            val overlaySettings = liquidGlassSettings
             if (overlayBounds.isEmpty()) {
                 glView.setLiquidGlassOverlays(null, 0f, overlaySettings)
             } else {
@@ -1994,7 +1984,6 @@ fun CameraScreen(
             onOppoPhotoSettingsChange = viewModel::updateOppoPhotoSettings,
             refocusAvailable = state.minimumFocusDistance > 0f,
             contentTopPadding = CameraTopBarBaseTopPadding + topSafePadding,
-            cameraMenuTransparency = cameraMenuTransparency,
             liquidGlassSettings = liquidGlassSettings,
             onGlassBoundsChanged = { cameraTopSheetGlassBounds = it }
         )

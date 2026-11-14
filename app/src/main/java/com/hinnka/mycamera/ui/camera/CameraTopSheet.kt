@@ -7,7 +7,6 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -24,7 +23,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -148,7 +146,6 @@ fun CameraTopSheet(
     refocusAvailable: Boolean,
     contentTopPadding: Dp = CameraTopSheetContentTopPadding,
     modifier: Modifier = Modifier,
-    cameraMenuTransparency: Float = 0.25f,
     liquidGlassSettings: LiquidGlassSettings = LiquidGlassSettings(),
     onGlassBoundsChanged: (Rect?) -> Unit = {}
 ) {
@@ -208,7 +205,7 @@ fun CameraTopSheet(
             modifier = Modifier.fillMaxWidth(),
             contentAlignment = Alignment.TopCenter
         ) {
-            val glassShape = RoundedCornerShape(30.dp)
+            val glassShape = RoundedCornerShape(liquidGlassSettings.cornerRadiusDp.dp)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -217,7 +214,6 @@ fun CameraTopSheet(
                     .clip(glassShape)
                     // The single optical Liquid Glass surface is composited by the
                     // preview GL renderer. Keep this Compose container fully transparent.
-                    .background(Color.Transparent)
                     .padding(horizontal = 18.dp, vertical = 16.dp)
                     .autoRotate()
             ) {
@@ -996,25 +992,20 @@ private fun VideoMenuItem(
     onClick: () -> Unit,
     icon: @Composable (Color) -> Unit
 ) {
-    // Keep active menu actions neutral; the glass material itself supplies
-    // the menu appearance, not an extra blue accent wash.
-    val iconTint = if (enabled) Color.White else Color.White.copy(alpha = 0.36f)
+    // The parent menu is the only glass surface. Keep shortcuts as transparent
+    // icon/label content so their own disks, shadows and borders cannot stack over it.
+    val iconTint = when {
+        !enabled -> Color.White.copy(alpha = 0.36f)
+        active -> Color.White
+        else -> Color.White.copy(alpha = 0.78f)
+    }
     Column(
         modifier = modifier.clickable(enabled = enabled, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Box(
-            modifier = Modifier
-                .size(62.dp)
-                .shadow(5.dp, CircleShape)
-                .clip(CircleShape)
-                .background(Color(0xD908080A))
-                .border(
-                    width = 1.dp,
-                    color = Color.White.copy(alpha = if (active) 0.26f else 0.10f),
-                    shape = CircleShape
-                ),
+            modifier = Modifier.size(62.dp),
             contentAlignment = Alignment.Center
         ) {
             icon(iconTint)
@@ -1026,7 +1017,7 @@ private fun VideoMenuItem(
             fontSize = 11.sp,
             lineHeight = 12.sp,
             letterSpacing = 0.30.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = if (active) FontWeight.Bold else FontWeight.SemiBold,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             maxLines = 2
         )
@@ -1128,10 +1119,6 @@ private fun VideoSettingTile(
     Column(
         modifier = modifier
             .height(40.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (expanded) Color.White else Color.White.copy(alpha = 0.14f)
-            )
             .clickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically)
@@ -1172,8 +1159,6 @@ private fun VideoSettingExpandedPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color.White.copy(alpha = 0.08f))
             .padding(14.dp),
         content = content
     )
@@ -1189,10 +1174,6 @@ private fun VideoOptionChip(
     Box(
         modifier = Modifier
             .heightIn(min = 36.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                Color.White.copy(alpha = if (selected) 0.24f else 0.08f)
-            )
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
@@ -1202,7 +1183,7 @@ private fun VideoOptionChip(
             color = when {
                 !enabled -> Color.White.copy(alpha = 0.38f)
                 selected -> Color.White
-                else -> Color.White
+                else -> Color.White.copy(alpha = 0.72f)
             },
             fontSize = 12.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
