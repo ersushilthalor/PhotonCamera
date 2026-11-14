@@ -2,6 +2,7 @@ package com.hinnka.mycamera.ui.components
 
 import com.hinnka.mycamera.ui.theme.AccentColor
 import androidx.compose.ui.graphics.Brush
+import com.styropyr0.prismal.PrismalGlassSurface
 import com.styropyr0.prismal.drawPrismalGlass
 import com.styropyr0.prismal.effects.applyPrismalGlassEffects
 import com.styropyr0.prismal.sources.rememberPrismalCanvasSource
@@ -159,9 +160,9 @@ fun ColorRecipePanel(
     }
 
     val density = LocalDensity.current
-    // PrismalAGSL Glass Panel material from the supplied PrismalAGSL source archive.
-    // The sheet itself uses Android cross-window blur for the live camera preview;
-    // this procedural source provides the refracting highlight/tint layer for controls.
+    // The edit sheet's full-size glass is sampled directly from the live camera preview
+    // by CameraGLSurfaceView. This Prismal source is reserved for the inner adjustment
+    // control and ruler surfaces rendered with the actual PrismalGlassSurface component.
     val recipeGlassBackdrop = rememberPrismalCanvasSource {
         drawRect(
             Brush.linearGradient(
@@ -441,27 +442,6 @@ fun ColorRecipePanel(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(containerShape)
-                .drawPrismalGlass(
-                    backdrop = recipeGlassBackdrop,
-                    shape = { containerShape },
-                    effects = {
-                        applyPrismalGlassEffects(
-                            density = density,
-                            adaptiveLuminance = false,
-                            luminance = 0.42f,
-                            blurRadiusPx = with(density) { 18.dp.toPx() },
-                            refractionHeightPx = with(density) { 22.dp.toPx() },
-                            refractionAmountPx = with(density) { 20.dp.toPx() },
-                            saturation = 1.18f,
-                            depthEffect = true,
-                            chromaticAberration = 0.12f,
-                            useVibrancy = true,
-                        )
-                    },
-                    onDrawSurface = {
-                        drawRect(Color(0xFF111318).copy(alpha = if (isCurveDragging) 0.18f else 0.30f))
-                    }
-                )
                 .border(
                     0.7.dp,
                     Color.White.copy(alpha = if (isCurveDragging) 0.10f else 0.20f),
@@ -1031,31 +1011,10 @@ private fun BasicRecipeAdjuster(
     val accent = getBasicControlColor(control)
     val haptic = LocalHapticFeedback.current
 
-    Column(
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
-            .drawPrismalGlass(
-                backdrop = glassBackdrop,
-                shape = { RoundedCornerShape(18.dp) },
-                effects = {
-                    applyPrismalGlassEffects(
-                        density = glassDensity,
-                        adaptiveLuminance = false,
-                        luminance = 0.38f,
-                        blurRadiusPx = with(glassDensity) { 14.dp.toPx() },
-                        refractionHeightPx = with(glassDensity) { 14.dp.toPx() },
-                        refractionAmountPx = with(glassDensity) { 14.dp.toPx() },
-                        saturation = 1.12f,
-                        depthEffect = true,
-                        chromaticAberration = 0.08f,
-                        useVibrancy = true,
-                    )
-                },
-                onDrawSurface = {
-                    drawRect(Color(0xFF20242B).copy(alpha = 0.30f))
-                }
-            )
             .border(0.7.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(18.dp))
             .pointerInput(Unit) {
                 detectTapGestures(
@@ -1065,9 +1024,25 @@ private fun BasicRecipeAdjuster(
                     }
                 )
             }
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        PrismalGlassSurface(
+            backdrop = glassBackdrop,
+            modifier = Modifier.matchParentSize(),
+            shape = { RoundedCornerShape(18.dp) },
+            blurRadius = 14.dp,
+            refractionHeightPx = with(glassDensity) { 14.dp.toPx() },
+            refractionAmountPx = with(glassDensity) { 14.dp.toPx() },
+            saturation = 1.12f,
+            depthEffect = true,
+            chromaticAberration = 0.08f,
+            surfaceColor = Color(0xFF20242B).copy(alpha = 0.30f),
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -1135,6 +1110,7 @@ private fun BasicRecipeAdjuster(
                 glassDensity = glassDensity,
             )
         }
+    }
     }
 }
 

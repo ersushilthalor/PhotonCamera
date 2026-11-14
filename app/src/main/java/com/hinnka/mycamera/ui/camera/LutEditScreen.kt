@@ -8,6 +8,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -42,7 +45,8 @@ fun LutEditBottomSheet(
     containerColor: Color? = null,
     modifier: Modifier = Modifier,
     replaceVignetteWithVideoBrightness: Boolean = false,
-    videoOnly: Boolean = false
+    videoOnly: Boolean = false,
+    onGlassBoundsChanged: (Rect?) -> Unit = {},
 ) {
     val lutEditViewModel: LutEditViewModel = viewModel()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -108,8 +112,9 @@ fun LutEditBottomSheet(
     }
 
     AppModalBottomSheet(
-        containerColor = containerColor,
-        style = AppSheetStyle.Frosted,
+        containerColor = containerColor ?: Color.Transparent,
+        scrimColor = Color.Transparent,
+        style = AppSheetStyle.Translucent,
         onDismissRequest = {
             flushLutSave()
             onDismiss()
@@ -122,6 +127,17 @@ fun LutEditBottomSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
+                .onGloballyPositioned { coordinates ->
+                    val topLeft = coordinates.localToScreen(Offset.Zero)
+                    onGlassBoundsChanged(
+                        Rect(
+                            topLeft.x,
+                            topLeft.y,
+                            topLeft.x + coordinates.size.width.toFloat(),
+                            topLeft.y + coordinates.size.height.toFloat(),
+                        )
+                    )
+                }
         ) {
             ColorRecipePanel(
                 currentParams = editingParams,

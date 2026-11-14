@@ -13,8 +13,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.viewinterop.AndroidView
@@ -129,7 +129,17 @@ fun CameraPreviewGL(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
-            .onGloballyPositioned { onPreviewBoundsChanged(it.boundsInRoot()) },
+            .onGloballyPositioned { coordinates ->
+                val topLeft = coordinates.localToScreen(Offset.Zero)
+                onPreviewBoundsChanged(
+                    Rect(
+                        topLeft.x,
+                        topLeft.y,
+                        topLeft.x + coordinates.size.width.toFloat(),
+                        topLeft.y + coordinates.size.height.toFloat(),
+                    )
+                )
+            },
         contentAlignment = Alignment.Center
     ) {
 

@@ -298,6 +298,7 @@ fun CameraScreen(
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
     var previewGlBounds by remember { mutableStateOf<Rect?>(null) }
     var cameraTopSheetGlassBounds by remember { mutableStateOf<Rect?>(null) }
+    var editPanelGlassBounds by remember { mutableStateOf<Rect?>(null) }
     var cameraGLSurfaceView by remember { mutableStateOf<CameraGLSurfaceView?>(null) }
     var zoomJoystickOpen by remember { mutableStateOf(false) }
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
@@ -375,6 +376,9 @@ fun CameraScreen(
     LaunchedEffect(activePanel) {
         if (activePanel == ActivePanel.FILTERS) {
             viewModel.generateThumbnail()
+        }
+        if (activePanel != ActivePanel.EDIT) {
+            editPanelGlassBounds = null
         }
     }
 
@@ -898,6 +902,7 @@ fun CameraScreen(
             activePanel,
             previewGlBounds,
             cameraTopSheetGlassBounds,
+            editPanelGlassBounds,
             cameraMenuTransparency,
             liquidGlassSettings,
             cameraGLSurfaceView,
@@ -940,9 +945,13 @@ fun CameraScreen(
                     // toolbar. Do not replace it with the old STANDARD frosted-blur panel.
                     appendOverlay(cameraTopSheetGlassBounds, liquidGlassSettings.tintAlpha * 0.25f)
                 }
+                if (activePanel == ActivePanel.EDIT) {
+                    // Keep the edit sheet on the exact same live preview glass pipeline.
+                    appendOverlay(editPanelGlassBounds, liquidGlassSettings.tintAlpha * 0.25f)
+                }
             }.toFloatArray()
 
-            val overlaySettings = if (activePanel == ActivePanel.SETTINGS) {
+            val overlaySettings = if (activePanel == ActivePanel.SETTINGS || activePanel == ActivePanel.EDIT) {
                 liquidGlassSettings.copy(
                     enabled = true,
                     pipeline = LiquidGlassPipelineTier.LIQUID,
@@ -2130,6 +2139,7 @@ fun CameraScreen(
                 showEffects = true,
                 replaceVignetteWithVideoBrightness = state.captureMode == CaptureMode.VIDEO,
                 videoOnly = state.captureMode == CaptureMode.VIDEO,
+                onGlassBoundsChanged = { editPanelGlassBounds = it },
                 onDismiss = {
                     // Keep the Video preview override until the separate recipe reaches DataStore.
                     if (state.captureMode != CaptureMode.VIDEO) {
