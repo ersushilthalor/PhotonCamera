@@ -218,6 +218,401 @@ fun CameraTopSheet(
                 Column(
                     modifier = Modifier.verticalScroll(rememberScrollState())
                 ) {
+                if (captureMode == CaptureMode.PHOTO) {
+                    val isProfessionalMode = useRaw && isRawSupported
+                    Column(modifier = Modifier.padding(vertical = 16.dp)) {
+                        QuickSettingGrid(columns = 3, itemHeight = 90.dp) { itemModifier ->
+                            VideoMenuItem(
+                                label = "REFOCUS",
+                                active = oppoPhotoSettings.refocusEnabled,
+                                enabled = refocusAvailable && !isProfessionalMode,
+                                modifier = itemModifier,
+                                onClick = {
+                                    val enabled = !oppoPhotoSettings.refocusEnabled
+                                    onOppoPhotoSettingsChange(
+                                        oppoPhotoSettings.copy(
+                                            refocusEnabled = enabled,
+                                            autoHdrEnabled = if (enabled) false else oppoPhotoSettings.autoHdrEnabled
+                                        )
+                                    )
+                                }
+                            ) { tint ->
+                                PhotoRefocusGlyph(tint)
+                            }
+                            VideoMenuItem(
+                                label = "LIVE",
+                                active = useLivePhoto,
+                                modifier = itemModifier,
+                                onClick = onLivePhotoToggle
+                            ) { tint ->
+                                PhotoLiveGlyph(tint)
+                            }
+                            VideoMenuItem(
+                                label = "ASPECT",
+                                modifier = itemModifier,
+                                onClick = { showPhotoAspectOptions = !showPhotoAspectOptions }
+                            ) { tint ->
+                                PhotoAspectGlyph(tint, aspectRatio.getDisplayName())
+                            }
+                            VideoMenuItem(
+                                label = "TIMER",
+                                active = timerSeconds > 0,
+                                modifier = itemModifier,
+                                onClick = onTimerToggle
+                            ) { tint ->
+                                PhotoTimerGlyph(tint, timerSeconds)
+                            }
+                            VideoMenuItem(
+                                label = "BRUST",
+                                active = oppoPhotoSettings.fastShutterEnabled,
+                                enabled = !isProfessionalMode,
+                                modifier = itemModifier,
+                                onClick = {
+                                    onOppoPhotoSettingsChange(
+                                        oppoPhotoSettings.copy(
+                                            fastShutterEnabled = !oppoPhotoSettings.fastShutterEnabled
+                                        )
+                                    )
+                                }
+                            ) { tint ->
+                                PhotoBurstGlyph(tint)
+                            }
+                            VideoMenuItem(
+                                label = "STYLES",
+                                active = if (isProfessionalMode) true else oppoPhotoSettings.customPipelineEnabled,
+                                modifier = itemModifier,
+                                onClick = {
+                                    if (isProfessionalMode) {
+                                        showRenderingEngineSheet = true
+                                    } else {
+                                        showOppoPipelineSheet = true
+                                    }
+                                }
+                            ) { tint ->
+                                PhotoStylesGlyph(tint)
+                            }
+                            VideoMenuItem(
+                                label = "FILTER",
+                                modifier = itemModifier,
+                                onClick = onPhotoFilterClick
+                            ) { tint ->
+                                PhotoFilterGlyph(tint)
+                            }
+                            VideoMenuItem(
+                                label = "DEPTH",
+                                modifier = itemModifier,
+                                onClick = onPhotoDepthClick
+                            ) { tint ->
+                                PhotoDepthGlyph(tint)
+                            }
+                            VideoMenuItem(
+                                label = "SETTINGS",
+                                modifier = itemModifier,
+                                onClick = onMoreSettingsClick
+                            ) { tint ->
+                                Icon(
+                                    imageVector = Icons.Default.Settings,
+                                    contentDescription = null,
+                                    tint = tint,
+                                    modifier = Modifier.size(34.dp)
+                                )
+                            }
+                        }
+
+                        AnimatedVisibility(
+                            visible = showPhotoAspectOptions,
+                            enter = expandVertically() + fadeIn(),
+                            exit = shrinkVertically() + fadeOut()
+                        ) {
+                            Column {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                VideoSettingExpandedPanel {
+                                    FlowRow(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        AspectRatio.sanitizeTopSheetRatios(topSheetAspectRatios).forEach { ratio ->
+                                            VideoOptionChip(
+                                                title = ratio.getDisplayName(),
+                                                selected = aspectRatio == ratio,
+                                                onClick = {
+                                                    showPhotoAspectOptions = false
+                                                    onAspectRatioChange(ratio)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // The floating window's outer bounds stay unchanged; only the video
+                    // menu content is replaced by the reference's 3x3 circular icon grid.
+                    Column(modifier = Modifier.padding(vertical = 16.dp)) {
+                        QuickSettingGrid(columns = 3, itemHeight = 90.dp) { itemModifier ->
+                            VideoMenuItem(
+                                label = "FLASH",
+                                active = videoTorchEnabled,
+                                modifier = itemModifier,
+                                onClick = onVideoTorchToggle
+                            ) { tint ->
+                                Icon(
+                                    imageVector = if (videoTorchEnabled) AppIcons.FlashOn else AppIcons.FlashOff,
+                                    contentDescription = null,
+                                    tint = tint,
+                                    modifier = Modifier.size(34.dp)
+                                )
+                            }
+                            VideoMenuItem(
+                                label = "EDIT",
+                                modifier = itemModifier,
+                                onClick = onVideoEditClick
+                            ) { tint ->
+                                VideoEditGlyph(tint)
+                            }
+                            VideoMenuItem(
+                                label = "ACTION",
+                                active = videoStabilizationMode == VideoStabilizationMode.ENHANCED,
+                                enabled = videoActionModeAvailable,
+                                modifier = itemModifier,
+                                onClick = {
+                                    if (videoActionModeAvailable) {
+                                        onVideoStabilizationModeChange(
+                                            if (videoStabilizationMode == VideoStabilizationMode.ENHANCED) {
+                                                VideoStabilizationMode.OFF
+                                            } else {
+                                                VideoStabilizationMode.ENHANCED
+                                            }
+                                        )
+                                    }
+                                }
+                            ) { tint ->
+                                VideoActionGlyph(
+                                    tint = tint,
+                                    active = videoStabilizationMode == VideoStabilizationMode.ENHANCED
+                                )
+                            }
+                            VideoMenuItem(
+                                label = "DUAL CAPTURE",
+                                modifier = itemModifier,
+                                onClick = onVideoDualCaptureClick
+                            ) { tint ->
+                                VideoDualCaptureGlyph(tint)
+                            }
+                            VideoMenuItem(
+                                label = "FORMAT",
+                                active = videoHdrEnabled,
+                                modifier = itemModifier,
+                                onClick = {
+                                    expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.CODEC) {
+                                        null
+                                    } else {
+                                        VideoSettingPanel.CODEC
+                                    }
+                                }
+                            ) { tint ->
+                                Text(
+                                    text = if (videoHdrEnabled) "HDR" else "SDR",
+                                    color = tint,
+                                    fontSize = 19.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            VideoMenuItem(
+                                label = "BITRATE",
+                                modifier = itemModifier,
+                                onClick = {
+                                    expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.BITRATE) {
+                                        null
+                                    } else {
+                                        VideoSettingPanel.BITRATE
+                                    }
+                                }
+                            ) { tint ->
+                                Text(
+                                    text = videoBitrate.bitrateMbps.toString(),
+                                    color = tint,
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            VideoMenuItem(
+                                label = "LOG",
+                                active = videoLogProfile.isEnabled,
+                                modifier = itemModifier,
+                                onClick = {
+                                    expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.LOG_PROFILE) {
+                                        null
+                                    } else {
+                                        VideoSettingPanel.LOG_PROFILE
+                                    }
+                                }
+                            ) { tint ->
+                                VideoLogGlyph(tint)
+                            }
+                            VideoMenuItem(
+                                label = "ASPECTS\nRATIO",
+                                modifier = itemModifier,
+                                onClick = {
+                                    expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.ASPECT_RATIO) {
+                                        null
+                                    } else {
+                                        VideoSettingPanel.ASPECT_RATIO
+                                    }
+                                }
+                            ) { tint ->
+                                VideoAspectRatioGlyph(tint)
+                            }
+                            VideoMenuItem(
+                                label = "SETTINGS",
+                                modifier = itemModifier,
+                                onClick = onMoreSettingsClick
+                            ) { tint ->
+                                Icon(
+                                    imageVector = Icons.Default.Settings,
+                                    contentDescription = null,
+                                    tint = tint,
+                                    modifier = Modifier.size(34.dp)
+                                )
+                            }
+                        }
+
+                        AnimatedVisibility(
+                            visible = expandedVideoPanel != null,
+                            enter = expandVertically() + fadeIn(),
+                            exit = shrinkVertically() + fadeOut()
+                        ) {
+                            Column {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                VideoSettingExpandedPanel {
+                                    when (expandedVideoPanel) {
+                                        VideoSettingPanel.ASPECT_RATIO -> {
+                                            FlowRow(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                VideoAspectRatio.entries.forEach { ratio ->
+                                                    VideoOptionChip(
+                                                        title = videoAspectRatioLabel(ratio),
+                                                        selected = videoAspectRatio == ratio,
+                                                        onClick = { onVideoAspectRatioChange(ratio) }
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        VideoSettingPanel.LOG_PROFILE -> {
+                                            FlowRow(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                availableVideoLogProfiles.forEach { profile ->
+                                                    VideoOptionChip(
+                                                        title = videoLogProfileLabel(profile),
+                                                        selected = videoLogProfile == profile,
+                                                        onClick = { onVideoLogProfileChange(profile) }
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        VideoSettingPanel.BITRATE -> {
+                                            FlowRow(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                VideoBitratePreset.entries.forEach { bitrate ->
+                                                    VideoOptionChip(
+                                                        title = "${bitrate.bitrateMbps}M",
+                                                        selected = videoBitrate == bitrate,
+                                                        onClick = { onVideoBitrateChange(bitrate) }
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        VideoSettingPanel.CODEC -> {
+                                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                                Column {
+                                                    SectionLabel(title = "DYNAMIC RANGE")
+                                                    FlowRow(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                    ) {
+                                                        VideoOptionChip(
+                                                            title = "HDR",
+                                                            selected = videoHdrEnabled,
+                                                            enabled = !videoLogProfile.isEnabled,
+                                                            onClick = {
+                                                                if (!videoHdrEnabled && !videoLogProfile.isEnabled) onVideoHdrToggle()
+                                                            }
+                                                        )
+                                                        VideoOptionChip(
+                                                            title = "SDR",
+                                                            selected = !videoHdrEnabled,
+                                                            enabled = !videoLogProfile.isEnabled,
+                                                            onClick = {
+                                                                if (videoHdrEnabled && !videoLogProfile.isEnabled) onVideoHdrToggle()
+                                                            }
+                                                        )
+                                                    }
+                                                }
+                                                Column {
+                                                    SectionLabel(title = "VIDEO CODEC")
+                                                    FlowRow(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                    ) {
+                                                        VideoCodec.entries.forEach { codec ->
+                                                            VideoOptionChip(
+                                                                title = codec.displayName,
+                                                                selected = videoCodec == codec,
+                                                                onClick = { onVideoCodecChange(codec) }
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        VideoSettingPanel.MICROPHONE -> {
+                                            FlowRow(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                VideoOptionChip(
+                                                    title = stringResource(R.string.video_microphone_auto),
+                                                    selected = videoAudioInputId == VIDEO_AUDIO_INPUT_AUTO,
+                                                    onClick = { onVideoAudioInputChange(VIDEO_AUDIO_INPUT_AUTO) }
+                                                )
+                                                videoAudioInputOptions.forEach { option ->
+                                                    VideoOptionChip(
+                                                        title = videoAudioInputLabel(option),
+                                                        selected = videoAudioInputId == option.id,
+                                                        onClick = { onVideoAudioInputChange(option.id) }
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        null -> Unit
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+
+            }
         }
     }
     }
