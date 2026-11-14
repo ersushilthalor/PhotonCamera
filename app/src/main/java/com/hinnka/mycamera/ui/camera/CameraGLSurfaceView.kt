@@ -8,6 +8,7 @@ import android.opengl.GLSurfaceView
 import android.util.AttributeSet
 import android.view.Surface
 import com.hinnka.mycamera.livephoto.LivePhotoRecorder
+import com.hinnka.mycamera.data.LiquidGlassSettings
 import com.hinnka.mycamera.camera.MeteringMode
 import com.hinnka.mycamera.lut.LutConfig
 import com.hinnka.mycamera.lut.LutRenderer
@@ -337,21 +338,41 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         cornerRadiusPx: Float,
         refractionHeightPx: Float,
         refractionAmountPx: Float,
-    ) = setLiquidGlassOverlays(bounds, cornerRadiusPx, refractionHeightPx, refractionAmountPx)
+    ) = setLiquidGlassOverlays(
+        bounds,
+        cornerRadiusPx,
+        LiquidGlassSettings().copy(
+            refractionHeightDp = refractionHeightPx,
+            refractionAmountDp = refractionAmountPx
+        )
+    )
 
     fun setLiquidGlassOverlays(
         bounds: FloatArray?,
         cornerRadiusPx: Float,
         refractionHeightPx: Float,
         refractionAmountPx: Float,
+    ) = setLiquidGlassOverlays(
+        bounds,
+        cornerRadiusPx,
+        LiquidGlassSettings().copy(
+            refractionHeightDp = refractionHeightPx,
+            refractionAmountDp = refractionAmountPx
+        )
+    )
+
+    fun setLiquidGlassOverlays(
+        bounds: FloatArray?,
+        cornerRadiusPx: Float,
+        settings: LiquidGlassSettings,
     ) {
         val safeBounds = bounds?.copyOf()
+        val safeSettings = settings.sanitized()
         queueEvent {
             renderer.setLiquidGlassOverlays(
                 safeBounds,
                 cornerRadiusPx,
-                refractionHeightPx,
-                refractionAmountPx,
+                safeSettings,
             )
             requestRender()
         }
