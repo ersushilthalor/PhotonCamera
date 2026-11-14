@@ -29,6 +29,7 @@ import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.CameraInfo
 import com.hinnka.mycamera.camera.LensType
 import com.hinnka.mycamera.viewmodel.CameraViewModel
+import com.hinnka.mycamera.ui.theme.AccentColor
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.exp
