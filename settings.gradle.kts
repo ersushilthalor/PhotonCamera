@@ -19,10 +19,10 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven(url = "https://jitpack.io")
     }
 }
 
 rootProject.name = "PhotonCamera"
 include(":app")
- 
+include(":Prismal")
+project(":Prismal").projectDir = file("prismal-library")
