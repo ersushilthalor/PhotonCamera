@@ -214,7 +214,7 @@ fun CameraTopSheet(
                     .clip(RoundedCornerShape(24.dp))
                     .background(
                         Color(0xFF1A1A1E).copy(
-                            alpha = 1f - cameraMenuTransparency.coerceIn(0f, 0.7f)
+                            alpha = 1f - cameraMenuTransparency.coerceIn(0f, 1f)
                         )
                     )
                     .border(
