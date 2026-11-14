@@ -109,6 +109,7 @@ class DualCaptureActivity : ComponentActivity() {
             onError = { message ->
                 runOnUiThread {
                     cameraReady = false
+                    engineStarted = false
                     recording = false
                     errorMessage = message
                 }
@@ -157,6 +158,10 @@ class DualCaptureActivity : ComponentActivity() {
                 )
             }
         }
+
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() = closeScreen()
+        })
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.CAMERA), PERMISSION_REQUEST)
