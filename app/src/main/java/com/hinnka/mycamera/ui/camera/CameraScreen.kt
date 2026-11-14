@@ -1088,7 +1088,6 @@ fun CameraScreen(
                 videoConfig = state.videoConfig,
                 videoCapabilities = state.videoCapabilities,
                 onVideoTorchToggle = { viewModel.setVideoTorchEnabled(!state.videoConfig.torchEnabled) },
-                onVideoStabilizationModeChange = viewModel::setVideoStabilizationMode,
                 onVideoResolutionClick = {
                     if (state.videoConfig.aspectRatio != VideoAspectRatio.OPEN_GATE) {
                         cycleVideoResolution(state)?.let(viewModel::setVideoResolution)
@@ -1105,7 +1104,6 @@ fun CameraScreen(
                     activePanel = if (activePanel == ActivePanel.SETTINGS) ActivePanel.NONE else ActivePanel.SETTINGS
                 },
                 glassBackdrop = videoTopBarBackdrop,
-                prismalBackdrop = cameraPrismalBackdrop,
                 onVideoGlassBoundsChanged = { videoTopBarGlassBounds = it },
                 onVideoLeftGlassBoundsChanged = { videoTopBarLeftGlassBounds = it },
                 modifier = Modifier
