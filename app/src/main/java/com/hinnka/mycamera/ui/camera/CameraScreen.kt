@@ -1778,9 +1778,8 @@ fun CameraScreen(
                     ) {
                         viewfinder()
                     }
-                    if (isVideoMode) {
-                        // Keep video top controls at their previous screen position,
-                        // independent of the viewfinder's vertical offset.
+                    if (isVideoMode && activePanel != ActivePanel.SETTINGS) {
+                        // The six-dot menu takes the toolbar's place while its panel is open.
                         Box(
                             modifier = Modifier
                                 .width(cardWidth)
@@ -1837,7 +1836,7 @@ fun CameraScreen(
                     }
                 }
     
-                if (!isVideoMode) topBar()
+                if (!isVideoMode && activePanel != ActivePanel.SETTINGS) topBar()
             }
 
             Box(
