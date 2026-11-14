@@ -1,10 +1,7 @@
 name: Sync upstream changes
 
 on:
-  # Check the original PhotonCamera repository every day at 09:00 IST.
-  schedule:
-    - cron: "30 3 * * *"
-  # Also allow a manual run from the Actions tab.
+  # Manual only until the fork-specific camera pipeline changes can be safely ported.
   workflow_dispatch:
 
 permissions:
