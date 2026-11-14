@@ -3470,6 +3470,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
 
+    val dualCaptureStreamSize = cameraController.dualCaptureStreamSize
+
     fun isDualCaptureSupported(): Boolean = cameraController.isDualCaptureSupported()
 
     fun setDualCaptureEnabled(enabled: Boolean) {
