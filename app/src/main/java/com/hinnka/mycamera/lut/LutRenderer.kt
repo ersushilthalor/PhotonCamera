@@ -243,13 +243,15 @@ private val LIQUID_GLASS_REFRACTION_FRAGMENT_SHADER = """
                 / max(halfSize.x * halfSize.y, 1.0);
             vec2 dispersion = direction * (displacement * uChromaticAberration * cornerFactor) / viewport;
 
-            vec3 redSample = sampleGlass(clamp(sampleUv + dispersion, vec2(0.001), vec2(0.999)), effectiveBlurRadius);
-            vec3 orangeSample = sampleGlass(clamp(sampleUv + dispersion * (2.0 / 3.0), vec2(0.001), vec2(0.999)), effectiveBlurRadius);
-            vec3 yellowSample = sampleGlass(clamp(sampleUv + dispersion * (1.0 / 3.0), vec2(0.001), vec2(0.999)), effectiveBlurRadius);
-            vec3 greenSample = color;
-            vec3 cyanSample = sampleGlass(clamp(sampleUv - dispersion * (1.0 / 3.0), vec2(0.001), vec2(0.999)), effectiveBlurRadius);
-            vec3 blueSample = sampleGlass(clamp(sampleUv - dispersion * (2.0 / 3.0), vec2(0.001), vec2(0.999)), effectiveBlurRadius);
-            vec3 purpleSample = sampleGlass(clamp(sampleUv - dispersion, vec2(0.001), vec2(0.999)), effectiveBlurRadius);
+            // Blur is applied once to the base glass color above. Dispersion taps stay
+            // single-sample so enabling chromatic aberration does not multiply the blur cost.
+            vec3 redSample = texture(uInputTexture, clamp(sampleUv + dispersion, vec2(0.001), vec2(0.999))).rgb;
+            vec3 orangeSample = texture(uInputTexture, clamp(sampleUv + dispersion * (2.0 / 3.0), vec2(0.001), vec2(0.999))).rgb;
+            vec3 yellowSample = texture(uInputTexture, clamp(sampleUv + dispersion * (1.0 / 3.0), vec2(0.001), vec2(0.999))).rgb;
+            vec3 greenSample = texture(uInputTexture, sampleUv).rgb;
+            vec3 cyanSample = texture(uInputTexture, clamp(sampleUv - dispersion * (1.0 / 3.0), vec2(0.001), vec2(0.999))).rgb;
+            vec3 blueSample = texture(uInputTexture, clamp(sampleUv - dispersion * (2.0 / 3.0), vec2(0.001), vec2(0.999))).rgb;
+            vec3 purpleSample = texture(uInputTexture, clamp(sampleUv - dispersion, vec2(0.001), vec2(0.999))).rgb;
 
             color = vec3(
                 redSample.r / 3.5 + orangeSample.r / 3.5 + yellowSample.r / 3.5 + purpleSample.r / 7.0,
