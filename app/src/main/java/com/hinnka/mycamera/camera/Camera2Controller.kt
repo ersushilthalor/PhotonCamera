@@ -8146,7 +8146,11 @@ class Camera2Controller(private val context: Context) {
         dualCapturePreviewSurface = null
         dualCapturePreviewSurfaceTexture = surfaceTexture
         if (surfaceTexture == null) {
-            if (!videoRecorder.isRecording()) stopDualCaptureCamera()
+            if (videoRecorder.isRecording()) {
+                createDualCaptureSession()
+            } else {
+                stopDualCaptureCamera()
+            }
             return
         }
         if (dualCaptureEnabled) startDualCaptureCamera()
@@ -8258,6 +8262,7 @@ class Camera2Controller(private val context: Context) {
                         } else {
                             camera.close()
                         }
+                        if (videoRecorder.isRecording()) stopVideoRecording()
                         onCameraError?.invoke(-1, "Front camera disconnected during Dual Capture.", false)
                     }
 
@@ -8268,6 +8273,7 @@ class Camera2Controller(private val context: Context) {
                         } else {
                             camera.close()
                         }
+                        if (videoRecorder.isRecording()) stopVideoRecording()
                         onCameraError?.invoke(-1, "Cannot open front camera for Dual Capture ($error).", false)
                     }
 
@@ -8294,11 +8300,12 @@ class Camera2Controller(private val context: Context) {
             return
         }
         val device = dualCaptureCameraDevice ?: return
-        val previewSurface = dualCapturePreviewSurface ?: return
-        if (!dualCaptureEnabled || _state.value.captureMode != CaptureMode.VIDEO) return
+        val previewSurface = dualCapturePreviewSurface
         val recordSurface = dualCaptureRecordSurface
+        if (!dualCaptureEnabled || _state.value.captureMode != CaptureMode.VIDEO) return
+        if (previewSurface == null && recordSurface == null) return
         val surfaces = buildList {
-            add(previewSurface)
+            previewSurface?.let(::add)
             recordSurface?.let(::add)
         }
         val generation = ++dualCaptureSessionGeneration
@@ -8309,7 +8316,7 @@ class Camera2Controller(private val context: Context) {
             val availableAfModes = characteristics.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES)
                 ?: intArrayOf()
             val request = device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
-                addTarget(previewSurface)
+                previewSurface?.let(::addTarget)
                 recordSurface?.let(::addTarget)
                 set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
                 if (availableAfModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)) {
@@ -8415,7 +8422,7 @@ class Camera2Controller(private val context: Context) {
         dualCaptureRecordSurface = videoRecorder.dualCaptureInputSurface
         if (dualCaptureRecordSurface == null) {
             onCameraError?.invoke(-1, "Dual Capture encoder input could not be created.", false)
-            stopVideoRecording()
+            videoRecorder.forceStop()
             return
         }
         createDualCaptureSession()
@@ -8430,6 +8437,17 @@ class Camera2Controller(private val context: Context) {
             _state.value.videoRecordingState.isRecording ||
             _state.value.videoRecordingState.isProcessing
         ) {
+            return
+        }
+
+        if (dualCaptureEnabled &&
+            (dualCaptureCameraDevice == null || dualCaptureSession == null)
+        ) {
+            onCameraError?.invoke(
+                -1,
+                "Wait for the front-camera Dual Capture preview to become ready before recording.",
+                false,
+            )
             return
         }
 
@@ -8529,8 +8547,10 @@ class Camera2Controller(private val context: Context) {
         ) { uri ->
             PLog.i(TAG, "Video saved: $uri")
             val completeRecording = Runnable {
-                dualCaptureRecordSurface = null
-                if (dualCaptureEnabled) createDualCaptureSession()
+                if (dualCaptureRecordSurface != null) {
+                    dualCaptureRecordSurface = null
+                    if (dualCaptureEnabled) createDualCaptureSession()
+                }
                 _state.value = _state.value.copy(videoRecordingState = VideoRecordingState())
                 if (cameraDevice != null && previewSurface != null) {
                     createPreviewSession(openGeneration = cameraOpenGeneration)
@@ -8672,7 +8692,11 @@ class Camera2Controller(private val context: Context) {
         videoCameraHlg10InputActive = false
         if (dualCaptureRecordSurface != null) {
             dualCaptureRecordSurface = null
-            if (dualCaptureEnabled) createDualCaptureSession()
+            if (dualCaptureEnabled && dualCapturePreviewSurface != null) {
+                createDualCaptureSession()
+            } else {
+                stopDualCaptureCamera()
+            }
         }
         videoRecorder.stopRecording()
         if (pendingVendorSessionParameterRestart && cameraDevice != null && previewSurface != null) {
