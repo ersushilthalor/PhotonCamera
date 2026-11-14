@@ -1427,4 +1427,11 @@
     <string name="oppo_refocus_far">Far</string>
     <string name="settings_camera_menu_transparency">Quick menu transparency</string>
     <string name="settings_camera_menu_transparency_description">Adjust how much of the live preview shows through the photo and video quick menu. 0% is opaque; higher values reveal more of the blurred preview.</string>
+
+    <string name="dual_capture_layout">Dual capture layout</string>
+    <string name="dual_capture_layout_picture_in_picture">Picture-in-picture</string>
+    <string name="dual_capture_layout_top_bottom">Top / bottom</string>
+    <string name="dual_capture_layout_side_by_side">Side by side</string>
+    <string name="dual_capture_not_supported">Dual Capture requires a supported rear/front concurrent camera pair.</string>
+    <string name="dual_capture_front_stream_error">The front-camera stream could not be started.</string>
 </resources>
