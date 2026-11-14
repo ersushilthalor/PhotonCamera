@@ -1922,7 +1922,7 @@ fun SettingsScreen(
                             description = "Gaussian-style softening behind the glass surface.",
                             value = liquidGlassSettings.blurRadiusDp,
                             valueRange = 0f..24f,
-                            valueTextFormatter = { "\${it.toInt()} pt" },
+                            valueTextFormatter = { "${it.toInt()} pt" },
                             resetValue = 8f,
                             onValueChange = { v -> updateLiquidGlass { it.copy(blurRadiusDp = v) } }
                         )
@@ -1931,7 +1931,7 @@ fun SettingsScreen(
                             title = "Refraction Height",
                             value = liquidGlassSettings.refractionHeightDp,
                             valueRange = 0f..32f,
-                            valueTextFormatter = { "\${it.toInt()} pt" },
+                            valueTextFormatter = { "${it.toInt()} pt" },
                             resetValue = 16f,
                             onValueChange = { v -> updateLiquidGlass { it.copy(refractionHeightDp = v) } }
                         )
@@ -1940,7 +1940,7 @@ fun SettingsScreen(
                             title = "Refraction Amount",
                             value = liquidGlassSettings.refractionAmountDp,
                             valueRange = 0f..60f,
-                            valueTextFormatter = { "\${it.toInt()} pt" },
+                            valueTextFormatter = { "${it.toInt()} pt" },
                             resetValue = 32f,
                             onValueChange = { v -> updateLiquidGlass { it.copy(refractionAmountDp = v) } }
                         )
@@ -1949,7 +1949,7 @@ fun SettingsScreen(
                             title = "Chromatic Aberration",
                             value = liquidGlassSettings.chromaticAberration,
                             valueRange = 0f..1f,
-                            valueTextFormatter = { "\${(it * 100).toInt()}%" },
+                            valueTextFormatter = { "${(it * 100).toInt()}%" },
                             resetValue = 0f,
                             onValueChange = { v -> updateLiquidGlass { it.copy(chromaticAberration = v) } }
                         )
@@ -1968,7 +1968,7 @@ fun SettingsScreen(
                             title = "Corner Radius",
                             value = liquidGlassSettings.cornerRadiusDp,
                             valueRange = 0f..48f,
-                            valueTextFormatter = { "\${it.toInt()} pt" },
+                            valueTextFormatter = { "${it.toInt()} pt" },
                             resetValue = 22f,
                             onValueChange = { v -> updateLiquidGlass { it.copy(cornerRadiusDp = v) } }
                         )
@@ -2041,7 +2041,7 @@ fun SettingsScreen(
                             title = "Surface Tint",
                             value = liquidGlassSettings.surfaceTintAlpha,
                             valueRange = 0f..0.6f,
-                            valueTextFormatter = { "\${(it * 100).toInt()}%" },
+                            valueTextFormatter = { "${(it * 100).toInt()}%" },
                             resetValue = 0f,
                             onValueChange = { v -> updateLiquidGlass { it.copy(surfaceTintAlpha = v) } }
                         )
@@ -2050,7 +2050,7 @@ fun SettingsScreen(
                             title = "Color Tint Alpha",
                             value = liquidGlassSettings.tintAlpha,
                             valueRange = 0.05f..0.75f,
-                            valueTextFormatter = { "\${(it * 100).toInt()}%" },
+                            valueTextFormatter = { "${(it * 100).toInt()}%" },
                             resetValue = 0.28f,
                             onValueChange = { v -> updateLiquidGlass { it.copy(tintAlpha = v) } }
                         )
@@ -2092,7 +2092,7 @@ fun SettingsScreen(
                                 title = "Alpha",
                                 value = liquidGlassSettings.specularAlpha,
                                 valueRange = 0f..1f,
-                                valueTextFormatter = { "\${(it * 100).toInt()}%" },
+                                valueTextFormatter = { "${(it * 100).toInt()}%" },
                                 resetValue = 1f,
                                 onValueChange = { v -> updateLiquidGlass { it.copy(specularAlpha = v) } }
                             )
@@ -2124,7 +2124,7 @@ fun SettingsScreen(
                                 title = "Shadow Radius",
                                 value = liquidGlassSettings.depthShadowRadiusDp,
                                 valueRange = 0f..32f,
-                                valueTextFormatter = { "\${it.toInt()} pt" },
+                                valueTextFormatter = { "${it.toInt()} pt" },
                                 resetValue = 24f,
                                 onValueChange = { v -> updateLiquidGlass { it.copy(depthShadowRadiusDp = v) } }
                             )
@@ -2133,7 +2133,7 @@ fun SettingsScreen(
                                 title = "Shadow Alpha",
                                 value = liquidGlassSettings.depthShadowAlpha,
                                 valueRange = 0f..1f,
-                                valueTextFormatter = { "\${(it * 100).toInt()}%" },
+                                valueTextFormatter = { "${(it * 100).toInt()}%" },
                                 resetValue = 1f,
                                 onValueChange = { v -> updateLiquidGlass { it.copy(depthShadowAlpha = v) } }
                             )
@@ -2150,7 +2150,7 @@ fun SettingsScreen(
                                 title = "Inset Radius",
                                 value = liquidGlassSettings.depthInsetRadiusDp,
                                 valueRange = 0f..24f,
-                                valueTextFormatter = { "\${it.toInt()} pt" },
+                                valueTextFormatter = { "${it.toInt()} pt" },
                                 resetValue = 8f,
                                 onValueChange = { v -> updateLiquidGlass { it.copy(depthInsetRadiusDp = v) } }
                             )
@@ -2159,7 +2159,7 @@ fun SettingsScreen(
                                 title = "Inset Alpha",
                                 value = liquidGlassSettings.depthInsetAlpha,
                                 valueRange = 0f..1f,
-                                valueTextFormatter = { "\${(it * 100).toInt()}%" },
+                                valueTextFormatter = { "${(it * 100).toInt()}%" },
                                 resetValue = 0.5f,
                                 onValueChange = { v -> updateLiquidGlass { it.copy(depthInsetAlpha = v) } }
                             )
