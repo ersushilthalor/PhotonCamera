@@ -20,6 +20,7 @@ import android.util.Size
 import android.view.Surface
 import androidx.core.app.ActivityCompat
 import com.hinnka.mycamera.lut.RealtimeVideoRenderer
+import com.hinnka.mycamera.video.DualCaptureLayout
 import com.hinnka.mycamera.lut.VideoColorEffectLayer
 import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD
 import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_STRENGTH
@@ -131,6 +132,10 @@ class VideoRecorder(
     private var requestedEnhancedStabilization = false
     private var requestedEnhancedStabilizationStrength = DEFAULT_VIDEO_STABILIZATION_STRENGTH
     private var requestedEnhancedStabilizationLookahead = DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD
+    private var requestedDualCaptureInputSize: Size? = null
+    private var requestedDualCaptureLayout: DualCaptureLayout = DualCaptureLayout.PICTURE_IN_PICTURE
+    private var requestedDualCapturePositionX: Float = 0.66f
+    private var requestedDualCapturePositionY: Float = 0.05f
     private var cameraInputStarted = false
     private var requestedCameraTimestampSource = CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_UNKNOWN
     private var requestedSensorOrientationDegrees = 0
@@ -185,6 +190,11 @@ class VideoRecorder(
             isRecording && !stopRequested
         }
 
+    val dualCaptureInputSurface: Surface?
+        get() = renderer?.dualCaptureInputSurface.takeIf {
+            isRecording && !stopRequested
+        }
+
     fun startRecording(
         size: Size,
         cameraInputSize: Size = size,
@@ -203,6 +213,10 @@ class VideoRecorder(
         enhancedStabilizationLookahead: Int = DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD,
         recordingPath: VideoRecordingPath = VideoRecordingPath.DCIM_PHOTON,
         recordingTreeUri: String? = null,
+        dualCaptureInputSize: Size? = null,
+        dualCaptureLayout: DualCaptureLayout = DualCaptureLayout.PICTURE_IN_PICTURE,
+        dualCapturePositionX: Float = 0.66f,
+        dualCapturePositionY: Float = 0.05f,
         onError: ((String) -> Unit)? = null,
         onFinished: ((Uri?) -> Unit)? = null
     ): Boolean {
@@ -211,6 +225,10 @@ class VideoRecorder(
         requestedOrientationHintDegrees = normalizeOrientationHint(orientationHintDegrees)
         requestedOutputSize = Size(size.width.align16(), size.height.align16())
         requestedCameraInputSize = cameraInputSize
+        requestedDualCaptureInputSize = dualCaptureInputSize
+        requestedDualCaptureLayout = dualCaptureLayout
+        requestedDualCapturePositionX = dualCapturePositionX.coerceIn(0f, 1f)
+        requestedDualCapturePositionY = dualCapturePositionY.coerceIn(0f, 1f)
         // SurfaceTexture 变换后的 OES 内容已经处于自然显示方向，编码画布必须继续使用
         // 已解析的显示尺寸（片门全开使用最大相机输入尺寸）。设备横竖屏差异只通过容器 rotation metadata 表达。
         requestedSize = requestedOutputSize
@@ -460,6 +478,25 @@ class VideoRecorder(
         PLog.d(TAG, "Video recording resumed")
     }
 
+    fun updateDualCaptureLayout(layout: DualCaptureLayout) {
+        if (!isRecording || stopRequested) return
+        requestedDualCaptureLayout = layout
+        scope.launch(renderDispatcher) {
+            if (!isRecording || stopRequested) return@launch
+            renderer?.updateDualCaptureLayout(layout)
+        }
+    }
+
+    fun updateDualCapturePosition(x: Float, y: Float) {
+        if (!isRecording || stopRequested) return
+        requestedDualCapturePositionX = x.coerceIn(0f, 1f)
+        requestedDualCapturePositionY = y.coerceIn(0f, 1f)
+        scope.launch(renderDispatcher) {
+            if (!isRecording || stopRequested) return@launch
+            renderer?.updateDualCapturePosition(requestedDualCapturePositionX, requestedDualCapturePositionY)
+        }
+    }
+
     fun updateCreativeRecipeParams(params: com.hinnka.mycamera.model.ColorRecipeParams) {
         if (!isRecording || stopRequested) return
         scope.launch(renderDispatcher) {
@@ -499,6 +536,10 @@ class VideoRecorder(
             enhancedStabilizationEnabled = requestedEnhancedStabilization,
             enhancedStabilizationStrength = requestedEnhancedStabilizationStrength,
             enhancedStabilizationLookahead = requestedEnhancedStabilizationLookahead,
+            dualCaptureInputSize = requestedDualCaptureInputSize,
+            dualCaptureLayout = requestedDualCaptureLayout,
+            dualCapturePositionX = requestedDualCapturePositionX,
+            dualCapturePositionY = requestedDualCapturePositionY,
         )
         renderer = realtimeRenderer
         realtimeRenderer.initialize(
