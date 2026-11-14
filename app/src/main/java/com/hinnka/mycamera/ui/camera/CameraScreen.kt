@@ -10,6 +10,7 @@ import android.os.Environment
 import android.os.SystemClock
 import android.provider.Settings
 import android.view.WindowManager
+import android.view.TextureView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -50,6 +51,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -84,6 +86,7 @@ import com.hinnka.mycamera.utils.OrientationObserver
 import com.hinnka.mycamera.viewmodel.CameraViewModel
 import com.hinnka.mycamera.viewmodel.GalleryViewModel
 import com.hinnka.mycamera.video.CaptureMode
+import com.hinnka.mycamera.video.DualCaptureLayout
 import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VideoFpsPreset
 import com.hinnka.mycamera.video.VideoLogProfile
@@ -228,6 +231,10 @@ fun CameraScreen(
     val isPhotoVideoModeTransition = previousPreviewCaptureMode != state.captureMode
 
     LaunchedEffect(state.captureMode) {
+        if (state.captureMode != CaptureMode.VIDEO && dualCaptureEnabled) {
+            dualCaptureEnabled = false
+            viewModel.setDualCaptureEnabled(false)
+        }
         if (isPhotoVideoModeTransition) {
             delay(PhotoVideoViewfinderExpansionDurationMillis.toLong())
         }
@@ -269,6 +276,10 @@ fun CameraScreen(
     val videoCodec by viewModel.videoCodec.collectAsState()
     val videoAudioInputOptions by viewModel.videoAudioInputOptions.collectAsState()
     val phantomPipPreview by viewModel.phantomPipPreview.collectAsState()
+    var dualCaptureEnabled by remember { mutableStateOf(false) }
+    var dualCaptureLayout by remember { mutableStateOf(DualCaptureLayout.PICTURE_IN_PICTURE) }
+    var dualCaptureLayoutMenuExpanded by remember { mutableStateOf(false) }
+    var dualCaptureDragOffset by remember { mutableStateOf(Offset.Zero) }
     val rawDcpId by viewModel.rawDcpId.collectAsState()
     val rawDcpIdsByLens by viewModel.rawDcpIdsByLens.collectAsState()
     val rawHncsFilmCurveMode by viewModel.rawHncsFilmCurveMode.collectAsState()
@@ -1073,6 +1084,65 @@ fun CameraScreen(
             }
         }
 
+
+        val zoomBarWithDualCaptureLayout = @Composable {
+            if (dualCaptureEnabled && isVideoMode) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        zoomBar()
+                    }
+                    Box {
+                        IconButton(
+                            onClick = { dualCaptureLayoutMenuExpanded = true },
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Text(
+                                text = "▤",
+                                color = Color.White,
+                                fontSize = 19.sp,
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = dualCaptureLayoutMenuExpanded,
+                            onDismissRequest = { dualCaptureLayoutMenuExpanded = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.dual_capture_layout_picture_in_picture)) },
+                                onClick = {
+                                    dualCaptureLayout = DualCaptureLayout.PICTURE_IN_PICTURE
+                                    dualCaptureDragOffset = Offset.Zero
+                                    viewModel.setDualCaptureLayout(dualCaptureLayout)
+                                    viewModel.setDualCapturePosition(0.66f, 0.05f)
+                                    dualCaptureLayoutMenuExpanded = false
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.dual_capture_layout_top_bottom)) },
+                                onClick = {
+                                    dualCaptureLayout = DualCaptureLayout.TOP_BOTTOM
+                                    viewModel.setDualCaptureLayout(dualCaptureLayout)
+                                    dualCaptureLayoutMenuExpanded = false
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.dual_capture_layout_side_by_side)) },
+                                onClick = {
+                                    dualCaptureLayout = DualCaptureLayout.SIDE_BY_SIDE
+                                    viewModel.setDualCaptureLayout(dualCaptureLayout)
+                                    dualCaptureLayoutMenuExpanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+            } else {
+                zoomBar()
+            }
+        }
+
         val parameterRuler = @Composable { rulerModifier: Modifier ->
             val whiteBalanceCurrentValue = if (
                 state.awbMode == android.hardware.camera2.CameraMetadata.CONTROL_AWB_MODE_AUTO
@@ -1395,6 +1465,99 @@ fun CameraScreen(
                                     y = if (state.captureMode == CaptureMode.VIDEO) 3.dp else 0.dp
                                 )
                         )
+                    }
+
+
+                    if (state.captureMode == CaptureMode.VIDEO && dualCaptureEnabled) {
+                        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                            val insetWidth = maxWidth * 0.34f
+                            val insetHeight = insetWidth / (16f / 9f)
+                            val pipModifier = Modifier
+                                .width(insetWidth)
+                                .aspectRatio(16f / 9f)
+                                .align(Alignment.TopEnd)
+                                .padding(12.dp)
+                                .offset {
+                                    IntOffset(
+                                        dualCaptureDragOffset.x.roundToInt(),
+                                        dualCaptureDragOffset.y.roundToInt(),
+                                    )
+                                }
+                                .pointerInput(dualCaptureLayout, maxWidth, maxHeight) {
+                                    if (dualCaptureLayout == DualCaptureLayout.PICTURE_IN_PICTURE) {
+                                        detectDragGestures { change, dragAmount ->
+                                            change.consume()
+                                            val maxX = -(maxWidth.toPx() - insetWidth.toPx()).coerceAtLeast(0f)
+                                            val maxY = (maxHeight.toPx() - insetHeight.toPx()).coerceAtLeast(0f)
+                                            val next = Offset(
+                                                (dualCaptureDragOffset.x + dragAmount.x).coerceIn(maxX, 0f),
+                                                (dualCaptureDragOffset.y + dragAmount.y).coerceIn(0f, maxY),
+                                            )
+                                            dualCaptureDragOffset = next
+                                            val normalizedX = (maxWidth.toPx() - insetWidth.toPx() + next.x) /
+                                                maxWidth.toPx().coerceAtLeast(1f)
+                                            val normalizedY = next.y / maxHeight.toPx().coerceAtLeast(1f)
+                                            viewModel.setDualCapturePosition(normalizedX, normalizedY)
+                                        }
+                                    }
+                                }
+                            val frontPreviewModifier = when (dualCaptureLayout) {
+                                DualCaptureLayout.PICTURE_IN_PICTURE -> pipModifier
+                                DualCaptureLayout.TOP_BOTTOM -> Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .fillMaxWidth()
+                                    .fillMaxHeight(0.5f)
+                                DualCaptureLayout.SIDE_BY_SIDE -> Modifier
+                                    .align(Alignment.CenterEnd)
+                                    .fillMaxWidth(0.5f)
+                                    .fillMaxHeight()
+                            }
+                            val pipShape = RoundedCornerShape(
+                                if (dualCaptureLayout == DualCaptureLayout.PICTURE_IN_PICTURE) 12.dp else 0.dp
+                            )
+                            Box(
+                                modifier = frontPreviewModifier
+                                    .clip(pipShape)
+                                    .border(
+                                        width = if (dualCaptureLayout == DualCaptureLayout.PICTURE_IN_PICTURE) 1.dp else 0.dp,
+                                        color = Color.White.copy(alpha = 0.85f),
+                                        shape = pipShape,
+                                    ),
+                            ) {
+                                AndroidView(
+                                    modifier = Modifier.fillMaxSize(),
+                                    factory = { context ->
+                                        TextureView(context).apply {
+                                            scaleX = -1f
+                                            surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                                                override fun onSurfaceTextureAvailable(
+                                                    surface: SurfaceTexture,
+                                                    width: Int,
+                                                    height: Int,
+                                                ) {
+                                                    viewModel.setDualCapturePreviewSurfaceTexture(surface)
+                                                }
+
+                                                override fun onSurfaceTextureSizeChanged(
+                                                    surface: SurfaceTexture,
+                                                    width: Int,
+                                                    height: Int,
+                                                ) {
+                                                    viewModel.setDualCapturePreviewSurfaceTexture(surface)
+                                                }
+
+                                                override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                                                    viewModel.setDualCapturePreviewSurfaceTexture(null)
+                                                    return true
+                                                }
+
+                                                override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
+                                            }
+                                        }
+                                    },
+                                )
+                            }
+                        }
                     }
 
                     Box(
@@ -1753,7 +1916,7 @@ fun CameraScreen(
                                 .offset(y = -VideoViewfinderAdditionalOffset),
                             contentAlignment = Alignment.Center
                         ) {
-                            zoomBar()
+                            zoomBarWithDualCaptureLayout()
                         }
                     }
                     if (canShowZoomJoystick) {
@@ -1807,7 +1970,7 @@ fun CameraScreen(
                                     .fillMaxWidth()
                                     .height(CameraControlsLayoutDefaults.ZoomBarHeight)
                             ) {
-                                zoomBar()
+                                zoomBarWithDualCaptureLayout()
                             }
                         } else {
                             Spacer(modifier = Modifier.height(0.dp))
@@ -1878,11 +2041,23 @@ fun CameraScreen(
             onVideoStabilizationModeChange = viewModel::setVideoStabilizationMode,
             onVideoEditClick = { activePanel = ActivePanel.EDIT },
             onVideoDualCaptureClick = {
-                android.widget.Toast.makeText(
-                    context,
-                    "Coming soon",
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
+                if (state.videoRecordingState.isRecording || state.videoRecordingState.isProcessing) {
+                    android.widget.Toast.makeText(
+                        context,
+                        context.getString(R.string.dual_capture_stop_recording_to_change),
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                } else if (!dualCaptureEnabled && !viewModel.isDualCaptureSupported()) {
+                    android.widget.Toast.makeText(
+                        context,
+                        context.getString(R.string.dual_capture_not_supported),
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                } else {
+                    dualCaptureEnabled = !dualCaptureEnabled
+                    dualCaptureDragOffset = Offset.Zero
+                    viewModel.setDualCaptureEnabled(dualCaptureEnabled)
+                }
             },
             videoCodec = videoCodec,
             onVideoCodecChange = { viewModel.setVideoCodec(it) },
