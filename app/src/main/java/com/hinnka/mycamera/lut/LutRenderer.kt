@@ -5,7 +5,10 @@ import android.graphics.Bitmap
 import android.graphics.PointF
 import android.graphics.SurfaceTexture
 import android.opengl.*
+import android.os.Build
 import android.os.SystemClock
+import com.hinnka.mycamera.data.LiquidGlassPipelineTier
+import com.hinnka.mycamera.data.LiquidGlassSettings
 import com.hinnka.mycamera.livephoto.LivePhotoRecorder
 import com.hinnka.mycamera.livephoto.resolveLivePhotoRotationDegrees
 import com.hinnka.mycamera.preview.EyeFocusPreviewFrame
@@ -58,6 +61,29 @@ private val LIQUID_GLASS_REFRACTION_FRAGMENT_SHADER = """
     uniform float uRefractionHeightPx;
     uniform float uRefractionAmountPx;
     uniform float uTintAlpha;
+    uniform float uBlurRadiusPx;
+    uniform float uBrightness;
+    uniform float uSaturation;
+    uniform float uChromaticAberration;
+    uniform float uDepthEffect;
+    uniform float uAdaptiveLuminance;
+    uniform float uAdaptiveStyle;
+    uniform float uUseVibrancy;
+    uniform float uSurfaceTintAlpha;
+    uniform float uSpecularEnabled;
+    uniform float uSpecularAlpha;
+    uniform float uSpecularWidthPx;
+    uniform float uSpecularStyle;
+    uniform float uDepthShadowEnabled;
+    uniform float uDepthShadowRadiusPx;
+    uniform float uDepthShadowAlpha;
+    uniform float uDepthInsetEnabled;
+    uniform float uDepthInsetRadiusPx;
+    uniform float uDepthInsetAlpha;
+    uniform float uGradientBlurFadeEnd;
+    uniform float uGradientBottomWeight;
+    uniform float uPipelineTier;
+    uniform int uPassMode;
 
     float roundedRectDistance(vec2 point, vec2 halfSize, float radius) {
         vec2 q = abs(point) - halfSize + vec2(radius);
@@ -83,54 +109,145 @@ private val LIQUID_GLASS_REFRACTION_FRAGMENT_SHADER = """
         return 1.0 - sqrt(max(0.0, 1.0 - x * x));
     }
 
+    vec3 sampleGlass(vec2 uv, float blurRadiusPx) {
+        vec2 texel = blurRadiusPx / max(uViewportSize, vec2(1.0));
+        vec3 color = texture(uInputTexture, uv).rgb * 0.28;
+        color += texture(uInputTexture, clamp(uv + vec2(texel.x, 0.0), vec2(0.001), vec2(0.999))).rgb * 0.12;
+        color += texture(uInputTexture, clamp(uv - vec2(texel.x, 0.0), vec2(0.001), vec2(0.999))).rgb * 0.12;
+        color += texture(uInputTexture, clamp(uv + vec2(0.0, texel.y), vec2(0.001), vec2(0.999))).rgb * 0.12;
+        color += texture(uInputTexture, clamp(uv - vec2(0.0, texel.y), vec2(0.001), vec2(0.999))).rgb * 0.12;
+        vec2 diagonal = texel * 0.72;
+        color += texture(uInputTexture, clamp(uv + vec2(diagonal.x, diagonal.y), vec2(0.001), vec2(0.999))).rgb * 0.055;
+        color += texture(uInputTexture, clamp(uv + vec2(diagonal.x, -diagonal.y), vec2(0.001), vec2(0.999))).rgb * 0.055;
+        color += texture(uInputTexture, clamp(uv + vec2(-diagonal.x, diagonal.y), vec2(0.001), vec2(0.999))).rgb * 0.055;
+        color += texture(uInputTexture, clamp(uv - diagonal, vec2(0.001), vec2(0.999))).rgb * 0.055;
+        return color;
+    }
+
     void main() {
         vec2 viewport = max(uViewportSize, vec2(1.0));
         vec2 rectSize = max((uOverlayRect.zw - uOverlayRect.xy) * viewport, vec2(1.0));
         vec2 localPosition = (vTexCoord - uOverlayRect.xy) * viewport;
         vec2 centeredPosition = localPosition - rectSize * 0.5;
+        vec2 halfSize = rectSize * 0.5;
         float radius = clamp(uCornerRadiusPx, 0.0, min(rectSize.x, rectSize.y) * 0.5);
-        float distanceToEdge = roundedRectDistance(centeredPosition, rectSize * 0.5, radius);
+        float distanceToEdge = roundedRectDistance(centeredPosition, halfSize, radius);
+
+        // Pass 1 draws a soft shadow outside the glass shape before the glass itself.
+        if (uPassMode == 1) {
+            if (uDepthShadowEnabled < 0.5 || uPipelineTier < 1.0) discard;
+            vec2 shadowPoint = centeredPosition + vec2(0.0, uDepthShadowRadiusPx * 0.10);
+            float shadowDistance = roundedRectDistance(shadowPoint, halfSize, radius);
+            float outsideDistance = max(shadowDistance, 0.0);
+            float shadowAlpha = (1.0 - smoothstep(0.0, max(uDepthShadowRadiusPx, 1.0), outsideDistance))
+                * step(0.0, shadowDistance) * uDepthShadowAlpha * 0.10;
+            if (shadowAlpha <= 0.001) discard;
+            fragColor = vec4(0.0, 0.0, 0.0, shadowAlpha);
+            return;
+        }
+
         float antialias = max(fwidth(distanceToEdge), 0.75);
         float coverage = 1.0 - smoothstep(-antialias, antialias, distanceToEdge);
         if (coverage <= 0.001) discard;
 
-        // Port of Kyant Backdrop 2.0.1 lens(): rounded-rect SDF refraction with
-        // the same circular edge profile and depth-aware inward sampling.
         float insideDepth = max(-distanceToEdge, 0.0);
+        float verticalPosition = clamp(localPosition.y / max(rectSize.y, 1.0), 0.0, 1.0);
+        float bottomWeight = mix(clamp(uGradientBottomWeight, 0.0, 1.0), 1.0, smoothstep(0.0, 0.65, verticalPosition));
         float refractionProgress = clamp(
             1.0 - insideDepth / max(uRefractionHeightPx, 1.0),
             0.0,
             1.0
         );
-        float displacement = circleMap(refractionProgress) * max(uRefractionAmountPx, 0.0);
-        float gradientRadius = min(radius * 1.5, min(rectSize.x, rectSize.y) * 0.5);
-        vec2 gradient = roundedRectGradient(centeredPosition, rectSize * 0.5, gradientRadius);
-        vec2 direction = safeDirection(gradient + safeDirection(centeredPosition));
+        float displacement = 0.0;
+        vec2 gradient = roundedRectGradient(centeredPosition, halfSize, min(radius * 1.5, min(halfSize.x, halfSize.y)));
+
+        // Auto / Liquid use the full lens path. Standard keeps blur and color controls;
+        // Legacy falls back to the frosted tint treatment.
+        if (uPipelineTier >= 2.5 && uRefractionHeightPx > 0.0 && uRefractionAmountPx > 0.0) {
+            displacement = circleMap(refractionProgress) * uRefractionAmountPx * bottomWeight;
+        }
+        vec2 depthDirection = uDepthEffect > 0.5 ? safeDirection(centeredPosition) : vec2(0.0);
+        vec2 direction = safeDirection(gradient + depthDirection);
         vec2 sampleUv = clamp(
             vTexCoord + (displacement * direction) / viewport,
             vec2(0.001),
             vec2(0.999)
         );
 
-        vec3 color = texture(uInputTexture, sampleUv).rgb;
-        float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
-        color = mix(vec3(luminance), color, 1.16);
-        // A restrained cool-blue tint, rather than the old charcoal overlay.
-        color = mix(color, vec3(0.58, 0.74, 0.93), clamp(uTintAlpha, 0.0, 0.13));
+        // Sample the live camera preview texture, with an adjustable compact Gaussian-style blur.
+        float baseLuminance = dot(texture(uInputTexture, sampleUv).rgb, vec3(0.2126, 0.7152, 0.0722));
+        float luminanceCurve = (baseLuminance * 2.0 - 1.0);
+        luminanceCurve = sign(luminanceCurve) * luminanceCurve * luminanceCurve;
+        float adaptiveBrightness = 0.0;
+        float adaptiveContrast = 1.0;
+        float adaptiveBlurScale = 1.0;
+        if (uAdaptiveLuminance > 0.5) {
+            float minBrightness = uAdaptiveStyle > 0.5 ? -0.06 : -0.12;
+            float maxBrightness = uAdaptiveStyle > 0.5 ? 0.12 : 0.22;
+            float midBrightness = uAdaptiveStyle > 0.5 ? 0.05 : 0.08;
+            float minContrast = uAdaptiveStyle > 0.5 ? 0.88 : 0.75;
+            float maxBlurScale = uAdaptiveStyle > 0.5 ? 1.5 : 2.0;
+            float minBlurScale = uAdaptiveStyle > 0.5 ? 0.5 : 0.25;
+            adaptiveBrightness = luminanceCurve > 0.0
+                ? mix(midBrightness, maxBrightness, luminanceCurve)
+                : mix(midBrightness, minBrightness, -luminanceCurve);
+            adaptiveContrast = luminanceCurve > 0.0
+                ? mix(1.0, minContrast, luminanceCurve)
+                : 1.0;
+            adaptiveBlurScale = luminanceCurve > 0.0
+                ? mix(1.0, maxBlurScale, luminanceCurve)
+                : mix(1.0, minBlurScale, -luminanceCurve);
+        }
 
-        // A fine, directional blue-white highlight replaces the heavy dark-looking rim.
-        float rimWidth = max(1.0, fwidth(distanceToEdge) * 1.25);
-        float rim = 1.0 - smoothstep(0.0, rimWidth, abs(distanceToEdge));
-        vec2 highlightGradient = roundedRectGradient(
-            centeredPosition,
-            rectSize * 0.5,
-            gradientRadius
-        );
-        float directionalLight = pow(
-            max(dot(safeDirection(highlightGradient), vec2(-0.60, 0.80)), 0.0),
-            2.0
-        );
-        color += vec3(0.70, 0.82, 0.98) * directionalLight * rim * 0.24;
+        float blurFadeEnd = max(uGradientBlurFadeEnd, 0.001);
+        float gradientBlurMask = smoothstep(0.0, blurFadeEnd, verticalPosition);
+        float effectiveBlurRadius = uPipelineTier >= 2.0
+            ? uBlurRadiusPx * adaptiveBlurScale * gradientBlurMask
+            : 0.0;
+        vec3 color = sampleGlass(sampleUv, effectiveBlurRadius);
+
+        // Prismal-style chromatic dispersion (separate red/green/blue sample offsets).
+        if (uPipelineTier >= 3.0 && uChromaticAberration > 0.001) {
+            float cornerFactor = (centeredPosition.x * centeredPosition.y)
+                / max(halfSize.x * halfSize.y, 1.0);
+            vec2 dispersion = direction * (displacement * uChromaticAberration * cornerFactor) / viewport;
+            vec3 redSample = sampleGlass(clamp(sampleUv + dispersion, vec2(0.001), vec2(0.999)), effectiveBlurRadius);
+            vec3 blueSample = sampleGlass(clamp(sampleUv - dispersion, vec2(0.001), vec2(0.999)), effectiveBlurRadius);
+            color = vec3(redSample.r, color.g, blueSample.b);
+        }
+
+        float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
+        float saturation = uUseVibrancy > 0.5 ? 1.5 : uSaturation;
+        float brightness = uAdaptiveLuminance > 0.5 ? adaptiveBrightness : uBrightness;
+        float contrast = uAdaptiveLuminance > 0.5 ? adaptiveContrast : 1.0;
+        color = mix(vec3(luminance), color, saturation);
+        color = (color - vec3(0.5)) * contrast + vec3(0.5 + brightness);
+
+        // Hue-preserving translucent blue tint and the white surface tint controls.
+        color = mix(color, vec3(0.58, 0.74, 0.93), clamp(uTintAlpha, 0.0, 0.75));
+        color = mix(color, vec3(1.0), clamp(uSurfaceTintAlpha, 0.0, 0.6));
+
+        // Optional depth inset: a soft inner shadow that follows the rounded edge.
+        if (uDepthInsetEnabled > 0.5 && uPipelineTier >= 2.0) {
+            float inset = exp(-insideDepth / max(uDepthInsetRadiusPx, 1.0));
+            color = mix(color, vec3(0.015, 0.025, 0.04), inset * uDepthInsetAlpha * 0.28);
+        }
+
+        // Specular edge highlight: directional, ambient or plain.
+        if (uSpecularEnabled > 0.5 && uPipelineTier >= 2.0) {
+            float rimWidth = max(uSpecularWidthPx, max(1.0, fwidth(distanceToEdge) * 1.25));
+            float rim = 1.0 - smoothstep(0.0, rimWidth, abs(distanceToEdge));
+            vec2 highlightGradient = roundedRectGradient(centeredPosition, halfSize, min(radius * 1.5, min(halfSize.x, halfSize.y)));
+            float facing = dot(safeDirection(highlightGradient), vec2(0.70710678, 0.70710678));
+            float highlight = 1.0;
+            if (uSpecularStyle < 0.5) {
+                highlight = pow(max(facing, 0.0), 1.0);
+            } else if (uSpecularStyle < 1.5) {
+                highlight = pow(abs(facing), 1.0);
+            }
+            color += vec3(0.78, 0.88, 1.0) * rim * highlight * uSpecularAlpha * 0.38;
+        }
+
         fragColor = vec4(max(color, vec3(0.0)), coverage);
     }
 """.trimIndent()
@@ -316,9 +433,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     @Volatile
     private var liquidGlassOverlayCornerRadiusPx = 0f
     @Volatile
-    private var liquidGlassOverlayRefractionHeightPx = 24f
-    @Volatile
-    private var liquidGlassOverlayRefractionAmountPx = 48f
+    private var liquidGlassSettings = LiquidGlassSettings()
 
     // SurfaceTexture 变换矩阵
     private val stMatrix = FloatArray(16).apply { Matrix.setIdentityM(this, 0) }
@@ -2689,13 +2804,33 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         cornerRadiusPx: Float,
         refractionHeightPx: Float,
         refractionAmountPx: Float,
-    ) = setLiquidGlassOverlays(bounds, cornerRadiusPx, refractionHeightPx, refractionAmountPx)
+    ) = setLiquidGlassOverlays(
+        bounds,
+        cornerRadiusPx,
+        LiquidGlassSettings().copy(
+            refractionHeightDp = refractionHeightPx,
+            refractionAmountDp = refractionAmountPx
+        )
+    )
 
     fun setLiquidGlassOverlays(
         bounds: FloatArray?,
         cornerRadiusPx: Float,
         refractionHeightPx: Float,
         refractionAmountPx: Float,
+    ) = setLiquidGlassOverlays(
+        bounds,
+        cornerRadiusPx,
+        LiquidGlassSettings().copy(
+            refractionHeightDp = refractionHeightPx,
+            refractionAmountDp = refractionAmountPx
+        )
+    )
+
+    fun setLiquidGlassOverlays(
+        bounds: FloatArray?,
+        cornerRadiusPx: Float,
+        settings: LiquidGlassSettings,
     ) {
         val safeBounds = bounds?.takeIf { values ->
             values.size >= 5 &&
@@ -2704,13 +2839,12 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 (0 until values.size step 5).all { index ->
                     values[index + 2] > values[index] &&
                         values[index + 3] > values[index + 1] &&
-                        values[index + 4] in 0f..0.28f
+                        values[index + 4] in 0f..0.75f
                 }
         }?.copyOf()
         liquidGlassOverlayBounds = safeBounds
         liquidGlassOverlayCornerRadiusPx = cornerRadiusPx.coerceAtLeast(0f)
-        liquidGlassOverlayRefractionHeightPx = refractionHeightPx.coerceAtLeast(0f)
-        liquidGlassOverlayRefractionAmountPx = refractionAmountPx.coerceAtLeast(0f)
+        liquidGlassSettings = settings.sanitized()
     }
 
     fun setSourceCrop(crop: PhantomPipCrop) {
@@ -3832,6 +3966,22 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     ) {
         if (!ensureLiquidGlassPrograms() || bounds.size < 5 || bounds.size % 5 != 0) return
 
+        val settings = liquidGlassSettings
+        val density = appContext.resources.displayMetrics.density.coerceAtLeast(0.5f)
+        val px = { dp: Float -> dp * density }
+        val deviceTier = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> 3
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> 2
+            else -> 1
+        }
+        val requestedTier = when (settings.pipeline) {
+            LiquidGlassPipelineTier.AUTO -> deviceTier
+            LiquidGlassPipelineTier.LEGACY -> 1
+            LiquidGlassPipelineTier.STANDARD -> 2
+            LiquidGlassPipelineTier.LIQUID -> 3
+        }
+        val effectiveTier = minOf(requestedTier, deviceTier)
+
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         GLES30.glViewport(0, 0, width, height)
         GLES30.glEnable(GLES30.GL_BLEND)
@@ -3840,22 +3990,63 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, sourceTextureId)
 
-        val inputTextureLocation = GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, "uInputTexture")
-        val viewportLocation = GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, "uViewportSize")
-        val cornerRadiusLocation = GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, "uCornerRadiusPx")
-        val refractionHeightLocation = GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, "uRefractionHeightPx")
-        val refractionAmountLocation = GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, "uRefractionAmountPx")
+        fun uniform1f(name: String, value: Float) {
+            GLES30.glUniform1f(GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, name), value)
+        }
+        fun uniform1i(name: String, value: Int) {
+            GLES30.glUniform1i(GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, name), value)
+        }
+
+        uniform1i("uInputTexture", 0)
+        GLES30.glUniform2f(
+            GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, "uViewportSize"),
+            width.toFloat(),
+            height.toFloat(),
+        )
+        uniform1f("uCornerRadiusPx", liquidGlassOverlayCornerRadiusPx)
+        uniform1f("uRefractionHeightPx", px(settings.refractionHeightDp))
+        uniform1f("uRefractionAmountPx", px(settings.refractionAmountDp))
+        uniform1f("uBlurRadiusPx", px(settings.blurRadiusDp))
+        uniform1f("uBrightness", settings.brightness)
+        uniform1f("uSaturation", settings.saturation)
+        uniform1f("uChromaticAberration", settings.chromaticAberration)
+        uniform1f("uDepthEffect", if (settings.depthEffect) 1f else 0f)
+        uniform1f("uAdaptiveLuminance", if (settings.adaptiveLuminance) 1f else 0f)
+        uniform1f("uAdaptiveStyle", if (settings.adaptiveStyle.name == "SUBTLE") 1f else 0f)
+        uniform1f("uUseVibrancy", if (settings.useVibrancy && !settings.adaptiveLuminance) 1f else 0f)
+        uniform1f("uSurfaceTintAlpha", settings.surfaceTintAlpha)
+        uniform1f("uSpecularEnabled", if (settings.specularEnabled) 1f else 0f)
+        uniform1f("uSpecularAlpha", settings.specularAlpha)
+        uniform1f("uSpecularWidthPx", px(settings.specularWidthDp))
+        uniform1f("uSpecularStyle", settings.specularStyle.ordinal.toFloat())
+        uniform1f("uDepthShadowEnabled", if (settings.depthShadowEnabled) 1f else 0f)
+        uniform1f("uDepthShadowRadiusPx", px(settings.depthShadowRadiusDp))
+        uniform1f("uDepthShadowAlpha", settings.depthShadowAlpha)
+        uniform1f("uDepthInsetEnabled", if (settings.depthInsetEnabled) 1f else 0f)
+        uniform1f("uDepthInsetRadiusPx", px(settings.depthInsetRadiusDp))
+        uniform1f("uDepthInsetAlpha", settings.depthInsetAlpha)
+        uniform1f("uGradientBlurFadeEnd", settings.gradientBlurFadeEnd)
+        uniform1f("uGradientBottomWeight", settings.gradientBottomWeight)
+        uniform1f("uPipelineTier", effectiveTier.toFloat())
+
         val overlayRectLocation = GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, "uOverlayRect")
         val tintAlphaLocation = GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, "uTintAlpha")
 
-        GLES30.glUniform1i(inputTextureLocation, 0)
-        GLES30.glUniform2f(viewportLocation, width.toFloat(), height.toFloat())
-        GLES30.glUniform1f(cornerRadiusLocation, liquidGlassOverlayCornerRadiusPx)
-        GLES30.glUniform1f(refractionHeightLocation, liquidGlassOverlayRefractionHeightPx)
-        GLES30.glUniform1f(refractionAmountLocation, liquidGlassOverlayRefractionAmountPx)
+        // Draw shadow pass first so the glass surface stays clean and the configured
+        // depth shadow remains independent from the specular edge highlight.
+        if (settings.enabled && settings.depthShadowEnabled && settings.depthShadowRadiusDp > 0f) {
+            uniform1i("uPassMode", 1)
+            for (index in 0 until bounds.size step 5) {
+                GLES30.glUniform4f(
+                    overlayRectLocation,
+                    bounds[index], bounds[index + 1], bounds[index + 2], bounds[index + 3],
+                )
+                GLES30.glUniform1f(tintAlphaLocation, bounds[index + 4])
+                drawSimpleQuad(liquidGlassOverlayProgramId)
+            }
+        }
 
-        // Each region gets its own tint value: the camera menu slider controls only
-        // the menu surface, while the video top-bar capsules retain a subtle fixed tint.
+        uniform1i("uPassMode", 0)
         for (index in 0 until bounds.size step 5) {
             GLES30.glUniform4f(
                 overlayRectLocation,
