@@ -5822,6 +5822,16 @@ class Camera2Controller(private val context: Context) {
         }
 
         applyHighQualityStillPostProcessingSettings(builder)
+        // Night Vision relies on a clean low-light burst; request the ISP's HQ NR
+        // for capture frames only, leaving live preview latency/appearance unchanged.
+        if (state.isNightVisionActive &&
+            availableNoiseReductionModes.contains(CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY)
+        ) {
+            builder.set(
+                CaptureRequest.NOISE_REDUCTION_MODE,
+                CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY,
+            )
+        }
     }
 
     private fun applyFastStillPostProcessingSettings(builder: CaptureRequest.Builder) {

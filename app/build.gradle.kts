@@ -241,6 +241,10 @@ dependencies {
 
     // TensorFlow Lite for Depth Estimator
     implementation("org.tensorflow:tensorflow-lite:2.17.0")
+    // LiteRT GPU runtime required by the FP16 CPGA-Net Night Vision model.
+    implementation("com.google.ai.edge.litert:litert:2.3.2")
+    implementation("com.google.ai.edge.litert:litert-gpu:2.3.2")
+    implementation("com.google.ai.edge.litert:litert-support:2.3.2")
     implementation("org.tensorflow:tensorflow-lite-gpu:2.17.0")
     implementation("org.tensorflow:tensorflow-lite-gpu-api:2.17.0")
     implementation("org.tensorflow:tensorflow-lite-support:0.5.0")

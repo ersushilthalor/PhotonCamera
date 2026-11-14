@@ -16,6 +16,8 @@ internal data class PreviewColorShaderVariant(
     val includeLchMixer: Boolean,
     val includePreLogFilmGrain: Boolean,
     val includeLutMask: Boolean = false,
+    /** Apply the live Night Vision curve before the normal recipe and LUT stages. */
+    val includeNightVisionTone: Boolean = false,
     val includeJpegInputToneCurve: Boolean = false,
     val includeSpatialRecipeEffects: Boolean = false,
     val includeVideoLog: Boolean = false,
@@ -31,10 +33,12 @@ internal data class PreviewColorShaderVariant(
             lutConfig: LutConfig?,
             lutEnabled: Boolean,
             videoLogEnabled: Boolean,
+            nightVisionTone: Boolean = false,
         ): PreviewColorShaderVariant {
             val lutCurve = lutConfig?.curve ?: TransferCurve.SRGB
             return PreviewColorShaderVariant(
                 textureSource = textureSource,
+                includeNightVisionTone = nightVisionTone,
                 includeExtendedLutCurves = videoLogEnabled ||
                     (lutEnabled && lutCurve.shaderId !in SIMPLE_LUT_CURVES),
                 includeOklchDensity = abs(params.color) > EPSILON,
