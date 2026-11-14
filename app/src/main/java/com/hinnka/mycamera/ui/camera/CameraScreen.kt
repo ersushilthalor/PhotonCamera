@@ -297,6 +297,9 @@ fun CameraScreen(
     var captureAnimationJob by remember { mutableStateOf<Job?>(null) }
     var cameraScreenBounds by remember { mutableStateOf<Rect?>(null) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
+    var previewGlBounds by remember { mutableStateOf<Rect?>(null) }
+    var editPanelGlassBounds by remember { mutableStateOf<Rect?>(null) }
+    var cameraGLSurfaceView by remember { mutableStateOf<CameraGLSurfaceView?>(null) }
     var zoomJoystickOpen by remember { mutableStateOf(false) }
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
     var zoomBarBounds by remember { mutableStateOf<Rect?>(null) }
@@ -373,6 +376,9 @@ fun CameraScreen(
     LaunchedEffect(activePanel) {
         if (activePanel == ActivePanel.FILTERS) {
             viewModel.generateThumbnail()
+        }
+        if (activePanel != ActivePanel.EDIT) {
+            editPanelGlassBounds = null
         }
     }
 
@@ -855,7 +861,7 @@ fun CameraScreen(
     ) {
 
         val backgroundPainter = rememberBackgroundPainter(viewModel)
-        // Capture only the live preview as Prismal's backdrop; never capture the menu itself.
+        // Capture the TextureView preview only; the menu itself must never enter its backdrop.
         val cameraPrismalBackdrop = rememberPrismalGlassLayer()
         val modeSwitcherBackdrop = rememberLiquidGlassBackdrop()
         val videoTopBarBackdrop = rememberLiquidGlassBackdrop()
@@ -893,6 +899,72 @@ fun CameraScreen(
 
         val density = LocalDensity.current
 
+        LaunchedEffect(
+            state.captureMode,
+            activePanel,
+            previewGlBounds,
+            editPanelGlassBounds,
+            cameraMenuTransparency,
+            liquidGlassSettings,
+            cameraGLSurfaceView,
+        ) {
+            val previewRect = previewGlBounds
+            val glView = cameraGLSurfaceView
+            if (glView == null) return@LaunchedEffect
+
+            if (previewRect == null || previewRect.width <= 0f || previewRect.height <= 0f) {
+                glView.setLiquidGlassOverlays(null, 0f, liquidGlassSettings)
+                return@LaunchedEffect
+            }
+
+            // Overlay records are five floats: left, bottom, right, top, tint alpha.
+            // The same live preview texture is sampled by the Kyant-style lens shader.
+            val overlayBounds = buildList<Float> {
+                fun appendOverlay(rect: Rect?, tintAlpha: Float) {
+                    if (rect == null) return
+                    val visibleLeft = maxOf(rect.left, previewRect.left)
+                    val visibleTop = maxOf(rect.top, previewRect.top)
+                    val visibleRight = minOf(rect.right, previewRect.right)
+                    val visibleBottom = minOf(rect.bottom, previewRect.bottom)
+                    if (visibleRight <= visibleLeft || visibleBottom <= visibleTop) return
+
+                    // Compose uses a top-left origin; GLES texture coordinates use bottom-left.
+                    // Preserve the original rectangle so the shader keeps the real rounded corners.
+                    val left = (rect.left - previewRect.left) / previewRect.width
+                    val top = (rect.top - previewRect.top) / previewRect.height
+                    val right = (rect.right - previewRect.left) / previewRect.width
+                    val bottom = (rect.bottom - previewRect.top) / previewRect.height
+                    add(left)
+                    add(1f - bottom)
+                    add(right)
+                    add(1f - top)
+                    add(tintAlpha.coerceIn(0f, 0.75f))
+                }
+
+                if (activePanel == ActivePanel.EDIT) {
+                    // Keep the edit sheet on the exact same live preview glass pipeline.
+                    appendOverlay(editPanelGlassBounds, liquidGlassSettings.tintAlpha * 0.25f)
+                }
+            }.toFloatArray()
+
+            val overlaySettings = if (activePanel == ActivePanel.EDIT) {
+                liquidGlassSettings.copy(
+                    enabled = true,
+                    pipeline = LiquidGlassPipelineTier.LIQUID,
+                )
+            } else {
+                liquidGlassSettings
+            }
+            if (overlayBounds.isEmpty()) {
+                glView.setLiquidGlassOverlays(null, 0f, overlaySettings)
+            } else {
+                glView.setLiquidGlassOverlays(
+                    bounds = overlayBounds,
+                    cornerRadiusPx = with(density) { overlaySettings.cornerRadiusDp.dp.toPx() },
+                    settings = overlaySettings,
+                )
+            }
+        }
         val width = with(density) { constraints.maxWidth.toDp() }
         val height = with(density) { constraints.maxHeight.toDp() }
         val topSafePadding = cameraTopSafePadding()
@@ -1290,6 +1362,8 @@ fun CameraScreen(
                                 previewSurfaceTexture = surfaceTexture
                             },
                             onSurfaceDestroyed = { surfaceTexture ->
+                                previewGlBounds = null
+                                cameraGLSurfaceView = null
                                 if (previewSurfaceTexture === surfaceTexture) {
                                     previewSurfaceTexture = null
                                 }
@@ -1325,7 +1399,11 @@ fun CameraScreen(
                                 null
                             },
                             onFirstPreviewFrame = viewModel::onFirstPreviewFrame,
-                            onGLSurfaceViewReady = { viewModel.glSurfaceView = it },
+                            onGLSurfaceViewReady = {
+                                viewModel.glSurfaceView = it
+                                cameraGLSurfaceView = it
+                            },
+                            onPreviewBoundsChanged = { previewGlBounds = it },
                             prismalGlassBackdrop = cameraPrismalBackdrop,
                             livePhotoRecorder = viewModel.livePhotoRecorder,
                             videoLogProfile = state.videoConfig.logProfile,
@@ -2058,6 +2136,7 @@ fun CameraScreen(
                 showEffects = true,
                 replaceVignetteWithVideoBrightness = state.captureMode == CaptureMode.VIDEO,
                 videoOnly = state.captureMode == CaptureMode.VIDEO,
+                onGlassBoundsChanged = { editPanelGlassBounds = it },
                 onDismiss = {
                     // Keep the Video preview override until the separate recipe reaches DataStore.
                     if (state.captureMode != CaptureMode.VIDEO) {
