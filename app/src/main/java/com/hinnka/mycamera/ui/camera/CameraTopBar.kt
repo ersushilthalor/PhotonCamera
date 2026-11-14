@@ -41,17 +41,10 @@ import com.hinnka.mycamera.video.VideoCapabilities
 import com.hinnka.mycamera.video.VideoConfig
 import com.hinnka.mycamera.video.VideoLogProfile
 import com.hinnka.mycamera.video.VideoResolutionPreset
-import com.hinnka.mycamera.video.VideoStabilizationMode
 import com.hinnka.mycamera.ui.icons.AppIcons
 import com.hinnka.mycamera.ui.components.LiquidGlassBackdrop
 import com.hinnka.mycamera.ui.components.LiquidGlassSurface
 import com.hinnka.mycamera.ui.components.LiquidGlassStyle
-import com.styropyr0.prismal.PrismalBackdrop
-import com.styropyr0.prismal.components.PrismalGlassMenu
-import com.styropyr0.prismal.components.PrismalGlassMenuDivider
-import com.styropyr0.prismal.components.PrismalGlassMenuItem
-import com.styropyr0.prismal.components.PrismalGlassToggle
-import com.styropyr0.prismal.components.prismalMenuAnchor
 
 @Composable
 fun CameraTopBar(
@@ -68,14 +61,12 @@ fun CameraTopBar(
     videoConfig: VideoConfig,
     videoCapabilities: VideoCapabilities,
     onVideoTorchToggle: () -> Unit,
-    onVideoStabilizationModeChange: (VideoStabilizationMode) -> Unit,
     onVideoResolutionClick: () -> Unit,
     onVideoFpsClick: () -> Unit,
     videoHdrEnabled: Boolean,
     onVideoHdrToggle: () -> Unit,
     onSettingsClick: () -> Unit,
     glassBackdrop: LiquidGlassBackdrop,
-    prismalBackdrop: PrismalBackdrop,
     onVideoGlassBoundsChanged: (Rect?) -> Unit = {},
     onVideoLeftGlassBoundsChanged: (Rect?) -> Unit = {},
     modifier: Modifier = Modifier
@@ -87,14 +78,12 @@ fun CameraTopBar(
             videoConfig = videoConfig,
             videoCapabilities = videoCapabilities,
             onVideoTorchToggle = onVideoTorchToggle,
-            onVideoStabilizationModeChange = onVideoStabilizationModeChange,
             onVideoResolutionClick = onVideoResolutionClick,
             onVideoFpsClick = onVideoFpsClick,
             videoHdrEnabled = videoHdrEnabled,
             onVideoHdrToggle = onVideoHdrToggle,
             onSettingsClick = onSettingsClick,
             glassBackdrop = glassBackdrop,
-            prismalBackdrop = prismalBackdrop,
             onGlassBoundsChanged = onVideoGlassBoundsChanged,
             onLeftGlassBoundsChanged = onVideoLeftGlassBoundsChanged,
             modifier = modifier
@@ -246,36 +235,16 @@ private fun VideoTopBar(
     videoConfig: VideoConfig,
     videoCapabilities: VideoCapabilities,
     onVideoTorchToggle: () -> Unit,
-    onVideoStabilizationModeChange: (VideoStabilizationMode) -> Unit,
     onVideoResolutionClick: () -> Unit,
     onVideoFpsClick: () -> Unit,
     videoHdrEnabled: Boolean,
     onVideoHdrToggle: () -> Unit,
     onSettingsClick: () -> Unit,
     glassBackdrop: LiquidGlassBackdrop,
-    prismalBackdrop: PrismalBackdrop,
     onGlassBoundsChanged: (Rect?) -> Unit = {},
     onLeftGlassBoundsChanged: (Rect?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var stabilizationMenuExpanded by remember { mutableStateOf(false) }
-    var stabilizationAnchorBounds by remember { mutableStateOf(Rect.Zero) }
-    var lastEnabledStabilizationMode by remember {
-        mutableStateOf(
-            videoConfig.stabilizationMode.takeIf { it != VideoStabilizationMode.OFF }
-                ?: VideoStabilizationMode.EIS
-        )
-    }
-    val availableEnabledStabilizationModes = videoCapabilities.availableStabilizationModes
-        .filter { it != VideoStabilizationMode.OFF }
-    LaunchedEffect(videoConfig.stabilizationMode) {
-        if (videoConfig.stabilizationMode != VideoStabilizationMode.OFF) {
-            lastEnabledStabilizationMode = videoConfig.stabilizationMode
-        }
-    }
-    LaunchedEffect(isRecording) {
-        if (isRecording) stabilizationMenuExpanded = false
-    }
     val videoTopBarGlassStyle = remember {
         LiquidGlassStyle(
             blurRadius = 20.dp,
@@ -347,100 +316,6 @@ private fun VideoTopBar(
                                 else -> Color.White
                             }
                         )
-                    }
-
-                    Box(
-                        modifier = Modifier.prismalMenuAnchor { stabilizationAnchorBounds = it }
-                    ) {
-                        TopBarActionButton(
-                            onClick = {
-                                if (!isRecording && videoCapabilities.availableStabilizationModes.isNotEmpty()) {
-                                    stabilizationMenuExpanded = true
-                                }
-                            },
-                            contentDescription = stringResource(R.string.settings_video_stabilization_default)
-                        ) {
-                            Icon(
-                                imageVector = AppIcons.Stabilization,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp).autoRotate(),
-                                tint = when {
-                                    videoCapabilities.availableStabilizationModes.isEmpty() ->
-                                        Color.White.copy(alpha = 0.3f)
-                                    isRecording -> Color.White.copy(alpha = 0.55f)
-                                    videoConfig.stabilizationMode != VideoStabilizationMode.OFF -> AccentColor
-                                    else -> Color.White
-                                }
-                            )
-                        }
-                        PrismalGlassMenu(
-                            expanded = stabilizationMenuExpanded,
-                            onDismissRequest = { stabilizationMenuExpanded = false },
-                            anchorBounds = stabilizationAnchorBounds,
-                            backdrop = prismalBackdrop,
-                            width = 280.dp,
-                            cornerRadius = 24.dp,
-                            scrimColor = Color.Black.copy(alpha = 0.12f)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    Text(
-                                        text = stringResource(R.string.settings_video_stabilization_default),
-                                        color = Color.White,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1
-                                    )
-                                    Text(
-                                        text = videoStabilizationModeLabel(videoConfig.stabilizationMode),
-                                        color = Color.White.copy(alpha = 0.68f),
-                                        fontSize = 12.sp,
-                                        maxLines = 1
-                                    )
-                                }
-                                if (availableEnabledStabilizationModes.isNotEmpty()) {
-                                    PrismalGlassToggle(
-                                        selected = {
-                                            videoConfig.stabilizationMode != VideoStabilizationMode.OFF
-                                        },
-                                        onSelect = { enabled ->
-                                            if (!enabled) {
-                                                onVideoStabilizationModeChange(VideoStabilizationMode.OFF)
-                                            } else {
-                                                val targetMode =
-                                                    lastEnabledStabilizationMode.takeIf {
-                                                        it in availableEnabledStabilizationModes
-                                                    } ?: availableEnabledStabilizationModes.firstOrNull()
-                                                targetMode?.let(onVideoStabilizationModeChange)
-                                            }
-                                        },
-                                        backdrop = prismalBackdrop,
-                                        modifier = Modifier.padding(start = 12.dp)
-                                    )
-                                }
-                            }
-                            PrismalGlassMenuDivider(color = Color.White.copy(alpha = 0.14f))
-                            videoCapabilities.availableStabilizationModes.forEach { mode ->
-                                PrismalGlassMenuItem(
-                                    text = videoStabilizationModeLabel(mode),
-                                    onClick = {
-                                        stabilizationMenuExpanded = false
-                                        onVideoStabilizationModeChange(mode)
-                                    },
-                                    selected = mode == videoConfig.stabilizationMode,
-                                    textColor = Color.White,
-                                    selectedColor = AccentColor
-                                )
-                            }
-                        }
                     }
 
                     TopBarActionButton(
@@ -569,20 +444,6 @@ private fun VideoActionIcon(
                 Color.White.copy(alpha = 0.3f)
             }
         )
-    }
-}
-
-@Composable
-private fun videoStabilizationModeLabel(mode: VideoStabilizationMode): String {
-    return when (mode) {
-        VideoStabilizationMode.OFF ->
-            stringResource(R.string.settings_video_stabilization_mode_off)
-        VideoStabilizationMode.EIS ->
-            stringResource(R.string.settings_video_stabilization_mode_eis)
-        VideoStabilizationMode.OIS ->
-            stringResource(R.string.settings_video_stabilization_mode_ois)
-        VideoStabilizationMode.ENHANCED ->
-            stringResource(R.string.settings_video_stabilization_mode_enhanced)
     }
 }
 
