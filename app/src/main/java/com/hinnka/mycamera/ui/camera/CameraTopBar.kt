@@ -27,8 +27,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -67,8 +65,6 @@ fun CameraTopBar(
     onVideoHdrToggle: () -> Unit,
     onSettingsClick: () -> Unit,
     glassBackdrop: LiquidGlassBackdrop,
-    onVideoGlassBoundsChanged: (Rect?) -> Unit = {},
-    onVideoLeftGlassBoundsChanged: (Rect?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     if (captureMode == CaptureMode.VIDEO) {
@@ -84,8 +80,6 @@ fun CameraTopBar(
             onVideoHdrToggle = onVideoHdrToggle,
             onSettingsClick = onSettingsClick,
             glassBackdrop = glassBackdrop,
-            onGlassBoundsChanged = onVideoGlassBoundsChanged,
-            onLeftGlassBoundsChanged = onVideoLeftGlassBoundsChanged,
             modifier = modifier
         )
         return
@@ -241,8 +235,6 @@ private fun VideoTopBar(
     onVideoHdrToggle: () -> Unit,
     onSettingsClick: () -> Unit,
     glassBackdrop: LiquidGlassBackdrop,
-    onGlassBoundsChanged: (Rect?) -> Unit = {},
-    onLeftGlassBoundsChanged: (Rect?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val videoTopBarGlassStyle = remember {
@@ -278,8 +270,7 @@ private fun VideoTopBar(
                 glassBackdrop = glassBackdrop,
                 glassStyle = videoTopBarGlassStyle,
                 onResolutionClick = onVideoResolutionClick,
-                onFpsClick = onVideoFpsClick,
-                onBoundsChanged = onLeftGlassBoundsChanged
+                onFpsClick = onVideoFpsClick
             )
 
             // Use the same compact grouped control capsule and touch targets as photo mode.
@@ -287,7 +278,6 @@ private fun VideoTopBar(
                 modifier = Modifier
                     .height(36.dp)
                     .clip(CircleShape)
-                    .onGloballyPositioned { onGlassBoundsChanged(it.boundsInRoot()) }
             ) {
                 LiquidGlassSurface(
                     backdrop = glassBackdrop,
@@ -354,14 +344,12 @@ private fun VideoParameterCluster(
     glassBackdrop: LiquidGlassBackdrop,
     glassStyle: LiquidGlassStyle,
     onResolutionClick: () -> Unit,
-    onFpsClick: () -> Unit,
-    onBoundsChanged: (Rect?) -> Unit = {}
+    onFpsClick: () -> Unit
 ) {
     Box(
         modifier = Modifier
             .height(36.dp)
             .clip(CircleShape)
-            .onGloballyPositioned { onBoundsChanged(it.boundsInRoot()) }
     ) {
         LiquidGlassSurface(
             backdrop = glassBackdrop,
