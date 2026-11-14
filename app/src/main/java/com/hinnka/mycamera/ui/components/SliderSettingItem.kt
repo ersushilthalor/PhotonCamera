@@ -1,5 +1,6 @@
 package com.hinnka.mycamera.ui.components
 
+import android.os.SystemClock
 import android.view.ViewConfiguration
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
@@ -207,7 +208,7 @@ private fun Modifier.prismalSliderGestures(
                     }
                 } else if (!change.pressed && pointerDown) {
                     if (!moved && onTapReset != null) {
-                        val now = event.uptimeMillis
+                        val now = SystemClock.uptimeMillis()
                         if (lastTapTime != 0L && now - lastTapTime <= doubleTapTimeoutMillis) {
                             latestOnTapReset.value?.invoke()
                             latestOnValueChangeFinished.value?.invoke()
