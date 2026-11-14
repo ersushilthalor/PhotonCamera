@@ -46,6 +46,7 @@ dependencies {
 
 tasks.withType<KotlinCompile>().configureEach {
     compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
         freeCompilerArgs.add("-Xcontext-parameters")
         optIn.add("kotlin.time.ExperimentalTime")
     }
