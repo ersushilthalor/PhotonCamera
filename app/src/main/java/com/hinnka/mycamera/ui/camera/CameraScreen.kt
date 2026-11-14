@@ -924,6 +924,7 @@ fun CameraScreen(
             depthInsetEnabled = false,
             surfaceTintAlpha = 0.06f,
             tintAlpha = 0f,
+            gradientBlurFadeEnd = 0.001f,
         )
 
         LaunchedEffect(
