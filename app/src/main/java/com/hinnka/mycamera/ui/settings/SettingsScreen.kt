@@ -3744,7 +3744,6 @@ fun DropdownSettingItem(
         }
     }
 }
-}
 
 /**
  * 导航设置项（点击后跳转到其他页面）
@@ -5300,7 +5299,6 @@ fun <T> QualityLevelSetting(
         }
     }
 }
-}
 
 
 private fun android.content.Context.findActivity(): android.app.Activity? {
@@ -6051,7 +6049,6 @@ private fun UiStyleSetting(currentStyle: String, onStyleSelected: (String) -> Un
             )
         }
     }
-}
 }
 
 
