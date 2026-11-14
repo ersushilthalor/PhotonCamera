@@ -906,30 +906,6 @@ fun CameraScreen(
             isVideoMode && state.videoConfig.aspectRatio == VideoAspectRatio.OPEN_GATE
 
         val density = LocalDensity.current
-        // The menu uses the Prismal-style Glass Panel material: frosted backdrop blur,
-        // neutral surface, and no optical lens/refraction. Toolbar glass remains configurable.
-        val menuGlassPanelSettings = liquidGlassSettings.copy(
-            enabled = true,
-            pipeline = LiquidGlassPipelineTier.STANDARD,
-            blurRadiusDp = 20f,
-            refractionHeightDp = 0f,
-            refractionAmountDp = 0f,
-            brightness = 0f,
-            saturation = 1f,
-            chromaticAberration = 0f,
-            cornerRadiusDp = 30f,
-            depthEffect = false,
-            adaptiveLuminance = false,
-            useVibrancy = false,
-            specularEnabled = false,
-            depthShadowEnabled = true,
-            depthShadowRadiusDp = 16f,
-            depthShadowAlpha = 0.35f,
-            depthInsetEnabled = false,
-            surfaceTintAlpha = 0.06f,
-            tintAlpha = 0f,
-            gradientBlurFadeEnd = 0.001f,
-        )
 
         LaunchedEffect(
             state.captureMode,
@@ -984,14 +960,17 @@ fun CameraScreen(
                     appendOverlay(videoTopBarGlassBounds, liquidGlassSettings.tintAlpha * 0.25f)
                 }
                 if (activePanel == ActivePanel.SETTINGS) {
-                    // Menu is always a neutral frosted Glass Panel, independent of the
-                    // Liquid Glass toolbar toggle and transparency controls.
-                    appendOverlay(cameraTopSheetGlassBounds, 0f)
+                    // The six-dot menu uses the same optical Liquid Glass pipeline as the
+                    // toolbar. Do not replace it with the old STANDARD frosted-blur panel.
+                    appendOverlay(cameraTopSheetGlassBounds, liquidGlassSettings.tintAlpha * 0.25f)
                 }
             }.toFloatArray()
 
             val overlaySettings = if (activePanel == ActivePanel.SETTINGS) {
-                menuGlassPanelSettings
+                liquidGlassSettings.copy(
+                    enabled = true,
+                    pipeline = LiquidGlassPipelineTier.LIQUID,
+                )
             } else {
                 liquidGlassSettings
             }
