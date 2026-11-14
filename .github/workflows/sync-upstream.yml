@@ -1,0 +1,109 @@
+name: Sync upstream changes
+
+on:
+  # Check the original PhotonCamera repository every day at 09:00 IST.
+  schedule:
+    - cron: "30 3 * * *"
+  # Also allow a manual run from the Actions tab.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: photon-camera-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Merge upstream and open a review PR
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM_REPOSITORY: bjzhou/PhotonCamera
+      UPSTREAM_BRANCH: main
+      BASE_BRANCH: main
+      SYNC_BRANCH: automation/upstream-sync
+
+    steps:
+      - name: Check out fork
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream and fork main
+        run: |
+          git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
+          git fetch --no-tags upstream "+refs/heads/${UPSTREAM_BRANCH}:refs/remotes/upstream/${UPSTREAM_BRANCH}"
+          git fetch origin "refs/heads/${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}"
+
+          # Refuse to merge unrelated histories.
+          if ! git merge-base "refs/remotes/origin/${BASE_BRANCH}" "refs/remotes/upstream/${UPSTREAM_BRANCH}" >/dev/null; then
+            echo "::error::The fork and upstream no longer share a common Git history. No changes were pushed."
+            exit 1
+          fi
+
+      - name: Merge upstream into a dedicated sync branch
+        id: merge
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git switch --force-create "${SYNC_BRANCH}" "refs/remotes/origin/${BASE_BRANCH}"
+
+          if ! git merge --no-edit --no-ff \
+            -m "Merge upstream ${UPSTREAM_REPOSITORY}:${UPSTREAM_BRANCH}" \
+            "refs/remotes/upstream/${UPSTREAM_BRANCH}"; then
+            echo "::error::Upstream changes conflict with custom fork changes. The sync branch was not pushed; resolve the conflict manually."
+            exit 1
+          fi
+
+          if git diff --quiet "refs/remotes/origin/${BASE_BRANCH}...HEAD"; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "Fork main is already up to date with upstream."
+            exit 0
+          fi
+
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+
+          # This is a bot-managed branch, never the customized main branch.
+          git push --force origin "HEAD:refs/heads/${SYNC_BRANCH}"
+
+      - name: Create or update upstream sync pull request
+        if: steps.merge.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          title="Sync upstream: ${UPSTREAM_REPOSITORY}:${UPSTREAM_BRANCH}"
+          body=$(cat <<'EOF'
+          This pull request brings the latest commits from the original PhotonCamera repository into this customized fork.
+
+          - **Upstream:** `bjzhou/PhotonCamera`, branch `main`
+          - **Target:** this fork's `main`
+          - **Safety:** changes are proposed for review; this workflow never pushes upstream changes directly to `main`.
+
+          Review the diff and run the Android build before merging. If upstream edits conflict with custom camera features, the workflow stops and requires manual conflict resolution.
+          EOF
+          )
+
+          pr_number=$(gh pr list \
+            --head "${SYNC_BRANCH}" \
+            --base "${BASE_BRANCH}" \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+
+          if [[ -n "$pr_number" ]]; then
+            gh pr edit "$pr_number" --title "$title" --body "$body"
+            echo "Updated existing pull request #$pr_number"
+          else
+            gh pr create --base "${BASE_BRANCH}" --head "${SYNC_BRANCH}" --title "$title" --body "$body"
+          fi
