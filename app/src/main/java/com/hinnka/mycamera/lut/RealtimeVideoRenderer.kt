@@ -319,6 +319,10 @@ class RealtimeVideoRenderer(
     ): Long? {
         if (!initialized || !makeCurrent()) return null
         val surfaceTexture = cameraSurfaceTexture ?: return null
+        if (dualCaptureSurfaceTexture != null) {
+            acquireLatestDualCaptureFrame()
+            if (!dualCaptureHasFrame) return null
+        }
         val cameraFrameUpdated = cameraFramePending.getAndSet(false) &&
             acquireLatestCameraFrame(surfaceTexture)
         val cameraTimestampNs = surfaceTexture.timestamp
@@ -455,19 +459,23 @@ class RealtimeVideoRenderer(
         else -> null
     }
 
-    private fun drawDualCaptureOverlay() {
-        val surfaceTexture = dualCaptureSurfaceTexture ?: return
-        if (dualCaptureProgramId == 0) return
-        if (dualCaptureFramePending.getAndSet(false)) {
-            try {
-                surfaceTexture.updateTexImage()
-                surfaceTexture.getTransformMatrix(dualCaptureStMatrix)
-                dualCaptureHasFrame = true
-            } catch (error: RuntimeException) {
-                PLog.e(TAG, "Failed to acquire dual-capture frame", error)
-                return
-            }
+    private fun acquireLatestDualCaptureFrame(): Boolean {
+        val surfaceTexture = dualCaptureSurfaceTexture ?: return false
+        if (!dualCaptureFramePending.getAndSet(false)) return false
+        return try {
+            surfaceTexture.updateTexImage()
+            surfaceTexture.getTransformMatrix(dualCaptureStMatrix)
+            dualCaptureHasFrame = true
+            true
+        } catch (error: RuntimeException) {
+            PLog.e(TAG, "Failed to acquire dual-capture frame", error)
+            false
         }
+    }
+
+    private fun drawDualCaptureOverlay() {
+        if (dualCaptureSurfaceTexture == null || dualCaptureProgramId == 0) return
+        acquireLatestDualCaptureFrame()
         if (!dualCaptureHasFrame) return
 
         val outputWidth = encoderOutputSize.width
