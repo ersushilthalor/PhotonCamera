@@ -33,6 +33,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -178,27 +179,32 @@ fun CameraTopSheet(
         visible = visible,
         // Match OppoCam's six-dot menu: a compact card that unfolds from the top
         // instead of a full-width square sheet.
-        enter = fadeIn(animationSpec = tween(170)) +
+        // The menu scales from the six-dot trigger's top-right position. As the
+        // top bar disappears, the card grows out from that same point instead of
+        // appearing as an unrelated sheet over the controls.
+        enter = fadeIn(animationSpec = tween(110)) +
             scaleIn(
-                initialScale = 0.80f,
-                animationSpec = spring(dampingRatio = 0.50f, stiffness = 420f)
+                initialScale = 0.035f,
+                transformOrigin = TransformOrigin(0.94f, 0.04f),
+                animationSpec = spring(dampingRatio = 0.86f, stiffness = 300f)
             ) +
             expandVertically(
                 expandFrom = Alignment.Top,
-                animationSpec = spring(dampingRatio = 0.66f, stiffness = 360f)
+                animationSpec = spring(dampingRatio = 0.88f, stiffness = 320f)
             ),
-        exit = fadeOut(animationSpec = tween(130)) +
+        exit = fadeOut(animationSpec = tween(120)) +
             scaleOut(
                 targetScale = 0.94f,
-                animationSpec = tween(130)
+                transformOrigin = TransformOrigin(0.94f, 0.04f),
+                animationSpec = tween(140)
             ) +
             shrinkVertically(
                 shrinkTowards = Alignment.Top,
-                animationSpec = tween(160)
+                animationSpec = tween(150)
             ),
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = contentTopPadding, start = 14.dp, end = 14.dp)
+            .padding(top = contentTopPadding, start = 5.dp, end = 5.dp)
     ) {
         Box(
             modifier = Modifier.fillMaxWidth(),
@@ -1013,11 +1019,9 @@ private fun VideoMenuItem(
     onClick: () -> Unit,
     icon: @Composable (Color) -> Unit
 ) {
-    val iconTint = when {
-        !enabled -> Color.White.copy(alpha = 0.36f)
-        active -> AccentColor
-        else -> Color.White
-    }
+    // Keep active menu actions neutral; the glass material itself supplies
+    // the menu appearance, not an extra blue accent wash.
+    val iconTint = if (enabled) Color.White else Color.White.copy(alpha = 0.36f)
     Column(
         modifier = modifier.clickable(enabled = enabled, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1031,7 +1035,7 @@ private fun VideoMenuItem(
                 .background(Color(0xD908080A))
                 .border(
                     width = 1.dp,
-                    color = Color.White.copy(alpha = if (active) 0.20f else 0.10f),
+                    color = Color.White.copy(alpha = if (active) 0.26f else 0.10f),
                     shape = CircleShape
                 ),
             contentAlignment = Alignment.Center
@@ -1210,7 +1214,7 @@ private fun VideoOptionChip(
             .heightIn(min = 36.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(
-                if (selected) AccentColor else Color.White.copy(alpha = 0.12f)
+                Color.White.copy(alpha = if (selected) 0.24f else 0.08f)
             )
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -1220,7 +1224,7 @@ private fun VideoOptionChip(
             text = title,
             color = when {
                 !enabled -> Color.White.copy(alpha = 0.38f)
-                selected -> OnAccentColor
+                selected -> Color.White
                 else -> Color.White
             },
             fontSize = 12.sp,
