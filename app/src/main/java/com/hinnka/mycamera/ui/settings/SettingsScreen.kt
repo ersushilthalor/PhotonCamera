@@ -1888,29 +1888,45 @@ fun SettingsScreen(
                             color = Color.White.copy(alpha = 0.1f),
                             modifier = Modifier.padding(vertical = 10.dp)
                         )
-                        val pipelineLabels = listOf("Auto", "Legacy", "Standard", "Liquid")
+                        val devicePipelineName = when {
+                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> "Liquid"
+                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> "Standard"
+                            else -> "Legacy"
+                        }
+                        val pipelineLabels = listOf(
+                            "Auto ($devicePipelineName)",
+                            "Liquid · API 33+",
+                            "Standard · API 31–32",
+                            "Legacy · API 25–30"
+                        )
                         val pipelineLabel = when (liquidGlassSettings.pipeline) {
-                            LiquidGlassPipelineTier.AUTO -> "Auto"
-                            LiquidGlassPipelineTier.LEGACY -> "Legacy"
-                            LiquidGlassPipelineTier.STANDARD -> "Standard"
-                            LiquidGlassPipelineTier.LIQUID -> "Liquid"
+                            LiquidGlassPipelineTier.AUTO -> pipelineLabels.first()
+                            LiquidGlassPipelineTier.LEGACY -> pipelineLabels.last()
+                            LiquidGlassPipelineTier.STANDARD -> pipelineLabels[2]
+                            LiquidGlassPipelineTier.LIQUID -> pipelineLabels[1]
                         }
                         DropdownSettingItem(
                             title = "Pipeline",
-                            description = "Choose the rendering tier. Auto uses the best tier available on this device.",
+                            description = "Auto selects the best device tier. Forced tiers are capped by Android API support.",
                             value = pipelineLabel,
                             options = pipelineLabels,
                             isLoading = false,
                             onExpanded = {},
                             onOptionSelected = { label ->
-                                val selected = when (label) {
-                                    "Legacy" -> LiquidGlassPipelineTier.LEGACY
-                                    "Standard" -> LiquidGlassPipelineTier.STANDARD
-                                    "Liquid" -> LiquidGlassPipelineTier.LIQUID
+                                val selected = when {
+                                    label.startsWith("Liquid") -> LiquidGlassPipelineTier.LIQUID
+                                    label.startsWith("Standard") -> LiquidGlassPipelineTier.STANDARD
+                                    label.startsWith("Legacy") -> LiquidGlassPipelineTier.LEGACY
                                     else -> LiquidGlassPipelineTier.AUTO
                                 }
                                 updateLiquidGlass { it.copy(pipeline = selected) }
                             }
+                        )
+                        Text(
+                            text = "Detected device pipeline: $devicePipelineName · API ${Build.VERSION.SDK_INT}",
+                            color = Color.White.copy(alpha = 0.55f),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 4.dp)
                         )
                     }
 
