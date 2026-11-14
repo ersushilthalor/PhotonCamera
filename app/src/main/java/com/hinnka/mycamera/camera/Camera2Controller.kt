@@ -8549,7 +8549,11 @@ class Camera2Controller(private val context: Context) {
             val completeRecording = Runnable {
                 if (dualCaptureRecordSurface != null) {
                     dualCaptureRecordSurface = null
-                    if (dualCaptureEnabled) createDualCaptureSession()
+                    if (dualCaptureEnabled && dualCapturePreviewSurface != null) {
+                        createDualCaptureSession()
+                    } else {
+                        stopDualCaptureCamera()
+                    }
                 }
                 _state.value = _state.value.copy(videoRecordingState = VideoRecordingState())
                 if (cameraDevice != null && previewSurface != null) {
