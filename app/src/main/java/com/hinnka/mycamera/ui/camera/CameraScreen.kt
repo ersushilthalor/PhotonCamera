@@ -1290,8 +1290,6 @@ fun CameraScreen(
                                 previewSurfaceTexture = surfaceTexture
                             },
                             onSurfaceDestroyed = { surfaceTexture ->
-                                previewGlBounds = null
-                                cameraGLSurfaceView = null
                                 if (previewSurfaceTexture === surfaceTexture) {
                                     previewSurfaceTexture = null
                                 }
@@ -1925,7 +1923,8 @@ fun CameraScreen(
             refocusAvailable = state.minimumFocusDistance > 0f,
             contentTopPadding = CameraTopBarBaseTopPadding + topSafePadding,
             cameraMenuTransparency = cameraMenuTransparency,
-            liquidGlassSettings = liquidGlassSettings
+            liquidGlassSettings = liquidGlassSettings,
+            prismalBackdrop = cameraPrismalBackdrop
         )
 
         // During navigation measurement or window resizing, the viewport can be
