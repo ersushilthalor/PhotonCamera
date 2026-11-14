@@ -82,20 +82,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.geometry.Rect
 import com.hinnka.mycamera.ui.components.LocalSettingsPrismalBackdrop
-import com.styropyr0.prismal.PrismalGlassSurface
 import com.styropyr0.prismal.components.LocalPrismalParentGlassLayer
 import com.styropyr0.prismal.components.PrismalGlassButton
-import com.styropyr0.prismal.components.PrismalGlassMenu
-import com.styropyr0.prismal.components.PrismalGlassMenuDivider
-import com.styropyr0.prismal.components.PrismalGlassMenuItem
 import com.styropyr0.prismal.components.PrismalGlassToggle
-import com.styropyr0.prismal.components.PrismalSegmentedControl
 import com.styropyr0.prismal.shapes.PrismalRoundedRectangle
 import com.styropyr0.prismal.sources.prismalGlassLayer
 import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
-import com.styropyr0.prismal.components.prismalMenuAnchor
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.paint
@@ -3640,7 +3633,8 @@ fun TextInputSettingItem(
 }
 
 /**
- * 下拉选择菜单设置项
+ * Dropdown setting item. Settings selectors use the standard compact row and Material menu;
+ * the Prismal material remains reserved for camera-surface controls.
  */
 @Composable
 fun DropdownSettingItem(
@@ -3655,185 +3649,101 @@ fun DropdownSettingItem(
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
-    var anchorBounds by remember { mutableStateOf(Rect.Zero) }
-    val backdrop = LocalSettingsPrismalBackdrop.current
     val displayValue = if (isLoading && options.isEmpty()) {
         stringResource(R.string.settings_ai_model_loading)
     } else {
         value.ifEmpty { stringResource(R.string.settings_ai_model_select) }
     }
+    val alpha = if (enabled) 1f else 0.4f
 
-    if (backdrop != null) {
-        PrismalGlassButton(
-            onClick = {
-                if (enabled) {
-                    onExpanded()
-                    expanded = true
-                }
-            },
-            backdrop = backdrop,
-            modifier = modifier
-                .fillMaxWidth()
-                .prismalMenuAnchor { anchorBounds = it },
-            isInteractive = enabled,
-            height = null,
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            nestedGlassSource = LocalPrismalParentGlassLayer.current
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled) {
+                onExpanded()
+                expanded = true
+            }
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                color = Color.White.copy(alpha = alpha),
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Normal
+            )
+            if (description != null) {
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = title,
-                    color = Color.White.copy(alpha = if (enabled) 1f else 0.4f),
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Normal
-                )
-                if (description != null) {
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = description,
-                        color = Color.White.copy(alpha = if (enabled) 0.6f else 0.24f),
-                        fontSize = 13.sp,
-                        lineHeight = 18.sp
-                    )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = displayValue,
-                    color = AccentColor.copy(alpha = if (enabled) 1f else 0.4f),
-                    fontSize = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    text = description,
+                    color = Color.White.copy(alpha = 0.6f * alpha),
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
                 )
             }
-            Spacer(modifier = Modifier.width(16.dp))
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = displayValue,
+                color = AccentColor.copy(alpha = alpha),
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Spacer(modifier = Modifier.width(16.dp))
+        Box {
             Icon(
                 imageVector = AppIcons.ExpandMore,
                 contentDescription = null,
-                tint = Color.White.copy(alpha = if (enabled) 0.5f else 0.2f)
+                tint = Color.White.copy(alpha = 0.4f)
             )
-        }
-
-        PrismalGlassMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            anchorBounds = anchorBounds,
-            backdrop = backdrop
-        ) {
-            when {
-                isLoading -> PrismalGlassMenuItem(
-                    text = stringResource(R.string.settings_ai_model_fetching),
-                    onClick = {},
-                    enabled = false
-                )
-                options.isEmpty() -> PrismalGlassMenuItem(
-                    text = stringResource(R.string.settings_ai_model_empty),
-                    onClick = {},
-                    enabled = false
-                )
-                else -> options.forEachIndexed { index, option ->
-                    if (index > 0) PrismalGlassMenuDivider()
-                    PrismalGlassMenuItem(
-                        text = option,
-                        onClick = {
-                            onOptionSelected(option)
-                            expanded = false
-                        },
-                        selected = option == value
-                    )
-                }
-            }
-        }
-    } else {
-        val alpha = if (enabled) 1f else 0.4f
-        Row(
-            modifier = modifier
-                .fillMaxWidth()
-                .clickable(enabled = enabled) {
-                    onExpanded()
-                    expanded = true
-                }
-                .padding(vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    color = Color.White.copy(alpha = alpha),
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Normal
-                )
-                if (description != null) {
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = description,
-                        color = Color.White.copy(alpha = 0.6f * alpha),
-                        fontSize = 13.sp,
-                        lineHeight = 18.sp
-                    )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = displayValue,
-                    color = AccentColor.copy(alpha = alpha),
-                    fontSize = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Spacer(modifier = Modifier.width(16.dp))
-            Box {
-                Icon(
-                    imageVector = AppIcons.ExpandMore,
-                    contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.4f)
-                )
-                DropdownMenu(
-                    expanded = expanded,
-                    onDismissRequest = { expanded = false },
-                    modifier = Modifier.background(Color(0xFF2C2C2E))
-                ) {
-                    if (isLoading) {
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    stringResource(R.string.settings_ai_model_fetching),
-                                    color = Color.White.copy(alpha = 0.6f)
-                                )
-                            },
-                            onClick = {}
-                        )
-                    } else if (options.isEmpty()) {
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    stringResource(R.string.settings_ai_model_empty),
-                                    color = Color.White.copy(alpha = 0.6f)
-                                )
-                            },
-                            onClick = { expanded = false }
-                        )
-                    } else {
-                        options.forEach { option ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = option,
-                                        color = if (option == value) AccentColor else Color.White
-                                    )
-                                },
-                                onClick = {
-                                    onOptionSelected(option)
-                                    expanded = false
-                                }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.background(Color(0xFF2C2C2E))
+            ) {
+                if (isLoading) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                stringResource(R.string.settings_ai_model_fetching),
+                                color = Color.White.copy(alpha = 0.6f)
                             )
-                        }
+                        },
+                        onClick = {}
+                    )
+                } else if (options.isEmpty()) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                stringResource(R.string.settings_ai_model_empty),
+                                color = Color.White.copy(alpha = 0.6f)
+                            )
+                        },
+                        onClick = { expanded = false }
+                    )
+                } else {
+                    options.forEach { option ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = option,
+                                    color = if (option == value) AccentColor else Color.White
+                                )
+                            },
+                            onClick = {
+                                onOptionSelected(option)
+                                expanded = false
+                            }
+                        )
                     }
                 }
             }
         }
     }
+}
 }
 
 /**
@@ -5340,7 +5250,6 @@ fun <T> QualityLevelSetting(
     onLevelSelected: (T) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val backdrop = LocalSettingsPrismalBackdrop.current
     Column(modifier = modifier.fillMaxWidth()) {
         if (title != null) {
             Text(
@@ -5361,64 +5270,36 @@ fun <T> QualityLevelSetting(
             )
         }
 
-        if (backdrop != null && levels.size in 2..4) {
-            val selectedIndex = levels.indexOfFirst { it.first == currentLevel }.coerceAtLeast(0)
-            PrismalSegmentedControl(
-                labels = levels.map { it.second },
-                selectedIndex = selectedIndex,
-                onSelected = { index -> levels.getOrNull(index)?.first?.let(onLevelSelected) },
-                backdrop = backdrop,
-                modifier = Modifier.fillMaxWidth(),
-                height = 44.dp
-            )
-        } else {
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                levels.forEach { (level, label) ->
-                    val isSelected = currentLevel == level
-                    if (backdrop != null) {
-                        PrismalGlassButton(
-                            onClick = { onLevelSelected(level) },
-                            backdrop = backdrop,
-                            modifier = Modifier.height(36.dp),
-                            height = 36.dp,
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                            nestedGlassSource = LocalPrismalParentGlassLayer.current
-                        ) {
-                            Text(
-                                text = label,
-                                color = if (isSelected) AccentColor else Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .height(36.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) AccentColor else Color.White.copy(alpha = 0.1f))
-                                .clickable { onLevelSelected(level) },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = label,
-                                color = if (isSelected) OnAccentColor else Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(horizontal = 4.dp).widthIn(min = 44.dp)
-                            )
-                        }
-                    }
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            levels.forEach { (level, label) ->
+                val isSelected = currentLevel == level
+                Box(
+                    modifier = Modifier
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isSelected) AccentColor else Color.White.copy(alpha = 0.1f))
+                        .clickable { onLevelSelected(level) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = label,
+                        color = if (isSelected) OnAccentColor else Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .padding(horizontal = 4.dp)
+                            .widthIn(min = 44.dp)
+                    )
                 }
             }
         }
     }
+}
 }
 
 
@@ -6123,7 +6004,6 @@ private fun UiStyleSetting(currentStyle: String, onStyleSelected: (String) -> Un
         "ONE_UI" to "One UI",
         "CUSTOM" to "Custom"
     )
-    val backdrop = LocalSettingsPrismalBackdrop.current
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         Text("UI Style", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         Text(
@@ -6132,44 +6012,33 @@ private fun UiStyleSetting(currentStyle: String, onStyleSelected: (String) -> Un
             fontSize = 13.sp,
             modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
         )
-        if (backdrop != null) {
-            PrismalSegmentedControl(
-                labels = options.map { it.second },
-                selectedIndex = options.indexOfFirst { it.first == currentStyle }.coerceAtLeast(0),
-                onSelected = { index -> options.getOrNull(index)?.first?.let(onStyleSelected) },
-                backdrop = backdrop,
+        options.chunked(2).forEach { rowOptions ->
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                height = 48.dp
-            )
-        } else {
-            options.chunked(2).forEach { rowOptions ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    rowOptions.forEach { (style, label) ->
-                        val selected = currentStyle == style
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(bottom = 8.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (selected) AccentColor.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f))
-                                .border(
-                                    if (selected) 1.5.dp else 1.dp,
-                                    if (selected) AccentColor else Color.White.copy(alpha = 0.12f),
-                                    RoundedCornerShape(12.dp)
-                                )
-                                .clickable { onStyleSelected(style) }
-                                .padding(vertical = 16.dp, horizontal = 12.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                if (selected) "✓  $label" else label,
-                                color = if (selected) AccentColor else Color.White,
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                rowOptions.forEach { (style, label) ->
+                    val selected = currentStyle == style
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(bottom = 8.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (selected) AccentColor.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f))
+                            .border(
+                                if (selected) 1.5.dp else 1.dp,
+                                if (selected) AccentColor else Color.White.copy(alpha = 0.12f),
+                                RoundedCornerShape(12.dp)
                             )
-                        }
+                            .clickable { onStyleSelected(style) }
+                            .padding(vertical = 16.dp, horizontal = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            if (selected) "✓  $label" else label,
+                            color = if (selected) AccentColor else Color.White,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                        )
                     }
                 }
             }
@@ -6182,6 +6051,7 @@ private fun UiStyleSetting(currentStyle: String, onStyleSelected: (String) -> Un
             )
         }
     }
+}
 }
 
 
