@@ -161,8 +161,8 @@ android {
 }
 
 dependencies {
-    // JitPack multi-module coordinates: repository group plus the Prismal subproject artifact.
-    implementation("com.github.styropyr0.PrismalAGSL:Prismal:v1.0.7")
+    // Use the pinned PrismalAGSL source checked out from the repository submodule.
+    implementation(project(":Prismal"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
