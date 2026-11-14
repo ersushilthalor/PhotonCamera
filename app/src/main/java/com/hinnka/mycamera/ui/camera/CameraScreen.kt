@@ -96,6 +96,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.*
 import com.hinnka.mycamera.ui.icons.AppIcons
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 
 /**
  * 主相机界面
@@ -297,7 +298,6 @@ fun CameraScreen(
     var cameraScreenBounds by remember { mutableStateOf<Rect?>(null) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
     var previewGlBounds by remember { mutableStateOf<Rect?>(null) }
-    var cameraTopSheetGlassBounds by remember { mutableStateOf<Rect?>(null) }
     var editPanelGlassBounds by remember { mutableStateOf<Rect?>(null) }
     var cameraGLSurfaceView by remember { mutableStateOf<CameraGLSurfaceView?>(null) }
     var zoomJoystickOpen by remember { mutableStateOf(false) }
@@ -861,6 +861,8 @@ fun CameraScreen(
     ) {
 
         val backgroundPainter = rememberBackgroundPainter(viewModel)
+        // Capture the TextureView preview only; the menu itself must never enter its backdrop.
+        val cameraPrismalBackdrop = rememberPrismalGlassLayer()
         val modeSwitcherBackdrop = rememberLiquidGlassBackdrop()
         val videoTopBarBackdrop = rememberLiquidGlassBackdrop()
 
@@ -901,7 +903,6 @@ fun CameraScreen(
             state.captureMode,
             activePanel,
             previewGlBounds,
-            cameraTopSheetGlassBounds,
             editPanelGlassBounds,
             cameraMenuTransparency,
             liquidGlassSettings,
@@ -940,18 +941,13 @@ fun CameraScreen(
                     add(tintAlpha.coerceIn(0f, 0.75f))
                 }
 
-                if (activePanel == ActivePanel.SETTINGS) {
-                    // The six-dot menu uses the same optical Liquid Glass pipeline as the
-                    // toolbar. Do not replace it with the old STANDARD frosted-blur panel.
-                    appendOverlay(cameraTopSheetGlassBounds, liquidGlassSettings.tintAlpha * 0.25f)
-                }
                 if (activePanel == ActivePanel.EDIT) {
                     // Keep the edit sheet on the exact same live preview glass pipeline.
                     appendOverlay(editPanelGlassBounds, liquidGlassSettings.tintAlpha * 0.25f)
                 }
             }.toFloatArray()
 
-            val overlaySettings = if (activePanel == ActivePanel.SETTINGS || activePanel == ActivePanel.EDIT) {
+            val overlaySettings = if (activePanel == ActivePanel.EDIT) {
                 liquidGlassSettings.copy(
                     enabled = true,
                     pipeline = LiquidGlassPipelineTier.LIQUID,
@@ -1408,6 +1404,7 @@ fun CameraScreen(
                                 cameraGLSurfaceView = it
                             },
                             onPreviewBoundsChanged = { previewGlBounds = it },
+                            prismalGlassBackdrop = cameraPrismalBackdrop,
                             livePhotoRecorder = viewModel.livePhotoRecorder,
                             videoLogProfile = state.videoConfig.logProfile,
                             isEyeFocusBusy = viewModel.isEyeFocusBusy,
@@ -2005,7 +2002,7 @@ fun CameraScreen(
             contentTopPadding = CameraTopBarBaseTopPadding + topSafePadding,
             cameraMenuTransparency = cameraMenuTransparency,
             liquidGlassSettings = liquidGlassSettings,
-            onGlassBoundsChanged = { cameraTopSheetGlassBounds = it }
+            prismalBackdrop = cameraPrismalBackdrop
         )
 
         // During navigation measurement or window resizing, the viewport can be
