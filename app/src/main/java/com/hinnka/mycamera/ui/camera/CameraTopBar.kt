@@ -270,7 +270,7 @@ private fun VideoTopBar(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 8.dp, start = 8.dp, end = 8.dp)
+            .padding(top = 18.dp, start = 8.dp, end = 8.dp)
             .height(56.dp),
         contentAlignment = Alignment.Center
     ) {

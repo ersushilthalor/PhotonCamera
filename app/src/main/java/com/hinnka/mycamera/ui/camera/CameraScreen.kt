@@ -1109,21 +1109,6 @@ fun CameraScreen(
                     onPreviewZoomChange = viewModel::setZoomRatio,
                     onZoomStopClick = { animateZoomStopTo(it) },
                     onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
-                    onFilterClick = {
-                        if (isVideoMode) {
-                            // Open the regular LUT selector; its Edit action opens adjustments.
-                            activePanel = if (activePanel == ActivePanel.FILTERS) {
-                                ActivePanel.NONE
-                            } else {
-                                ActivePanel.FILTERS
-                            }
-                        } else {
-                            activePanel = if (activePanel == ActivePanel.EDIT) ActivePanel.NONE else ActivePanel.EDIT
-                        }
-                    },
-                    onFilterButtonBoundsChanged = { bounds ->
-                        filterButtonBounds = bounds
-                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .onGloballyPositioned { coordinates ->
