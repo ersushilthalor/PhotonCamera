@@ -169,7 +169,6 @@ private fun Bitmap.recycleIfAlive() {
 private fun PanelDismissPreviewOverlay(
     bounds: Rect?,
     parentBounds: Rect?,
-    dimBackground: Boolean,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -192,13 +191,6 @@ private fun PanelDismissPreviewOverlay(
                 )
             }
             .size(width = width, height = height)
-            .then(
-                if (dimBackground) {
-                    Modifier.background(Color.Black.copy(alpha = 0.4f))
-                } else {
-                    Modifier
-                }
-            )
             .pointerInput(Unit) {
                 detectTapGestures {
                     currentOnDismiss()
@@ -307,8 +299,6 @@ fun CameraScreen(
     var cameraScreenBounds by remember { mutableStateOf<Rect?>(null) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
     var previewGlBounds by remember { mutableStateOf<Rect?>(null) }
-    var videoTopBarLeftGlassBounds by remember { mutableStateOf<Rect?>(null) }
-    var videoTopBarGlassBounds by remember { mutableStateOf<Rect?>(null) }
     var cameraTopSheetGlassBounds by remember { mutableStateOf<Rect?>(null) }
     var cameraGLSurfaceView by remember { mutableStateOf<CameraGLSurfaceView?>(null) }
     var zoomJoystickOpen by remember { mutableStateOf(false) }
@@ -911,8 +901,6 @@ fun CameraScreen(
             state.captureMode,
             activePanel,
             previewGlBounds,
-            videoTopBarLeftGlassBounds,
-            videoTopBarGlassBounds,
             cameraTopSheetGlassBounds,
             cameraMenuTransparency,
             liquidGlassSettings,
@@ -951,14 +939,6 @@ fun CameraScreen(
                     add(tintAlpha.coerceIn(0f, 0.75f))
                 }
 
-                if (liquidGlassSettings.enabled &&
-                    state.captureMode == CaptureMode.VIDEO &&
-                    activePanel == ActivePanel.NONE
-                ) {
-                    // Keep the existing toolbar glass material exactly as configured.
-                    appendOverlay(videoTopBarLeftGlassBounds, liquidGlassSettings.tintAlpha * 0.25f)
-                    appendOverlay(videoTopBarGlassBounds, liquidGlassSettings.tintAlpha * 0.25f)
-                }
                 if (activePanel == ActivePanel.SETTINGS) {
                     // The six-dot menu uses the same optical Liquid Glass pipeline as the
                     // toolbar. Do not replace it with the old STANDARD frosted-blur panel.
@@ -1104,8 +1084,6 @@ fun CameraScreen(
                     activePanel = if (activePanel == ActivePanel.SETTINGS) ActivePanel.NONE else ActivePanel.SETTINGS
                 },
                 glassBackdrop = videoTopBarBackdrop,
-                onVideoGlassBoundsChanged = { videoTopBarGlassBounds = it },
-                onVideoLeftGlassBoundsChanged = { videoTopBarLeftGlassBounds = it },
                 modifier = Modifier
                     .padding(top = topSafePadding)
                     .offset(y = topBarOffset)
@@ -1897,7 +1875,6 @@ fun CameraScreen(
             PanelDismissPreviewOverlay(
                 bounds = panelDismissBounds,
                 parentBounds = cameraScreenBounds,
-                dimBackground = activePanel == ActivePanel.SETTINGS,
                 onDismiss = { activePanel = ActivePanel.NONE }
             )
         }
