@@ -350,24 +350,75 @@ private fun VideoTopBar(
                         }
                         DropdownMenu(
                             expanded = stabilizationMenuExpanded,
-                            onDismissRequest = { stabilizationMenuExpanded = false }
+                            onDismissRequest = { stabilizationMenuExpanded = false },
+                            modifier = Modifier.width(300.dp),
+                            shape = RoundedCornerShape(24.dp),
+                            containerColor = Color.Transparent,
+                            tonalElevation = 0.dp,
+                            shadowElevation = 0.dp
                         ) {
-                            videoCapabilities.availableStabilizationModes.forEach { mode ->
-                                DropdownMenuItem(
-                                    text = { Text(videoStabilizationModeLabel(mode)) },
-                                    onClick = {
-                                        stabilizationMenuExpanded = false
-                                        onVideoStabilizationModeChange(mode)
-                                    },
-                                    trailingIcon = if (mode == videoConfig.stabilizationMode) {
-                                        {
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = null
+                            // Reuse the live camera backdrop so the quick stabilization
+                            // picker has the same refracted Liquid Glass material as settings.
+                            Box {
+                                LiquidGlassSurface(
+                                    backdrop = glassBackdrop,
+                                    modifier = Modifier.matchParentSize(),
+                                    cornerRadius = 24.dp,
+                                    style = LiquidGlassStyle(
+                                        blurRadius = 22.dp,
+                                        refractionHeight = 22.dp,
+                                        refractionAmount = 26.dp,
+                                        saturation = 1.35f,
+                                        tint = Color(0x55101218),
+                                        highlightWidth = 0.8.dp,
+                                        highlightBlur = 0.8.dp,
+                                        highlightAlpha = 0.42f,
+                                        fallbackColor = Color(0xF016171D)
+                                    )
+                                ) {}
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp)
+                                ) {
+                                    videoCapabilities.availableStabilizationModes.forEach { mode ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    text = videoStabilizationModeLabel(mode),
+                                                    color = if (mode == videoConfig.stabilizationMode) {
+                                                        AccentColor
+                                                    } else {
+                                                        Color.White
+                                                    },
+                                                    fontWeight = if (mode == videoConfig.stabilizationMode) {
+                                                        FontWeight.SemiBold
+                                                    } else {
+                                                        FontWeight.Medium
+                                                    }
+                                                )
+                                            },
+                                            onClick = {
+                                                stabilizationMenuExpanded = false
+                                                onVideoStabilizationModeChange(mode)
+                                            },
+                                            trailingIcon = if (mode == videoConfig.stabilizationMode) {
+                                                {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = null,
+                                                        tint = AccentColor
+                                                    )
+                                                }
+                                            } else null,
+                                            colors = MenuDefaults.itemColors(
+                                                textColor = Color.White,
+                                                leadingIconColor = Color.White,
+                                                trailingIconColor = AccentColor
                                             )
-                                        }
-                                    } else null
-                                )
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
