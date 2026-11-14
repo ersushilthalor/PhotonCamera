@@ -72,6 +72,7 @@ import com.hinnka.mycamera.camera.FocusPointSource
 import com.hinnka.mycamera.camera.PhotoCaptureProgress
 import com.hinnka.mycamera.data.CaptureButtonStyle
 import com.hinnka.mycamera.data.LiquidGlassSettingsStore
+import com.hinnka.mycamera.data.LiquidGlassPipelineTier
 import com.hinnka.mycamera.data.DevelopAnimationStyle
 import com.hinnka.mycamera.model.CameraPreset
 import com.hinnka.mycamera.model.ColorRecipeParams
@@ -901,6 +902,29 @@ fun CameraScreen(
             isVideoMode && state.videoConfig.aspectRatio == VideoAspectRatio.OPEN_GATE
 
         val density = LocalDensity.current
+        // The menu uses the Prismal-style Glass Panel material: frosted backdrop blur,
+        // neutral surface, and no optical lens/refraction. Toolbar glass remains configurable.
+        val menuGlassPanelSettings = liquidGlassSettings.copy(
+            enabled = true,
+            pipeline = LiquidGlassPipelineTier.STANDARD,
+            blurRadiusDp = 20f,
+            refractionHeightDp = 0f,
+            refractionAmountDp = 0f,
+            brightness = 0f,
+            saturation = 1f,
+            chromaticAberration = 0f,
+            cornerRadiusDp = 30f,
+            depthEffect = false,
+            adaptiveLuminance = false,
+            useVibrancy = false,
+            specularEnabled = false,
+            depthShadowEnabled = true,
+            depthShadowRadiusDp = 16f,
+            depthShadowAlpha = 0.35f,
+            depthInsetEnabled = false,
+            surfaceTintAlpha = 0.06f,
+            tintAlpha = 0f,
+        )
 
         LaunchedEffect(
             state.captureMode,
@@ -946,28 +970,33 @@ fun CameraScreen(
                     add(tintAlpha.coerceIn(0f, 0.75f))
                 }
 
-                if (liquidGlassSettings.enabled) {
-                    // The toolbar is removed while the settings panel is open, so
-                    // its previous glass bounds must not leave a duplicate overlay behind.
-                    if (state.captureMode == CaptureMode.VIDEO && activePanel == ActivePanel.NONE) {
-                        appendOverlay(videoTopBarLeftGlassBounds, liquidGlassSettings.tintAlpha * 0.25f)
-                        appendOverlay(videoTopBarGlassBounds, liquidGlassSettings.tintAlpha * 0.25f)
-                    }
-                    if (activePanel == ActivePanel.SETTINGS) {
-                        val menuTint = liquidGlassSettings.tintAlpha *
-                            (1f - cameraMenuTransparency.coerceIn(0f, 1f))
-                        appendOverlay(cameraTopSheetGlassBounds, menuTint)
-                    }
+                if (liquidGlassSettings.enabled &&
+                    state.captureMode == CaptureMode.VIDEO &&
+                    activePanel == ActivePanel.NONE
+                ) {
+                    // Keep the existing toolbar glass material exactly as configured.
+                    appendOverlay(videoTopBarLeftGlassBounds, liquidGlassSettings.tintAlpha * 0.25f)
+                    appendOverlay(videoTopBarGlassBounds, liquidGlassSettings.tintAlpha * 0.25f)
+                }
+                if (activePanel == ActivePanel.SETTINGS) {
+                    // Menu is always a neutral frosted Glass Panel, independent of the
+                    // Liquid Glass toolbar toggle and transparency controls.
+                    appendOverlay(cameraTopSheetGlassBounds, 0f)
                 }
             }.toFloatArray()
 
+            val overlaySettings = if (activePanel == ActivePanel.SETTINGS) {
+                menuGlassPanelSettings
+            } else {
+                liquidGlassSettings
+            }
             if (overlayBounds.isEmpty()) {
-                glView.setLiquidGlassOverlays(null, 0f, liquidGlassSettings)
+                glView.setLiquidGlassOverlays(null, 0f, overlaySettings)
             } else {
                 glView.setLiquidGlassOverlays(
                     bounds = overlayBounds,
-                    cornerRadiusPx = with(density) { liquidGlassSettings.cornerRadiusDp.dp.toPx() },
-                    settings = liquidGlassSettings,
+                    cornerRadiusPx = with(density) { overlaySettings.cornerRadiusDp.dp.toPx() },
+                    settings = overlaySettings,
                 )
             }
         }
