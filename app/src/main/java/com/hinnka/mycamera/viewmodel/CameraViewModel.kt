@@ -5250,7 +5250,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             userPreferencesRepository.saveRawMaxOutputScale(normalizedScale)
             cameraController.setMultiFrameOutputScale(
                 resolveMultiFrameOutputScale(
-                    useJpgMax = prefs.useJpgMax && !prefs.useRaw &&
+                    useJpgMax = (prefs.useJpgMax || prefs.nightVisionMode) && !prefs.useRaw &&
                         !prefs.useMultipleExposure,
                     useRawMax = prefs.useRawMax && prefs.useRaw &&
                         !prefs.useMultipleExposure,
@@ -5271,7 +5271,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val prefs = userPreferencesRepository.userPreferences.first()
             cameraController.setMultiFrameOutputScale(
                 resolveMultiFrameOutputScale(
-                    useJpgMax = prefs.useJpgMax && !prefs.useRaw &&
+                    useJpgMax = (prefs.useJpgMax || prefs.nightVisionMode) && !prefs.useRaw &&
                         !prefs.useMultipleExposure,
                     useRawMax = prefs.useRawMax && prefs.useRaw &&
                         !prefs.useMultipleExposure,
@@ -5284,7 +5284,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun shouldEnableLivePhoto(prefs: UserPreferences): Boolean {
         // RAWmax supports Live Photo. A saved JPGmax preference is inactive in RAW mode.
-        val activeUseJpgMax = prefs.useJpgMax && !prefs.useRaw
+        val activeUseJpgMax = (prefs.useJpgMax || prefs.nightVisionMode) && !prefs.useRaw
         return prefs.useLivePhoto && !activeUseJpgMax && !prefs.useMultipleExposure &&
             prefs.captureMode == CaptureMode.PHOTO
     }
@@ -5294,6 +5294,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun setUseLivePhoto(enabled: Boolean) {
         viewModelScope.launch {
+            if (enabled && state.value.isNightVisionActive) {
+                PLog.w(TAG, "Live Photo is unavailable while Night Vision is active")
+                return@launch
+            }
             if (enabled) {
                 applyCameraFeatureUpdate(
                     CameraFeatureUpdate(
