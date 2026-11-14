@@ -15,6 +15,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -181,8 +182,10 @@ private fun Modifier.prismalSliderGestures(
     onValueChangeFinished: (() -> Unit)?
 ): Modifier {
     if (onTapReset == null && onValueChangeFinished == null) return this
+    val latestOnTapReset = rememberUpdatedState(onTapReset)
+    val latestOnValueChangeFinished = rememberUpdatedState(onValueChangeFinished)
 
-    return pointerInput(touchSlop, doubleTapTimeoutMillis, onTapReset, onValueChangeFinished) {
+    return pointerInput(touchSlop, doubleTapTimeoutMillis, onTapReset != null, onValueChangeFinished != null) {
         var pointerDown = false
         var startPosition = Offset.Zero
         var moved = false
@@ -205,15 +208,15 @@ private fun Modifier.prismalSliderGestures(
                     if (!moved && onTapReset != null) {
                         val now = event.uptimeMillis
                         if (lastTapTime != 0L && now - lastTapTime <= doubleTapTimeoutMillis) {
-                            onTapReset()
-                            onValueChangeFinished?.invoke()
+                            latestOnTapReset.value?.invoke()
+                            latestOnValueChangeFinished.value?.invoke()
                             lastTapTime = 0L
                         } else {
                             lastTapTime = now
-                            onValueChangeFinished?.invoke()
+                            latestOnValueChangeFinished.value?.invoke()
                         }
                     } else {
-                        onValueChangeFinished?.invoke()
+                        latestOnValueChangeFinished.value?.invoke()
                     }
                     pointerDown = false
                 }
