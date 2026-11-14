@@ -66,6 +66,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import coil.compose.AsyncImage
 import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.ui.theme.accentContentColor
+import com.hinnka.mycamera.DualCaptureActivity
 import com.hinnka.mycamera.MyCameraApplication
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.AspectRatio
@@ -1913,11 +1914,19 @@ fun CameraScreen(
             onVideoStabilizationModeChange = viewModel::setVideoStabilizationMode,
             onVideoEditClick = { activePanel = ActivePanel.EDIT },
             onVideoDualCaptureClick = {
-                android.widget.Toast.makeText(
-                    context,
-                    "Coming soon",
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
+                context.startActivity(
+                    Intent(context, DualCaptureActivity::class.java).apply {
+                        putExtra(DualCaptureActivity.EXTRA_ASPECT_RATIO, state.videoConfig.aspectRatio.name)
+                        putExtra(
+                            DualCaptureActivity.EXTRA_OPEN_GATE_RATIO,
+                            state.videoCapabilities.openGatePortraitAspectRatio
+                        )
+                        putExtra(DualCaptureActivity.EXTRA_FPS, state.videoConfig.fps.fps)
+                        putExtra(DualCaptureActivity.EXTRA_CODEC_MIME, state.videoConfig.codec.mimeType)
+                        putExtra(DualCaptureActivity.EXTRA_BITRATE_MBPS, state.videoConfig.bitrate.bitrateMbps)
+                        putExtra(DualCaptureActivity.EXTRA_RESOLUTION, state.videoConfig.resolution.name)
+                    }
+                )
             },
             videoCodec = videoCodec,
             onVideoCodecChange = { viewModel.setVideoCodec(it) },
