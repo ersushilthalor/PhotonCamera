@@ -788,7 +788,7 @@ private class DualCaptureGlCompositor {
 
     fun detachEncoder() {
         handler.post {
-            if (drawEncoder) {
+            if (encoderEgl != EGL14.EGL_NO_SURFACE) {
                 EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
                 EGL14.eglDestroySurface(display, encoderEgl)
                 encoderEgl = EGL14.EGL_NO_SURFACE
@@ -828,7 +828,7 @@ private class DualCaptureGlCompositor {
                 drawComposition(previewWidth, previewHeight)
                 EGL14.eglSwapBuffers(display, previewEgl)
             }
-            if (encoderEgl != EGL14.EGL_NO_SURFACE) {
+            if (drawEncoder) {
                 makeCurrent(encoderEgl)
                 drawComposition(encoderSize.width, encoderSize.height)
                 EGLExt.eglPresentationTimeANDROID(display, encoderEgl, SystemClock.elapsedRealtimeNanos())
