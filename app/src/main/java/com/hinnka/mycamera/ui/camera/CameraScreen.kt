@@ -949,7 +949,7 @@ fun CameraScreen(
                             retiredFrames.removeAt(0).recycle()
                         }
                     }
-                    delay(100L)
+                    delay(33L)
                 }
             } finally {
                 cameraGlassPreviewImage.value = null
