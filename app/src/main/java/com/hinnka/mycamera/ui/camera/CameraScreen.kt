@@ -229,6 +229,7 @@ fun CameraScreen(
     val state by viewModel.state.collectAsState()
     var previousPreviewCaptureMode by remember { mutableStateOf(state.captureMode) }
     val isPhotoVideoModeTransition = previousPreviewCaptureMode != state.captureMode
+    var dualCaptureEnabled by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.captureMode) {
         if (state.captureMode != CaptureMode.VIDEO && dualCaptureEnabled) {
@@ -276,7 +277,6 @@ fun CameraScreen(
     val videoCodec by viewModel.videoCodec.collectAsState()
     val videoAudioInputOptions by viewModel.videoAudioInputOptions.collectAsState()
     val phantomPipPreview by viewModel.phantomPipPreview.collectAsState()
-    var dualCaptureEnabled by remember { mutableStateOf(false) }
     var dualCaptureLayout by remember { mutableStateOf(DualCaptureLayout.PICTURE_IN_PICTURE) }
     var dualCaptureLayoutMenuExpanded by remember { mutableStateOf(false) }
     var dualCaptureDragOffset by remember { mutableStateOf(Offset.Zero) }
