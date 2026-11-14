@@ -225,3 +225,12 @@ fun resolveOpenGatePortraitAspectRatio(
 private fun Int.align16(): Int {
     return (this / 16 * 16).coerceAtLeast(16)
 }
+
+/**
+ * Arrangement of the secondary front-camera stream in Dual Capture recordings.
+ */
+enum class DualCaptureLayout {
+    PICTURE_IN_PICTURE,
+    TOP_BOTTOM,
+    SIDE_BY_SIDE
+}
