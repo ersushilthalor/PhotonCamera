@@ -904,6 +904,7 @@ fun CameraScreen(
             videoTopBarLeftGlassBounds,
             videoTopBarGlassBounds,
             cameraTopSheetGlassBounds,
+            cameraMenuTransparency,
             cameraGLSurfaceView,
         ) {
             val previewRect = previewGlBounds
@@ -911,52 +912,55 @@ fun CameraScreen(
             if (glView == null) return@LaunchedEffect
 
             if (previewRect == null || previewRect.width <= 0f || previewRect.height <= 0f) {
-                glView.setLiquidGlassOverlays(null, 0f, 0f)
+                glView.setLiquidGlassOverlays(null, 0f, 24f, 48f)
                 return@LaunchedEffect
             }
 
+            // Overlay records are five floats: left, bottom, right, top, tint alpha.
+            // The same live preview texture is sampled by the Kyant-style lens shader.
             val overlayBounds = buildList<Float> {
-                fun appendOverlay(rect: Rect?) {
+                fun appendOverlay(rect: Rect?, tintAlpha: Float) {
                     if (rect == null) return
-                    // Use the clipped rectangle only to test visibility. Keep the original
-                    // bounds when mapping to GL so a preview edge does not become a fake
-                    // rounded corner for a menu that continues above the preview.
                     val visibleLeft = maxOf(rect.left, previewRect.left)
                     val visibleTop = maxOf(rect.top, previewRect.top)
                     val visibleRight = minOf(rect.right, previewRect.right)
                     val visibleBottom = minOf(rect.bottom, previewRect.bottom)
                     if (visibleRight <= visibleLeft || visibleBottom <= visibleTop) return
 
-                    // Coordinates may intentionally extend outside 0..1. The GL viewport
-                    // clips them naturally while the shader keeps the real card corners.
+                    // Compose uses a top-left origin; GLES texture coordinates use bottom-left.
+                    // Preserve the original rectangle so the shader keeps the real rounded corners.
                     val left = (rect.left - previewRect.left) / previewRect.width
                     val top = (rect.top - previewRect.top) / previewRect.height
                     val right = (rect.right - previewRect.left) / previewRect.width
                     val bottom = (rect.bottom - previewRect.top) / previewRect.height
-                    // Compose uses a top-left origin; the preview texture uses bottom-left UVs.
                     add(left)
                     add(1f - bottom)
                     add(right)
                     add(1f - top)
+                    add(tintAlpha.coerceIn(0f, 0.28f))
                 }
 
                 if (state.captureMode == CaptureMode.VIDEO) {
-                    appendOverlay(videoTopBarLeftGlassBounds)
-                    appendOverlay(videoTopBarGlassBounds)
+                    appendOverlay(videoTopBarLeftGlassBounds, 0.07f)
+                    appendOverlay(videoTopBarGlassBounds, 0.07f)
                 }
                 if (activePanel == ActivePanel.SETTINGS) {
-                    appendOverlay(cameraTopSheetGlassBounds)
+                    // Keep the 0–100% setting, but it now controls the glass tint rather
+                    // than making the menu itself a flat translucent black rectangle.
+                    val menuTint = 0.05f +
+                        (1f - cameraMenuTransparency.coerceIn(0f, 1f)) * 0.16f
+                    appendOverlay(cameraTopSheetGlassBounds, menuTint)
                 }
             }.toFloatArray()
 
             if (overlayBounds.isEmpty()) {
-                glView.setLiquidGlassOverlays(null, 0f, 0f)
+                glView.setLiquidGlassOverlays(null, 0f, 24f, 48f)
             } else {
-                // Blur once, then reuse the same blurred preview for the top bar and menu card.
                 glView.setLiquidGlassOverlays(
                     bounds = overlayBounds,
                     cornerRadiusPx = with(density) { 24.dp.toPx() },
-                    blurRadiusPx = with(density) { 20.dp.toPx() },
+                    refractionHeightPx = with(density) { 24.dp.toPx() },
+                    refractionAmountPx = with(density) { 48.dp.toPx() },
                 )
             }
         }
@@ -2014,7 +2018,6 @@ fun CameraScreen(
             onOppoPhotoSettingsChange = viewModel::updateOppoPhotoSettings,
             refocusAvailable = state.minimumFocusDistance > 0f,
             contentTopPadding = CameraTopBarBaseTopPadding + topSafePadding,
-            cameraMenuTransparency = cameraMenuTransparency,
             onGlassBoundsChanged = { cameraTopSheetGlassBounds = it }
         )
 

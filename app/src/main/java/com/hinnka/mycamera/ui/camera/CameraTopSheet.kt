@@ -147,7 +147,6 @@ fun CameraTopSheet(
     refocusAvailable: Boolean,
     contentTopPadding: Dp = CameraTopSheetContentTopPadding,
     modifier: Modifier = Modifier,
-    cameraMenuTransparency: Float = 0.25f,
     onGlassBoundsChanged: (Rect?) -> Unit = {}
 ) {
     var expandedVideoPanel by rememberSaveable { mutableStateOf<VideoSettingPanel?>(null) }
@@ -212,16 +211,10 @@ fun CameraTopSheet(
                         shape = RoundedCornerShape(24.dp)
                     )
                     .clip(RoundedCornerShape(24.dp))
-                    .background(
-                        Color(0xFF1A1A1E).copy(
-                            alpha = 1f - cameraMenuTransparency.coerceIn(0f, 1f)
-                        )
-                    )
-                    .border(
-                        width = 1.dp,
-                        color = Color.White.copy(alpha = 0.12f),
-                        shape = RoundedCornerShape(24.dp)
-                    )
+                    // The live-preview GLES renderer draws the refractive Liquid Glass
+                    // surface underneath this transparent Compose content. Keep only the
+                    // library's subtle 5% surface tint as a fallback outside the preview.
+                    .background(Color(0x0D000000))
                     .padding(horizontal = 18.dp, vertical = 16.dp)
                     .autoRotate()
             ) {
