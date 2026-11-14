@@ -17,8 +17,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -109,7 +107,6 @@ class DualCaptureActivity : ComponentActivity() {
             onError = { message ->
                 runOnUiThread {
                     cameraReady = false
-                    engineStarted = false
                     recording = false
                     errorMessage = message
                 }
@@ -234,6 +231,7 @@ class DualCaptureActivity : ComponentActivity() {
         selectedOption = option
         cameraReady = false
         errorMessage = null
+        engineStarted = true
         engine?.changeResolution(option)
     }
 
@@ -464,7 +462,7 @@ private fun DualCaptureScreen(
                     FilterChip(
                         selected = selectedOption?.preset == option.preset,
                         onClick = { onResolutionChange(option) },
-                        enabled = !recording && cameraReady,
+                        enabled = !recording && (cameraReady || errorMessage != null),
                         label = { Text(option.preset.displayName, fontSize = 12.sp) },
                         modifier = Modifier.padding(horizontal = 3.dp)
                     )
