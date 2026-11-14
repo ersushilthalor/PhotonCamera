@@ -36,6 +36,8 @@ import com.hinnka.mycamera.ui.components.FocusIndicator
 import com.hinnka.mycamera.utils.OrientationObserver
 import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.video.VideoLogProfile
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.prismalGlassLayer
 
 /**
  * 相机预览组件 - OpenGL ES 版本（Camera2 适配）
@@ -89,6 +91,7 @@ fun CameraPreviewGL(
     videoPreviewStabilizationEnabled: Boolean = false,
     videoPreviewStabilizationStrength: Float = 0f,
     videoPreviewStabilizationLookahead: Int = DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD,
+    prismalGlassBackdrop: PrismalGlassLayer? = null,
     modifier: Modifier = Modifier
 ) {
     val rotationDegrees = OrientationObserver.rotationDegrees
@@ -322,7 +325,13 @@ fun CameraPreviewGL(
                         glSurfaceView.setFocusPeakingEnabled(focusPeakingEnabled)
                         glSurfaceView.setEyeFocusBusy(isEyeFocusBusy)
                     },
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(
+                            prismalGlassBackdrop?.let { backdrop ->
+                                Modifier.prismalGlassLayer(backdrop)
+                            } ?: Modifier
+                        )
                 )
 
             // 对焦指示器
