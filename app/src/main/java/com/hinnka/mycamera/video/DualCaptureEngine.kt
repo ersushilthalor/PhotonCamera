@@ -546,6 +546,8 @@ private class DualCaptureGlCompositor {
                 rotations[1] = frontRotation
                 initEgl()
                 createPreviewSurface(preview)
+                check(previewEgl != EGL14.EGL_NO_SURFACE) { "Preview EGL surface is unavailable" }
+                makeCurrent(previewEgl)
                 initProgram()
                 initCameraSurfaces()
                 ready = true
