@@ -212,13 +212,7 @@ fun CameraTopSheet(
                     .heightIn(max = 600.dp)
                     .onGloballyPositioned { onGlassBoundsChanged(it.boundsInRoot()) }
                     .shadow(
-                        elevation = if (liquidGlassSettings.enabled && liquidGlassSettings.depthShadowEnabled) {
-                            liquidGlassSettings.depthShadowRadiusDp.dp
-                        } else if (!liquidGlassSettings.enabled) {
-                            6.dp
-                        } else {
-                            0.dp
-                        },
+                        elevation = if (liquidGlassSettings.enabled) 0.dp else 6.dp,
                         shape = glassShape,
                         ambientColor = Color.Black.copy(
                             alpha = if (liquidGlassSettings.enabled) 0.10f * liquidGlassSettings.depthShadowAlpha else 0.22f
