@@ -5917,6 +5917,12 @@ class Camera2Controller(private val context: Context) {
         _state.value = _state.value.copy(nrLevel = normalizedLevel)
     }
 
+    fun setNightVisionEnabled(enabled: Boolean) {
+        if (_state.value.nightVisionEnabled == enabled) return
+        _state.value = _state.value.copy(nightVisionEnabled = enabled)
+        PLog.i(TAG, "Night Vision enabled=$enabled")
+    }
+
     fun setVideoImageQualitySettings(nrLevel: Int, edgeLevel: Int) {
         val handler = cameraHandler
         if (handler != null && Looper.myLooper() != handler.looper) {

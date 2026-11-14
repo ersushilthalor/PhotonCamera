@@ -15,6 +15,7 @@ import com.hinnka.mycamera.model.ColorRecipeParams
 import com.hinnka.mycamera.lut.ChromaDenoiseShaders
 import com.hinnka.mycamera.processor.GlesComputeWorkGroup
 import com.hinnka.mycamera.processor.DenoiseStrength
+import com.hinnka.mycamera.processor.NightVisionToneCurve
 import com.hinnka.mycamera.raw.DenoiseProfileNlmConfig
 import com.hinnka.mycamera.raw.DenoiseProfileShaders
 import com.hinnka.mycamera.utils.LargeDirectBuffer
@@ -71,6 +72,7 @@ class LutImageProcessor(context: Context? = null) {
     private var imageTextureId = 0
     private var lutTextureId = 0
     private val basicToneTextures = BasicToneGlTextures()
+    private val nightVisionToneGl = NightVisionToneGl()
     private val logInput = LogInputGl()
     private var framebufferId = 0
     private var outputTextureId = 0
@@ -789,6 +791,60 @@ class LutImageProcessor(context: Context? = null) {
             colorRecipeParams = null,
             sharpening = 0f,
             lutMaskType = 0
+        )
+    }
+
+    /** Night Vision stage: GPU denoise followed by the model-derived luma curve. */
+    internal suspend fun applyNightVision(
+        bitmap: Bitmap,
+        lumaStrength: Float,
+        chromaStrength: Float,
+        sensorIso: Int?,
+        curve: NightVisionToneCurve,
+    ): Bitmap = withContext(glDispatcher) {
+        currentCoroutineContext().ensureActive()
+        val luma = DenoiseStrength.clamp(lumaStrength)
+        val chroma = DenoiseStrength.clamp(chromaStrength)
+        if (luma <= 0f && chroma <= 0f && curve.isIdentity) return@withContext bitmap
+        if (!isInitialized && !initialize()) {
+            PLog.e(TAG, "Night Vision stage skipped: GL processor failed to initialize")
+            return@withContext bitmap
+        }
+        if (!EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) {
+            PLog.e(TAG, "Night Vision stage skipped: EGL context could not be activated")
+            return@withContext bitmap
+        }
+        val width = bitmap.width
+        val height = bitmap.height
+        setupFramebuffer(width, height)
+        uploadImageTexture(bitmap)
+        currentCoroutineContext().ensureActive()
+
+        if (chroma > 0f) {
+            renderBitmapChromaDenoise(imageTextureId, width, height, chroma)
+            currentCoroutineContext().ensureActive()
+        }
+        val chromaDenoisedTexture = if (chroma > 0f) bitmapDenoiseTexId[0] else imageTextureId
+        if (luma > 0f) {
+            renderBitmapDenoiseProfile(chromaDenoisedTexture, width, height, luma)
+            currentCoroutineContext().ensureActive()
+        }
+        val denoisedTexture = if (luma > 0f) bitmapDenoiseTexId[1] else chromaDenoisedTexture
+        val tonedTexture = if (curve.isIdentity) {
+            denoisedTexture
+        } else {
+            nightVisionToneGl.apply(denoisedTexture, width, height, curve)
+        }
+        currentCoroutineContext().ensureActive()
+        performRender(
+            width = width,
+            height = height,
+            inputTextureId = tonedTexture,
+            inputColorSpace = bitmap.colorSpace ?: ColorSpace.get(ColorSpace.Named.SRGB),
+            lutConfig = null,
+            colorRecipeParams = null,
+            sharpening = 0f,
+            lutMaskType = 0,
         )
     }
 
@@ -2619,6 +2675,7 @@ class LutImageProcessor(context: Context? = null) {
         if (!isInitialized) return
         EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
         GLES30.glFinish()
+        nightVisionToneGl.release()
 
         if (shaderProgram != 0) {
             GLES30.glDeleteProgram(shaderProgram)

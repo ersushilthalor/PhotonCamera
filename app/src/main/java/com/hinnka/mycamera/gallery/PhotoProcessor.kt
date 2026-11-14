@@ -24,6 +24,7 @@ import com.hinnka.mycamera.lut.ColorCorrectionPipelineResolver
 import com.hinnka.mycamera.lut.LutImageProcessor
 import com.hinnka.mycamera.lut.LutManager
 import com.hinnka.mycamera.processor.PhotonSensorSizeTuning
+import com.hinnka.mycamera.processor.NightVisionToneCurve
 import com.hinnka.mycamera.processor.DepthBokehProcessor
 import com.hinnka.mycamera.processor.BokehStyle
 import com.hinnka.mycamera.processor.OppoPhotoPipelineEngine
@@ -88,6 +89,21 @@ class PhotoProcessor(
     private fun resolveChromaNoiseReduction(metadata: MediaMetadata, fallback: Float): Float {
         return metadata.chromaNoiseReduction ?: (if (metadata.isImported) 0f else fallback)
     }
+
+    /** Runs Night Vision's denoise + learned tone curve before LUT and creative processing. */
+    internal suspend fun applyNightVision(
+        bitmap: Bitmap,
+        lumaStrength: Float,
+        chromaStrength: Float,
+        sensorIso: Int?,
+        curve: NightVisionToneCurve,
+    ): Bitmap = lutImageProcessor.applyNightVision(
+        bitmap = bitmap,
+        lumaStrength = lumaStrength,
+        chromaStrength = chromaStrength,
+        sensorIso = sensorIso,
+        curve = curve,
+    )
 
     suspend fun prepareUltraHdrSource(
         context: Context,
