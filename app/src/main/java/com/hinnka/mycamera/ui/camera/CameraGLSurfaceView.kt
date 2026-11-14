@@ -153,6 +153,18 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         }
     }
 
+    @Volatile
+    private var currentNightVisionEnabled = false
+
+    fun setNightVisionEnabled(enabled: Boolean) {
+        if (currentNightVisionEnabled == enabled) return
+        currentNightVisionEnabled = enabled
+        queueEvent {
+            renderer.nightVisionEnabled = enabled
+            requestRender()
+        }
+    }
+
     fun setSensorOrientation(orientation: Int) {
         queueEvent {
             renderer.setSensorOrientation(orientation)

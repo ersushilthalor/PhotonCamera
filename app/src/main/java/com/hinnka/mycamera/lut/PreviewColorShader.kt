@@ -97,6 +97,7 @@ internal object PreviewColorShader {
             ${ThreeWayColorGradingShader.GLSL}
             ${PreviewColorShaderModules.SANITIZE}
             ${BasicToneLutShader.GLSL}
+            ${if (variant.includeNightVisionTone) NightVisionToneGl.GLSL else ""}
 
             ${if (variant.includeJpegInputToneCurve) """
             float sampleJpegInputToneCurve(float value) {
@@ -185,6 +186,10 @@ internal object PreviewColorShader {
 
                 ${if (variant.includeJpegInputToneCurve) """
                 color.rgb = applyJpegInputToneCurve(color.rgb);
+                color.rgb = sanitizeColor(color.rgb);
+                """ else ""}
+                ${if (variant.includeNightVisionTone) """
+                color.rgb = applyNightVisionTone(color.rgb);
                 color.rgb = sanitizeColor(color.rgb);
                 """ else ""}
 

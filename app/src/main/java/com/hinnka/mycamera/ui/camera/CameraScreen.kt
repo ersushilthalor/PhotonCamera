@@ -115,6 +115,7 @@ enum class ActivePanel {
 private enum class CameraShootingMode {
     PROFESSIONAL,
     PHOTO,
+    NIGHT_VISION,
     VIDEO
 }
 
@@ -667,17 +668,27 @@ fun CameraScreen(
 
         val targetCaptureMode = when (mode) {
             CameraShootingMode.PROFESSIONAL,
-            CameraShootingMode.PHOTO -> CaptureMode.PHOTO
+            CameraShootingMode.PHOTO,
+            CameraShootingMode.NIGHT_VISION -> CaptureMode.PHOTO
             CameraShootingMode.VIDEO -> CaptureMode.VIDEO
         }
         val targetUseRaw = when (mode) {
             CameraShootingMode.PROFESSIONAL -> true
-            CameraShootingMode.PHOTO -> false
+            CameraShootingMode.PHOTO,
+            CameraShootingMode.NIGHT_VISION -> false
             CameraShootingMode.VIDEO -> null
+        }
+        // Keep Night Vision selected while in Video so returning to Photo restores it.
+        val targetNightVision = when (mode) {
+            CameraShootingMode.NIGHT_VISION -> true
+            CameraShootingMode.PROFESSIONAL,
+            CameraShootingMode.PHOTO -> false
+            CameraShootingMode.VIDEO -> state.nightVisionEnabled
         }
         if (
             targetCaptureMode == state.captureMode &&
-            (targetUseRaw == null || targetUseRaw == state.useRaw)
+            (targetUseRaw == null || targetUseRaw == state.useRaw) &&
+            targetNightVision == state.nightVisionEnabled
         ) {
             return
         }
@@ -687,7 +698,7 @@ fun CameraScreen(
         if (targetCaptureMode == CaptureMode.VIDEO && state.aspectRatio == AspectRatio.XPAN) {
             viewModel.setAspectRatio(AspectRatio.RATIO_4_3)
         }
-        viewModel.setShootingMode(targetCaptureMode, targetUseRaw)
+        viewModel.setShootingMode(targetCaptureMode, targetUseRaw, targetNightVision)
     }
 
     fun presetTargetAspectRatio(preset: CameraPreset?): AspectRatio {
@@ -1366,6 +1377,7 @@ fun CameraScreen(
                             previewSize = previewSize,
                             captureSize = state.currentCaptureSize,
                             captureMode = state.captureMode,
+                            nightVisionEnabled = state.isNightVisionActive,
                             sensorOrientation = state.getCurrentCameraInfo()?.sensorOrientation
                                 ?: 0,
                             lensFacing = if (state.getCurrentCameraInfo()?.lensFacing == android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT) 0 else 1,
@@ -2028,6 +2040,7 @@ fun CameraScreen(
         CameraTopSheet(
             visible = activePanel == ActivePanel.SETTINGS,
             captureMode = state.captureMode,
+            nightVisionEnabled = state.isNightVisionActive,
             aspectRatio = state.aspectRatio,
             topSheetAspectRatios = topSheetAspectRatios,
             onAspectRatioChange = { runPreviewTransition { viewModel.setAspectRatio(it) } },
@@ -2557,10 +2570,10 @@ private fun Controls(
                     oppoStyle = uiStyle == "OPPO",
                     modeSwitcherBackdrop = modeSwitcherBackdrop,
                     // Pro/RAW remains an internal capture option, not a visible mode.
-                    shootingMode = if (state.captureMode == CaptureMode.VIDEO) {
-                        CameraShootingMode.VIDEO
-                    } else {
-                        CameraShootingMode.PHOTO
+                    shootingMode = when {
+                        state.captureMode == CaptureMode.VIDEO -> CameraShootingMode.VIDEO
+                        state.nightVisionEnabled -> CameraShootingMode.NIGHT_VISION
+                        else -> CameraShootingMode.PHOTO
                     },
                     enabled = modeSwitchEnabled &&
                         !state.videoRecordingState.isRecording &&
@@ -2923,8 +2936,12 @@ private fun CaptureModeSwitcher(
     ) {
         // The visible switcher contains only Photo and Video. Pro/RAW capture
         // internals are preserved but are not exposed as a separate UI mode.
-        val knobWidth = maxWidth / 2
-        val selectedIndex = if (shootingMode == CameraShootingMode.VIDEO) 0 else 1
+        val knobWidth = maxWidth / 3
+        val selectedIndex = when (shootingMode) {
+            CameraShootingMode.VIDEO -> 0
+            CameraShootingMode.PHOTO, CameraShootingMode.PROFESSIONAL -> 1
+            CameraShootingMode.NIGHT_VISION -> 2
+        }
         val knobOffset by animateDpAsState(
             targetValue = knobWidth * selectedIndex,
             animationSpec = tween(durationMillis = 220),
@@ -3020,11 +3037,18 @@ private fun CaptureModeSwitcher(
                 selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color(0xFFFFD400)
             )
             ModeSwitcherItem(
-                label = stringResource(R.string.capture_mode_photo).uppercase() +
-                    if (oppoStyle && shootingMode != CameraShootingMode.VIDEO) " ▴" else "",
-                selected = shootingMode != CameraShootingMode.VIDEO,
+                label = stringResource(R.string.capture_mode_photo).uppercase(),
+                selected = shootingMode == CameraShootingMode.PHOTO || shootingMode == CameraShootingMode.PROFESSIONAL,
                 enabled = enabled,
                 onClick = { onModeSelected(CameraShootingMode.PHOTO) },
+                modifier = Modifier.weight(1f),
+                selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color(0xFFFFD400)
+            )
+            ModeSwitcherItem(
+                label = stringResource(R.string.capture_mode_night_vision).uppercase(),
+                selected = shootingMode == CameraShootingMode.NIGHT_VISION,
+                enabled = enabled,
+                onClick = { onModeSelected(CameraShootingMode.NIGHT_VISION) },
                 modifier = Modifier.weight(1f),
                 selectedContentColor = if (oppoStyle) Color(0xFFFF9A32) else Color(0xFFFFD400)
             )

@@ -239,7 +239,7 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 
-    // TensorFlow Lite for Depth Estimator
+    // Shared TensorFlow Lite runtime for Depth, DnCNN, RAW and Night Vision GPU inference.
     implementation("org.tensorflow:tensorflow-lite:2.17.0")
     implementation("org.tensorflow:tensorflow-lite-gpu:2.17.0")
     implementation("org.tensorflow:tensorflow-lite-gpu-api:2.17.0")

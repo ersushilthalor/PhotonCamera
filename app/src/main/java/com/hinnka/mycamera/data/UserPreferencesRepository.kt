@@ -202,6 +202,7 @@ data class UserPreferences(
     val defaultFocalLength: Float = 0f, // 默认焦段 (mm)，0表示不设置
     val zoomDisplayMode: String = "FOCAL_LENGTH",
     val useJpgMax: Boolean = false, // YUV 多帧降噪
+    val nightVisionMode: Boolean = false,
     val useJpgMaxHdrComposition: Boolean = false, // 多帧降噪固定不启用包围曝光
     val jpgMultiFrameDenoiseFrameCount: Int = MultiFrameConfig.DEFAULT_DENOISE_FRAME_COUNT,
     val jpgMultiFrameDenoiseOutputScale: Float = MultiFrameConfig.DEFAULT_SUPER_RESOLUTION_SCALE,
@@ -331,6 +332,7 @@ data class CameraFeaturePreferencesUpdate(
     val aspectRatio: PreferenceUpdateValue<String>? = null,
     val useRaw: PreferenceUpdateValue<Boolean>? = null,
     val useJpgMax: PreferenceUpdateValue<Boolean>? = null,
+    val nightVisionMode: PreferenceUpdateValue<Boolean>? = null,
     val useRawMax: PreferenceUpdateValue<Boolean>? = null,
     val ultraHdrGainMapEnabled: PreferenceUpdateValue<Boolean>? = null,
     val useMultipleExposure: PreferenceUpdateValue<Boolean>? = null,
@@ -475,6 +477,7 @@ class UserPreferencesRepository(private val context: Context) {
 
         // 多帧合成 Key
         private val USE_JPG_MAX = booleanPreferencesKey("use_jpg_max")
+        private val NIGHT_VISION_MODE = booleanPreferencesKey("night_vision_mode")
         private val RAW_MAX_QUALITY_TUNING_ENABLED = booleanPreferencesKey("raw_max_quality_tuning_enabled")
         private val USE_RAW_MAX = booleanPreferencesKey("use_raw_max")
         private val LEGACY_USE_MULTI_FRAME = booleanPreferencesKey("use_multi_frame")
@@ -611,6 +614,7 @@ class UserPreferencesRepository(private val context: Context) {
             val rawBaselineLutConfigured = preferences[RAW_BASELINE_LUT_CONFIGURED_KEY]
                 ?: preferences.contains(RAW_BASELINE_LUT_ID_KEY)
             val storedUseRaw = preferences[USE_RAW] ?: false
+            val nightVisionMode = preferences[NIGHT_VISION_MODE] ?: false
             val hasCurrentMaxPreferences = preferences.contains(USE_JPG_MAX) ||
                 preferences.contains(USE_RAW_MAX)
             val legacyMultiFrameEnabled = preferences[LEGACY_USE_MULTI_FRAME] == true ||
@@ -626,7 +630,7 @@ class UserPreferencesRepository(private val context: Context) {
             } else {
                 storedUseRaw && legacyMultiFrameEnabled
             }
-            val useRawMax = requestedUseRawMax || storedUseRaw
+            val useRawMax = !nightVisionMode && (requestedUseRawMax || storedUseRaw)
             // RAW/HDR+ and YUV denoise belong to different shooting modes. Keep the YUV
             // preference while professional mode is active so returning to PHOTO restores it.
             val useJpgMax = requestedUseJpgMax
@@ -785,7 +789,9 @@ class UserPreferencesRepository(private val context: Context) {
                 customVendorKeySettings = CustomVendorKeySettings.deserialize(
                     preferences[CUSTOM_VENDOR_KEY_SETTINGS]
                 ),
+                nightVisionMode = nightVisionMode,
                 useRaw = when {
+                    nightVisionMode -> false
                     useRawMax -> true
                     useJpgMax -> false
                     else -> storedUseRaw
@@ -817,7 +823,7 @@ class UserPreferencesRepository(private val context: Context) {
                         )
                     }
                     ?: MultiFrameConfig.DEFAULT_SUPER_RESOLUTION_SCALE,
-                useMultipleExposure = preferences[USE_MULTIPLE_EXPOSURE] ?: false,
+                useMultipleExposure = if (nightVisionMode) false else preferences[USE_MULTIPLE_EXPOSURE] ?: false,
                 multipleExposureCount = preferences[MULTIPLE_EXPOSURE_COUNT] ?: 2,
                 rawMaxQualityTuningEnabled = preferences[RAW_MAX_QUALITY_TUNING_ENABLED]
                     ?: PhotonSensorSizeTuning.DEFAULT_RAW_MAX_QUALITY_TUNING_ENABLED,
@@ -859,7 +865,7 @@ class UserPreferencesRepository(private val context: Context) {
                 photoQuality = preferences[PHOTO_QUALITY] ?: 95,
                 useHeicExport = useHeicExport,
                 useJpeg444Export = useJpeg444Export,
-                useLivePhoto = preferences[USE_LIVE_PHOTO] ?: false,
+                useLivePhoto = !nightVisionMode && (preferences[USE_LIVE_PHOTO] ?: false),
                 enableDevelopAnimation = preferences[ENABLE_DEVELOP_ANIMATION] ?: false,
                 colorPaletteEnabled = preferences[COLOR_PALETTE_ENABLED] ?: false,
                 developAnimationStyle = DevelopAnimationStyle.entries.firstOrNull {
@@ -2653,6 +2659,9 @@ class UserPreferencesRepository(private val context: Context) {
             }
             update.useJpgMax?.let {
                 preferences[USE_JPG_MAX] = it.value
+            }
+            update.nightVisionMode?.let {
+                preferences[NIGHT_VISION_MODE] = it.value
             }
             update.useRawMax?.let {
                 preferences[USE_RAW_MAX] = it.value

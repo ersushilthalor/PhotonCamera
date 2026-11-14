@@ -74,6 +74,7 @@ private val CameraTopSheetContentTopPadding = 32.dp
 fun CameraTopSheet(
     visible: Boolean,
     captureMode: CaptureMode,
+    nightVisionEnabled: Boolean = false,
     aspectRatio: AspectRatio,
     topSheetAspectRatios: List<AspectRatio>,
     onAspectRatioChange: (AspectRatio) -> Unit,
@@ -243,6 +244,7 @@ fun CameraTopSheet(
                             VideoMenuItem(
                                 label = "LIVE",
                                 active = useLivePhoto,
+                                enabled = !nightVisionEnabled,
                                 modifier = itemModifier,
                                 onClick = onLivePhotoToggle
                             ) { tint ->

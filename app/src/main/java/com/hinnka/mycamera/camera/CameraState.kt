@@ -387,6 +387,8 @@ data class CameraState(
     val refocusCapturing: Boolean = false,
     val refocusFrameCount: Int = 5,
     val useRaw: Boolean = false,
+    /** Night Vision: dedicated eight-frame YUV capture and learned low-light tone curve. */
+    val nightVisionEnabled: Boolean = false,
     val useMultipleExposure: Boolean = false,
     val rawMinShutterSpeedNs: Long = 0L,
     val useLivePhoto: Boolean = false,
@@ -431,7 +433,8 @@ data class CameraState(
         get() = isIsoAuto && isShutterSpeedAuto
 
     val isMultiFrameEnabled: Boolean
-        get() = (multiFrameOutputScale != null ||
+        get() = ((nightVisionEnabled && captureMode == CaptureMode.PHOTO && !useRaw && !useMultipleExposure) ||
+            multiFrameOutputScale != null ||
             (autoHdrEnabled && captureMode == CaptureMode.PHOTO && !useRaw)) &&
             (!useRaw || (isRawSupported && isRawMultiFrameSupported && normalizedHdrPlusFrameCount > 1))
 
@@ -457,8 +460,13 @@ data class CameraState(
     val isJpgMaxEnabled: Boolean
         get() = isMultiFrameEnabled && !useRaw
 
+    /** Night Vision applies only to a PHOTO YUV stack, never to RAW or video. */
+    val isNightVisionActive: Boolean
+        get() = nightVisionEnabled && captureMode == CaptureMode.PHOTO && isJpgMaxEnabled && !useMultipleExposure
+
     val isJpgMaxHdrEnabled: Boolean
-        get() = isJpgMaxEnabled && (useJpgMaxHdrComposition || autoHdrEnabled)
+        get() = isJpgMaxEnabled && !isNightVisionActive &&
+            (useJpgMaxHdrComposition || autoHdrEnabled)
 
     val isRawMaxEnabled: Boolean
         get() = isMultiFrameEnabled && useRaw
@@ -469,6 +477,7 @@ data class CameraState(
 
     val activeMultiFrameCount: Int
         get() = when {
+            isNightVisionActive -> MultiFrameConfig.NIGHT_VISION_FRAME_COUNT
             autoHdrEnabled && captureMode == CaptureMode.PHOTO && !useRaw -> 1
             isJpgMaxEnabled -> MultiFrameConfig.normalizeDenoiseFrameCount(
                 jpgMultiFrameDenoiseFrameCount
