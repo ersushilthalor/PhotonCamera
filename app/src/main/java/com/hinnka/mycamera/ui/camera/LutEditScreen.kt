@@ -4,6 +4,7 @@ import com.hinnka.mycamera.ui.components.AppModalBottomSheet
 import com.hinnka.mycamera.ui.components.AppSheetStyle
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.*
@@ -17,6 +18,8 @@ import com.hinnka.mycamera.model.toEffectParams
 import com.hinnka.mycamera.ui.components.ColorRecipePanel
 import com.hinnka.mycamera.ui.components.ImageHistogram
 import com.hinnka.mycamera.viewmodel.LutEditViewModel
+import com.styropyr0.prismal.PrismalBackdrop
+import com.styropyr0.prismal.PrismalGlassSurface
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -42,10 +45,12 @@ fun LutEditBottomSheet(
     containerColor: Color? = null,
     modifier: Modifier = Modifier,
     replaceVignetteWithVideoBrightness: Boolean = false,
-    videoOnly: Boolean = false
+    videoOnly: Boolean = false,
+    prismalBackdrop: PrismalBackdrop? = null
 ) {
     val lutEditViewModel: LutEditViewModel = viewModel()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetShape = remember { RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp) }
     val coroutineScope = rememberCoroutineScope()
 
     var editingParams by remember { mutableStateOf(ColorRecipeParams.DEFAULT) }
@@ -108,8 +113,10 @@ fun LutEditBottomSheet(
     }
 
     AppModalBottomSheet(
-        containerColor = containerColor,
-        style = AppSheetStyle.Frosted,
+        containerColor = if (prismalBackdrop != null) Color.Transparent else containerColor,
+        style = if (prismalBackdrop != null) AppSheetStyle.Translucent else AppSheetStyle.Frosted,
+        scrimColor = if (prismalBackdrop != null) Color.Black.copy(alpha = 0.24f) else null,
+        shape = sheetShape,
         onDismissRequest = {
             flushLutSave()
             onDismiss()
@@ -118,12 +125,27 @@ fun LutEditBottomSheet(
         modifier = modifier,
         dragHandle = null,
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-        ) {
-            ColorRecipePanel(
+        Box(modifier = Modifier.fillMaxWidth()) {
+            prismalBackdrop?.let { backdrop ->
+                PrismalGlassSurface(
+                    backdrop = backdrop,
+                    modifier = Modifier.matchParentSize(),
+                    shape = { sheetShape },
+                    blurRadius = 18.dp,
+                    tint = Color(0xFF151820),
+                    tintAlpha = 0.56f,
+                    saturation = 1.35f,
+                    refractionHeightPx = 18f,
+                    refractionAmountPx = 32f,
+                    depthEffect = true
+                )
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+            ) {
+                ColorRecipePanel(
                 currentParams = editingParams,
                 onParamChange = { param, value ->
                     onParamsUpdated(param.setValue(editingParams, value))
@@ -157,8 +179,9 @@ fun LutEditBottomSheet(
                     null
                 },
                 modifier = Modifier.fillMaxWidth(),
-                replaceVignetteWithVideoBrightness = replaceVignetteWithVideoBrightness
-            )
+                    replaceVignetteWithVideoBrightness = replaceVignetteWithVideoBrightness
+                )
+            }
         }
     }
 }

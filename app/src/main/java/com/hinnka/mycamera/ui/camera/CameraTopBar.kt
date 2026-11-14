@@ -46,6 +46,12 @@ import com.hinnka.mycamera.ui.icons.AppIcons
 import com.hinnka.mycamera.ui.components.LiquidGlassBackdrop
 import com.hinnka.mycamera.ui.components.LiquidGlassSurface
 import com.hinnka.mycamera.ui.components.LiquidGlassStyle
+import com.styropyr0.prismal.PrismalBackdrop
+import com.styropyr0.prismal.components.PrismalGlassMenu
+import com.styropyr0.prismal.components.PrismalGlassMenuDivider
+import com.styropyr0.prismal.components.PrismalGlassMenuItem
+import com.styropyr0.prismal.components.PrismalGlassToggle
+import com.styropyr0.prismal.components.prismalMenuAnchor
 
 @Composable
 fun CameraTopBar(
@@ -69,6 +75,7 @@ fun CameraTopBar(
     onVideoHdrToggle: () -> Unit,
     onSettingsClick: () -> Unit,
     glassBackdrop: LiquidGlassBackdrop,
+    prismalBackdrop: PrismalBackdrop,
     onVideoGlassBoundsChanged: (Rect?) -> Unit = {},
     onVideoLeftGlassBoundsChanged: (Rect?) -> Unit = {},
     modifier: Modifier = Modifier
@@ -87,6 +94,7 @@ fun CameraTopBar(
             onVideoHdrToggle = onVideoHdrToggle,
             onSettingsClick = onSettingsClick,
             glassBackdrop = glassBackdrop,
+            prismalBackdrop = prismalBackdrop,
             onGlassBoundsChanged = onVideoGlassBoundsChanged,
             onLeftGlassBoundsChanged = onVideoLeftGlassBoundsChanged,
             modifier = modifier
@@ -245,11 +253,26 @@ private fun VideoTopBar(
     onVideoHdrToggle: () -> Unit,
     onSettingsClick: () -> Unit,
     glassBackdrop: LiquidGlassBackdrop,
+    prismalBackdrop: PrismalBackdrop,
     onGlassBoundsChanged: (Rect?) -> Unit = {},
     onLeftGlassBoundsChanged: (Rect?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var stabilizationMenuExpanded by remember { mutableStateOf(false) }
+    var stabilizationAnchorBounds by remember { mutableStateOf(Rect.Zero) }
+    var lastEnabledStabilizationMode by remember {
+        mutableStateOf(
+            videoConfig.stabilizationMode.takeIf { it != VideoStabilizationMode.OFF }
+                ?: VideoStabilizationMode.EIS
+        )
+    }
+    val availableEnabledStabilizationModes = videoCapabilities.availableStabilizationModes
+        .filter { it != VideoStabilizationMode.OFF }
+    LaunchedEffect(videoConfig.stabilizationMode) {
+        if (videoConfig.stabilizationMode != VideoStabilizationMode.OFF) {
+            lastEnabledStabilizationMode = videoConfig.stabilizationMode
+        }
+    }
     LaunchedEffect(isRecording) {
         if (isRecording) stabilizationMenuExpanded = false
     }
@@ -326,7 +349,9 @@ private fun VideoTopBar(
                         )
                     }
 
-                    Box {
+                    Box(
+                        modifier = Modifier.prismalMenuAnchor { stabilizationAnchorBounds = it }
+                    ) {
                         TopBarActionButton(
                             onClick = {
                                 if (!isRecording && videoCapabilities.availableStabilizationModes.isNotEmpty()) {
@@ -348,77 +373,72 @@ private fun VideoTopBar(
                                 }
                             )
                         }
-                        DropdownMenu(
+                        PrismalGlassMenu(
                             expanded = stabilizationMenuExpanded,
                             onDismissRequest = { stabilizationMenuExpanded = false },
-                            modifier = Modifier.width(300.dp),
-                            shape = RoundedCornerShape(24.dp),
-                            containerColor = Color.Transparent,
-                            tonalElevation = 0.dp,
-                            shadowElevation = 0.dp
+                            anchorBounds = stabilizationAnchorBounds,
+                            backdrop = prismalBackdrop,
+                            width = 280.dp,
+                            cornerRadius = 24.dp,
+                            scrimColor = Color.Black.copy(alpha = 0.12f)
                         ) {
-                            // Reuse the live camera backdrop so the quick stabilization
-                            // picker has the same refracted Liquid Glass material as settings.
-                            Box {
-                                LiquidGlassSurface(
-                                    backdrop = glassBackdrop,
-                                    modifier = Modifier.matchParentSize(),
-                                    cornerRadius = 24.dp,
-                                    style = LiquidGlassStyle(
-                                        blurRadius = 22.dp,
-                                        refractionHeight = 22.dp,
-                                        refractionAmount = 26.dp,
-                                        saturation = 1.35f,
-                                        tint = Color(0x55101218),
-                                        highlightWidth = 0.8.dp,
-                                        highlightBlur = 0.8.dp,
-                                        highlightAlpha = 0.42f,
-                                        fallbackColor = Color(0xF016171D)
-                                    )
-                                ) {}
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 8.dp)
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
                                 ) {
-                                    videoCapabilities.availableStabilizationModes.forEach { mode ->
-                                        DropdownMenuItem(
-                                            text = {
-                                                Text(
-                                                    text = videoStabilizationModeLabel(mode),
-                                                    color = if (mode == videoConfig.stabilizationMode) {
-                                                        AccentColor
-                                                    } else {
-                                                        Color.White
-                                                    },
-                                                    fontWeight = if (mode == videoConfig.stabilizationMode) {
-                                                        FontWeight.SemiBold
-                                                    } else {
-                                                        FontWeight.Medium
-                                                    }
-                                                )
-                                            },
-                                            onClick = {
-                                                stabilizationMenuExpanded = false
-                                                onVideoStabilizationModeChange(mode)
-                                            },
-                                            trailingIcon = if (mode == videoConfig.stabilizationMode) {
-                                                {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Check,
-                                                        contentDescription = null,
-                                                        tint = AccentColor
-                                                    )
-                                                }
-                                            } else null,
-                                            colors = MenuDefaults.itemColors(
-                                                textColor = Color.White,
-                                                leadingIconColor = Color.White,
-                                                trailingIconColor = AccentColor
-                                            )
-                                        )
-                                    }
+                                    Text(
+                                        text = stringResource(R.string.settings_video_stabilization_default),
+                                        color = Color.White,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = videoStabilizationModeLabel(videoConfig.stabilizationMode),
+                                        color = Color.White.copy(alpha = 0.68f),
+                                        fontSize = 12.sp,
+                                        maxLines = 1
+                                    )
                                 }
+                                if (availableEnabledStabilizationModes.isNotEmpty()) {
+                                    PrismalGlassToggle(
+                                        selected = {
+                                            videoConfig.stabilizationMode != VideoStabilizationMode.OFF
+                                        },
+                                        onSelect = { enabled ->
+                                            if (!enabled) {
+                                                onVideoStabilizationModeChange(VideoStabilizationMode.OFF)
+                                            } else {
+                                                val targetMode =
+                                                    lastEnabledStabilizationMode.takeIf {
+                                                        it in availableEnabledStabilizationModes
+                                                    } ?: availableEnabledStabilizationModes.firstOrNull()
+                                                targetMode?.let(onVideoStabilizationModeChange)
+                                            }
+                                        },
+                                        backdrop = prismalBackdrop,
+                                        modifier = Modifier.padding(start = 12.dp)
+                                    )
+                                }
+                            }
+                            PrismalGlassMenuDivider(color = Color.White.copy(alpha = 0.14f))
+                            videoCapabilities.availableStabilizationModes.forEach { mode ->
+                                PrismalGlassMenuItem(
+                                    text = videoStabilizationModeLabel(mode),
+                                    onClick = {
+                                        stabilizationMenuExpanded = false
+                                        onVideoStabilizationModeChange(mode)
+                                    },
+                                    selected = mode == videoConfig.stabilizationMode,
+                                    textColor = Color.White,
+                                    selectedColor = AccentColor
+                                )
                             }
                         }
                     }
