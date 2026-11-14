@@ -330,10 +330,17 @@ class DualCaptureEngine(
                         val characteristics = manager.getCameraCharacteristics(device.id)
                         val request = device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
                             addTarget(surface)
-                            set(
-                                CaptureRequest.CONTROL_AF_MODE,
-                                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
-                            )
+                            val availableAfModes = characteristics.get(
+                                CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES
+                            ) ?: intArrayOf()
+                            val afMode = when {
+                                availableAfModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO) ->
+                                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+                                availableAfModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE) ->
+                                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+                                else -> CaptureRequest.CONTROL_AF_MODE_OFF
+                            }
+                            set(CaptureRequest.CONTROL_AF_MODE, afMode)
                             set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
                             chooseFpsRange(
                                 characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES),
@@ -775,7 +782,7 @@ private class DualCaptureGlCompositor {
     }
 
     private fun drawCamera(x: Int, y: Int, w: Int, h: Int, index: Int) {
-        if (w <= 0 || h <= 0 || textureIds[index] == 0) return
+        if (w <= 0 || h <= 0 || textureIds[index] == 0 || !hasFrame[index]) return
         GLES20.glViewport(x, y, w, h)
         GLES20.glUseProgram(program)
         vertices.position(0)
