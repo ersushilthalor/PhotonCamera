@@ -48,6 +48,27 @@ enum class PreviewCaptureSource {
     Original
 }
 
+private val LIQUID_GLASS_LUMINANCE_FRAGMENT_SHADER = """
+    #version 300 es
+    precision highp float;
+    in vec2 vTexCoord;
+    out vec4 fragColor;
+    uniform sampler2D uInputTexture;
+
+    void main() {
+        float luminanceSum = 0.0;
+        for (int y = 0; y < 8; ++y) {
+            for (int x = 0; x < 8; ++x) {
+                vec2 uv = (vec2(float(x), float(y)) + vec2(0.5)) / 8.0;
+                vec3 sampleColor = texture(uInputTexture, uv).rgb;
+                luminanceSum += dot(sampleColor, vec3(0.2126, 0.7152, 0.0722));
+            }
+        }
+        float averageLuminance = luminanceSum / 64.0;
+        fragColor = vec4(averageLuminance, averageLuminance, averageLuminance, 1.0);
+    }
+""".trimIndent()
+
 private val LIQUID_GLASS_REFRACTION_FRAGMENT_SHADER = """
     #version 300 es
     precision highp float;
@@ -55,6 +76,8 @@ private val LIQUID_GLASS_REFRACTION_FRAGMENT_SHADER = """
     out vec4 fragColor;
 
     uniform sampler2D uInputTexture;
+    uniform sampler2D uLuminanceTexture;
+    uniform float uHasGlobalLuminance;
     uniform vec4 uOverlayRect;
     uniform vec2 uViewportSize;
     uniform float uCornerRadiusPx;
@@ -136,7 +159,7 @@ private val LIQUID_GLASS_REFRACTION_FRAGMENT_SHADER = """
         // Pass 1 draws a soft shadow outside the glass shape before the glass itself.
         if (uPassMode == 1) {
             if (uDepthShadowEnabled < 0.5 || uPipelineTier < 1.0) discard;
-            vec2 shadowPoint = centeredPosition + vec2(0.0, uDepthShadowRadiusPx * 0.10);
+            vec2 shadowPoint = centeredPosition + vec2(0.0, uDepthShadowRadiusPx / 6.0);
             float shadowDistance = roundedRectDistance(shadowPoint, halfSize, radius);
             float outsideDistance = max(shadowDistance, 0.0);
             float shadowAlpha = (1.0 - smoothstep(0.0, max(uDepthShadowRadiusPx, 1.0), outsideDistance))
@@ -176,7 +199,12 @@ private val LIQUID_GLASS_REFRACTION_FRAGMENT_SHADER = """
         );
 
         // Sample the live camera preview texture, with an adjustable compact Gaussian-style blur.
-        float baseLuminance = dot(texture(uInputTexture, sampleUv).rgb, vec3(0.2126, 0.7152, 0.0722));
+        float localLuminance = dot(texture(uInputTexture, sampleUv).rgb, vec3(0.2126, 0.7152, 0.0722));
+        float baseLuminance = mix(
+            localLuminance,
+            texture(uLuminanceTexture, vec2(0.5)).r,
+            clamp(uHasGlobalLuminance, 0.0, 1.0)
+        );
         float luminanceCurve = (baseLuminance * 2.0 - 1.0);
         luminanceCurve = sign(luminanceCurve) * luminanceCurve * luminanceCurve;
         float adaptiveBrightness = 0.0;
@@ -202,8 +230,10 @@ private val LIQUID_GLASS_REFRACTION_FRAGMENT_SHADER = """
 
         float blurFadeEnd = max(uGradientBlurFadeEnd, 0.001);
         float gradientBlurMask = smoothstep(0.0, blurFadeEnd, verticalPosition);
+        float adaptiveBaseBlur = uBlurRadiusPx > 0.0 ? uBlurRadiusPx : 8.0;
         float effectiveBlurRadius = uPipelineTier >= 2.0
-            ? uBlurRadiusPx * adaptiveBlurScale * gradientBlurMask
+            ? (uAdaptiveLuminance > 0.5 ? adaptiveBaseBlur : uBlurRadiusPx)
+                * adaptiveBlurScale * gradientBlurMask
             : 0.0;
         vec3 color = sampleGlass(sampleUv, effectiveBlurRadius);
 
@@ -212,13 +242,24 @@ private val LIQUID_GLASS_REFRACTION_FRAGMENT_SHADER = """
             float cornerFactor = (centeredPosition.x * centeredPosition.y)
                 / max(halfSize.x * halfSize.y, 1.0);
             vec2 dispersion = direction * (displacement * uChromaticAberration * cornerFactor) / viewport;
+
             vec3 redSample = sampleGlass(clamp(sampleUv + dispersion, vec2(0.001), vec2(0.999)), effectiveBlurRadius);
-            vec3 blueSample = sampleGlass(clamp(sampleUv - dispersion, vec2(0.001), vec2(0.999)), effectiveBlurRadius);
-            color = vec3(redSample.r, color.g, blueSample.b);
+            vec3 orangeSample = sampleGlass(clamp(sampleUv + dispersion * (2.0 / 3.0), vec2(0.001), vec2(0.999)), effectiveBlurRadius);
+            vec3 yellowSample = sampleGlass(clamp(sampleUv + dispersion * (1.0 / 3.0), vec2(0.001), vec2(0.999)), effectiveBlurRadius);
+            vec3 greenSample = color;
+            vec3 cyanSample = sampleGlass(clamp(sampleUv - dispersion * (1.0 / 3.0), vec2(0.001), vec2(0.999)), effectiveBlurRadius);
+            vec3 blueSample = sampleGlass(clamp(sampleUv - dispersion * (2.0 / 3.0), vec2(0.001), vec2(0.999)), effectiveBlurRadius);
+            vec3 purpleSample = sampleGlass(clamp(sampleUv - dispersion, vec2(0.001), vec2(0.999)), effectiveBlurRadius);
+
+            color = vec3(
+                redSample.r / 3.5 + orangeSample.r / 3.5 + yellowSample.r / 3.5 + purpleSample.r / 7.0,
+                orangeSample.g / 7.0 + yellowSample.g / 3.5 + greenSample.g / 3.5 + cyanSample.g / 3.5,
+                cyanSample.b / 3.0 + blueSample.b / 3.0 + purpleSample.b / 3.0
+            );
         }
 
         float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
-        float saturation = uUseVibrancy > 0.5 ? 1.5 : uSaturation;
+        float saturation = (uAdaptiveLuminance > 0.5 || uUseVibrancy > 0.5) ? 1.5 : uSaturation;
         float brightness = uAdaptiveLuminance > 0.5 ? adaptiveBrightness : uBrightness;
         float contrast = uAdaptiveLuminance > 0.5 ? adaptiveContrast : 1.0;
         color = mix(vec3(luminance), color, saturation);
@@ -231,7 +272,8 @@ private val LIQUID_GLASS_REFRACTION_FRAGMENT_SHADER = """
         // Optional depth inset: a soft inner shadow that follows the rounded edge.
         if (uDepthInsetEnabled > 0.5 && uPipelineTier >= 2.0) {
             float inset = exp(-insideDepth / max(uDepthInsetRadiusPx, 1.0));
-            color = mix(color, vec3(0.015, 0.025, 0.04), inset * uDepthInsetAlpha * 0.28);
+            float lowerEdgeWeight = smoothstep(0.0, 0.8, verticalPosition);
+            color = mix(color, vec3(0.0), inset * lowerEdgeWeight * uDepthInsetAlpha * 0.15);
         }
 
         // Specular edge highlight: directional, ambient or plain.
@@ -241,12 +283,18 @@ private val LIQUID_GLASS_REFRACTION_FRAGMENT_SHADER = """
             vec2 highlightGradient = roundedRectGradient(centeredPosition, halfSize, min(radius * 1.5, min(halfSize.x, halfSize.y)));
             float facing = dot(safeDirection(highlightGradient), vec2(0.70710678, 0.70710678));
             float highlight = 1.0;
+            float highlightStrength = 0.38;
             if (uSpecularStyle < 0.5) {
-                highlight = pow(max(facing, 0.0), 1.0);
-            } else if (uSpecularStyle < 1.5) {
+                // Default: Prismal's white directional specular uses abs(dot(normal, light)).
                 highlight = pow(abs(facing), 1.0);
+                highlightStrength = 0.50;
+            } else if (uSpecularStyle < 1.5) {
+                // Ambient: illuminate only the half-space facing the 45-degree light.
+                highlight = step(0.0, facing) * pow(abs(facing), 1.0);
+                highlightStrength = 1.0;
             }
-            color += vec3(0.78, 0.88, 1.0) * rim * highlight * uSpecularAlpha * 0.38;
+            // Plain uses the playground's white 0.38-alpha additive highlight.
+            color += vec3(1.0) * rim * highlight * uSpecularAlpha * highlightStrength;
         }
 
         fragColor = vec4(max(color, vec3(0.0)), coverage);
@@ -425,6 +473,9 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     // Live Liquid Glass is composited directly from the already-rendered camera texture.
     // This avoids a second Camera2 stream, CPU readback, and the previous Gaussian-blur passes.
     private var liquidGlassOverlayProgramId: Int = 0
+    private var liquidGlassLuminanceProgramId: Int = 0
+    private var liquidGlassLuminanceTextureId: Int = 0
+    private var liquidGlassLuminanceFboId: Int = 0
     private var liquidGlassBaseTextureId = 0
     private var liquidGlassBaseFboId = 0
     private var liquidGlassBaseWidth = 0
@@ -893,6 +944,9 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         focusPeakingFboWidth = 0
         focusPeakingFboHeight = 0
         liquidGlassOverlayProgramId = 0
+        liquidGlassLuminanceProgramId = 0
+        liquidGlassLuminanceTextureId = 0
+        liquidGlassLuminanceFboId = 0
         liquidGlassBaseTextureId = 0
         liquidGlassBaseFboId = 0
         liquidGlassBaseWidth = 0
@@ -3694,6 +3748,16 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         copyProgramId = 0
         GlUtils.deleteProgram(liquidGlassOverlayProgramId)
         liquidGlassOverlayProgramId = 0
+        GlUtils.deleteProgram(liquidGlassLuminanceProgramId)
+        liquidGlassLuminanceProgramId = 0
+        if (liquidGlassLuminanceFboId != 0) {
+            GLES30.glDeleteFramebuffers(1, intArrayOf(liquidGlassLuminanceFboId), 0)
+            liquidGlassLuminanceFboId = 0
+        }
+        if (liquidGlassLuminanceTextureId != 0) {
+            GLES30.glDeleteTextures(1, intArrayOf(liquidGlassLuminanceTextureId), 0)
+            liquidGlassLuminanceTextureId = 0
+        }
 
         // Release the Camera2 preview SurfaceTexture.
         surfaceTexture?.release()
@@ -3894,6 +3958,22 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         return liquidGlassOverlayProgramId != 0
     }
 
+    private fun ensureLiquidGlassLuminanceProbe(): Boolean {
+        if (liquidGlassLuminanceProgramId == 0) {
+            liquidGlassLuminanceProgramId = createPostProcessProgram(
+                LIQUID_GLASS_LUMINANCE_FRAGMENT_SHADER,
+                "Liquid Glass 8x8 luminance probe",
+            )
+        }
+        if (liquidGlassLuminanceProgramId == 0) return false
+        if (liquidGlassLuminanceTextureId == 0 || liquidGlassLuminanceFboId == 0) {
+            val target = createLiquidGlassFramebuffer(1, 1, "luminance probe") ?: return false
+            liquidGlassLuminanceTextureId = target.first
+            liquidGlassLuminanceFboId = target.second
+        }
+        return true
+    }
+
     private fun createLiquidGlassFramebuffer(
         width: Int,
         height: Int,
@@ -3983,6 +4063,24 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         }
         val effectiveTier = minOf(requestedTier, deviceTier)
 
+        var luminanceProbeAvailable = false
+        if (settings.enabled && settings.adaptiveLuminance && ensureLiquidGlassLuminanceProbe()) {
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, liquidGlassLuminanceFboId)
+            GLES30.glViewport(0, 0, 1, 1)
+            GLES30.glDisable(GLES30.GL_BLEND)
+            GLES30.glUseProgram(liquidGlassLuminanceProgramId)
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, sourceTextureId)
+            GLES30.glUniform1i(
+                GLES30.glGetUniformLocation(liquidGlassLuminanceProgramId, "uInputTexture"),
+                0,
+            )
+            drawSimpleQuad(liquidGlassLuminanceProgramId)
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+            GLES30.glViewport(0, 0, width, height)
+            luminanceProbeAvailable = true
+        }
+
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
         GLES30.glViewport(0, 0, width, height)
         GLES30.glEnable(GLES30.GL_BLEND)
@@ -3990,6 +4088,12 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         GLES30.glUseProgram(liquidGlassOverlayProgramId)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, sourceTextureId)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+        GLES30.glBindTexture(
+            GLES30.GL_TEXTURE_2D,
+            if (luminanceProbeAvailable) liquidGlassLuminanceTextureId else sourceTextureId,
+        )
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
 
         fun uniform1f(name: String, value: Float) {
             GLES30.glUniform1f(GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, name), value)
@@ -3999,6 +4103,8 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         }
 
         uniform1i("uInputTexture", 0)
+        uniform1i("uLuminanceTexture", 1)
+        uniform1f("uHasGlobalLuminance", if (luminanceProbeAvailable) 1f else 0f)
         GLES30.glUniform2f(
             GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, "uViewportSize"),
             width.toFloat(),
@@ -4058,6 +4164,9 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         }
 
         GLES30.glDisable(GLES30.GL_BLEND)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
     }
 
