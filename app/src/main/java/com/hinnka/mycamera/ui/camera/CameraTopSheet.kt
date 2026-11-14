@@ -31,6 +31,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -207,14 +208,27 @@ fun CameraTopSheet(
                     .heightIn(max = 600.dp)
                     .onGloballyPositioned { onGlassBoundsChanged(it.boundsInRoot()) }
                     .shadow(
-                        elevation = 18.dp,
-                        shape = RoundedCornerShape(24.dp)
+                        elevation = 5.dp,
+                        shape = RoundedCornerShape(24.dp),
+                        ambientColor = Color(0xFF9ACBFF).copy(alpha = 0.08f),
+                        spotColor = Color.Black.copy(alpha = 0.10f)
                     )
                     .clip(RoundedCornerShape(24.dp))
-                    // The live-preview GLES renderer draws the refractive Liquid Glass
-                    // surface underneath this transparent Compose content. Keep only the
-                    // library's subtle 5% surface tint as a fallback outside the preview.
-                    .background(Color(0x0D000000))
+                    // The live-preview GLES renderer supplies the refractive surface.
+                    // Keep the Compose fallback cool and translucent, with a fine glass edge.
+                    .background(Color(0x0A8FC8FF))
+                    .border(
+                        width = 0.8.dp,
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.30f),
+                                Color(0xFF9BCFFF).copy(alpha = 0.20f),
+                                Color.White.copy(alpha = 0.08f),
+                                Color(0xFFC5E3FF).copy(alpha = 0.18f)
+                            )
+                        ),
+                        shape = RoundedCornerShape(24.dp)
+                    )
                     .padding(horizontal = 18.dp, vertical = 16.dp)
                     .autoRotate()
             ) {
