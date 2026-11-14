@@ -788,7 +788,7 @@ private class DualCaptureGlCompositor {
 
     fun detachEncoder() {
         handler.post {
-            if (encoderEgl != EGL14.EGL_NO_SURFACE) {
+            if (drawEncoder) {
                 EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
                 EGL14.eglDestroySurface(display, encoderEgl)
                 encoderEgl = EGL14.EGL_NO_SURFACE
@@ -804,7 +804,16 @@ private class DualCaptureGlCompositor {
     }
 
     private fun renderFrames() {
+        val drawPreview = previewEgl != EGL14.EGL_NO_SURFACE && previewSurface?.isValid == true
+        val drawEncoder = encoderEgl != EGL14.EGL_NO_SURFACE
+        if (!drawPreview && !drawEncoder) {
+            // The preview can disappear while the Activity is backgrounded. Leave pending
+            // camera frames queued until a valid EGL window surface is attached again.
+            renderQueued.set(false)
+            return
+        }
         try {
+            makeCurrent(if (drawEncoder) encoderEgl else previewEgl)
             for (i in 0..1) {
                 if (pending[i]) {
                     pending[i] = false
@@ -814,7 +823,7 @@ private class DualCaptureGlCompositor {
                     hasFrame[i] = true
                 }
             }
-            if (previewEgl != EGL14.EGL_NO_SURFACE && previewSurface?.isValid == true) {
+            if (drawPreview) {
                 makeCurrent(previewEgl)
                 drawComposition(previewWidth, previewHeight)
                 EGL14.eglSwapBuffers(display, previewEgl)
