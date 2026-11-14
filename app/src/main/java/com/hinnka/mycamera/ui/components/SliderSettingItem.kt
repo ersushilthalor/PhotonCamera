@@ -76,7 +76,7 @@ fun SliderSettingItem(
                 Spacer(modifier = Modifier.width(8.dp))
                 if (backdrop != null && enabled) {
                     PrismalGlassToggle(
-                        selected = { toggleValue },
+                        selected = { toggleValue == true },
                         onSelect = onToggleChange,
                         backdrop = backdrop
                     )
