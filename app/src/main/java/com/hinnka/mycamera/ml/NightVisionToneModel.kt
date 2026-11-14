@@ -1,7 +1,6 @@
 package com.hinnka.mycamera.ml
 
 import android.content.Context
-import com.google.ai.edge.litert.CompiledModel
 import com.hinnka.mycamera.processor.NightVisionTone
 import com.hinnka.mycamera.processor.NightVisionToneCurve
 import com.hinnka.mycamera.utils.PLog
@@ -11,9 +10,9 @@ import java.util.concurrent.Executors
 
 /**
  * Bundled CPGA-Net low-light model (assets/night_vision), used only to estimate the night vision
- * tone curve. LiteRtGpuModel is not thread-safe, so preview and capture share one model confined
- * to a single thread. XNNPACK rejects the FP16 graph; without the GPU accelerator the mode has no
- * curve and [estimate] returns null.
+ * tone curve. The model is not thread-safe, so preview and capture share one GPU-backed instance
+ * confined to a single thread. Without GPU delegate support the mode has no curve and [estimate]
+ * returns null.
  */
 internal object NightVisionToneModel {
     private const val TAG = "NightVisionToneModel"
@@ -25,7 +24,7 @@ internal object NightVisionToneModel {
         Thread(runnable, "NightVisionTone").apply { isDaemon = true }
     }.asCoroutineDispatcher()
 
-    private var model: LiteRtGpuModel? = null
+    private var model: NightVisionGpuModel? = null
     private var loadFailed = false
 
     /** Runs the model on [input] (HWC RGB, see [NightVisionTone.modelInputFrom]) and fits the curve. */
@@ -48,7 +47,7 @@ internal object NightVisionToneModel {
         NightVisionTone.estimate(input, output)
     }
 
-    private fun obtainModel(context: Context): LiteRtGpuModel? {
+    private fun obtainModel(context: Context): NightVisionGpuModel? {
         model?.let { return it }
         if (loadFailed) return null
         return try {
@@ -56,15 +55,14 @@ internal object NightVisionToneModel {
             val cache = MlDelegateCacheFactory.create(
                 context = context,
                 tag = TAG,
-                cacheName = "cpga_night_vision_litert",
+                cacheName = "cpga_night_vision_tflite_gpu",
                 modelAssetName = MODEL_ASSET,
                 modelSizeBytes = modelSize,
             )
-            LiteRtGpuModel.fromAsset(
+            NightVisionGpuModel.fromAsset(
                 context = context,
                 assetName = MODEL_ASSET,
                 cache = cache,
-                precision = CompiledModel.GpuOptions.Precision.DEFAULT,
                 inputElementCount = ELEMENT_COUNT,
                 outputElementCount = ELEMENT_COUNT,
             ).also { model = it }
