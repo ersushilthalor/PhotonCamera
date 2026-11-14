@@ -918,16 +918,21 @@ fun CameraScreen(
             val overlayBounds = buildList<Float> {
                 fun appendOverlay(rect: Rect?) {
                     if (rect == null) return
-                    val clippedLeft = maxOf(rect.left, previewRect.left)
-                    val clippedTop = maxOf(rect.top, previewRect.top)
-                    val clippedRight = minOf(rect.right, previewRect.right)
-                    val clippedBottom = minOf(rect.bottom, previewRect.bottom)
-                    if (clippedRight <= clippedLeft || clippedBottom <= clippedTop) return
+                    // Use the clipped rectangle only to test visibility. Keep the original
+                    // bounds when mapping to GL so a preview edge does not become a fake
+                    // rounded corner for a menu that continues above the preview.
+                    val visibleLeft = maxOf(rect.left, previewRect.left)
+                    val visibleTop = maxOf(rect.top, previewRect.top)
+                    val visibleRight = minOf(rect.right, previewRect.right)
+                    val visibleBottom = minOf(rect.bottom, previewRect.bottom)
+                    if (visibleRight <= visibleLeft || visibleBottom <= visibleTop) return
 
-                    val left = ((clippedLeft - previewRect.left) / previewRect.width).coerceIn(0f, 1f)
-                    val top = ((clippedTop - previewRect.top) / previewRect.height).coerceIn(0f, 1f)
-                    val right = ((clippedRight - previewRect.left) / previewRect.width).coerceIn(0f, 1f)
-                    val bottom = ((clippedBottom - previewRect.top) / previewRect.height).coerceIn(0f, 1f)
+                    // Coordinates may intentionally extend outside 0..1. The GL viewport
+                    // clips them naturally while the shader keeps the real card corners.
+                    val left = (rect.left - previewRect.left) / previewRect.width
+                    val top = (rect.top - previewRect.top) / previewRect.height
+                    val right = (rect.right - previewRect.left) / previewRect.width
+                    val bottom = (rect.bottom - previewRect.top) / previewRect.height
                     // Compose uses a top-left origin; the preview texture uses bottom-left UVs.
                     add(left)
                     add(1f - bottom)
