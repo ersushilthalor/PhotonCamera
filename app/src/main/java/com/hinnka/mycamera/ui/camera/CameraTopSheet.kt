@@ -47,7 +47,6 @@ import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.MeteringMode
 import com.hinnka.mycamera.data.OppoPhotoSettings
-import com.hinnka.mycamera.data.LiquidGlassSettings
 import com.hinnka.mycamera.raw.DcpInfo
 import com.hinnka.mycamera.raw.HncsFilmCurveMode
 import com.hinnka.mycamera.raw.RawRenderingEngine
@@ -59,7 +58,6 @@ import com.hinnka.mycamera.ui.components.RawRenderingEngineSettingsPanel
 import com.hinnka.mycamera.video.*
 import com.hinnka.mycamera.video.VideoCodec
 import com.hinnka.mycamera.ui.icons.AppIcons
-import com.styropyr0.prismal.PrismalBackdrop
 
 private enum class VideoSettingPanel {
     ASPECT_RATIO,
@@ -147,8 +145,7 @@ fun CameraTopSheet(
     refocusAvailable: Boolean,
     contentTopPadding: Dp = CameraTopSheetContentTopPadding,
     modifier: Modifier = Modifier,
-    liquidGlassSettings: LiquidGlassSettings = LiquidGlassSettings(),
-    prismalBackdrop: PrismalBackdrop
+    onGlassBoundsChanged: (Rect?) -> Unit = {},
 ) {
     var expandedVideoPanel by rememberSaveable { mutableStateOf<VideoSettingPanel?>(null) }
     var showPhotoAspectOptions by rememberSaveable { mutableStateOf(false) }
@@ -163,6 +160,9 @@ fun CameraTopSheet(
     LaunchedEffect(visible, captureMode) {
         showContentManagementOptions = false
         showPhotoAspectOptions = false
+    }
+    LaunchedEffect(visible) {
+        if (!visible) onGlassBoundsChanged(null)
     }
 
     LaunchedEffect(useRaw) {
@@ -202,12 +202,13 @@ fun CameraTopSheet(
             .fillMaxWidth()
             .padding(top = contentTopPadding, start = 5.dp, end = 5.dp)
     ) {
-        CameraPrismalGlassSurface(
-            backdrop = prismalBackdrop,
-            settings = liquidGlassSettings,
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(max = 600.dp)
+                .onGloballyPositioned { coordinates ->
+                    onGlassBoundsChanged(coordinates.boundsInRoot())
+                }
         ) {
             Column(
                 modifier = Modifier

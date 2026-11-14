@@ -262,7 +262,9 @@ private val LIQUID_GLASS_REFRACTION_FRAGMENT_SHADER = """
 
         float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
         float saturation = (uAdaptiveLuminance > 0.5 || uUseVibrancy > 0.5) ? 1.5 : uSaturation;
-        float brightness = uAdaptiveLuminance > 0.5 ? adaptiveBrightness : uBrightness;
+        float brightness = uAdaptiveLuminance > 0.5
+            ? adaptiveBrightness
+            : (uUseVibrancy > 0.5 ? 0.0 : uBrightness);
         float contrast = uAdaptiveLuminance > 0.5 ? adaptiveContrast : 1.0;
         color = mix(vec3(luminance), color, saturation);
         color = (color - vec3(0.5)) * contrast + vec3(0.5 + brightness);

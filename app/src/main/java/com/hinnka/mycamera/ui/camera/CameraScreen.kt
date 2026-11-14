@@ -94,14 +94,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
-import kotlin.coroutines.resume
 import kotlin.math.*
 import com.hinnka.mycamera.ui.icons.AppIcons
-import com.styropyr0.prismal.sources.prismalGlassLayer
-import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 
 /**
  * 主相机界面
@@ -302,27 +297,7 @@ fun CameraScreen(
     var cameraScreenBounds by remember { mutableStateOf<Rect?>(null) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
     var previewGlBounds by remember { mutableStateOf<Rect?>(null) }
-    val cameraGlassPreviewImage = remember { mutableStateOf<ImageBitmap?>(null) }
-    val cameraPrismalBackdrop = rememberPrismalGlassLayer(
-        onDraw = {
-            val image = cameraGlassPreviewImage.value
-            val previewRect = previewGlBounds
-            if (image != null && previewRect != null) {
-                val rootRect = cameraScreenBounds
-                drawImage(
-                    image = image,
-                    dstOffset = IntOffset(
-                        x = (previewRect.left - (rootRect?.left ?: 0f)).roundToInt(),
-                        y = (previewRect.top - (rootRect?.top ?: 0f)).roundToInt(),
-                    ),
-                    dstSize = IntSize(
-                        width = previewRect.width.roundToInt().coerceAtLeast(1),
-                        height = previewRect.height.roundToInt().coerceAtLeast(1),
-                    ),
-                )
-            }
-        }
-    )
+    var topSheetGlassBounds by remember { mutableStateOf<Rect?>(null) }
     var cameraGLSurfaceView by remember { mutableStateOf<CameraGLSurfaceView?>(null) }
     var zoomJoystickOpen by remember { mutableStateOf(false) }
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
@@ -879,7 +854,6 @@ fun CameraScreen(
             .onGloballyPositioned { coordinates ->
                 cameraScreenBounds = coordinates.boundsInRoot()
             }
-            .prismalGlassLayer(cameraPrismalBackdrop)
     ) {
 
         val backgroundPainter = rememberBackgroundPainter(viewModel)
@@ -919,43 +893,34 @@ fun CameraScreen(
 
         val density = LocalDensity.current
 
-        LaunchedEffect(activePanel, cameraGLSurfaceView) {
-            if (activePanel != ActivePanel.SETTINGS) {
-                cameraGlassPreviewImage.value = null
-                return@LaunchedEffect
-            }
-
+        // Render the menu glass in the existing camera GL compositor. This samples
+        // the same final preview texture and never captures a second bitmap stream.
+        LaunchedEffect(
+            activePanel,
+            cameraGLSurfaceView,
+            previewGlBounds,
+            topSheetGlassBounds,
+            liquidGlassSettings,
+            density,
+        ) {
             val glView = cameraGLSurfaceView ?: return@LaunchedEffect
-            var currentFrame: Bitmap? = null
-            val retiredFrames = mutableListOf<Bitmap>()
-            try {
-                while (isActive) {
-                    val nextFrame = withTimeoutOrNull(1_000L) {
-                        suspendCancellableCoroutine<Bitmap> { continuation ->
-                            glView.captureNextPreviewFrame(640) { bitmap ->
-                                if (continuation.isActive) {
-                                    continuation.resume(bitmap)
-                                } else {
-                                    bitmap.recycle()
-                                }
-                            }
-                        }
-                    }
-                    if (nextFrame != null) {
-                        currentFrame?.let(retiredFrames::add)
-                        currentFrame = nextFrame
-                        cameraGlassPreviewImage.value = nextFrame.asImageBitmap()
-                        while (retiredFrames.size > 2) {
-                            retiredFrames.removeAt(0).recycle()
-                        }
-                    }
-                    delay(33L)
-                }
-            } finally {
-                cameraGlassPreviewImage.value = null
-                currentFrame?.recycle()
-                retiredFrames.forEach { it.recycle() }
+            val overlayBounds = if (
+                activePanel == ActivePanel.SETTINGS && liquidGlassSettings.enabled
+            ) {
+                createLiquidGlassOverlayBounds(
+                    panelBounds = topSheetGlassBounds,
+                    previewBounds = previewGlBounds,
+                )
+            } else {
+                null
             }
+            glView.setLiquidGlassOverlays(
+                bounds = overlayBounds,
+                cornerRadiusPx = with(density) {
+                    liquidGlassSettings.cornerRadiusDp.dp.toPx()
+                },
+                settings = liquidGlassSettings,
+            )
         }
 
         val width = with(density) { constraints.maxWidth.toDp() }
@@ -1992,8 +1957,7 @@ fun CameraScreen(
             onOppoPhotoSettingsChange = viewModel::updateOppoPhotoSettings,
             refocusAvailable = state.minimumFocusDistance > 0f,
             contentTopPadding = CameraTopBarBaseTopPadding + topSafePadding,
-            liquidGlassSettings = liquidGlassSettings,
-            prismalBackdrop = cameraPrismalBackdrop
+            onGlassBoundsChanged = { bounds -> topSheetGlassBounds = bounds },
         )
 
         // During navigation measurement or window resizing, the viewport can be
