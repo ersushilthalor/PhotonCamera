@@ -139,6 +139,7 @@ class DualCaptureActivity : ComponentActivity() {
                     pipX = pipX,
                     pipY = pipY,
                     onPreviewSurface = ::onPreviewSurfaceAvailable,
+                    onPreviewSurfaceDestroyed = ::onPreviewSurfaceDestroyed,
                     onPreviewSizeChanged = ::onPreviewSizeChanged,
                     onLayoutChange = { value ->
                         dualLayout = value
@@ -197,6 +198,11 @@ class DualCaptureActivity : ComponentActivity() {
         } else {
             startEngineIfPossible()
         }
+    }
+
+    private fun onPreviewSurfaceDestroyed() {
+        previewSurface = null
+        engine?.detachPreview()
     }
 
     private fun onPreviewSizeChanged(size: IntSize) {
@@ -307,6 +313,7 @@ private fun DualCaptureScreen(
     pipX: Float,
     pipY: Float,
     onPreviewSurface: (Surface) -> Unit,
+    onPreviewSurfaceDestroyed: () -> Unit,
     onPreviewSizeChanged: (IntSize) -> Unit,
     onLayoutChange: (DualCaptureLayout) -> Unit,
     onResolutionChange: (DualCaptureResolutionOption) -> Unit,
@@ -381,7 +388,7 @@ private fun DualCaptureScreen(
                                     onPreviewSizeChanged(IntSize(width, height))
                                 }
                                 override fun surfaceDestroyed(holder: SurfaceHolder) {
-                                    // The Activity owns the camera engine and releases it on exit.
+                                    onPreviewSurfaceDestroyed()
                                 }
                             })
                         }
