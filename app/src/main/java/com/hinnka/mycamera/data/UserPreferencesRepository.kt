@@ -823,7 +823,7 @@ class UserPreferencesRepository(private val context: Context) {
                         )
                     }
                     ?: MultiFrameConfig.DEFAULT_SUPER_RESOLUTION_SCALE,
-                useMultipleExposure = preferences[USE_MULTIPLE_EXPOSURE] ?: false,
+                useMultipleExposure = if (nightVisionMode) false else preferences[USE_MULTIPLE_EXPOSURE] ?: false,
                 multipleExposureCount = preferences[MULTIPLE_EXPOSURE_COUNT] ?: 2,
                 rawMaxQualityTuningEnabled = preferences[RAW_MAX_QUALITY_TUNING_ENABLED]
                     ?: PhotonSensorSizeTuning.DEFAULT_RAW_MAX_QUALITY_TUNING_ENABLED,
@@ -865,7 +865,7 @@ class UserPreferencesRepository(private val context: Context) {
                 photoQuality = preferences[PHOTO_QUALITY] ?: 95,
                 useHeicExport = useHeicExport,
                 useJpeg444Export = useJpeg444Export,
-                useLivePhoto = preferences[USE_LIVE_PHOTO] ?: false,
+                useLivePhoto = !nightVisionMode && (preferences[USE_LIVE_PHOTO] ?: false),
                 enableDevelopAnimation = preferences[ENABLE_DEVELOP_ANIMATION] ?: false,
                 colorPaletteEnabled = preferences[COLOR_PALETTE_ENABLED] ?: false,
                 developAnimationStyle = DevelopAnimationStyle.entries.firstOrNull {

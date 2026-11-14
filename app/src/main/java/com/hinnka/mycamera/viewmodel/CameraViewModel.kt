@@ -2632,7 +2632,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 cameraController.setRawCfaCorrectionModes(prefs.rawCfaCorrectionModes)
                 cameraController.setMultiFrameOutputScale(
                     resolveMultiFrameOutputScale(
-                        useJpgMax = prefs.useJpgMax && !prefs.useRaw &&
+                        useJpgMax = (prefs.useJpgMax || prefs.nightVisionMode) && !prefs.useRaw &&
                             !prefs.useMultipleExposure,
                         useRawMax = prefs.useRawMax && prefs.useRaw &&
                             !prefs.useMultipleExposure,
