@@ -309,6 +309,8 @@ class Camera2Controller(private val context: Context) {
     private var dualCaptureCameraId: String? = null
     private var dualCaptureInputSize: Size? = null
     private var dualCaptureSessionGeneration = 0L
+    private val _dualCaptureStreamSize = MutableStateFlow<Size?>(null)
+    val dualCaptureStreamSize: StateFlow<Size?> = _dualCaptureStreamSize.asStateFlow()
     private var imageReader: ImageReader? = null
     private var stabilizationImageReader: StabilizationImageReader? = null
 
@@ -8233,6 +8235,7 @@ class Camera2Controller(private val context: Context) {
             previewTexture.setDefaultBufferSize(targetSize.width, targetSize.height)
             dualCapturePreviewSurface = Surface(previewTexture)
             dualCaptureInputSize = targetSize
+            _dualCaptureStreamSize.value = targetSize
             dualCaptureCameraId = targetCameraId
             val generation = ++dualCaptureSessionGeneration
             PLog.i(
@@ -8415,6 +8418,7 @@ class Camera2Controller(private val context: Context) {
         dualCaptureRecordSurface = null
         dualCaptureCameraId = null
         dualCaptureInputSize = null
+        _dualCaptureStreamSize.value = null
     }
 
     private fun refreshDualCaptureRecordingTarget() {
