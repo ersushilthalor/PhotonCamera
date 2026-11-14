@@ -61,6 +61,7 @@ import com.hinnka.mycamera.video.VideoLogProfile
 import com.hinnka.mycamera.video.OppoNaturalVideoEngine
 import com.hinnka.mycamera.video.OppoHlg10AutoExposureEngine
 import com.hinnka.mycamera.video.VideoLogLutMode
+import com.hinnka.mycamera.video.DualCaptureLayout
 import com.hinnka.mycamera.video.VideoRecorder
 import com.hinnka.mycamera.video.VideoRecordingPath
 import com.hinnka.mycamera.video.VideoResolutionPreset
@@ -296,6 +297,18 @@ class Camera2Controller(private val context: Context) {
 
     private var previewSurface: Surface? = null
     private var previewSurfaceTexture: SurfaceTexture? = null
+    private var dualCaptureEnabled = false
+    private var dualCaptureLayout = DualCaptureLayout.PICTURE_IN_PICTURE
+    private var dualCapturePositionX = 0.66f
+    private var dualCapturePositionY = 0.05f
+    private var dualCapturePreviewSurfaceTexture: SurfaceTexture? = null
+    private var dualCapturePreviewSurface: Surface? = null
+    private var dualCaptureRecordSurface: Surface? = null
+    private var dualCaptureCameraDevice: CameraDevice? = null
+    private var dualCaptureSession: CameraCaptureSession? = null
+    private var dualCaptureCameraId: String? = null
+    private var dualCaptureInputSize: Size? = null
+    private var dualCaptureSessionGeneration = 0L
     private var imageReader: ImageReader? = null
     private var stabilizationImageReader: StabilizationImageReader? = null
 
@@ -2697,6 +2710,9 @@ class Camera2Controller(private val context: Context) {
         val openCameraId = selectedCamera?.getOpenCameraId() ?: cameraId
         val targetZoomRatioByMain = getTargetZoomRatioByMain(_state.value, selectedCamera)
         val captureMode = _state.value.captureMode
+        if (captureMode != CaptureMode.VIDEO && dualCaptureCameraDevice != null) {
+            stopDualCaptureCamera()
+        }
         if (cameraId.isEmpty()) {
             handleCameraOpenFailure(
                 cameraId = cameraId,
@@ -2739,6 +2755,9 @@ class Camera2Controller(private val context: Context) {
                 PLog.d(TAG, "Camera opened/reused: ${camera.id}")
                 cameraDeviceLifecycle = CameraDeviceLifecycle.OPEN
                 cameraDevice = camera
+                if (dualCaptureEnabled && captureMode == CaptureMode.VIDEO) {
+                    startDualCaptureCamera()
+                }
                 val pendingReconfigure = pendingCaptureModeReconfigureRequest
                 if (captureMode != _state.value.captureMode ||
                     pendingReconfigure?.targetCaptureMode?.let { it != captureMode } == true
@@ -8061,6 +8080,347 @@ class Camera2Controller(private val context: Context) {
         mirrorFrontCameraEnabled = enabled
     }
 
+
+    /**
+     * Dual Capture uses Android's concurrent-camera contract instead of trying to open
+     * a second camera optimistically. A back-facing primary camera and a front camera
+     * must be advertised in the same concurrent set by the device.
+     */
+    fun isDualCaptureSupported(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+        val state = _state.value
+        val current = state.getCurrentCameraInfo() ?: return false
+        if (current.lensFacing == CameraCharacteristics.LENS_FACING_FRONT) return false
+        val front = state.availableCameras.firstOrNull {
+            it.lensFacing == CameraCharacteristics.LENS_FACING_FRONT
+        } ?: return false
+        val primaryId = activeOpenCameraId.takeIf { it.isNotBlank() }
+            ?: runCatching { current.getOpenCameraId() }.getOrNull()
+            ?: current.cameraId
+        return runCatching {
+            cameraManager.concurrentCameraIds.any { ids ->
+                ids.contains(primaryId) && ids.contains(front.cameraId)
+            }
+        }.getOrDefault(false)
+    }
+
+    fun setDualCaptureEnabled(enabled: Boolean) {
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { setDualCaptureEnabled(enabled) }
+            return
+        }
+        if (dualCaptureEnabled == enabled) return
+        if (enabled) {
+            if (_state.value.captureMode != CaptureMode.VIDEO || !isDualCaptureSupported()) {
+                onCameraError?.invoke(
+                    -1,
+                    "Dual Capture is not supported with the currently selected camera.",
+                    false,
+                )
+                return
+            }
+            dualCaptureEnabled = true
+            startDualCaptureCamera()
+        } else {
+            if (videoRecorder.isRecording()) {
+                onCameraError?.invoke(-1, "Stop recording before disabling Dual Capture.", false)
+                return
+            }
+            dualCaptureEnabled = false
+            dualCaptureRecordSurface = null
+            stopDualCaptureCamera()
+        }
+    }
+
+    fun setDualCapturePreviewSurfaceTexture(surfaceTexture: SurfaceTexture?) {
+        val handler = cameraHandler
+        if (handler != null && Looper.myLooper() != handler.looper) {
+            handler.post { setDualCapturePreviewSurfaceTexture(surfaceTexture) }
+            return
+        }
+        if (dualCapturePreviewSurfaceTexture === surfaceTexture) return
+        dualCaptureSession?.let { safeCloseCaptureSession(it, "dual capture preview surface replaced") }
+        dualCaptureSession = null
+        dualCapturePreviewSurface?.release()
+        dualCapturePreviewSurface = null
+        dualCapturePreviewSurfaceTexture = surfaceTexture
+        if (surfaceTexture == null) {
+            if (!videoRecorder.isRecording()) stopDualCaptureCamera()
+            return
+        }
+        if (dualCaptureEnabled) startDualCaptureCamera()
+    }
+
+    fun setDualCaptureLayout(layout: DualCaptureLayout) {
+        dualCaptureLayout = layout
+        videoRecorder.updateDualCaptureLayout(layout)
+    }
+
+    fun setDualCapturePosition(x: Float, y: Float) {
+        dualCapturePositionX = x.coerceIn(0f, 1f)
+        dualCapturePositionY = y.coerceIn(0f, 1f)
+        videoRecorder.updateDualCapturePosition(dualCapturePositionX, dualCapturePositionY)
+    }
+
+    private fun resolveDualCaptureCameraId(): String? {
+        if (!isDualCaptureSupported()) return null
+        return _state.value.availableCameras.firstOrNull {
+            it.lensFacing == CameraCharacteristics.LENS_FACING_FRONT
+        }?.cameraId
+    }
+
+    private fun resolveDualCaptureInputSize(cameraId: String): Size? {
+        return try {
+            val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+            val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                ?: return null
+            val sizes = map.getOutputSizes(SurfaceTexture::class.java)?.toList().orEmpty()
+            if (sizes.isEmpty()) return null
+            val targetAspect = _state.value.currentPreviewSize.width.toFloat() /
+                _state.value.currentPreviewSize.height.coerceAtLeast(1)
+            sizes.filter { it.width <= 1920 && it.height <= 1920 }
+                .maxWithOrNull(
+                    compareBy<Size>(
+                        { -kotlin.math.abs(it.width.toFloat() / it.height.coerceAtLeast(1) - targetAspect) },
+                        { it.width.toLong() * it.height.toLong() },
+                    )
+                )
+                ?: sizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+        } catch (error: Exception) {
+            PLog.e(TAG, "Cannot resolve front-camera Dual Capture stream size", error)
+            null
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startDualCaptureCamera() {
+        val handler = cameraHandler ?: return
+        if (Looper.myLooper() != handler.looper) {
+            handler.post { startDualCaptureCamera() }
+            return
+        }
+        if (!dualCaptureEnabled || _state.value.captureMode != CaptureMode.VIDEO) return
+        if (cameraDevice == null || cameraDeviceLifecycle != CameraDeviceLifecycle.OPEN) return
+        val previewTexture = dualCapturePreviewSurfaceTexture ?: return
+        val targetCameraId = resolveDualCaptureCameraId()
+        if (targetCameraId == null) {
+            PLog.w(TAG, "Dual Capture unavailable: selected primary/front camera pair is not concurrent")
+            return
+        }
+        val targetSize = resolveDualCaptureInputSize(targetCameraId)
+        if (targetSize == null) {
+            PLog.w(TAG, "Dual Capture unavailable: front camera exposes no SurfaceTexture output size")
+            onCameraError?.invoke(-1, "Front camera has no compatible video preview stream.", false)
+            return
+        }
+        if (dualCaptureCameraDevice != null && dualCaptureCameraId == targetCameraId &&
+            dualCaptureInputSize == targetSize
+        ) {
+            if (dualCapturePreviewSurface == null) {
+                previewTexture.setDefaultBufferSize(targetSize.width, targetSize.height)
+                dualCapturePreviewSurface = Surface(previewTexture)
+            }
+            createDualCaptureSession()
+            return
+        }
+        stopDualCaptureCamera()
+        try {
+            previewTexture.setDefaultBufferSize(targetSize.width, targetSize.height)
+            dualCapturePreviewSurface = Surface(previewTexture)
+            dualCaptureInputSize = targetSize
+            dualCaptureCameraId = targetCameraId
+            val generation = ++dualCaptureSessionGeneration
+            PLog.i(
+                TAG,
+                "Opening concurrent front camera for Dual Capture: id=$targetCameraId, " +
+                    "stream=${targetSize.width}x${targetSize.height}, primary=$activeOpenCameraId",
+            )
+            cameraManager.openCamera(
+                targetCameraId,
+                object : CameraDevice.StateCallback() {
+                    override fun onOpened(camera: CameraDevice) {
+                        if (generation != dualCaptureSessionGeneration ||
+                            !dualCaptureEnabled ||
+                            dualCapturePreviewSurfaceTexture !== previewTexture
+                        ) {
+                            camera.close()
+                            return
+                        }
+                        dualCaptureCameraDevice = camera
+                        createDualCaptureSession()
+                    }
+
+                    override fun onDisconnected(camera: CameraDevice) {
+                        PLog.w(TAG, "Concurrent front camera disconnected")
+                        if (dualCaptureCameraDevice === camera) {
+                            stopDualCaptureCamera()
+                        } else {
+                            camera.close()
+                        }
+                        onCameraError?.invoke(-1, "Front camera disconnected during Dual Capture.", false)
+                    }
+
+                    override fun onError(camera: CameraDevice, error: Int) {
+                        PLog.e(TAG, "Concurrent front camera open error: $error")
+                        if (dualCaptureCameraDevice === camera) {
+                            stopDualCaptureCamera()
+                        } else {
+                            camera.close()
+                        }
+                        onCameraError?.invoke(-1, "Cannot open front camera for Dual Capture ($error).", false)
+                    }
+
+                    override fun onClosed(camera: CameraDevice) {
+                        if (dualCaptureCameraDevice === camera) {
+                            dualCaptureCameraDevice = null
+                            dualCaptureSession = null
+                        }
+                    }
+                },
+                handler,
+            )
+        } catch (error: Exception) {
+            PLog.e(TAG, "Failed to open concurrent front camera", error)
+            stopDualCaptureCamera()
+            onCameraError?.invoke(-1, "Cannot start front-camera Dual Capture: ${error.localizedMessage}", false)
+        }
+    }
+
+    private fun createDualCaptureSession() {
+        val handler = cameraHandler ?: return
+        if (Looper.myLooper() != handler.looper) {
+            handler.post { createDualCaptureSession() }
+            return
+        }
+        val device = dualCaptureCameraDevice ?: return
+        val previewSurface = dualCapturePreviewSurface ?: return
+        if (!dualCaptureEnabled || _state.value.captureMode != CaptureMode.VIDEO) return
+        val recordSurface = dualCaptureRecordSurface
+        val surfaces = buildList {
+            add(previewSurface)
+            recordSurface?.let(::add)
+        }
+        val generation = ++dualCaptureSessionGeneration
+        try {
+            dualCaptureSession?.let { safeCloseCaptureSession(it, "dual capture session replaced") }
+            dualCaptureSession = null
+            val characteristics = cameraManager.getCameraCharacteristics(device.id)
+            val availableAfModes = characteristics.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES)
+                ?: intArrayOf()
+            val request = device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
+                addTarget(previewSurface)
+                recordSurface?.let(::addTarget)
+                set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
+                if (availableAfModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)) {
+                    set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
+                }
+                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
+            }
+            device.createCaptureSession(
+                surfaces,
+                object : CameraCaptureSession.StateCallback() {
+                    override fun onConfigured(session: CameraCaptureSession) {
+                        if (generation != dualCaptureSessionGeneration ||
+                            device !== dualCaptureCameraDevice ||
+                            !dualCaptureEnabled
+                        ) {
+                            safeCloseCaptureSession(session, "stale dual capture session")
+                            return
+                        }
+                        dualCaptureSession = session
+                        try {
+                            session.setRepeatingRequest(request.build(), null, handler)
+                            PLog.i(
+                                TAG,
+                                "Dual Capture front stream active: preview=${dualCaptureInputSize}, " +
+                                    "encoder=${recordSurface != null}, layout=${dualCaptureLayout.name}",
+                            )
+                        } catch (error: Exception) {
+                            PLog.e(TAG, "Unable to start front-camera repeating request", error)
+                            safeCloseCaptureSession(session, "dual capture repeating request failed")
+                            dualCaptureSession = null
+                            if (recordSurface != null) {
+                                onCameraError?.invoke(-1, "Front-camera recording stream failed.", false)
+                                stopVideoRecording()
+                            }
+                        }
+                    }
+
+                    override fun onConfigureFailed(session: CameraCaptureSession) {
+                        safeCloseCaptureSession(session, "dual capture configuration failed")
+                        PLog.e(
+                            TAG,
+                            "Dual Capture session configuration failed: encoderSurface=${recordSurface != null}",
+                        )
+                        if (recordSurface != null) {
+                            onCameraError?.invoke(
+                                -1,
+                                "The front camera cannot provide the selected Dual Capture recording stream.",
+                                false,
+                            )
+                            stopVideoRecording()
+                        } else {
+                            onCameraError?.invoke(-1, "Front-camera preview could not be configured.", false)
+                        }
+                    }
+
+                    override fun onClosed(session: CameraCaptureSession) {
+                        if (dualCaptureSession === session) dualCaptureSession = null
+                    }
+                },
+                handler,
+            )
+        } catch (error: Exception) {
+            PLog.e(TAG, "Failed to configure Dual Capture front session", error)
+            if (recordSurface != null) {
+                onCameraError?.invoke(-1, "Front-camera recording stream setup failed.", false)
+                stopVideoRecording()
+            }
+        }
+    }
+
+    private fun stopDualCaptureCamera() {
+        dualCaptureSessionGeneration++
+        val session = dualCaptureSession
+        dualCaptureSession = null
+        try {
+            session?.stopRepeating()
+        } catch (_: Exception) {
+        }
+        try {
+            session?.abortCaptures()
+        } catch (_: Exception) {
+        }
+        try {
+            session?.close()
+        } catch (_: Exception) {
+        }
+        val device = dualCaptureCameraDevice
+        dualCaptureCameraDevice = null
+        try {
+            device?.close()
+        } catch (_: Exception) {
+        }
+        dualCapturePreviewSurface?.release()
+        dualCapturePreviewSurface = null
+        dualCaptureRecordSurface = null
+        dualCaptureCameraId = null
+        dualCaptureInputSize = null
+    }
+
+    private fun refreshDualCaptureRecordingTarget() {
+        if (!dualCaptureEnabled || !videoRecorder.isRecording()) return
+        dualCaptureRecordSurface = videoRecorder.dualCaptureInputSurface
+        if (dualCaptureRecordSurface == null) {
+            onCameraError?.invoke(-1, "Dual Capture encoder input could not be created.", false)
+            stopVideoRecording()
+            return
+        }
+        createDualCaptureSession()
+    }
+
     fun startVideoRecording(
         creativeLutConfig: LutConfig? = null,
         creativeRecipeParams: ColorRecipeParams? = null,
@@ -8158,6 +8518,10 @@ class Camera2Controller(private val context: Context) {
                 _state.value.videoConfig.enhancedStabilizationLookahead,
             recordingPath = _state.value.videoConfig.recordingPath,
             recordingTreeUri = _state.value.videoConfig.recordingTreeUri,
+            dualCaptureInputSize = if (dualCaptureEnabled) dualCaptureInputSize else null,
+            dualCaptureLayout = dualCaptureLayout,
+            dualCapturePositionX = dualCapturePositionX,
+            dualCapturePositionY = dualCapturePositionY,
             onError = { message ->
                 PLog.e(TAG, "Video recording error: $message")
                 onCameraError?.invoke(-1, message, false)
@@ -8165,6 +8529,8 @@ class Camera2Controller(private val context: Context) {
         ) { uri ->
             PLog.i(TAG, "Video saved: $uri")
             val completeRecording = Runnable {
+                dualCaptureRecordSurface = null
+                if (dualCaptureEnabled) createDualCaptureSession()
                 _state.value = _state.value.copy(videoRecordingState = VideoRecordingState())
                 if (cameraDevice != null && previewSurface != null) {
                     createPreviewSession(openGeneration = cameraOpenGeneration)
@@ -8176,6 +8542,10 @@ class Camera2Controller(private val context: Context) {
         if (!started) {
             videoCameraHlg10InputActive = false
             return
+        }
+        if (dualCaptureEnabled) {
+            refreshDualCaptureRecordingTarget()
+            if (dualCaptureRecordSurface == null) return
         }
         _state.value = _state.value.copy(
             videoRecordingState = VideoRecordingState(isRecording = true, elapsedMs = 0L)
@@ -8300,6 +8670,10 @@ class Camera2Controller(private val context: Context) {
             }
         }
         videoCameraHlg10InputActive = false
+        if (dualCaptureRecordSurface != null) {
+            dualCaptureRecordSurface = null
+            if (dualCaptureEnabled) createDualCaptureSession()
+        }
         videoRecorder.stopRecording()
         if (pendingVendorSessionParameterRestart && cameraDevice != null && previewSurface != null) {
             PLog.d(TAG, "Restarting preview session after recording for pending vendor session parameter change")
@@ -9830,6 +10204,9 @@ class Camera2Controller(private val context: Context) {
             captureModeReconfiguringSurfaceTexture = null
             val lifecycleBeforeClose = cameraDeviceLifecycle
             val keepVideoRecording = preserveVideoRecording && _state.value.videoRecordingState.isRecording
+            if (!keepVideoRecording) {
+                stopDualCaptureCamera()
+            }
             if (keepVideoRecording) {
                 PLog.d(TAG, "Closing camera while keeping active video recording")
             }
