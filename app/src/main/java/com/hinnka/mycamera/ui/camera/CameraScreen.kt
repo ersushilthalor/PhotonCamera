@@ -280,6 +280,7 @@ fun CameraScreen(
     var dualCaptureLayout by remember { mutableStateOf(DualCaptureLayout.PICTURE_IN_PICTURE) }
     var dualCaptureLayoutMenuExpanded by remember { mutableStateOf(false) }
     var dualCaptureDragOffset by remember { mutableStateOf(Offset.Zero) }
+    val dualCaptureStreamSize by viewModel.dualCaptureStreamSize.collectAsState()
     val rawDcpId by viewModel.rawDcpId.collectAsState()
     val rawDcpIdsByLens by viewModel.rawDcpIdsByLens.collectAsState()
     val rawHncsFilmCurveMode by viewModel.rawHncsFilmCurveMode.collectAsState()
@@ -1471,10 +1472,11 @@ fun CameraScreen(
                     if (state.captureMode == CaptureMode.VIDEO && dualCaptureEnabled) {
                         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                             val insetWidth = maxWidth * 0.34f
-                            val insetHeight = insetWidth / (16f / 9f)
+                            val dualInsetAspectRatio = if (previewAspectRatio >= 1f) 16f / 9f else 9f / 16f
+                            val insetHeight = insetWidth / dualInsetAspectRatio
                             val pipModifier = Modifier
                                 .width(insetWidth)
-                                .aspectRatio(16f / 9f)
+                                .aspectRatio(dualInsetAspectRatio)
                                 .align(Alignment.TopEnd)
                                 .padding(12.dp)
                                 .offset {
@@ -1556,6 +1558,27 @@ fun CameraScreen(
                                         }
                                     },
                                 )
+                                dualCaptureStreamSize?.let { streamSize ->
+                                    Surface(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomStart)
+                                            .padding(6.dp),
+                                        color = Color.Black.copy(alpha = 0.72f),
+                                        shape = RoundedCornerShape(6.dp),
+                                    ) {
+                                        Text(
+                                            text = stringResource(
+                                                R.string.dual_capture_front_resolution,
+                                                streamSize.width,
+                                                streamSize.height,
+                                            ),
+                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                                            color = Color.White,
+                                            fontSize = 10.sp,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
