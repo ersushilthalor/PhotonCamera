@@ -113,6 +113,7 @@ import com.hinnka.mycamera.ui.camera.CameraGLSurfaceView
 import com.hinnka.mycamera.ui.camera.ZoomDisplayMode
 import com.hinnka.mycamera.utils.*
 import com.hinnka.mycamera.video.CaptureMode
+import com.hinnka.mycamera.video.DualCaptureLayout
 import com.hinnka.mycamera.video.VideoAudioInputManager
 import com.hinnka.mycamera.video.VideoAudioInputOption
 import com.hinnka.mycamera.video.VideoAspectRatio
@@ -3466,6 +3467,25 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             userPreferencesRepository.saveVideoCodec(codec)
         }
+    }
+
+
+    fun isDualCaptureSupported(): Boolean = cameraController.isDualCaptureSupported()
+
+    fun setDualCaptureEnabled(enabled: Boolean) {
+        cameraController.setDualCaptureEnabled(enabled)
+    }
+
+    fun setDualCapturePreviewSurfaceTexture(surfaceTexture: SurfaceTexture?) {
+        cameraController.setDualCapturePreviewSurfaceTexture(surfaceTexture)
+    }
+
+    fun setDualCaptureLayout(layout: DualCaptureLayout) {
+        cameraController.setDualCaptureLayout(layout)
+    }
+
+    fun setDualCapturePosition(x: Float, y: Float) {
+        cameraController.setDualCapturePosition(x, y)
     }
 
     fun pauseVideoRecording() {
