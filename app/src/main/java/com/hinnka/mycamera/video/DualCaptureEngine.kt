@@ -391,20 +391,16 @@ class DualCaptureEngine(
             orientationHintDegrees = 0,
             recordingPath = VideoRecordingPath.DCIM_PHOTON,
             onError = { message ->
-                cameraHandler.post {
-                    recording = false
-                    recorder = null
-                    nextRecorder.release()
-                    onError(message)
-                }
+                recording = false
+                if (recorder === nextRecorder) recorder = null
+                nextRecorder.release()
+                onError(message)
             },
             onFinished = { uri ->
-                cameraHandler.post {
-                    recording = false
-                    recorder = null
-                    nextRecorder.release()
-                    onRecordingFinished(uri)
-                }
+                recording = false
+                if (recorder === nextRecorder) recorder = null
+                nextRecorder.release()
+                onRecordingFinished(uri)
             }
         )
         if (!started) {
