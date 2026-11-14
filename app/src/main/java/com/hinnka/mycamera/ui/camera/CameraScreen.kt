@@ -96,8 +96,6 @@ import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.*
 import com.hinnka.mycamera.ui.icons.AppIcons
-import com.styropyr0.prismal.sources.prismalGlassLayer
-import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 
 /**
  * 主相机界面
@@ -850,14 +848,12 @@ fun CameraScreen(
         )
     }
 
-    val cameraPrismalBackdrop = rememberPrismalGlassLayer()
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .onGloballyPositioned { coordinates ->
                 cameraScreenBounds = coordinates.boundsInRoot()
             }
-            .prismalGlassLayer(cameraPrismalBackdrop)
     ) {
 
         val backgroundPainter = rememberBackgroundPainter(viewModel)
@@ -2134,7 +2130,6 @@ fun CameraScreen(
                 showEffects = true,
                 replaceVignetteWithVideoBrightness = state.captureMode == CaptureMode.VIDEO,
                 videoOnly = state.captureMode == CaptureMode.VIDEO,
-                prismalBackdrop = cameraPrismalBackdrop,
                 onDismiss = {
                     // Keep the Video preview override until the separate recipe reaches DataStore.
                     if (state.captureMode != CaptureMode.VIDEO) {
