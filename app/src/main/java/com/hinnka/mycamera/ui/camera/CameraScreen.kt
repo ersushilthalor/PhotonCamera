@@ -71,6 +71,7 @@ import com.hinnka.mycamera.camera.CameraState
 import com.hinnka.mycamera.camera.FocusPointSource
 import com.hinnka.mycamera.camera.PhotoCaptureProgress
 import com.hinnka.mycamera.data.CaptureButtonStyle
+import com.hinnka.mycamera.data.LiquidGlassSettingsStore
 import com.hinnka.mycamera.data.DevelopAnimationStyle
 import com.hinnka.mycamera.model.CameraPreset
 import com.hinnka.mycamera.model.ColorRecipeParams
@@ -246,6 +247,10 @@ fun CameraScreen(
     val eyeFocusEnabled by viewModel.eyeFocusEnabled.collectAsState()
     val keepScreenOn by viewModel.keepScreenOn.collectAsState(initial = false)
     val cameraMenuTransparency by viewModel.cameraMenuTransparency.collectAsState()
+    val liquidGlassSettings by LiquidGlassSettingsStore.settings.collectAsState()
+    LaunchedEffect(context) {
+        LiquidGlassSettingsStore.load(context.applicationContext)
+    }
     val currentLutId by viewModel.currentLutId.collectAsState()
     val lutNameOverlayState = rememberLutNameOverlayState()
     val currentRecipeParams by viewModel.currentRecipeParams.collectAsState()
@@ -905,6 +910,7 @@ fun CameraScreen(
             videoTopBarGlassBounds,
             cameraTopSheetGlassBounds,
             cameraMenuTransparency,
+            liquidGlassSettings,
             cameraGLSurfaceView,
         ) {
             val previewRect = previewGlBounds
@@ -940,27 +946,26 @@ fun CameraScreen(
                     add(tintAlpha.coerceIn(0f, 0.28f))
                 }
 
-                if (state.captureMode == CaptureMode.VIDEO) {
-                    appendOverlay(videoTopBarLeftGlassBounds, 0.07f)
-                    appendOverlay(videoTopBarGlassBounds, 0.07f)
-                }
-                if (activePanel == ActivePanel.SETTINGS) {
-                    // Keep the 0–100% setting, but it now controls the glass tint rather
-                    // than making the menu itself a flat translucent black rectangle.
-                    val menuTint = 0.035f +
-                        (1f - cameraMenuTransparency.coerceIn(0f, 1f)) * 0.075f
-                    appendOverlay(cameraTopSheetGlassBounds, menuTint)
+                if (liquidGlassSettings.enabled) {
+                    if (state.captureMode == CaptureMode.VIDEO) {
+                        appendOverlay(videoTopBarLeftGlassBounds, liquidGlassSettings.tintAlpha * 0.25f)
+                        appendOverlay(videoTopBarGlassBounds, liquidGlassSettings.tintAlpha * 0.25f)
+                    }
+                    if (activePanel == ActivePanel.SETTINGS) {
+                        val menuTint = liquidGlassSettings.tintAlpha *
+                            (1f - cameraMenuTransparency.coerceIn(0f, 1f))
+                        appendOverlay(cameraTopSheetGlassBounds, menuTint)
+                    }
                 }
             }.toFloatArray()
 
             if (overlayBounds.isEmpty()) {
-                glView.setLiquidGlassOverlays(null, 0f, 24f, 48f)
+                glView.setLiquidGlassOverlays(null, 0f, liquidGlassSettings)
             } else {
                 glView.setLiquidGlassOverlays(
                     bounds = overlayBounds,
-                    cornerRadiusPx = with(density) { 24.dp.toPx() },
-                    refractionHeightPx = with(density) { 24.dp.toPx() },
-                    refractionAmountPx = with(density) { 28.dp.toPx() },
+                    cornerRadiusPx = with(density) { liquidGlassSettings.cornerRadiusDp.dp.toPx() },
+                    settings = liquidGlassSettings,
                 )
             }
         }
@@ -2018,6 +2023,8 @@ fun CameraScreen(
             onOppoPhotoSettingsChange = viewModel::updateOppoPhotoSettings,
             refocusAvailable = state.minimumFocusDistance > 0f,
             contentTopPadding = CameraTopBarBaseTopPadding + topSafePadding,
+            cameraMenuTransparency = cameraMenuTransparency,
+            liquidGlassSettings = liquidGlassSettings,
             onGlassBoundsChanged = { cameraTopSheetGlassBounds = it }
         )
 
