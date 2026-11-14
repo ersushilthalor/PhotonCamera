@@ -186,6 +186,13 @@
         </activity>
 
         <activity
+                android:name=".DualCaptureActivity"
+                android:exported="false"
+                android:screenOrientation="portrait"
+                android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+                android:theme="@style/Theme.MyCamera" />
+
+        <activity
                 android:name=".mgc.MgcFilterSelectionActivity"
                 android:excludeFromRecents="true"
                 android:exported="true"
