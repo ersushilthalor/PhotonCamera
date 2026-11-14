@@ -75,6 +75,7 @@ class CameraGLSurfaceView @JvmOverloads constructor(
     private var eglWindowSurface: EGLSurface? = null
 
     @Volatile private var currentSurface: Surface? = null
+    @Volatile private var deliveredSurface: Surface? = null
     private var currentStabilizationCoordinator: RealtimeStabilizationCoordinator? = null
     private var currentPreviewStabilizationUseCase: StabilizationUseCase? = null
     private var currentPreviewStabilizationStrength = 0f
@@ -93,6 +94,13 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         }
 
     var onSurfaceReady: ((Surface) -> Unit)? = null
+        set(value) {
+            field = value
+            val surface = currentSurface
+            if (value != null && surfaceAvailable && surface != null) {
+                post { notifySurfaceReady(surface) }
+            }
+        }
     var onSurfaceDestroyed: (() -> Unit)? = null
     var onFirstPreviewFrame: (() -> Unit)? = null
 
@@ -128,13 +136,8 @@ class CameraGLSurfaceView @JvmOverloads constructor(
             val surface = Surface(cameraTexture)
             currentSurface?.release()
             currentSurface = surface
-            post {
-                if (surfaceAvailable && currentSurface === surface) {
-                    onSurfaceReady?.invoke(surface)
-                } else {
-                    surface.release()
-                }
-            }
+            deliveredSurface = null
+            post { notifySurfaceReady(surface) }
         }
         renderer.onRequestRender = { requestRender() }
         renderer.onHistogramUpdated = { histogram -> onHistogramUpdated?.invoke(histogram) }
@@ -144,6 +147,13 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         renderer.onHighlightPointUpdated = { hx, hy -> onHighlightPointUpdated?.invoke(hx, hy) }
         renderer.onFirstFrameRendered = { post { onFirstPreviewFrame?.invoke() } }
         applyEyeFocusCallback()
+    }
+
+    private fun notifySurfaceReady(surface: Surface) {
+        if (!surfaceAvailable || currentSurface !== surface || deliveredSurface === surface) return
+        val callback = onSurfaceReady ?: return
+        deliveredSurface = surface
+        callback(surface)
     }
 
     private fun applyEyeFocusCallback() {
@@ -337,6 +347,7 @@ class CameraGLSurfaceView @JvmOverloads constructor(
             .onFailure { PLog.e(TAG, "Preview surface destroy callback failed", it) }
         currentSurface?.release()
         currentSurface = null
+        deliveredSurface = null
 
         val handler = glHandler
         if (handler == null) {
