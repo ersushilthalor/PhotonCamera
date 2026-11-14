@@ -45,8 +45,6 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import com.hinnka.mycamera.ui.theme.AccentColor
-import com.hinnka.mycamera.ui.theme.OnAccentColor
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.MeteringMode
@@ -213,7 +211,6 @@ fun CameraTopSheet(
             val glassShape = RoundedCornerShape(liquidGlassSettings.cornerRadiusDp.dp)
             Column(
                 modifier = Modifier
-                    .widthIn(max = 420.dp)
                     .fillMaxWidth()
                     .heightIn(max = 600.dp)
                     .onGloballyPositioned { onGlassBoundsChanged(it.boundsInRoot()) }
@@ -815,7 +812,7 @@ private fun OppoPipelineSlider(
             )
             Text(
                 text = String.format("%.2f", value),
-                color = AccentColor,
+                color = Color.White,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -1153,7 +1150,7 @@ private fun VideoSettingTile(
             .height(40.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(
-                if (expanded) AccentColor else Color.White.copy(alpha = 0.14f)
+                if (expanded) Color.White else Color.White.copy(alpha = 0.14f)
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 4.dp),
@@ -1161,7 +1158,7 @@ private fun VideoSettingTile(
     ) {
         Text(
             text = title,
-            color = if (expanded) OnAccentColor.copy(alpha = 0.75f) else Color.White.copy(alpha = 0.72f),
+            color = if (expanded) Color.White.copy(alpha = 0.75f) else Color.White.copy(alpha = 0.72f),
             fontSize = 9.sp,
             lineHeight = 12.sp,
             fontWeight = FontWeight.Medium,
@@ -1173,7 +1170,7 @@ private fun VideoSettingTile(
         ) {
             QuickSettingLabel(
                 text = summary,
-                color = if (expanded) OnAccentColor else Color.White,
+                color = if (expanded) Color.White else Color.White,
                 maxFontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f)
@@ -1181,7 +1178,7 @@ private fun VideoSettingTile(
             Icon(
                 imageVector = if (expanded) AppIcons.ExpandLess else AppIcons.OpenInFull,
                 contentDescription = null,
-                tint = if (expanded) OnAccentColor else Color.White.copy(alpha = 0.8f),
+                tint = if (expanded) Color.White else Color.White.copy(alpha = 0.8f),
                 modifier = Modifier.size(12.dp)
             )
         }
@@ -1518,7 +1515,7 @@ fun QuickSettingButton2(
             .height(48.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(
-                if (checked) AccentColor else Color.White.copy(
+                if (checked) Color.White else Color.White.copy(
                     alpha = 0.15f
                 )
             )
@@ -1533,14 +1530,14 @@ fun QuickSettingButton2(
         ) {
             QuickSettingLabel(
                 text = title,
-                color = if (checked) OnAccentColor else Color.White.copy(alpha = 0.9f),
+                color = if (checked) Color.White else Color.White.copy(alpha = 0.9f),
                 fontWeight = if (checked) FontWeight.Bold else FontWeight.Normal,
                 modifier = Modifier.weight(1f)
             )
             Icon(
                 imageVector = AppIcons.ChevronRight,
                 contentDescription = null,
-                tint = if (checked) OnAccentColor else Color.White.copy(alpha = 0.9f),
+                tint = if (checked) Color.White else Color.White.copy(alpha = 0.9f),
                 modifier = Modifier.size(14.dp)
             )
         }
@@ -1561,7 +1558,7 @@ fun QuickSettingToggle(
             .height(48.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(
-                if (checked) AccentColor.copy(alpha = contentAlpha) else Color.White.copy(
+                if (checked) Color.White.copy(alpha = contentAlpha) else Color.White.copy(
                     alpha = 0.15f
                 )
             )
@@ -1577,7 +1574,7 @@ fun QuickSettingToggle(
             QuickSettingLabel(
                 text = title,
                 color = if (checked) {
-                    OnAccentColor.copy(alpha = contentAlpha)
+                    Color.White.copy(alpha = contentAlpha)
                 } else {
                     Color.White.copy(alpha = 0.9f * contentAlpha)
                 },
@@ -1592,7 +1589,7 @@ fun QuickSettingToggle(
                     .clip(androidx.compose.foundation.shape.CircleShape)
                     .background(
                         if (checked) {
-                            OnAccentColor.copy(alpha = contentAlpha)
+                            Color.White.copy(alpha = contentAlpha)
                         } else {
                             Color.White.copy(alpha = 0.2f * contentAlpha)
                         }
