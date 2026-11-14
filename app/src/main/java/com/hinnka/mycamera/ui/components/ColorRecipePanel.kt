@@ -2,8 +2,6 @@ package com.hinnka.mycamera.ui.components
 
 import com.hinnka.mycamera.ui.theme.AccentColor
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.platform.LocalDensity
 import com.styropyr0.prismal.drawPrismalGlass
 import com.styropyr0.prismal.effects.applyPrismalGlassEffects
 import com.styropyr0.prismal.sources.rememberPrismalCanvasSource
