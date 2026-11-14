@@ -1875,6 +1875,38 @@ fun SettingsScreen(
                 }
 
                 SettingsPage.LIQUID_GLASS -> {
+                    SettingsSection(title = "Appearance") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Backdrop", color = Color.White, fontSize = 16.sp)
+                                Text(
+                                    "Live camera preview",
+                                    color = Color.White.copy(alpha = 0.62f),
+                                    fontSize = 13.sp
+                                )
+                            }
+                            Text(
+                                "LIVE",
+                                color = AccentColor,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Text(
+                            "The active viewfinder is used as the glass backdrop instead of a static wallpaper.",
+                            color = Color.White.copy(alpha = 0.55f),
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
                     SettingsSection(title = "General", showTitle = false) {
                         SwitchSettingItem(
                             title = "Liquid Glass",
