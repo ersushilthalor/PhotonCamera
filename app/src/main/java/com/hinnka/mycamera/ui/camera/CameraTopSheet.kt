@@ -208,36 +208,23 @@ fun CameraTopSheet(
             modifier = Modifier.fillMaxWidth(),
             contentAlignment = Alignment.TopCenter
         ) {
-            val glassShape = RoundedCornerShape(liquidGlassSettings.cornerRadiusDp.dp)
+            val glassShape = RoundedCornerShape(30.dp)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = 600.dp)
                     .onGloballyPositioned { onGlassBoundsChanged(it.boundsInRoot()) }
                     .shadow(
-                        elevation = if (liquidGlassSettings.enabled) 0.dp else 6.dp,
+                        elevation = 5.dp,
                         shape = glassShape,
-                        ambientColor = Color.Black.copy(
-                            alpha = if (liquidGlassSettings.enabled) 0.10f * liquidGlassSettings.depthShadowAlpha else 0.22f
-                        ),
-                        spotColor = Color.Black.copy(
-                            alpha = if (liquidGlassSettings.enabled) 0.10f * liquidGlassSettings.depthShadowAlpha else 0.35f
-                        )
+                        ambientColor = Color.Black.copy(alpha = 0.14f),
+                        spotColor = Color.Black.copy(alpha = 0.20f)
                     )
                     .clip(glassShape)
-                    // The camera GL renderer supplies the live refracted preview.
-                    // Keep a restrained Compose fallback for devices / modes without it.
-                    .background(
-                        if (liquidGlassSettings.enabled) {
-                            Color.Transparent
-                        } else {
-                            Color(0xFF1A1A1E).copy(
-                                alpha = (1f - cameraMenuTransparency.coerceIn(0f, 1f)).coerceIn(0.18f, 0.88f)
-                            )
-                        }
-                    )
-                    // Specular and surface tint are drawn by the configurable GL material,
-                    // not by a fixed Compose border or an always-on fallback tint.
+                    // The live camera preview is blurred by the dedicated STANDARD
+                    // Glass Panel pipeline underneath this transparent Compose surface.
+                    .background(Color.Transparent)
+                    .border(0.6.dp, Color.White.copy(alpha = 0.22f), glassShape)
                     .padding(horizontal = 18.dp, vertical = 16.dp)
                     .autoRotate()
             ) {
