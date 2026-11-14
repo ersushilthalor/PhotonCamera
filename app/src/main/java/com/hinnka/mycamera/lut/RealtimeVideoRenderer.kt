@@ -18,6 +18,7 @@ import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD
 import com.hinnka.mycamera.stabilization.RealtimeStabilizationCoordinator
 import com.hinnka.mycamera.stabilization.StabilizationUseCase
 import com.hinnka.mycamera.utils.PLog
+import com.hinnka.mycamera.video.DualCaptureLayout
 import com.hinnka.mycamera.video.VideoEncoderColorConfig
 import com.hinnka.mycamera.video.VideoEncodedColorPipeline
 import com.hinnka.mycamera.video.VideoLogProfile
@@ -51,6 +52,10 @@ class RealtimeVideoRenderer(
     private val enhancedStabilizationStrength: Float,
     private val enhancedStabilizationLookahead: Int = DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD,
     cameraInputIsHlg10: Boolean = false,
+    dualCaptureInputSize: Size? = null,
+    dualCaptureLayout: DualCaptureLayout = DualCaptureLayout.PICTURE_IN_PICTURE,
+    dualCapturePositionX: Float = 0.66f,
+    dualCapturePositionY: Float = 0.05f,
 ) {
     companion object {
         private const val TAG = "RealtimeVideoRenderer"
@@ -122,6 +127,21 @@ class RealtimeVideoRenderer(
     private var cameraSurfaceTexture: SurfaceTexture? = null
     @Volatile private var currentCameraInputSize: Size = cameraInputSize
     private var cameraSurface: Surface? = null
+    private var dualCaptureTextureId = 0
+    private var dualCaptureSurfaceTexture: SurfaceTexture? = null
+    private var dualCaptureSurface: Surface? = null
+    private val dualCaptureFramePending = AtomicBoolean(false)
+    private val dualCaptureStMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
+    private val dualCaptureMvpMatrix = FloatArray(16).also {
+        Matrix.setIdentityM(it, 0)
+        Matrix.scaleM(it, 0, -1f, 1f, 1f)
+    }
+    private var dualCaptureHasFrame = false
+    private var dualCaptureProgramId = 0
+    @Volatile private var currentDualCaptureLayout = dualCaptureLayout
+    @Volatile private var currentDualCapturePositionX = dualCapturePositionX.coerceIn(0f, 1f)
+    @Volatile private var currentDualCapturePositionY = dualCapturePositionY.coerceIn(0f, 1f)
+    private val currentDualCaptureInputSize = dualCaptureInputSize
     private var intermediateTextureId = 0
     private var intermediateFboId = 0
     private var finalColorTextureId = 0
@@ -138,6 +158,18 @@ class RealtimeVideoRenderer(
 
     val inputSurface: Surface?
         get() = cameraSurface
+
+    val dualCaptureInputSurface: Surface?
+        get() = dualCaptureSurface
+
+    fun updateDualCaptureLayout(layout: DualCaptureLayout) {
+        currentDualCaptureLayout = layout
+    }
+
+    fun updateDualCapturePosition(x: Float, y: Float) {
+        currentDualCapturePositionX = x.coerceIn(0f, 1f)
+        currentDualCapturePositionY = y.coerceIn(0f, 1f)
+    }
 
     /**
      * Update the creative recipe on the GL thread without rebuilding the encoder or EGL session.
@@ -241,6 +273,7 @@ class RealtimeVideoRenderer(
             }
         }
         cameraSurface = Surface(cameraSurfaceTexture)
+        currentDualCaptureInputSize?.let(::initializeDualCaptureInput)
         if (enhancedStabilizationEnabled) {
             check(
                 mgcEisPresentationTransform.captureFromSensorOrientation(
@@ -342,6 +375,7 @@ class RealtimeVideoRenderer(
             mvpMatrix = firstPassMvpMatrix,
             enableVideoLog = videoLogProfile.isEnabled && !cameraInputAlreadyHlg10,
             presentationTimeNs = timestampNs,
+            viewport = resolvePrimaryViewport(),
         )
 
         if (layers.size > 1) {
@@ -382,6 +416,8 @@ class RealtimeVideoRenderer(
                 "Realtime video film grain pass failed"
             }
         }
+        drawDualCaptureOverlay()
+        GLES30.glViewport(0, 0, encoderOutputSize.width, encoderOutputSize.height)
 
         EGLExt.eglPresentationTimeANDROID(eglDisplay, encoderEglSurface, presentationTimeNs)
         if (!EGL14.eglSwapBuffers(eglDisplay, encoderEglSurface)) {
@@ -390,6 +426,102 @@ class RealtimeVideoRenderer(
             )
         }
         return presentationTimeNs
+    }
+
+    private fun initializeDualCaptureInput(size: Size) {
+        dualCaptureTextureId = GlUtils.createOESTexture()
+        check(dualCaptureTextureId != 0) { "Cannot create dual-capture OES texture" }
+        dualCaptureProgramId = GlUtils.linkProgram(
+            GlUtils.compileShader(GLES30.GL_VERTEX_SHADER, Shaders.VERTEX_SHADER),
+            GlUtils.compileShader(GLES30.GL_FRAGMENT_SHADER, Shaders.FRAGMENT_SHADER_PASSTHROUGH),
+        )
+        check(dualCaptureProgramId != 0) { "Cannot create dual-capture GL program" }
+        dualCaptureSurfaceTexture = SurfaceTexture(dualCaptureTextureId).apply {
+            setDefaultBufferSize(size.width, size.height)
+            setOnFrameAvailableListener { dualCaptureFramePending.set(true) }
+        }
+        dualCaptureSurface = Surface(dualCaptureSurfaceTexture)
+        PLog.i(TAG, "Dual capture encoder input ready: ${size.width}x${size.height}")
+    }
+
+    private fun resolvePrimaryViewport(): IntArray? = when (currentDualCaptureLayout.takeIf { dualCaptureSurface != null }) {
+        DualCaptureLayout.TOP_BOTTOM -> intArrayOf(
+            0, encoderOutputSize.height / 2, encoderOutputSize.width,
+            encoderOutputSize.height - encoderOutputSize.height / 2,
+        )
+        DualCaptureLayout.SIDE_BY_SIDE -> intArrayOf(
+            0, 0, encoderOutputSize.width / 2, encoderOutputSize.height,
+        )
+        else -> null
+    }
+
+    private fun drawDualCaptureOverlay() {
+        val surfaceTexture = dualCaptureSurfaceTexture ?: return
+        if (dualCaptureProgramId == 0) return
+        if (dualCaptureFramePending.getAndSet(false)) {
+            try {
+                surfaceTexture.updateTexImage()
+                surfaceTexture.getTransformMatrix(dualCaptureStMatrix)
+                dualCaptureHasFrame = true
+            } catch (error: RuntimeException) {
+                PLog.e(TAG, "Failed to acquire dual-capture frame", error)
+                return
+            }
+        }
+        if (!dualCaptureHasFrame) return
+
+        val outputWidth = encoderOutputSize.width
+        val outputHeight = encoderOutputSize.height
+        val viewport = when (currentDualCaptureLayout) {
+            DualCaptureLayout.TOP_BOTTOM -> intArrayOf(
+                0, 0, outputWidth, outputHeight / 2,
+            )
+            DualCaptureLayout.SIDE_BY_SIDE -> intArrayOf(
+                outputWidth / 2, 0, outputWidth - outputWidth / 2, outputHeight,
+            )
+            DualCaptureLayout.PICTURE_IN_PICTURE -> {
+                val outputAspect = outputWidth.toFloat() / outputHeight.coerceAtLeast(1)
+                val insetAspect = if (outputAspect >= 1f) 16f / 9f else 9f / 16f
+                var width = (outputWidth * 0.32f).toInt().coerceAtLeast(1)
+                var height = (width / insetAspect).toInt().coerceAtLeast(1)
+                val maxHeight = (outputHeight * 0.30f).toInt().coerceAtLeast(1)
+                if (height > maxHeight) {
+                    height = maxHeight
+                    width = (height * insetAspect).toInt().coerceAtLeast(1)
+                }
+                val left = (currentDualCapturePositionX * outputWidth)
+                    .toInt().coerceIn(0, (outputWidth - width).coerceAtLeast(0))
+                val top = (currentDualCapturePositionY * outputHeight)
+                    .toInt().coerceIn(0, (outputHeight - height).coerceAtLeast(0))
+                intArrayOf(left, outputHeight - top - height, width, height)
+            }
+        }
+        GLES30.glViewport(viewport[0], viewport[1], viewport[2], viewport[3])
+        GLES30.glUseProgram(dualCaptureProgramId)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, dualCaptureTextureId)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(dualCaptureProgramId, "uCameraTexture"), 0)
+        GLES30.glUniformMatrix4fv(
+            GLES30.glGetUniformLocation(dualCaptureProgramId, "uMVPMatrix"),
+            1, false, dualCaptureMvpMatrix, 0,
+        )
+        GLES30.glUniformMatrix4fv(
+            GLES30.glGetUniformLocation(dualCaptureProgramId, "uSTMatrix"),
+            1, false, dualCaptureStMatrix, 0,
+        )
+        val sourceSize = currentDualCaptureInputSize ?: return
+        val crop = resolveCenterCropRect(
+            sourceSize.width,
+            sourceSize.height,
+            viewport[2],
+            viewport[3],
+        )
+        GLES30.glUniform4f(
+            GLES30.glGetUniformLocation(dualCaptureProgramId, "uCropRect"),
+            crop[0], crop[1], crop[2], crop[3],
+        )
+        drawSimpleQuad(dualCaptureProgramId)
+        GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
     }
 
     private fun acquireLatestCameraFrame(surfaceTexture: SurfaceTexture): Boolean {
@@ -513,6 +645,7 @@ class RealtimeVideoRenderer(
         mvpMatrix: FloatArray,
         enableVideoLog: Boolean,
         presentationTimeNs: Long,
+        viewport: IntArray? = null,
     ) {
         val lutEnabled = layer.lutConfig != null && layer.lutTextureId != 0
         val variant = PreviewColorShaderVariant.forPass(
@@ -526,7 +659,11 @@ class RealtimeVideoRenderer(
             ?: throw IllegalStateException("Cannot create realtime video color shader: $variant")
 
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, targetFboId)
-        GLES30.glViewport(0, 0, encoderOutputSize.width, encoderOutputSize.height)
+        if (viewport == null) {
+            GLES30.glViewport(0, 0, encoderOutputSize.width, encoderOutputSize.height)
+        } else {
+            GLES30.glViewport(viewport[0], viewport[1], viewport[2], viewport[3])
+        }
         GLES30.glClearColor(0f, 0f, 0f, 1f)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
         GLES30.glUseProgram(locations.programId)
@@ -1047,6 +1184,19 @@ class RealtimeVideoRenderer(
         cameraSurface = null
         cameraSurfaceTexture?.release()
         cameraSurfaceTexture = null
+        dualCaptureSurfaceTexture?.setOnFrameAvailableListener(null)
+        dualCaptureSurface?.release()
+        dualCaptureSurface = null
+        dualCaptureSurfaceTexture?.release()
+        dualCaptureSurfaceTexture = null
+        if (dualCaptureTextureId != 0) {
+            GLES30.glDeleteTextures(1, intArrayOf(dualCaptureTextureId), 0)
+            dualCaptureTextureId = 0
+        }
+        if (dualCaptureProgramId != 0) {
+            GLES30.glDeleteProgram(dualCaptureProgramId)
+            dualCaptureProgramId = 0
+        }
 
         layers.forEach { layer ->
             if (layer.lutTextureId != 0) {
