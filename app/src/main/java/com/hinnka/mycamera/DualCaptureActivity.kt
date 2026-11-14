@@ -17,7 +17,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -60,6 +61,8 @@ class DualCaptureActivity : ComponentActivity() {
     private var previewSurface: Surface? = null
     private var previewSize = IntSize(1, 1)
     private var engine: DualCaptureEngine? = null
+    private var engineStarted = false
+    private var closeAfterSave = false
     private var dualLayout by mutableStateOf(DualCaptureLayout.PICTURE_IN_PICTURE)
     private var pipX by mutableFloatStateOf(0.62f)
     private var pipY by mutableFloatStateOf(0.68f)
@@ -115,6 +118,10 @@ class DualCaptureActivity : ComponentActivity() {
                     recording = false
                     savedMessage = if (uri != null) "Video saved to PhotonCamera gallery." else "Recording finished."
                     Toast.makeText(this, savedMessage, Toast.LENGTH_SHORT).show()
+                    if (closeAfterSave) {
+                        closeAfterSave = false
+                        finish()
+                    }
                 }
             }
         )
@@ -146,7 +153,7 @@ class DualCaptureActivity : ComponentActivity() {
                         engine?.setPipPosition(x, y)
                     },
                     onRecordClick = ::toggleRecording,
-                    onClose = { finish() }
+                    onClose = ::closeScreen
                 )
             }
         }
@@ -183,13 +190,17 @@ class DualCaptureActivity : ComponentActivity() {
 
     private fun onPreviewSurfaceAvailable(surface: Surface) {
         previewSurface = surface
-        startEngineIfPossible()
+        if (engineStarted) {
+            engine?.updatePreview(surface, previewSize.width, previewSize.height)
+        } else {
+            startEngineIfPossible()
+        }
     }
 
     private fun onPreviewSizeChanged(size: IntSize) {
         previewSize = IntSize(size.width.coerceAtLeast(1), size.height.coerceAtLeast(1))
         val surface = previewSurface
-        if (surface != null && cameraReady) {
+        if (surface != null && engineStarted) {
             engine?.updatePreview(surface, previewSize.width, previewSize.height)
         }
     }
@@ -198,9 +209,10 @@ class DualCaptureActivity : ComponentActivity() {
         val available = support ?: return
         val selected = selectedOption ?: return
         val surface = previewSurface ?: return
-        if (!surface.isValid) return
+        if (!surface.isValid || engineStarted) return
         cameraReady = false
         errorMessage = null
+        engineStarted = true
         engine?.start(
             preview = surface,
             width = previewSize.width,
@@ -234,12 +246,14 @@ class DualCaptureActivity : ComponentActivity() {
             savedMessage = null
             errorMessage = null
             recording = true
-            engine?.startRecording(
-                selected = selected,
-                fps = requestedFps,
-                bitrateMbps = requestedBitrateMbps,
-                codecMime = available.codecMime
-            )
+                lifecycleScope.launch(Dispatchers.IO) {
+                engine?.startRecording(
+                    selected = selected,
+                    fps = requestedFps,
+                    bitrateMbps = requestedBitrateMbps,
+                    codecMime = available.codecMime
+                )
+            }
         }
     }
 
@@ -256,6 +270,16 @@ class DualCaptureActivity : ComponentActivity() {
                 loading = false
                 errorMessage = "Camera permission is required for dual capture."
             }
+        }
+    }
+
+    private fun closeScreen() {
+        if (recording) {
+            closeAfterSave = true
+            engine?.stopRecording()
+            recording = false
+        } else {
+            finish()
         }
     }
 
@@ -287,6 +311,8 @@ private fun DualCaptureScreen(
     onRecordClick: () -> Unit,
     onClose: () -> Unit
 ) {
+    val latestPipX by rememberUpdatedState(pipX)
+    val latestPipY by rememberUpdatedState(pipY)
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -300,7 +326,7 @@ private fun DualCaptureScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onClose) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                Icon(Icons.Filled.Close, contentDescription = "Close", tint = Color.White)
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text("DUAL CAPTURE", color = Color.White, fontSize = 15.sp)
@@ -375,13 +401,13 @@ private fun DualCaptureScreen(
                                 BorderStroke(2.dp, Color.White),
                                 RoundedCornerShape(11.dp)
                             )
-                            .pointerInput(previewWidth, previewHeight, pipX, pipY) {
+                            .pointerInput(previewWidth, previewHeight) {
                                 detectDragGestures { change, drag ->
                                     change.consume()
                                     val widthPx = (previewWidth - insetWidth).toPx().coerceAtLeast(1f)
                                     val heightPx = (previewHeight - insetHeight).toPx().coerceAtLeast(1f)
-                                    val nextX = (pipX + drag.x / widthPx).coerceIn(0f, 1f)
-                                    val nextY = (pipY + drag.y / heightPx).coerceIn(0f, 1f)
+                                    val nextX = (latestPipX + drag.x / widthPx).coerceIn(0f, 1f)
+                                    val nextY = (latestPipY + drag.y / heightPx).coerceIn(0f, 1f)
                                     onPipPositionChange(nextX, nextY)
                                 }
                             }
