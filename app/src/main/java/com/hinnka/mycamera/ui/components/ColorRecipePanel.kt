@@ -1110,7 +1110,9 @@ private fun BasicRecipeAdjuster(
                 isMajorTick = { abs(it - round(it)) < 0.05f },
                 zeroValue = 0.0f,
                 height = 34.dp,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                glassBackdrop = glassBackdrop,
+                glassDensity = glassDensity,
             )
         } else {
             val isSigned = range.start < 0f
@@ -1128,7 +1130,9 @@ private fun BasicRecipeAdjuster(
                 isMajorTick = { if (isSigned) it.toInt() % 5 == 0 else it.toInt() == 0 || it.toInt() == 5 || it.toInt() == 10 },
                 zeroValue = 0f,
                 height = 34.dp,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                glassBackdrop = glassBackdrop,
+                glassDensity = glassDensity,
             )
         }
     }
@@ -1149,6 +1153,8 @@ private fun RecipeScaleRuler(
     modifier: Modifier = Modifier,
     zeroValue: Float = 0f,
     height: Dp = 32.dp,
+    glassBackdrop: com.styropyr0.prismal.PrismalBackdrop? = null,
+    glassDensity: androidx.compose.ui.unit.Density? = null,
 ) {
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
@@ -1173,6 +1179,35 @@ private fun RecipeScaleRuler(
         modifier = modifier
             .fillMaxWidth()
             .height(height)
+            .then(
+                if (glassBackdrop != null && glassDensity != null) {
+                    Modifier
+                        .drawPrismalGlass(
+                            backdrop = glassBackdrop,
+                            shape = { CircleShape },
+                            effects = {
+                                applyPrismalGlassEffects(
+                                    density = glassDensity,
+                                    adaptiveLuminance = false,
+                                    luminance = 0.4f,
+                                    blurRadiusPx = with(glassDensity) { 10.dp.toPx() },
+                                    refractionHeightPx = with(glassDensity) { 12.dp.toPx() },
+                                    refractionAmountPx = with(glassDensity) { 12.dp.toPx() },
+                                    saturation = 1.1f,
+                                    depthEffect = true,
+                                    chromaticAberration = 0.06f,
+                                    useVibrancy = true,
+                                )
+                            },
+                            onDrawSurface = {
+                                drawRect(Color.White.copy(alpha = 0.035f))
+                            }
+                        )
+                        .border(0.5.dp, Color.White.copy(alpha = 0.14f), CircleShape)
+                } else {
+                    Modifier
+                }
+            )
             .pointerInput(values) {
                 detectTapGestures(
                     onDoubleTap = {
