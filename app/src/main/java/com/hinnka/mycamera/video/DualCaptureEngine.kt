@@ -104,6 +104,14 @@ object DualCaptureCapabilities {
                     ?: return@mapNotNull null
                 val frontInput = chooseInput(frontSizes, preset, ratio)
                     ?: return@mapNotNull null
+                if (!supportsConcurrentSession(
+                        manager = manager,
+                        backCameraId = backId,
+                        frontCameraId = frontId,
+                        backInputSize = backInput,
+                        frontInputSize = frontInput
+                    )
+                ) return@mapNotNull null
                 DualCaptureResolutionOption(preset, output, backInput, frontInput)
             }
             if (options.isEmpty()) continue
@@ -132,6 +140,60 @@ object DualCaptureCapabilities {
             null,
             "A concurrent front + rear pair exists, but no common camera stream and hardware encoder combination supports the selected frame rate."
         )
+    }
+
+    private fun supportsConcurrentSession(
+        manager: CameraManager,
+        backCameraId: String,
+        frontCameraId: String,
+        backInputSize: Size,
+        frontInputSize: Size
+    ): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+
+        val rearTexture = SurfaceTexture(false).apply {
+            setDefaultBufferSize(backInputSize.width, backInputSize.height)
+        }
+        val frontTexture = SurfaceTexture(false).apply {
+            setDefaultBufferSize(frontInputSize.width, frontInputSize.height)
+        }
+        val rearSurface = Surface(rearTexture)
+        val frontSurface = Surface(frontTexture)
+        val directExecutor = java.util.concurrent.Executor { command -> command.run() }
+
+        fun sessionConfiguration(surface: Surface): SessionConfiguration =
+            SessionConfiguration(
+                SessionConfiguration.SESSION_REGULAR,
+                listOf(android.hardware.camera2.params.OutputConfiguration(surface)),
+                directExecutor,
+                object : CameraCaptureSession.StateCallback() {
+                    override fun onConfigured(session: CameraCaptureSession) = Unit
+                    override fun onConfigureFailed(session: CameraCaptureSession) = Unit
+                }
+            )
+
+        return try {
+            manager.isConcurrentSessionConfigurationSupported(
+                mapOf(
+                    backCameraId to sessionConfiguration(rearSurface),
+                    frontCameraId to sessionConfiguration(frontSurface)
+                )
+            )
+        } catch (error: Exception) {
+            PLog.w(
+                "DualCaptureCapabilities",
+                "Concurrent stream preflight failed for rear=$backCameraId " +
+                    "${backInputSize.width}x${backInputSize.height}, " +
+                    "front=$frontCameraId ${frontInputSize.width}x${frontInputSize.height}",
+                error
+            )
+            false
+        } finally {
+            rearSurface.release()
+            frontSurface.release()
+            rearTexture.release()
+            frontTexture.release()
+        }
     }
 
     private fun supportsFps(characteristics: CameraCharacteristics, fps: Int): Boolean {
