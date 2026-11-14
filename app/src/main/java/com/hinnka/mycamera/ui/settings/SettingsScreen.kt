@@ -131,6 +131,11 @@ import com.hinnka.mycamera.camera.VendorCaptureSettings
 import com.hinnka.mycamera.camera.VendorCaptureSettingsByLens
 import com.hinnka.mycamera.camera.VendorCaptureValueType
 import com.hinnka.mycamera.data.CaptureButtonStyle
+import com.hinnka.mycamera.data.LiquidGlassAdaptiveStyle
+import com.hinnka.mycamera.data.LiquidGlassPipelineTier
+import com.hinnka.mycamera.data.LiquidGlassSettings
+import com.hinnka.mycamera.data.LiquidGlassSettingsStore
+import com.hinnka.mycamera.data.LiquidGlassSpecularStyle
 import com.hinnka.mycamera.data.DEFAULT_CAMERA_MENU_TRANSPARENCY
 import com.hinnka.mycamera.data.VolumeKeyAction
 import com.hinnka.mycamera.frame.FrameInfo
@@ -180,6 +185,7 @@ private enum class SettingsPage {
     FOCUS_LENS,
     CAPTURE_STORAGE,
     VIDEO,
+    LIQUID_GLASS,
     INTERFACE,
     CONTENT_MANAGEMENT,
     AI_SERVICE,
@@ -312,6 +318,13 @@ fun SettingsScreen(
     modifier: Modifier = Modifier
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val liquidGlassSettings by LiquidGlassSettingsStore.settings.collectAsState()
+    LaunchedEffect(context) {
+        LiquidGlassSettingsStore.load(context.applicationContext)
+    }
+    val updateLiquidGlass: ((LiquidGlassSettings) -> LiquidGlassSettings) -> Unit = { transform ->
+        LiquidGlassSettingsStore.update(context.applicationContext, transform)
+    }
     val state by viewModel.state.collectAsState()
     val userPreferences by viewModel.userPreferences.collectAsState()
     val showLevelIndicator by viewModel.showLevelIndicator.collectAsState(initial = false)
@@ -968,6 +981,7 @@ fun SettingsScreen(
         SettingsPage.FOCUS_LENS -> stringResource(R.string.settings_section_focus_lens)
         SettingsPage.CAPTURE_STORAGE -> stringResource(R.string.settings_section_capture_storage)
         SettingsPage.VIDEO -> stringResource(R.string.settings_section_video)
+        SettingsPage.LIQUID_GLASS -> "Liquid Glass"
         SettingsPage.INTERFACE -> stringResource(R.string.settings_section_interface)
         SettingsPage.CONTENT_MANAGEMENT -> stringResource(R.string.settings_section_management)
         SettingsPage.AI_SERVICE -> stringResource(R.string.ai_service)
@@ -1860,7 +1874,337 @@ fun SettingsScreen(
                     }
                 }
 
+                SettingsPage.LIQUID_GLASS -> {
+                    SettingsSection(title = "General", showTitle = false) {
+                        SwitchSettingItem(
+                            title = "Liquid Glass",
+                            description = "Enable the live camera Liquid Glass material.",
+                            checked = liquidGlassSettings.enabled,
+                            onCheckedChange = { enabled ->
+                                updateLiquidGlass { it.copy(enabled = enabled) }
+                            }
+                        )
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 10.dp)
+                        )
+                        val pipelineLabels = listOf("Auto", "Legacy", "Standard", "Liquid")
+                        val pipelineLabel = when (liquidGlassSettings.pipeline) {
+                            LiquidGlassPipelineTier.AUTO -> "Auto"
+                            LiquidGlassPipelineTier.LEGACY -> "Legacy"
+                            LiquidGlassPipelineTier.STANDARD -> "Standard"
+                            LiquidGlassPipelineTier.LIQUID -> "Liquid"
+                        }
+                        DropdownSettingItem(
+                            title = "Pipeline",
+                            description = "Choose the rendering tier. Auto uses the best tier available on this device.",
+                            value = pipelineLabel,
+                            options = pipelineLabels,
+                            isLoading = false,
+                            onExpanded = {},
+                            onOptionSelected = { label ->
+                                val selected = when (label) {
+                                    "Legacy" -> LiquidGlassPipelineTier.LEGACY
+                                    "Standard" -> LiquidGlassPipelineTier.STANDARD
+                                    "Liquid" -> LiquidGlassPipelineTier.LIQUID
+                                    else -> LiquidGlassPipelineTier.AUTO
+                                }
+                                updateLiquidGlass { it.copy(pipeline = selected) }
+                            }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    SettingsSection(title = "Refraction & Blur") {
+                        SliderSettingItem(
+                            title = "Blur Radius",
+                            description = "Gaussian-style softening behind the glass surface.",
+                            value = liquidGlassSettings.blurRadiusDp,
+                            valueRange = 0f..24f,
+                            valueTextFormatter = { "\${it.toInt()} pt" },
+                            resetValue = 8f,
+                            onValueChange = { v -> updateLiquidGlass { it.copy(blurRadiusDp = v) } }
+                        )
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                        SliderSettingItem(
+                            title = "Refraction Height",
+                            value = liquidGlassSettings.refractionHeightDp,
+                            valueRange = 0f..32f,
+                            valueTextFormatter = { "\${it.toInt()} pt" },
+                            resetValue = 16f,
+                            onValueChange = { v -> updateLiquidGlass { it.copy(refractionHeightDp = v) } }
+                        )
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                        SliderSettingItem(
+                            title = "Refraction Amount",
+                            value = liquidGlassSettings.refractionAmountDp,
+                            valueRange = 0f..60f,
+                            valueTextFormatter = { "\${it.toInt()} pt" },
+                            resetValue = 32f,
+                            onValueChange = { v -> updateLiquidGlass { it.copy(refractionAmountDp = v) } }
+                        )
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                        SliderSettingItem(
+                            title = "Chromatic Aberration",
+                            value = liquidGlassSettings.chromaticAberration,
+                            valueRange = 0f..1f,
+                            valueTextFormatter = { "\${(it * 100).toInt()}%" },
+                            resetValue = 0f,
+                            onValueChange = { v -> updateLiquidGlass { it.copy(chromaticAberration = v) } }
+                        )
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                        SwitchSettingItem(
+                            title = "Depth Effect",
+                            checked = liquidGlassSettings.depthEffect,
+                            onCheckedChange = { v -> updateLiquidGlass { it.copy(depthEffect = v) } }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    SettingsSection(title = "Shape") {
+                        SliderSettingItem(
+                            title = "Corner Radius",
+                            value = liquidGlassSettings.cornerRadiusDp,
+                            valueRange = 0f..48f,
+                            valueTextFormatter = { "\${it.toInt()} pt" },
+                            resetValue = 22f,
+                            onValueChange = { v -> updateLiquidGlass { it.copy(cornerRadiusDp = v) } }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    SettingsSection(title = "Color & Luminance") {
+                        SwitchSettingItem(
+                            title = "Adaptive Luminance",
+                            description = "Adapt brightness, contrast and blur to the live preview.",
+                            checked = liquidGlassSettings.adaptiveLuminance,
+                            onCheckedChange = { v -> updateLiquidGlass { it.copy(adaptiveLuminance = v) } }
+                        )
+                        if (liquidGlassSettings.adaptiveLuminance) {
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                            val adaptiveLabels = listOf("Standard", "Subtle")
+                            DropdownSettingItem(
+                                title = "Adaptive Style",
+                                value = if (liquidGlassSettings.adaptiveStyle == LiquidGlassAdaptiveStyle.SUBTLE) "Subtle" else "Standard",
+                                options = adaptiveLabels,
+                                isLoading = false,
+                                onExpanded = {},
+                                onOptionSelected = { label ->
+                                    updateLiquidGlass {
+                                        it.copy(
+                                            adaptiveStyle = if (label == "Subtle") LiquidGlassAdaptiveStyle.SUBTLE
+                                            else LiquidGlassAdaptiveStyle.STANDARD
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                        if (!liquidGlassSettings.adaptiveLuminance) {
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                            SwitchSettingItem(
+                                title = "Vibrancy",
+                                description = "Use the demo's fixed 1.5× saturation treatment.",
+                                checked = liquidGlassSettings.useVibrancy,
+                                onCheckedChange = { v -> updateLiquidGlass { it.copy(useVibrancy = v) } }
+                            )
+                        }
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                        SliderSettingItem(
+                            title = "Brightness",
+                            value = liquidGlassSettings.brightness,
+                            valueRange = -0.3f..0.5f,
+                            valueTextFormatter = { String.format("%.2f", it) },
+                            resetValue = 0f,
+                            enabled = !liquidGlassSettings.adaptiveLuminance,
+                            onValueChange = { v ->
+                                updateLiquidGlass {
+                                    it.copy(brightness = v, useVibrancy = if (it.useVibrancy) false else it.useVibrancy)
+                                }
+                            }
+                        )
+                        if (!liquidGlassSettings.adaptiveLuminance && !liquidGlassSettings.useVibrancy) {
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                            SliderSettingItem(
+                                title = "Saturation",
+                                value = liquidGlassSettings.saturation,
+                                valueRange = 0.5f..2.5f,
+                                valueTextFormatter = { String.format("%.2f", it) },
+                                resetValue = 1.5f,
+                                onValueChange = { v -> updateLiquidGlass { it.copy(saturation = v) } }
+                            )
+                        }
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                        SliderSettingItem(
+                            title = "Surface Tint",
+                            value = liquidGlassSettings.surfaceTintAlpha,
+                            valueRange = 0f..0.6f,
+                            valueTextFormatter = { "\${(it * 100).toInt()}%" },
+                            resetValue = 0f,
+                            onValueChange = { v -> updateLiquidGlass { it.copy(surfaceTintAlpha = v) } }
+                        )
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                        SliderSettingItem(
+                            title = "Color Tint Alpha",
+                            value = liquidGlassSettings.tintAlpha,
+                            valueRange = 0.05f..0.75f,
+                            valueTextFormatter = { "\${(it * 100).toInt()}%" },
+                            resetValue = 0.28f,
+                            onValueChange = { v -> updateLiquidGlass { it.copy(tintAlpha = v) } }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    SettingsSection(title = "Specular Highlight") {
+                        SwitchSettingItem(
+                            title = "Enabled",
+                            checked = liquidGlassSettings.specularEnabled,
+                            onCheckedChange = { v -> updateLiquidGlass { it.copy(specularEnabled = v) } }
+                        )
+                        if (liquidGlassSettings.specularEnabled) {
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                            val specularLabels = listOf("Default", "Ambient", "Plain")
+                            val specularLabel = when (liquidGlassSettings.specularStyle) {
+                                LiquidGlassSpecularStyle.DEFAULT -> "Default"
+                                LiquidGlassSpecularStyle.AMBIENT -> "Ambient"
+                                LiquidGlassSpecularStyle.PLAIN -> "Plain"
+                            }
+                            DropdownSettingItem(
+                                title = "Style",
+                                value = specularLabel,
+                                options = specularLabels,
+                                isLoading = false,
+                                onExpanded = {},
+                                onOptionSelected = { label ->
+                                    val selected = when (label) {
+                                        "Ambient" -> LiquidGlassSpecularStyle.AMBIENT
+                                        "Plain" -> LiquidGlassSpecularStyle.PLAIN
+                                        else -> LiquidGlassSpecularStyle.DEFAULT
+                                    }
+                                    updateLiquidGlass { it.copy(specularStyle = selected) }
+                                }
+                            )
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                            SliderSettingItem(
+                                title = "Alpha",
+                                value = liquidGlassSettings.specularAlpha,
+                                valueRange = 0f..1f,
+                                valueTextFormatter = { "\${(it * 100).toInt()}%" },
+                                resetValue = 1f,
+                                onValueChange = { v -> updateLiquidGlass { it.copy(specularAlpha = v) } }
+                            )
+                            if (liquidGlassSettings.specularStyle != LiquidGlassSpecularStyle.AMBIENT) {
+                                HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                                SliderSettingItem(
+                                    title = "Width",
+                                    value = liquidGlassSettings.specularWidthDp,
+                                    valueRange = 0.25f..2f,
+                                    valueTextFormatter = { String.format("%.2f pt", it) },
+                                    resetValue = 0.5f,
+                                    onValueChange = { v -> updateLiquidGlass { it.copy(specularWidthDp = v) } }
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    SettingsSection(title = "Depth") {
+                        SwitchSettingItem(
+                            title = "Drop Shadow",
+                            checked = liquidGlassSettings.depthShadowEnabled,
+                            onCheckedChange = { v -> updateLiquidGlass { it.copy(depthShadowEnabled = v) } }
+                        )
+                        if (liquidGlassSettings.depthShadowEnabled) {
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                            SliderSettingItem(
+                                title = "Shadow Radius",
+                                value = liquidGlassSettings.depthShadowRadiusDp,
+                                valueRange = 0f..32f,
+                                valueTextFormatter = { "\${it.toInt()} pt" },
+                                resetValue = 24f,
+                                onValueChange = { v -> updateLiquidGlass { it.copy(depthShadowRadiusDp = v) } }
+                            )
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                            SliderSettingItem(
+                                title = "Shadow Alpha",
+                                value = liquidGlassSettings.depthShadowAlpha,
+                                valueRange = 0f..1f,
+                                valueTextFormatter = { "\${(it * 100).toInt()}%" },
+                                resetValue = 1f,
+                                onValueChange = { v -> updateLiquidGlass { it.copy(depthShadowAlpha = v) } }
+                            )
+                        }
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                        SwitchSettingItem(
+                            title = "Depth Inset",
+                            checked = liquidGlassSettings.depthInsetEnabled,
+                            onCheckedChange = { v -> updateLiquidGlass { it.copy(depthInsetEnabled = v) } }
+                        )
+                        if (liquidGlassSettings.depthInsetEnabled) {
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                            SliderSettingItem(
+                                title = "Inset Radius",
+                                value = liquidGlassSettings.depthInsetRadiusDp,
+                                valueRange = 0f..24f,
+                                valueTextFormatter = { "\${it.toInt()} pt" },
+                                resetValue = 8f,
+                                onValueChange = { v -> updateLiquidGlass { it.copy(depthInsetRadiusDp = v) } }
+                            )
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                            SliderSettingItem(
+                                title = "Inset Alpha",
+                                value = liquidGlassSettings.depthInsetAlpha,
+                                valueRange = 0f..1f,
+                                valueTextFormatter = { "\${(it * 100).toInt()}%" },
+                                resetValue = 0.5f,
+                                onValueChange = { v -> updateLiquidGlass { it.copy(depthInsetAlpha = v) } }
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    SettingsSection(title = "Gradient Glass") {
+                        SliderSettingItem(
+                            title = "Bottom Refraction Weight",
+                            value = liquidGlassSettings.gradientBottomWeight,
+                            valueRange = 0f..1f,
+                            valueTextFormatter = { String.format("%.2f", it) },
+                            resetValue = 1f,
+                            onValueChange = { v -> updateLiquidGlass { it.copy(gradientBottomWeight = v) } }
+                        )
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                        SliderSettingItem(
+                            title = "Blur Fade End",
+                            value = liquidGlassSettings.gradientBlurFadeEnd,
+                            valueRange = 0f..1f,
+                            valueTextFormatter = { String.format("%.2f", it) },
+                            resetValue = 0.8f,
+                            onValueChange = { v -> updateLiquidGlass { it.copy(gradientBlurFadeEnd = v) } }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    TextButton(
+                        onClick = { updateLiquidGlass { LiquidGlassSettings() } },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Reset All Settings", color = Color(0xFFFF6B6B))
+                    }
+                    Text(
+                        text = "Restores the default Prismal-style material preset used by the camera menus.",
+                        color = Color.White.copy(alpha = 0.55f),
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+                }
+
                 SettingsPage.INTERFACE -> {
+
                     // 界面样式
                     SettingsSection(
                         title = stringResource(R.string.settings_section_interface),
@@ -2578,6 +2922,12 @@ private fun SettingsCategoryOverview(
             title = stringResource(R.string.settings_section_interface),
             description = stringResource(R.string.settings_section_interface),
             onClick = { onPageSelected(SettingsPage.INTERFACE) }
+        )
+        SettingsCategoryDivider()
+        NavigationSettingItem(
+            title = "Liquid Glass",
+            description = "Refraction · blur · tint · specular · depth",
+            onClick = { onPageSelected(SettingsPage.LIQUID_GLASS) }
         )
         SettingsCategoryDivider()
         NavigationSettingItem(
