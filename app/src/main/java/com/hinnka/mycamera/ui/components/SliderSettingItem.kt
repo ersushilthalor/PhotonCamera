@@ -175,6 +175,7 @@ fun SliderSettingItem(
  * Observes the glass slider's pointer stream without consuming it, preserving the
  * library's drag physics while keeping the settings row's reset and commit callbacks.
  */
+@Composable
 private fun Modifier.prismalSliderGestures(
     touchSlop: Float,
     doubleTapTimeoutMillis: Long,
