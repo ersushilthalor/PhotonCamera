@@ -161,6 +161,8 @@ android {
 }
 
 dependencies {
+    // Exact PrismalAGSL v1.0.7 release matching the supplied PrismalAGSL-master.zip.
+    implementation("com.github.styropyr0:PrismalAGSL:Prismal:v1.0.7")
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
