@@ -379,34 +379,30 @@ private fun ScreenCapturePipContent(
 }
 
 private fun captureRenderedFrame(
-    surfaceView: CameraGLSurfaceView,
+    previewView: CameraGLSurfaceView,
     onCaptured: (Bitmap?) -> Unit
 ) {
-    val width = surfaceView.width
-    val height = surfaceView.height
+    val width = previewView.width
+    val height = previewView.height
     if (width <= 0 || height <= 0) {
-        PLog.w("ScreenCapturePip", "Skip frozen frame capture because surface size is invalid: ${width}x${height}")
+        PLog.w("ScreenCapturePip", "Skip frozen frame capture because preview size is invalid: ${width}x${height}")
         onCaptured(null)
         return
     }
 
+    // CameraGLSurfaceView is TextureView-backed so PixelCopy(SurfaceView) is not valid.
+    // TextureView.getBitmap() snapshots the composited preview without including sibling UI.
     val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     try {
-        PixelCopy.request(
-            surfaceView,
-            bitmap,
-            { result ->
-                if (result == PixelCopy.SUCCESS) {
-                    PLog.d("ScreenCapturePip", "Captured frozen frame for PiP foreground restore")
-                    onCaptured(bitmap)
-                } else {
-                    PLog.w("ScreenCapturePip", "Failed to capture frozen frame, PixelCopy result=$result")
-                    bitmap.recycle()
-                    onCaptured(null)
-                }
-            },
-            Handler(Looper.getMainLooper())
-        )
+        val captured = previewView.getBitmap(bitmap)
+        if (captured != null) {
+            PLog.d("ScreenCapturePip", "Captured frozen TextureView frame for PiP foreground restore")
+            onCaptured(captured)
+        } else {
+            PLog.w("ScreenCapturePip", "TextureView returned no frame for PiP foreground restore")
+            bitmap.recycle()
+            onCaptured(null)
+        }
     } catch (t: Throwable) {
         PLog.e("ScreenCapturePip", "Failed to capture frozen frame for PiP foreground restore", t)
         bitmap.recycle()

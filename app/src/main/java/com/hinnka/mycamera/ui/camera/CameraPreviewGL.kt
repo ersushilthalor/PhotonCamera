@@ -36,6 +36,8 @@ import com.hinnka.mycamera.ui.components.FocusIndicator
 import com.hinnka.mycamera.utils.OrientationObserver
 import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.video.VideoLogProfile
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.prismalGlassLayer
 
 /**
  * 相机预览组件 - OpenGL ES 版本（Camera2 适配）
@@ -89,6 +91,7 @@ fun CameraPreviewGL(
     videoPreviewStabilizationEnabled: Boolean = false,
     videoPreviewStabilizationStrength: Float = 0f,
     videoPreviewStabilizationLookahead: Int = DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD,
+    prismalGlassBackdrop: PrismalGlassLayer? = null,
     modifier: Modifier = Modifier
 ) {
     val rotationDegrees = OrientationObserver.rotationDegrees
@@ -192,7 +195,7 @@ fun CameraPreviewGL(
                                 PLog.d("CameraPreviewGL", "onSurfaceReady called")
                                 // SurfaceTexture 已经准备好，可以开始预览
                                 surfaceAvailable = true
-                                glSurfaceView.getSurfaceTexture()?.let { surfaceTexture ->
+                                glSurfaceView.getCameraSurfaceTexture()?.let { surfaceTexture ->
                                     glSurfaceView.setPreviewSize(previewSize.width, previewSize.height)
                                     glSurfaceView.setStabilizationInputSize(
                                         stabilizationInputSize.width,
@@ -210,7 +213,7 @@ fun CameraPreviewGL(
                         }
 
                         glSurfaceView.onSurfaceDestroyed = {
-                            val destroyedSurfaceTexture = glSurfaceView.getSurfaceTexture()
+                            val destroyedSurfaceTexture = glSurfaceView.getCameraSurfaceTexture()
                             if (glSurfaceViewRef === glSurfaceView) {
                                 surfaceAvailable = false
                                 surfaceTextureNotified = false
@@ -274,7 +277,7 @@ fun CameraPreviewGL(
                         val currentNotifiedPreviewSize = notifiedPreviewSize
                         
                         if (viewWidth > 0 && viewHeight > 0 && surfaceAvailable) {
-                            glSurfaceView.getSurfaceTexture()?.let { surfaceTexture ->
+                            glSurfaceView.getCameraSurfaceTexture()?.let { surfaceTexture ->
                                 glSurfaceView.setPreviewSize(previewSize.width, previewSize.height)
                                 glSurfaceView.setStabilizationInputSize(
                                     stabilizationInputSize.width,
@@ -332,7 +335,13 @@ fun CameraPreviewGL(
                         glSurfaceView.setFocusPeakingEnabled(focusPeakingEnabled)
                         glSurfaceView.setEyeFocusBusy(isEyeFocusBusy)
                     },
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(
+                            prismalGlassBackdrop?.let { backdrop ->
+                                Modifier.prismalGlassLayer(backdrop)
+                            } ?: Modifier
+                        )
                 )
 
             // 对焦指示器

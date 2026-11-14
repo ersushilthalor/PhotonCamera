@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -62,6 +63,11 @@ import com.hinnka.mycamera.video.*
 import com.hinnka.mycamera.video.VideoCodec
 import com.hinnka.mycamera.ui.icons.AppIcons
 import com.styropyr0.prismal.PrismalBackdrop
+import com.styropyr0.prismal.drawPrismalGlass
+import com.styropyr0.prismal.effects.applyPrismalGlassEffects
+import com.styropyr0.prismal.shapes.PrismalRoundedCornerStyle
+import com.styropyr0.prismal.shapes.PrismalRoundedRectangle
+import com.styropyr0.prismal.specular.PrismalSpecular
 import com.styropyr0.prismal.components.PrismalGlassToggle
 import com.styropyr0.prismal.sources.rememberPrismalCanvasSource
 
@@ -153,13 +159,15 @@ fun CameraTopSheet(
     modifier: Modifier = Modifier,
     cameraMenuTransparency: Float = 0.25f,
     liquidGlassSettings: LiquidGlassSettings = LiquidGlassSettings(),
-    onGlassBoundsChanged: (Rect?) -> Unit = {}
+    prismalBackdrop: PrismalBackdrop? = null
 ) {
     var expandedVideoPanel by rememberSaveable { mutableStateOf<VideoSettingPanel?>(null) }
     var showPhotoAspectOptions by rememberSaveable { mutableStateOf(false) }
     var showRenderingEngineSheet by rememberSaveable { mutableStateOf(false) }
     var showOppoPipelineSheet by rememberSaveable { mutableStateOf(false) }
     var showContentManagementOptions by rememberSaveable { mutableStateOf(false) }
+    val density = LocalDensity.current
+    val glassSettings = liquidGlassSettings.sanitized()
     val stabilizationGlassBackdrop = rememberPrismalCanvasSource {
         drawRect(Color(0xFF252932))
     }
@@ -215,24 +223,60 @@ fun CameraTopSheet(
             contentAlignment = Alignment.TopCenter
         ) {
             val glassShape = RoundedCornerShape(30.dp)
+            val prismalSurface = prismalBackdrop?.let { backdrop ->
+                Modifier.drawPrismalGlass(
+                    backdrop = backdrop,
+                    shape = {
+                        PrismalRoundedRectangle(
+                            30.dp,
+                            PrismalRoundedCornerStyle.Continuous
+                        )
+                    },
+                    effects = {
+                        applyPrismalGlassEffects(
+                            density = density,
+                            adaptiveLuminance = glassSettings.adaptiveLuminance,
+                            luminance = 0.30f,
+                            blurRadiusPx = with(density) { glassSettings.blurRadiusDp.dp.toPx() },
+                            refractionHeightPx = with(density) { glassSettings.refractionHeightDp.dp.toPx() },
+                            refractionAmountPx = with(density) { glassSettings.refractionAmountDp.dp.toPx() },
+                            brightness = glassSettings.brightness,
+                            saturation = glassSettings.saturation,
+                            depthEffect = glassSettings.depthEffect,
+                            chromaticAberration = glassSettings.chromaticAberration,
+                            useVibrancy = glassSettings.useVibrancy
+                        )
+                    },
+                    specular = if (glassSettings.specularEnabled) {
+                        {
+                            PrismalSpecular(
+                                width = glassSettings.specularWidthDp.dp,
+                                blurRadius = glassSettings.specularWidthDp.dp / 2f,
+                                alpha = glassSettings.specularAlpha
+                            )
+                        }
+                    } else {
+                        null
+                    },
+                    // The optical surface owns its refraction and highlight; no second shadow/border.
+                    depthShadow = null,
+                    onDrawSurface = {
+                        val menuTint = cameraMenuTransparency.coerceIn(0f, 0.75f) * 0.10f
+                        if (menuTint > 0f) drawRect(Color.Black.copy(alpha = menuTint))
+                        if (glassSettings.surfaceTintAlpha > 0f) {
+                            drawRect(Color.White.copy(alpha = glassSettings.surfaceTintAlpha))
+                        }
+                    }
+                )
+            } ?: Modifier.background(
+                Color.Black.copy(alpha = cameraMenuTransparency.coerceIn(0f, 0.75f))
+            )
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = 600.dp)
-                    .onGloballyPositioned { coordinates ->
-                        val topLeft = coordinates.localToScreen(Offset.Zero)
-                        onGlassBoundsChanged(
-                            Rect(
-                                topLeft.x,
-                                topLeft.y,
-                                topLeft.x + coordinates.size.width.toFloat(),
-                                topLeft.y + coordinates.size.height.toFloat(),
-                            )
-                        )
-                    }
+                    .then(prismalSurface)
                     .clip(glassShape)
-                    // The single optical Liquid Glass surface is composited by the
-                    // preview GL renderer. Keep this Compose container fully transparent.
                     .background(Color.Transparent)
                     .padding(horizontal = 18.dp, vertical = 16.dp)
                     .autoRotate()
