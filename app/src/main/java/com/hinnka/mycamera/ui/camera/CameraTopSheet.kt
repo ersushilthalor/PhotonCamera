@@ -214,17 +214,10 @@ fun CameraTopSheet(
                     .fillMaxWidth()
                     .heightIn(max = 600.dp)
                     .onGloballyPositioned { onGlassBoundsChanged(it.boundsInRoot()) }
-                    .shadow(
-                        elevation = 5.dp,
-                        shape = glassShape,
-                        ambientColor = Color.Black.copy(alpha = 0.14f),
-                        spotColor = Color.Black.copy(alpha = 0.20f)
-                    )
                     .clip(glassShape)
-                    // The live camera preview is blurred by the dedicated STANDARD
-                    // Glass Panel pipeline underneath this transparent Compose surface.
+                    // The single optical Liquid Glass surface is composited by the
+                    // preview GL renderer. Keep this Compose container fully transparent.
                     .background(Color.Transparent)
-                    .border(0.6.dp, Color.White.copy(alpha = 0.22f), glassShape)
                     .padding(horizontal = 18.dp, vertical = 16.dp)
                     .autoRotate()
             ) {
