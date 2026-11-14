@@ -381,7 +381,11 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             field = value
             nightVisionEstimator.reset()
             pendingNightTone = null
-            if (!value) nightToneActive = false
+            if (!value) {
+                nightToneActive = false
+                nightVisionPboIndex = 0
+                releasePixelPackPbos(nightVisionPboIds, nightVisionPboFences)
+            }
         }
 
     // 测光相关纹理和 FBO
@@ -3401,7 +3405,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
     }
 
     private fun runNightVisionSampling() {
-        if (!nightVisionEnabled) return
+        if (!nightVisionEnabled || currentCameraTextureId == 0 || captureWidth <= 0 || captureHeight <= 0) return
         val size = NightVisionTone.MODEL_SIZE
         val pixelSize = size * size * 4
         if (!ensureNightVisionFbo() || !ensurePixelPackPbos(nightVisionPboIds, pixelSize)) return

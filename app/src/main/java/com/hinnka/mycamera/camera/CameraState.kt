@@ -465,7 +465,8 @@ data class CameraState(
         get() = nightVisionEnabled && captureMode == CaptureMode.PHOTO && isJpgMaxEnabled && !useMultipleExposure
 
     val isJpgMaxHdrEnabled: Boolean
-        get() = isJpgMaxEnabled && (useJpgMaxHdrComposition || autoHdrEnabled)
+        get() = isJpgMaxEnabled && !isNightVisionActive &&
+            (useJpgMaxHdrComposition || autoHdrEnabled)
 
     val isRawMaxEnabled: Boolean
         get() = isMultiFrameEnabled && useRaw
