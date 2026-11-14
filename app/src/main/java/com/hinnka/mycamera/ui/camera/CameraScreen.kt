@@ -918,7 +918,7 @@ fun CameraScreen(
             if (glView == null) return@LaunchedEffect
 
             if (previewRect == null || previewRect.width <= 0f || previewRect.height <= 0f) {
-                glView.setLiquidGlassOverlays(null, 0f, 24f, 48f)
+                glView.setLiquidGlassOverlays(null, 0f, liquidGlassSettings)
                 return@LaunchedEffect
             }
 
@@ -943,7 +943,7 @@ fun CameraScreen(
                     add(1f - bottom)
                     add(right)
                     add(1f - top)
-                    add(tintAlpha.coerceIn(0f, 0.28f))
+                    add(tintAlpha.coerceIn(0f, 0.75f))
                 }
 
                 if (liquidGlassSettings.enabled) {
