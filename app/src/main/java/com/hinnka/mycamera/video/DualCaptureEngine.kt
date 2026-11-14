@@ -192,10 +192,11 @@ class DualCaptureEngine(
     private var failed = false
     private var closed = false
     @Volatile private var recording = false
+    @Volatile private var finalizing = false
+    @Volatile private var recorder: VideoRecorder? = null
     @Volatile private var layout = DualCaptureLayout.PICTURE_IN_PICTURE
     @Volatile private var pipX = 0.62f
     @Volatile private var pipY = 0.68f
-    private var recorder: VideoRecorder? = null
 
     @SuppressLint("MissingPermission")
     fun start(
@@ -379,7 +380,16 @@ class DualCaptureEngine(
             return
         }
         val nextRecorder = VideoRecorder(app)
+        val releaseOnce = AtomicBoolean(false)
+        val errorReported = AtomicBoolean(false)
+        val releaseRecorder: () -> Unit = {
+            if (releaseOnce.compareAndSet(false, true)) nextRecorder.release()
+        }
+        val reportError: (String) -> Unit = { message ->
+            if (errorReported.compareAndSet(false, true)) onError(message)
+        }
         recorder = nextRecorder
+        finalizing = false
         val started = nextRecorder.startRecording(
             size = selected.outputSize,
             cameraInputSize = selected.outputSize,
@@ -392,30 +402,35 @@ class DualCaptureEngine(
             recordingPath = VideoRecordingPath.DCIM_PHOTON,
             onError = { message ->
                 recording = false
+                finalizing = false
                 if (recorder === nextRecorder) recorder = null
-                nextRecorder.release()
-                onError(message)
+                releaseRecorder()
+                reportError(message)
             },
             onFinished = { uri ->
                 recording = false
+                finalizing = false
                 if (recorder === nextRecorder) recorder = null
-                nextRecorder.release()
+                releaseRecorder()
                 onRecordingFinished(uri)
             }
         )
         if (!started) {
-            nextRecorder.release()
-            recorder = null
-            onError("Video encoder could not start at ${selected.outputSize.width}×${selected.outputSize.height}.")
-            return
-        }
-        val inputSurface = nextRecorder.cameraInputSurface
-        if (inputSurface == null) {
-            nextRecorder.stopRecording()
-            onError("The video input surface was not created.")
+            releaseRecorder()
+            if (recorder === nextRecorder) recorder = null
+            finalizing = false
+            reportError("Video encoder could not start at ${selected.outputSize.width}×${selected.outputSize.height}.")
             return
         }
         recording = true
+        val inputSurface = nextRecorder.cameraInputSurface
+        if (inputSurface == null) {
+            recording = false
+            finalizing = true
+            nextRecorder.stopRecording()
+            reportError("The video input surface was not created.")
+            return
+        }
         gl?.setEncoder(inputSurface, selected.outputSize)
         nextRecorder.onCameraInputStarted()
     }
@@ -423,6 +438,7 @@ class DualCaptureEngine(
     fun stopRecording() {
         if (!recording) return
         recording = false
+        finalizing = true
         gl?.detachEncoder()
         recorder?.stopRecording()
     }
@@ -464,7 +480,7 @@ class DualCaptureEngine(
         closed = true
         cameraHandler.post {
             if (recording) stopRecording()
-            if (!recording) {
+            if (!finalizing) {
                 recorder?.release()
                 recorder = null
             }
@@ -555,6 +571,7 @@ private class DualCaptureGlCompositor {
             } catch (error: Exception) {
                 PLog.e(TAG, "GL setup failed", error)
                 onError("Dual-capture preview setup failed: ${error.localizedMessage}")
+                release()
             }
         }
     }
@@ -567,6 +584,7 @@ private class DualCaptureGlCompositor {
         val attrs = intArrayOf(
             EGL14.EGL_RED_SIZE, 8, EGL14.EGL_GREEN_SIZE, 8,
             EGL14.EGL_BLUE_SIZE, 8, EGL14.EGL_ALPHA_SIZE, 8,
+            EGL14.EGL_SURFACE_TYPE, EGL14.EGL_WINDOW_BIT,
             EGL14.EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
             EGL_RECORDABLE_ANDROID, 1, EGL14.EGL_NONE
         )
