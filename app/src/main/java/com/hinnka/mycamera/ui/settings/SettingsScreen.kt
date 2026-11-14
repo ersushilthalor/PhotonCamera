@@ -3563,14 +3563,9 @@ fun NavigationSettingItem(
     showProgress: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+    val backdrop = LocalSettingsPrismalBackdrop.current
+
+    val rowContent: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
@@ -3603,8 +3598,31 @@ fun NavigationSettingItem(
             )
         }
     }
-}
 
+    if (backdrop != null) {
+        PrismalGlassButton(
+            onClick = onClick,
+            backdrop = backdrop,
+            modifier = modifier.fillMaxWidth(),
+            isInteractive = enabled,
+            height = null,
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            nestedGlassSource = LocalPrismalParentGlassLayer.current,
+            content = rowContent
+        )
+    } else {
+        Row(
+            modifier = modifier
+                .fillMaxWidth()
+                .clickable(enabled = enabled, onClick = onClick)
+                .padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+            content = rowContent
+        )
+    }
+}
 /**
  * 边框水印设置
  */
