@@ -195,7 +195,7 @@ fun CameraPreviewGL(
                                 PLog.d("CameraPreviewGL", "onSurfaceReady called")
                                 // SurfaceTexture 已经准备好，可以开始预览
                                 surfaceAvailable = true
-                                glSurfaceView.getSurfaceTexture()?.let { surfaceTexture ->
+                                glSurfaceView.getCameraSurfaceTexture()?.let { surfaceTexture ->
                                     glSurfaceView.setPreviewSize(previewSize.width, previewSize.height)
                                     glSurfaceView.setStabilizationInputSize(
                                         stabilizationInputSize.width,
@@ -213,7 +213,7 @@ fun CameraPreviewGL(
                         }
 
                         glSurfaceView.onSurfaceDestroyed = {
-                            val destroyedSurfaceTexture = glSurfaceView.getSurfaceTexture()
+                            val destroyedSurfaceTexture = glSurfaceView.getCameraSurfaceTexture()
                             if (glSurfaceViewRef === glSurfaceView) {
                                 surfaceAvailable = false
                                 surfaceTextureNotified = false
@@ -277,7 +277,7 @@ fun CameraPreviewGL(
                         val currentNotifiedPreviewSize = notifiedPreviewSize
                         
                         if (viewWidth > 0 && viewHeight > 0 && surfaceAvailable) {
-                            glSurfaceView.getSurfaceTexture()?.let { surfaceTexture ->
+                            glSurfaceView.getCameraSurfaceTexture()?.let { surfaceTexture ->
                                 glSurfaceView.setPreviewSize(previewSize.width, previewSize.height)
                                 glSurfaceView.setStabilizationInputSize(
                                     stabilizationInputSize.width,
