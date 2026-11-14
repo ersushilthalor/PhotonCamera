@@ -947,8 +947,8 @@ fun CameraScreen(
                 if (activePanel == ActivePanel.SETTINGS) {
                     // Keep the 0–100% setting, but it now controls the glass tint rather
                     // than making the menu itself a flat translucent black rectangle.
-                    val menuTint = 0.05f +
-                        (1f - cameraMenuTransparency.coerceIn(0f, 1f)) * 0.16f
+                    val menuTint = 0.035f +
+                        (1f - cameraMenuTransparency.coerceIn(0f, 1f)) * 0.075f
                     appendOverlay(cameraTopSheetGlassBounds, menuTint)
                 }
             }.toFloatArray()
@@ -960,7 +960,7 @@ fun CameraScreen(
                     bounds = overlayBounds,
                     cornerRadiusPx = with(density) { 24.dp.toPx() },
                     refractionHeightPx = with(density) { 24.dp.toPx() },
-                    refractionAmountPx = with(density) { 48.dp.toPx() },
+                    refractionAmountPx = with(density) { 28.dp.toPx() },
                 )
             }
         }
