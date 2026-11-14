@@ -1435,4 +1435,5 @@
     <string name="dual_capture_not_supported">Dual Capture requires a supported rear/front concurrent camera pair.</string>
     <string name="dual_capture_stop_recording_to_change">Stop recording before changing Dual Capture.</string>
     <string name="dual_capture_front_stream_error">The front-camera stream could not be started.</string>
+    <string name="dual_capture_front_resolution">Front camera · %1$d × %2$d</string>
 </resources>
