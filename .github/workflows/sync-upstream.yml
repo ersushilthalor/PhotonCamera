@@ -4,7 +4,6 @@ on:
   # Check the original PhotonCamera repository every day at 09:00 IST.
   schedule:
     - cron: "30 3 * * *"
-  # Also allow a manual run from the Actions tab.
   workflow_dispatch:
 
 permissions:
@@ -17,13 +16,14 @@ concurrency:
 
 jobs:
   sync:
-    name: Merge upstream and open a review PR
+    name: Cherry-pick new upstream commits and open a review PR
     runs-on: ubuntu-latest
     env:
       UPSTREAM_REPOSITORY: bjzhou/PhotonCamera
       UPSTREAM_BRANCH: main
       BASE_BRANCH: main
       SYNC_BRANCH: automation/upstream-sync
+      BASE_FILE: .github/upstream-sync-base
 
     steps:
       - name: Check out fork
@@ -32,78 +32,138 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Configure Git identity
+      - name: Configure Git and fetch upstream
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-      - name: Fetch upstream and fork main
-        run: |
           git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
           git fetch --no-tags upstream "+refs/heads/${UPSTREAM_BRANCH}:refs/remotes/upstream/${UPSTREAM_BRANCH}"
           git fetch origin "refs/heads/${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}"
 
-          # Refuse to merge unrelated histories.
-          if ! git merge-base "refs/remotes/origin/${BASE_BRANCH}" "refs/remotes/upstream/${UPSTREAM_BRANCH}" >/dev/null; then
-            echo "::error::The fork and upstream no longer share a common Git history. No changes were pushed."
-            exit 1
-          fi
-
-      - name: Merge upstream into a dedicated sync branch
-        id: merge
+      - name: Cherry-pick only commits newer than the last synced upstream commit
+        id: sync
         shell: bash
         run: |
           set -euo pipefail
 
-          git switch --force-create "${SYNC_BRANCH}" "refs/remotes/origin/${BASE_BRANCH}"
-
-          if ! git merge --no-edit --no-ff \
-            -m "Merge upstream ${UPSTREAM_REPOSITORY}:${UPSTREAM_BRANCH}" \
-            "refs/remotes/upstream/${UPSTREAM_BRANCH}"; then
-            echo "::error::Upstream changes conflict with custom fork changes. The sync branch was not pushed; resolve the conflict manually."
+          if [[ ! -s "${BASE_FILE}" ]]; then
+            echo "::error::Missing ${BASE_FILE}; refusing to guess an upstream baseline."
             exit 1
           fi
 
-          if git diff --quiet "refs/remotes/origin/${BASE_BRANCH}...HEAD"; then
+          base_sha="$(tr -d '[:space:]' < "${BASE_FILE}")"
+          upstream_ref="refs/remotes/upstream/${UPSTREAM_BRANCH}"
+          upstream_head="$(git rev-parse "${upstream_ref}")"
+
+          if ! git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
+            echo "::error::Recorded upstream baseline ${base_sha} is not available in fetched history."
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor "${base_sha}" "${upstream_ref}"; then
+            echo "::error::Recorded upstream baseline is not an ancestor of upstream main; refusing an unsafe sync."
+            exit 1
+          fi
+
+          mapfile -t commits < <(git rev-list --reverse "${base_sha}..${upstream_ref}")
+          if (( ${#commits[@]} == 0 )); then
+            echo "No upstream commits newer than ${base_sha}."
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
-            echo "Fork main is already up to date with upstream."
             exit 0
           fi
 
-          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          git switch --force-create "${SYNC_BRANCH}" "refs/remotes/origin/${BASE_BRANCH}"
 
-          # This is a bot-managed branch, never the customized main branch.
+          applied=0
+          skipped=0
+          preserved_paths=0
+
+          for sha in "${commits[@]}"; do
+            echo "::group::Cherry-pick ${sha}"
+            if git cherry-pick -x -X ours "${sha}"; then
+              ((applied+=1))
+            else
+              conflicts="$(git diff --name-only --diff-filter=U || true)"
+              if [[ -z "${conflicts}" ]]; then
+                # Skip an empty patch when the fork already contains its net effect.
+                git cherry-pick --skip
+                ((skipped+=1))
+              else
+                while IFS= read -r path; do
+                  stages="$(git ls-files -u -- "${path}" | awk '{print $3}' | sort -u)"
+                  if printf '%s\n' "${stages}" | grep -qx "2"; then
+                    # Keep the customized fork's side for any remaining conflict.
+                    git checkout --ours -- "${path}"
+                    git add -- "${path}"
+                    ((preserved_paths+=1))
+                  elif printf '%s\n' "${stages}" | grep -qx "3"; then
+                    # Keep a deletion already present in the customized fork.
+                    git rm --ignore-unmatch -- "${path}"
+                    ((preserved_paths+=1))
+                  else
+                    echo "::error::Cannot safely resolve conflict in ${path}."
+                    exit 1
+                  fi
+                done <<< "${conflicts}"
+
+                if [[ -n "$(git diff --name-only --diff-filter=U)" ]]; then
+                  echo "::error::Unresolved paths remain after conservative conflict handling."
+                  exit 1
+                fi
+
+                if git diff --cached --quiet; then
+                  git cherry-pick --skip
+                  ((skipped+=1))
+                else
+                  GIT_EDITOR=true git cherry-pick --continue
+                  ((applied+=1))
+                fi
+              fi
+            fi
+            echo "::endgroup::"
+          done
+
+          printf '%s\n' "${upstream_head}" > "${BASE_FILE}"
+          git add "${BASE_FILE}"
+          git commit -m "chore: record upstream sync baseline ${upstream_head}"
+
           git push --force origin "HEAD:refs/heads/${SYNC_BRANCH}"
 
+          {
+            echo "### Upstream sync summary"
+            echo "- Upstream baseline before sync: ${base_sha}"
+            echo "- Upstream baseline after sync: ${upstream_head}"
+            echo "- Commits applied: ${applied}"
+            echo "- Empty/already represented commits skipped: ${skipped}"
+            echo "- Conflict paths resolved in favor of fork: ${preserved_paths}"
+            echo "- Destination: review PR into ${BASE_BRANCH}; no direct push to main."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+
       - name: Create or update upstream sync pull request
-        if: steps.merge.outputs.has_changes == 'true'
+        if: steps.sync.outputs.has_changes == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-
           title="Sync upstream: ${UPSTREAM_REPOSITORY}:${UPSTREAM_BRANCH}"
           body=$(cat <<'EOF'
-          This pull request brings the latest commits from the original PhotonCamera repository into this customized fork.
+          This PR contains only commits newer than the upstream SHA recorded in `.github/upstream-sync-base`.
 
-          - **Upstream:** `bjzhou/PhotonCamera`, branch `main`
-          - **Target:** this fork's `main`
-          - **Safety:** changes are proposed for review; this workflow never pushes upstream changes directly to `main`.
+          - Upstream: `bjzhou/PhotonCamera:main`
+          - Target: customized fork `main`
+          - Changes are cherry-picked in chronological order.
+          - Remaining textual conflicts preserve the fork's existing version/deletion.
+          - The baseline advances only in this PR, so future syncs do not replay already integrated commits.
 
-          Review the diff and run the Android build before merging. If upstream edits conflict with custom camera features, the workflow stops and requires manual conflict resolution.
+          Review the diff and require a successful Android build/device test before merging. This workflow never pushes upstream changes directly to `main`.
           EOF
           )
 
-          pr_number=$(gh pr list \
-            --head "${SYNC_BRANCH}" \
-            --base "${BASE_BRANCH}" \
-            --state open \
-            --json number \
-            --jq '.[0].number // empty')
-
-          if [[ -n "$pr_number" ]]; then
-            gh pr edit "$pr_number" --title "$title" --body "$body"
-            echo "Updated existing pull request #$pr_number"
+          pr_number=$(gh pr list --head "${SYNC_BRANCH}" --base "${BASE_BRANCH}" --state open --json number --jq '.[0].number // empty')
+          if [[ -n "${pr_number}" ]]; then
+            gh pr edit "${pr_number}" --title "${title}" --body "${body}"
           else
-            gh pr create --base "${BASE_BRANCH}" --head "${SYNC_BRANCH}" --title "$title" --body "$body"
+            gh pr create --base "${BASE_BRANCH}" --head "${SYNC_BRANCH}" --title "${title}" --body "${body}"
           fi
