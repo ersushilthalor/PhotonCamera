@@ -55,6 +55,7 @@ jobs:
 
           applied=0
           skipped=0
+          ours_resolutions=0
           for sha in "${commits[@]}"; do
             if git log --format=%B | grep -Fq "$sha"; then
               echo "Already integrated: $sha"
@@ -63,33 +64,60 @@ jobs:
             fi
 
             echo "::group::Cherry-pick $sha"
-            if git cherry-pick -x "$sha"; then
+            if git cherry-pick -x -X ours "$sha"; then
               ((applied+=1))
               git push origin "HEAD:refs/heads/$TARGET_BRANCH"
               echo "Applied $sha"
             else
               conflicts=$(git diff --name-only --diff-filter=U || true)
-              {
-                echo "### Upstream integration stopped"
-                echo
-                echo "- Applied in this run: $applied"
-                echo "- Already present: $skipped"
-                echo "- Conflict commit: $sha"
-                echo "- Conflicting paths:"
-                if [[ -n "$conflicts" ]]; then
-                  while IFS= read -r path; do echo "  - `$path`"; done <<< "$conflicts"
-                else
-                  echo "  - (No unmerged paths; inspect cherry-pick error above.)"
+              if [[ -z "$conflicts" ]]; then
+                # An empty cherry-pick can occur when the fork already contains its net effect.
+                git cherry-pick --skip || exit 1
+                ((skipped+=1))
+                echo "Skipped empty/already represented commit $sha"
+              else
+                while IFS= read -r path; do
+                  stages=$(git ls-files -u -- "$path" | awk '{print $3}' | sort -u)
+                  if printf '%s\n' "$stages" | grep -qx "2"; then
+                    # Preserve the customized fork's version for any remaining conflict.
+                    git checkout --ours -- "$path"
+                    git add -- "$path"
+                    ((ours_resolutions+=1))
+                  elif printf '%s\n' "$stages" | grep -qx "3"; then
+                    # The fork had deleted this path; preserve that intentional deletion.
+                    git rm --ignore-unmatch -- "$path"
+                    ((ours_resolutions+=1))
+                  else
+                    echo "::error::Cannot safely resolve unmerged path: $path"
+                    exit 1
+                  fi
+                done <<< "$conflicts"
+
+                if [[ -n "$(git diff --name-only --diff-filter=U)" ]]; then
+                  echo "::error::Unresolved merge entries remain for $sha"
+                  exit 1
                 fi
-                echo
-                echo "The integration branch contains only completed cherry-picks. No changes were pushed to main."
-              } >> "$GITHUB_STEP_SUMMARY"
-              git cherry-pick --abort || true
-              exit 1
+
+                if git diff --cached --quiet; then
+                  git cherry-pick --skip || exit 1
+                  ((skipped+=1))
+                else
+                  GIT_EDITOR=true git cherry-pick --continue || exit 1
+                  ((applied+=1))
+                fi
+                git push origin "HEAD:refs/heads/$TARGET_BRANCH"
+              fi
             fi
             echo "::endgroup::"
           done
 
+          {
+            echo "### Integration summary"
+            echo "- Applied during this run: $applied"
+            echo "- Already present or empty: $skipped"
+            echo "- Remaining conflict paths resolved by preserving fork versions/deletions: $ours_resolutions"
+            echo "- Target: `$TARGET_BRANCH` (not main)"
+          } >> "$GITHUB_STEP_SUMMARY"
           echo "applied=$applied" >> "$GITHUB_OUTPUT"
           echo "skipped=$skipped" >> "$GITHUB_OUTPUT"
 
@@ -107,7 +135,7 @@ jobs:
           Upstream: `bjzhou/PhotonCamera`
           Target: customized fork `main`
 
-          Review the code diff and run the Android build/device tests before merging. The workflow stops at the first cherry-pick conflict and never pushes changes directly to `main`.
+          For unresolved textual conflicts, the integration workflow preserves the fork's existing version of the affected path instead of overwriting custom code. Review the full diff carefully: this conservative choice can mean an upstream change in a conflicted file is not included. Run the Android build and test the camera on-device before merging.
           EOF
           )
           if [[ -n "$pr" ]]; then
