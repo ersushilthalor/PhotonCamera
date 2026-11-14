@@ -161,6 +161,8 @@ android {
 }
 
 dependencies {
+    // Use the pinned PrismalAGSL source checked out from the repository submodule.
+    implementation(project(":Prismal"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

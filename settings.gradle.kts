@@ -24,4 +24,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "PhotonCamera"
 include(":app")
- 
+include(":Prismal")
+project(":Prismal").projectDir = file("prismal-library")
