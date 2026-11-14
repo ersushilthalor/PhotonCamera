@@ -226,30 +226,15 @@ fun CameraTopSheet(
                     // Keep a restrained Compose fallback for devices / modes without it.
                     .background(
                         if (liquidGlassSettings.enabled) {
-                            Color(0x0A8FC8FF)
+                            Color.Transparent
                         } else {
                             Color(0xFF1A1A1E).copy(
                                 alpha = (1f - cameraMenuTransparency.coerceIn(0f, 1f)).coerceIn(0.18f, 0.88f)
                             )
                         }
                     )
-                    .then(
-                        if (!liquidGlassSettings.enabled || !liquidGlassSettings.specularEnabled) {
-                            Modifier
-                        } else {
-                            Modifier.border(
-                                width = liquidGlassSettings.specularWidthDp.dp,
-                                brush = Brush.linearGradient(
-                                    colors = listOf(
-                                        Color.White.copy(alpha = 0.22f * liquidGlassSettings.specularAlpha),
-                                        Color(0xFF9BCFFF).copy(alpha = 0.15f * liquidGlassSettings.specularAlpha),
-                                        Color.White.copy(alpha = 0.05f * liquidGlassSettings.specularAlpha)
-                                    )
-                                ),
-                                shape = glassShape
-                            )
-                        }
-                    )
+                    // Specular and surface tint are drawn by the configurable GL material,
+                    // not by a fixed Compose border or an always-on fallback tint.
                     .padding(horizontal = 18.dp, vertical = 16.dp)
                     .autoRotate()
             ) {
