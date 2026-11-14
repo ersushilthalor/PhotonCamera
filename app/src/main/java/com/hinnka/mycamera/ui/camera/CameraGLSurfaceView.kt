@@ -541,7 +541,8 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         requestRender()
     }
 
-    fun getSurfaceTexture(): SurfaceTexture? = renderer.getSurfaceTexture()
+    /** Returns the Camera2 input texture, not TextureView's EGL output texture. */
+    fun getCameraSurfaceTexture(): SurfaceTexture? = renderer.getSurfaceTexture()
 
     fun getRenderSurface(): Surface? = currentSurface
 
