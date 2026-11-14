@@ -23,13 +23,13 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -61,6 +62,14 @@ import com.hinnka.mycamera.ui.components.RawRenderingEngineSettingsPanel
 import com.hinnka.mycamera.video.*
 import com.hinnka.mycamera.video.VideoCodec
 import com.hinnka.mycamera.ui.icons.AppIcons
+import com.styropyr0.prismal.PrismalBackdrop
+import com.styropyr0.prismal.drawPrismalGlass
+import com.styropyr0.prismal.effects.applyPrismalGlassEffects
+import com.styropyr0.prismal.shapes.PrismalRoundedCornerStyle
+import com.styropyr0.prismal.shapes.PrismalRoundedRectangle
+import com.styropyr0.prismal.specular.PrismalSpecular
+import com.styropyr0.prismal.components.PrismalGlassToggle
+import com.styropyr0.prismal.sources.rememberPrismalCanvasSource
 
 private enum class VideoSettingPanel {
     ASPECT_RATIO,
@@ -150,13 +159,18 @@ fun CameraTopSheet(
     modifier: Modifier = Modifier,
     cameraMenuTransparency: Float = 0.25f,
     liquidGlassSettings: LiquidGlassSettings = LiquidGlassSettings(),
-    onGlassBoundsChanged: (Rect?) -> Unit = {}
+    prismalBackdrop: PrismalBackdrop? = null
 ) {
     var expandedVideoPanel by rememberSaveable { mutableStateOf<VideoSettingPanel?>(null) }
     var showPhotoAspectOptions by rememberSaveable { mutableStateOf(false) }
     var showRenderingEngineSheet by rememberSaveable { mutableStateOf(false) }
     var showOppoPipelineSheet by rememberSaveable { mutableStateOf(false) }
     var showContentManagementOptions by rememberSaveable { mutableStateOf(false) }
+    val density = LocalDensity.current
+    val glassSettings = liquidGlassSettings.sanitized()
+    val stabilizationGlassBackdrop = rememberPrismalCanvasSource {
+        drawRect(Color(0xFF252932))
+    }
     fun handleContentManagementAction(action: () -> Unit) {
         showContentManagementOptions = false
         action()
@@ -209,14 +223,60 @@ fun CameraTopSheet(
             contentAlignment = Alignment.TopCenter
         ) {
             val glassShape = RoundedCornerShape(30.dp)
+            val prismalSurface = prismalBackdrop?.let { backdrop ->
+                Modifier.drawPrismalGlass(
+                    backdrop = backdrop,
+                    shape = {
+                        PrismalRoundedRectangle(
+                            30.dp,
+                            PrismalRoundedCornerStyle.Continuous
+                        )
+                    },
+                    effects = {
+                        applyPrismalGlassEffects(
+                            density = density,
+                            adaptiveLuminance = glassSettings.adaptiveLuminance,
+                            luminance = 0.30f,
+                            blurRadiusPx = with(density) { glassSettings.blurRadiusDp.dp.toPx() },
+                            refractionHeightPx = with(density) { glassSettings.refractionHeightDp.dp.toPx() },
+                            refractionAmountPx = with(density) { glassSettings.refractionAmountDp.dp.toPx() },
+                            brightness = glassSettings.brightness,
+                            saturation = glassSettings.saturation,
+                            depthEffect = glassSettings.depthEffect,
+                            chromaticAberration = glassSettings.chromaticAberration,
+                            useVibrancy = glassSettings.useVibrancy
+                        )
+                    },
+                    specular = if (glassSettings.specularEnabled) {
+                        {
+                            PrismalSpecular(
+                                width = glassSettings.specularWidthDp.dp,
+                                blurRadius = glassSettings.specularWidthDp.dp / 2f,
+                                alpha = glassSettings.specularAlpha
+                            )
+                        }
+                    } else {
+                        null
+                    },
+                    // The optical surface owns its refraction and highlight; no second shadow/border.
+                    depthShadow = null,
+                    onDrawSurface = {
+                        val menuTint = cameraMenuTransparency.coerceIn(0f, 0.75f) * 0.10f
+                        if (menuTint > 0f) drawRect(Color.Black.copy(alpha = menuTint))
+                        if (glassSettings.surfaceTintAlpha > 0f) {
+                            drawRect(Color.White.copy(alpha = glassSettings.surfaceTintAlpha))
+                        }
+                    }
+                )
+            } ?: Modifier.background(
+                Color.Black.copy(alpha = cameraMenuTransparency.coerceIn(0f, 0.75f))
+            )
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = 600.dp)
-                    .onGloballyPositioned { onGlassBoundsChanged(it.boundsInRoot()) }
+                    .then(prismalSurface)
                     .clip(glassShape)
-                    // The single optical Liquid Glass surface is composited by the
-                    // preview GL renderer. Keep this Compose container fully transparent.
                     .background(Color.Transparent)
                     .padding(horizontal = 18.dp, vertical = 16.dp)
                     .autoRotate()
@@ -378,28 +438,20 @@ fun CameraTopSheet(
                             ) { tint ->
                                 VideoEditGlyph(tint)
                             }
-                            VideoMenuItem(
-                                label = "ACTION",
-                                active = videoStabilizationMode == VideoStabilizationMode.ENHANCED,
-                                enabled = videoActionModeAvailable,
+                            VideoStabilizationMenuItem(
                                 modifier = itemModifier,
-                                onClick = {
+                                selected = videoStabilizationMode == VideoStabilizationMode.ENHANCED,
+                                enabled = videoActionModeAvailable,
+                                backdrop = stabilizationGlassBackdrop,
+                                onSelect = { enabled ->
                                     if (videoActionModeAvailable) {
                                         onVideoStabilizationModeChange(
-                                            if (videoStabilizationMode == VideoStabilizationMode.ENHANCED) {
-                                                VideoStabilizationMode.OFF
-                                            } else {
-                                                VideoStabilizationMode.ENHANCED
-                                            }
+                                            if (enabled) VideoStabilizationMode.ENHANCED
+                                            else VideoStabilizationMode.OFF
                                         )
                                     }
                                 }
-                            ) { tint ->
-                                VideoActionGlyph(
-                                    tint = tint,
-                                    active = videoStabilizationMode == VideoStabilizationMode.ENHANCED
-                                )
-                            }
+                            )
                             VideoMenuItem(
                                 label = "DUAL CAPTURE",
                                 modifier = itemModifier,
@@ -1023,6 +1075,56 @@ private fun VideoMenuItem(
         Text(
             text = label,
             color = if (enabled) Color.White else Color.White.copy(alpha = 0.42f),
+            fontSize = 11.sp,
+            lineHeight = 12.sp,
+            letterSpacing = 0.30.sp,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            maxLines = 2
+        )
+    }
+}
+
+@Composable
+private fun VideoStabilizationMenuItem(
+    modifier: Modifier = Modifier,
+    selected: Boolean,
+    enabled: Boolean,
+    backdrop: PrismalBackdrop,
+    onSelect: (Boolean) -> Unit,
+) {
+    val contentAlpha = if (enabled) 1f else 0.42f
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
+            modifier = Modifier.size(62.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            PrismalGlassToggle(
+                selected = { selected },
+                onSelect = onSelect,
+                backdrop = backdrop,
+                modifier = Modifier
+                    .size(62.dp, 28.dp)
+                    .alpha(contentAlpha),
+                hapticFeedback = enabled,
+            )
+            if (!enabled) {
+                // Keep the unavailable / recording state non-interactive.
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clickable(onClick = {})
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(3.dp))
+        Text(
+            text = "ACTION",
+            color = Color.White.copy(alpha = contentAlpha),
             fontSize = 11.sp,
             lineHeight = 12.sp,
             letterSpacing = 0.30.sp,
