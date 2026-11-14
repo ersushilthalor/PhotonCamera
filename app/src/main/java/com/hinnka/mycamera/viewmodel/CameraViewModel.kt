@@ -4142,7 +4142,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val rawNeedsUpdate = useRaw != null &&
             (state.value.useRaw != useRaw || this.useRaw.value != useRaw)
         val nightVisionNeedsUpdate = state.value.nightVisionEnabled != nightVision ||
-            userPreferencesRepository.current.nightVisionMode != nightVision
+            userPreferencesRepository.latest().nightVisionMode != nightVision
         if (state.value.captureMode == mode && !rawNeedsUpdate && !nightVisionNeedsUpdate) return
 
         shootingModeSwitchJob = viewModelScope.launch {
