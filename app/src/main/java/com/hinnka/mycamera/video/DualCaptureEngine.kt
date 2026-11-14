@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
+import android.hardware.camera2.params.SessionConfiguration
 import android.media.MediaCodecInfo
 import android.media.MediaCodecList
 import android.os.Build
