@@ -39,7 +39,7 @@ fun LutEditBottomSheet(
     imageHistogram: ImageHistogram? = null,
     showEffects: Boolean = false,
     editorTarget: LutEditorTarget = LutEditorTarget.CREATIVE_GLOBAL,
-    containerColor: Color = Color.Transparent,
+    containerColor: Color? = null,
     modifier: Modifier = Modifier,
     replaceVignetteWithVideoBrightness: Boolean = false,
     videoOnly: Boolean = false
@@ -109,7 +109,7 @@ fun LutEditBottomSheet(
 
     AppModalBottomSheet(
         containerColor = containerColor,
-        style = AppSheetStyle.Translucent,
+        style = AppSheetStyle.Frosted,
         onDismissRequest = {
             flushLutSave()
             onDismiss()
