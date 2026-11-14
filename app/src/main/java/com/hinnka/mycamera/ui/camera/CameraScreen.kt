@@ -245,6 +245,7 @@ fun CameraScreen(
     val focusPeakingEnabled by viewModel.focusPeakingEnabled.collectAsState(initial = true)
     val eyeFocusEnabled by viewModel.eyeFocusEnabled.collectAsState()
     val keepScreenOn by viewModel.keepScreenOn.collectAsState(initial = false)
+    val cameraMenuTransparency by viewModel.cameraMenuTransparency.collectAsState()
     val currentLutId by viewModel.currentLutId.collectAsState()
     val lutNameOverlayState = rememberLutNameOverlayState()
     val currentRecipeParams by viewModel.currentRecipeParams.collectAsState()
@@ -298,7 +299,9 @@ fun CameraScreen(
     var cameraScreenBounds by remember { mutableStateOf<Rect?>(null) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
     var previewGlBounds by remember { mutableStateOf<Rect?>(null) }
+    var videoTopBarLeftGlassBounds by remember { mutableStateOf<Rect?>(null) }
     var videoTopBarGlassBounds by remember { mutableStateOf<Rect?>(null) }
+    var cameraTopSheetGlassBounds by remember { mutableStateOf<Rect?>(null) }
     var cameraGLSurfaceView by remember { mutableStateOf<CameraGLSurfaceView?>(null) }
     var zoomJoystickOpen by remember { mutableStateOf(false) }
     var viewfinderAreaBounds by remember { mutableStateOf<Rect?>(null) }
@@ -896,41 +899,61 @@ fun CameraScreen(
 
         LaunchedEffect(
             state.captureMode,
+            activePanel,
             previewGlBounds,
+            videoTopBarLeftGlassBounds,
             videoTopBarGlassBounds,
+            cameraTopSheetGlassBounds,
             cameraGLSurfaceView,
         ) {
             val previewRect = previewGlBounds
-            val pillRect = videoTopBarGlassBounds
             val glView = cameraGLSurfaceView
             if (glView == null) return@LaunchedEffect
 
-            if (
-                state.captureMode != CaptureMode.VIDEO ||
-                previewRect == null ||
-                pillRect == null ||
-                previewRect.width <= 0f ||
-                previewRect.height <= 0f
-            ) {
-                glView.setLiquidGlassOverlay(null, 0f, 0f)
+            if (previewRect == null || previewRect.width <= 0f || previewRect.height <= 0f) {
+                glView.setLiquidGlassOverlays(null, 0f, 0f)
                 return@LaunchedEffect
             }
 
-            val left = ((pillRect.left - previewRect.left) / previewRect.width).coerceIn(0f, 1f)
-            val top = ((pillRect.top - previewRect.top) / previewRect.height).coerceIn(0f, 1f)
-            val right = ((pillRect.right - previewRect.left) / previewRect.width).coerceIn(0f, 1f)
-            val bottom = ((pillRect.bottom - previewRect.top) / previewRect.height).coerceIn(0f, 1f)
-            if (right <= left || bottom <= top) {
-                glView.setLiquidGlassOverlay(null, 0f, 0f)
-                return@LaunchedEffect
-            }
+            val overlayBounds = buildList<Float> {
+                fun appendOverlay(rect: Rect?) {
+                    if (rect == null) return
+                    val clippedLeft = maxOf(rect.left, previewRect.left)
+                    val clippedTop = maxOf(rect.top, previewRect.top)
+                    val clippedRight = minOf(rect.right, previewRect.right)
+                    val clippedBottom = minOf(rect.bottom, previewRect.bottom)
+                    if (clippedRight <= clippedLeft || clippedBottom <= clippedTop) return
 
-            // Compose reports top-left coordinates; the GL preview texture uses a bottom-left origin.
-            glView.setLiquidGlassOverlay(
-                bounds = floatArrayOf(left, 1f - bottom, right, 1f - top),
-                cornerRadiusPx = with(density) { 18.dp.toPx() },
-                blurRadiusPx = with(density) { 20.dp.toPx() },
-            )
+                    val left = ((clippedLeft - previewRect.left) / previewRect.width).coerceIn(0f, 1f)
+                    val top = ((clippedTop - previewRect.top) / previewRect.height).coerceIn(0f, 1f)
+                    val right = ((clippedRight - previewRect.left) / previewRect.width).coerceIn(0f, 1f)
+                    val bottom = ((clippedBottom - previewRect.top) / previewRect.height).coerceIn(0f, 1f)
+                    // Compose uses a top-left origin; the preview texture uses bottom-left UVs.
+                    add(left)
+                    add(1f - bottom)
+                    add(right)
+                    add(1f - top)
+                }
+
+                if (state.captureMode == CaptureMode.VIDEO) {
+                    appendOverlay(videoTopBarLeftGlassBounds)
+                    appendOverlay(videoTopBarGlassBounds)
+                }
+                if (activePanel == ActivePanel.SETTINGS) {
+                    appendOverlay(cameraTopSheetGlassBounds)
+                }
+            }.toFloatArray()
+
+            if (overlayBounds.isEmpty()) {
+                glView.setLiquidGlassOverlays(null, 0f, 0f)
+            } else {
+                // Blur once, then reuse the same blurred preview for the top bar and menu card.
+                glView.setLiquidGlassOverlays(
+                    bounds = overlayBounds,
+                    cornerRadiusPx = with(density) { 24.dp.toPx() },
+                    blurRadiusPx = with(density) { 20.dp.toPx() },
+                )
+            }
         }
         val width = with(density) { constraints.maxWidth.toDp() }
         val height = with(density) { constraints.maxHeight.toDp() }
@@ -1054,6 +1077,7 @@ fun CameraScreen(
                 },
                 glassBackdrop = videoTopBarBackdrop,
                 onVideoGlassBoundsChanged = { videoTopBarGlassBounds = it },
+                onVideoLeftGlassBoundsChanged = { videoTopBarLeftGlassBounds = it },
                 modifier = Modifier
                     .padding(top = topSafePadding)
                     .offset(y = topBarOffset)
@@ -1984,7 +2008,9 @@ fun CameraScreen(
             oppoPhotoSettings = oppoPhotoSettings,
             onOppoPhotoSettingsChange = viewModel::updateOppoPhotoSettings,
             refocusAvailable = state.minimumFocusDistance > 0f,
-            contentTopPadding = CameraTopBarBaseTopPadding + topSafePadding
+            contentTopPadding = CameraTopBarBaseTopPadding + topSafePadding,
+            cameraMenuTransparency = cameraMenuTransparency,
+            onGlassBoundsChanged = { cameraTopSheetGlassBounds = it }
         )
 
         // During navigation measurement or window resizing, the viewport can be

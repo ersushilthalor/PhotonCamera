@@ -121,6 +121,8 @@ enum class CaptureButtonStyle {
     }
 }
 
+const val DEFAULT_CAMERA_MENU_TRANSPARENCY = 0.25f
+
 /**
  * 用户偏好设置数据类
  */
@@ -174,6 +176,7 @@ data class UserPreferences(
     val burstSoundFileName: String? = null,
     val vibrationEnabled: Boolean = true,  // 拍摄震动
     val keepScreenOn: Boolean = false,  // 屏幕常亮
+    val cameraMenuTransparency: Float = DEFAULT_CAMERA_MENU_TRANSPARENCY,
     val retainCaptureSettings: Boolean = false,
     val customCaptureSettings: CustomCaptureSettings? = null,
     val windowScreenBrightness: Float? = null,  // Activity 窗口屏幕亮度，null 表示使用系统默认
@@ -441,6 +444,7 @@ class UserPreferencesRepository(private val context: Context) {
         private val RETAIN_CAPTURE_SETTINGS = booleanPreferencesKey("retain_capture_settings")
         private val CUSTOM_CAPTURE_SETTINGS = stringPreferencesKey("custom_capture_settings_v1")
         private val WINDOW_SCREEN_BRIGHTNESS = floatPreferencesKey("window_screen_brightness")
+        private val CAMERA_MENU_TRANSPARENCY_KEY = floatPreferencesKey("camera_menu_transparency")
         private val VOLUME_KEY_ACTION = stringPreferencesKey("volume_key_action")
         private val AUTO_SAVE_AFTER_CAPTURE = booleanPreferencesKey("auto_save_after_capture")
         private val PHOTO_SAVE_PATH = stringPreferencesKey("photo_save_path")
@@ -758,6 +762,9 @@ class UserPreferencesRepository(private val context: Context) {
                 retainCaptureSettings = preferences[RETAIN_CAPTURE_SETTINGS] ?: false,
                 customCaptureSettings = CustomCaptureSettings.fromJson(preferences[CUSTOM_CAPTURE_SETTINGS]),
                 windowScreenBrightness = preferences[WINDOW_SCREEN_BRIGHTNESS]?.coerceIn(0f, 1f),
+                cameraMenuTransparency = (
+                    preferences[CAMERA_MENU_TRANSPARENCY_KEY] ?: DEFAULT_CAMERA_MENU_TRANSPARENCY
+                ).coerceIn(0f, 0.7f),
                 volumeKeyAction = VolumeKeyAction.valueOf(
                     preferences[VOLUME_KEY_ACTION] ?: VolumeKeyAction.CAPTURE.name
                 ),
@@ -1664,6 +1671,12 @@ class UserPreferencesRepository(private val context: Context) {
             } else {
                 preferences[WINDOW_SCREEN_BRIGHTNESS] = value.coerceIn(0f, 1f)
             }
+        }
+    }
+
+    suspend fun saveCameraMenuTransparency(value: Float) {
+        context.dataStore.edit { preferences ->
+            preferences[CAMERA_MENU_TRANSPARENCY_KEY] = value.coerceIn(0f, 0.7f)
         }
     }
 

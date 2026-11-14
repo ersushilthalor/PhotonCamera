@@ -28,6 +28,9 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -143,7 +146,9 @@ fun CameraTopSheet(
     onOppoPhotoSettingsChange: (OppoPhotoSettings) -> Unit,
     refocusAvailable: Boolean,
     contentTopPadding: Dp = CameraTopSheetContentTopPadding,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    cameraMenuTransparency: Float = 0.25f,
+    onGlassBoundsChanged: (Rect?) -> Unit = {}
 ) {
     var expandedVideoPanel by rememberSaveable { mutableStateOf<VideoSettingPanel?>(null) }
     var showPhotoAspectOptions by rememberSaveable { mutableStateOf(false) }
@@ -201,12 +206,17 @@ fun CameraTopSheet(
                     .widthIn(max = 420.dp)
                     .fillMaxWidth()
                     .heightIn(max = 600.dp)
+                    .onGloballyPositioned { onGlassBoundsChanged(it.boundsInRoot()) }
                     .shadow(
                         elevation = 18.dp,
                         shape = RoundedCornerShape(24.dp)
                     )
                     .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xE51A1A1E))
+                    .background(
+                        Color(0xFF1A1A1E).copy(
+                            alpha = 1f - cameraMenuTransparency.coerceIn(0f, 0.7f)
+                        )
+                    )
                     .border(
                         width = 1.dp,
                         color = Color.White.copy(alpha = 0.12f),

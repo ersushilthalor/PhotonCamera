@@ -2648,13 +2648,23 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         bounds: FloatArray?,
         cornerRadiusPx: Float,
         blurRadiusPx: Float,
+    ) = setLiquidGlassOverlays(bounds, cornerRadiusPx, blurRadiusPx)
+
+    /** Each region is normalized GL UV coordinates: left, bottom, right, top. */
+    fun setLiquidGlassOverlays(
+        bounds: FloatArray?,
+        cornerRadiusPx: Float,
+        blurRadiusPx: Float,
     ) {
-        val safeBounds = bounds?.takeIf {
-            it.size >= 4 &&
-                it[0].isFinite() && it[1].isFinite() &&
-                it[2].isFinite() && it[3].isFinite() &&
-                it[2] > it[0] && it[3] > it[1]
-        }?.copyOf(4)
+        val safeBounds = bounds?.takeIf { values ->
+            values.size >= 4 &&
+                values.size % 4 == 0 &&
+                values.all { it.isFinite() } &&
+                (0 until values.size step 4).all { index ->
+                    values[index + 2] > values[index] &&
+                        values[index + 3] > values[index + 1]
+                }
+        }?.copyOf()
         liquidGlassOverlayBounds = safeBounds
         liquidGlassOverlayCornerRadiusPx = cornerRadiusPx.coerceAtLeast(0f)
         liquidGlassOverlayBlurRadiusPx = blurRadiusPx.coerceAtLeast(0f)
@@ -3885,10 +3895,6 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, liquidGlassBlurTextureIds[1])
         GLES30.glUniform1i(GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, "uBlurTexture"), 0)
-        GLES30.glUniform4f(
-            GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, "uOverlayRect"),
-            bounds[0], bounds[1], bounds[2], bounds[3],
-        )
         GLES30.glUniform2f(
             GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, "uViewportSize"),
             width.toFloat(), height.toFloat(),
@@ -3897,7 +3903,14 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, "uCornerRadiusPx"),
             liquidGlassOverlayCornerRadiusPx,
         )
-        drawSimpleQuad(liquidGlassOverlayProgramId)
+        // The blur texture is shared; only the rounded clipping rectangle changes.
+        for (index in 0 until bounds.size step 4) {
+            GLES30.glUniform4f(
+                GLES30.glGetUniformLocation(liquidGlassOverlayProgramId, "uOverlayRect"),
+                bounds[index], bounds[index + 1], bounds[index + 2], bounds[index + 3],
+            )
+            drawSimpleQuad(liquidGlassOverlayProgramId)
+        }
         GLES30.glDisable(GLES30.GL_BLEND)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
     }

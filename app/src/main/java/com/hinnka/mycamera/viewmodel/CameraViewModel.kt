@@ -25,6 +25,7 @@ import com.hinnka.mycamera.camera.*
 import com.hinnka.mycamera.data.ContentRepository
 import com.hinnka.mycamera.data.CameraFeaturePreferencesUpdate
 import com.hinnka.mycamera.data.CaptureButtonStyle
+import com.hinnka.mycamera.data.DEFAULT_CAMERA_MENU_TRANSPARENCY
 import com.hinnka.mycamera.data.CaptureSoundRepository
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.data.DevelopAnimationStyle
@@ -1562,6 +1563,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val windowScreenBrightness: StateFlow<Float?> = userPreferencesRepository.userPreferences
         .map { it.windowScreenBrightness }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val cameraMenuTransparency: StateFlow<Float> = userPreferencesRepository.userPreferences
+        .map { it.cameraMenuTransparency }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, DEFAULT_CAMERA_MENU_TRANSPARENCY)
     val volumeKeyAction: StateFlow<VolumeKeyAction> =
         userPreferencesRepository.userPreferences.map { it.volumeKeyAction }
             .stateIn(viewModelScope, SharingStarted.Eagerly, initialValue = VolumeKeyAction.NONE)
@@ -5328,6 +5332,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun setShowLevelIndicator(show: Boolean) {
         viewModelScope.launch {
             userPreferencesRepository.saveShowLevelIndicator(show)
+        }
+    }
+
+    fun setCameraMenuTransparency(value: Float) {
+        viewModelScope.launch {
+            userPreferencesRepository.saveCameraMenuTransparency(value)
         }
     }
 

@@ -336,10 +336,16 @@ class CameraGLSurfaceView @JvmOverloads constructor(
         bounds: FloatArray?,
         cornerRadiusPx: Float,
         blurRadiusPx: Float,
+    ) = setLiquidGlassOverlays(bounds, cornerRadiusPx, blurRadiusPx)
+
+    fun setLiquidGlassOverlays(
+        bounds: FloatArray?,
+        cornerRadiusPx: Float,
+        blurRadiusPx: Float,
     ) {
         val safeBounds = bounds?.copyOf()
         queueEvent {
-            renderer.setLiquidGlassOverlay(safeBounds, cornerRadiusPx, blurRadiusPx)
+            renderer.setLiquidGlassOverlays(safeBounds, cornerRadiusPx, blurRadiusPx)
             requestRender()
         }
     }

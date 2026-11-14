@@ -1425,4 +1425,6 @@
     <string name="oppo_refocus_plane_count">Plane %1$d of %2$d</string>
     <string name="oppo_refocus_near">Near</string>
     <string name="oppo_refocus_far">Far</string>
+    <string name="settings_camera_menu_transparency">Quick menu transparency</string>
+    <string name="settings_camera_menu_transparency_description">Adjust how much of the live preview shows through the photo and video quick menu. 0% is opaque; higher values reveal more of the blurred preview.</string>
 </resources>

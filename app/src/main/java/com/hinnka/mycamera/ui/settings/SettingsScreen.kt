@@ -131,6 +131,7 @@ import com.hinnka.mycamera.camera.VendorCaptureSettings
 import com.hinnka.mycamera.camera.VendorCaptureSettingsByLens
 import com.hinnka.mycamera.camera.VendorCaptureValueType
 import com.hinnka.mycamera.data.CaptureButtonStyle
+import com.hinnka.mycamera.data.DEFAULT_CAMERA_MENU_TRANSPARENCY
 import com.hinnka.mycamera.data.VolumeKeyAction
 import com.hinnka.mycamera.frame.FrameInfo
 import com.hinnka.mycamera.gallery.PhotoSavePath
@@ -1889,6 +1890,31 @@ fun SettingsScreen(
                         AccentColorSetting(
                             color = userPreferences.accentColor,
                             onColorSelected = viewModel::setAccentColor
+                        )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+
+                        var menuTransparencyUi by remember(userPreferences.cameraMenuTransparency) {
+                            mutableStateOf(userPreferences.cameraMenuTransparency)
+                        }
+                        SliderSettingItem(
+                            title = stringResource(R.string.settings_camera_menu_transparency),
+                            description = stringResource(R.string.settings_camera_menu_transparency_description),
+                            value = menuTransparencyUi,
+                            valueRange = 0f..0.7f,
+                            resetValue = DEFAULT_CAMERA_MENU_TRANSPARENCY,
+                            valueTextFormatter = { "${(it * 100f).toInt()}%" },
+                            onValueChange = { menuTransparencyUi = it },
+                            onValueChangeFinished = {
+                                viewModel.setCameraMenuTransparency(menuTransparencyUi)
+                            },
+                            onResetValue = {
+                                menuTransparencyUi = it
+                                viewModel.setCameraMenuTransparency(it)
+                            }
                         )
 
                         HorizontalDivider(

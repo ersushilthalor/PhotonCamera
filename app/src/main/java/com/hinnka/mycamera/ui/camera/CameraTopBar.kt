@@ -70,6 +70,7 @@ fun CameraTopBar(
     onSettingsClick: () -> Unit,
     glassBackdrop: LiquidGlassBackdrop,
     onVideoGlassBoundsChanged: (Rect?) -> Unit = {},
+    onVideoLeftGlassBoundsChanged: (Rect?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     if (captureMode == CaptureMode.VIDEO) {
@@ -87,6 +88,7 @@ fun CameraTopBar(
             onSettingsClick = onSettingsClick,
             glassBackdrop = glassBackdrop,
             onGlassBoundsChanged = onVideoGlassBoundsChanged,
+            onLeftGlassBoundsChanged = onVideoLeftGlassBoundsChanged,
             modifier = modifier
         )
         return
@@ -244,6 +246,7 @@ private fun VideoTopBar(
     onSettingsClick: () -> Unit,
     glassBackdrop: LiquidGlassBackdrop,
     onGlassBoundsChanged: (Rect?) -> Unit = {},
+    onLeftGlassBoundsChanged: (Rect?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var stabilizationMenuExpanded by remember { mutableStateOf(false) }
@@ -283,7 +286,8 @@ private fun VideoTopBar(
                 glassBackdrop = glassBackdrop,
                 glassStyle = videoTopBarGlassStyle,
                 onResolutionClick = onVideoResolutionClick,
-                onFpsClick = onVideoFpsClick
+                onFpsClick = onVideoFpsClick,
+                onBoundsChanged = onLeftGlassBoundsChanged
             )
 
             // Use the same compact grouped control capsule and touch targets as photo mode.
@@ -404,12 +408,14 @@ private fun VideoParameterCluster(
     glassBackdrop: LiquidGlassBackdrop,
     glassStyle: LiquidGlassStyle,
     onResolutionClick: () -> Unit,
-    onFpsClick: () -> Unit
+    onFpsClick: () -> Unit,
+    onBoundsChanged: (Rect?) -> Unit = {}
 ) {
     Box(
         modifier = Modifier
             .height(36.dp)
             .clip(CircleShape)
+            .onGloballyPositioned { onBoundsChanged(it.boundsInRoot()) }
     ) {
         LiquidGlassSurface(
             backdrop = glassBackdrop,
