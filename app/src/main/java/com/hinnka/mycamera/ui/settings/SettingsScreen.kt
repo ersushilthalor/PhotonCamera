@@ -1904,7 +1904,7 @@ fun SettingsScreen(
                             title = stringResource(R.string.settings_camera_menu_transparency),
                             description = stringResource(R.string.settings_camera_menu_transparency_description),
                             value = menuTransparencyUi,
-                            valueRange = 0f..0.7f,
+                            valueRange = 0f..1f,
                             resetValue = DEFAULT_CAMERA_MENU_TRANSPARENCY,
                             valueTextFormatter = { "${(it * 100f).toInt()}%" },
                             onValueChange = { menuTransparencyUi = it },
