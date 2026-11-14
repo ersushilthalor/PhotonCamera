@@ -50,6 +50,7 @@ import com.hinnka.mycamera.R
 import com.hinnka.mycamera.camera.AspectRatio
 import com.hinnka.mycamera.camera.MeteringMode
 import com.hinnka.mycamera.data.OppoPhotoSettings
+import com.hinnka.mycamera.data.LiquidGlassSettings
 import com.hinnka.mycamera.raw.DcpInfo
 import com.hinnka.mycamera.raw.HncsFilmCurveMode
 import com.hinnka.mycamera.raw.RawRenderingEngine
@@ -148,6 +149,8 @@ fun CameraTopSheet(
     refocusAvailable: Boolean,
     contentTopPadding: Dp = CameraTopSheetContentTopPadding,
     modifier: Modifier = Modifier,
+    cameraMenuTransparency: Float = 0.25f,
+    liquidGlassSettings: LiquidGlassSettings = LiquidGlassSettings(),
     onGlassBoundsChanged: (Rect?) -> Unit = {}
 ) {
     var expandedVideoPanel by rememberSaveable { mutableStateOf<VideoSettingPanel?>(null) }
@@ -201,6 +204,7 @@ fun CameraTopSheet(
             modifier = Modifier.fillMaxWidth(),
             contentAlignment = Alignment.TopCenter
         ) {
+            val glassShape = RoundedCornerShape(liquidGlassSettings.cornerRadiusDp.dp)
             Column(
                 modifier = Modifier
                     .widthIn(max = 420.dp)
@@ -208,26 +212,49 @@ fun CameraTopSheet(
                     .heightIn(max = 600.dp)
                     .onGloballyPositioned { onGlassBoundsChanged(it.boundsInRoot()) }
                     .shadow(
-                        elevation = 5.dp,
-                        shape = RoundedCornerShape(24.dp),
-                        ambientColor = Color(0xFF9ACBFF).copy(alpha = 0.08f),
-                        spotColor = Color.Black.copy(alpha = 0.10f)
-                    )
-                    .clip(RoundedCornerShape(24.dp))
-                    // The live-preview GLES renderer supplies the refractive surface.
-                    // Keep the Compose fallback cool and translucent, with a fine glass edge.
-                    .background(Color(0x0A8FC8FF))
-                    .border(
-                        width = 0.8.dp,
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = 0.30f),
-                                Color(0xFF9BCFFF).copy(alpha = 0.20f),
-                                Color.White.copy(alpha = 0.08f),
-                                Color(0xFFC5E3FF).copy(alpha = 0.18f)
-                            )
+                        elevation = if (liquidGlassSettings.enabled && liquidGlassSettings.depthShadowEnabled) {
+                            liquidGlassSettings.depthShadowRadiusDp.dp
+                        } else if (!liquidGlassSettings.enabled) {
+                            6.dp
+                        } else {
+                            0.dp
+                        },
+                        shape = glassShape,
+                        ambientColor = Color.Black.copy(
+                            alpha = if (liquidGlassSettings.enabled) 0.10f * liquidGlassSettings.depthShadowAlpha else 0.22f
                         ),
-                        shape = RoundedCornerShape(24.dp)
+                        spotColor = Color.Black.copy(
+                            alpha = if (liquidGlassSettings.enabled) 0.10f * liquidGlassSettings.depthShadowAlpha else 0.35f
+                        )
+                    )
+                    .clip(glassShape)
+                    // The camera GL renderer supplies the live refracted preview.
+                    // Keep a restrained Compose fallback for devices / modes without it.
+                    .background(
+                        if (liquidGlassSettings.enabled) {
+                            Color(0x0A8FC8FF)
+                        } else {
+                            Color(0xFF1A1A1E).copy(
+                                alpha = (1f - cameraMenuTransparency.coerceIn(0f, 1f)).coerceIn(0.18f, 0.88f)
+                            )
+                        }
+                    )
+                    .then(
+                        if (!liquidGlassSettings.enabled || !liquidGlassSettings.specularEnabled) {
+                            Modifier
+                        } else {
+                            Modifier.border(
+                                width = liquidGlassSettings.specularWidthDp.dp,
+                                brush = Brush.linearGradient(
+                                    colors = listOf(
+                                        Color.White.copy(alpha = 0.22f * liquidGlassSettings.specularAlpha),
+                                        Color(0xFF9BCFFF).copy(alpha = 0.15f * liquidGlassSettings.specularAlpha),
+                                        Color.White.copy(alpha = 0.05f * liquidGlassSettings.specularAlpha)
+                                    )
+                                ),
+                                shape = glassShape
+                            )
+                        }
                     )
                     .padding(horizontal = 18.dp, vertical = 16.dp)
                     .autoRotate()
