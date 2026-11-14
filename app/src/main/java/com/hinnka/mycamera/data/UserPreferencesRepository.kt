@@ -764,7 +764,7 @@ class UserPreferencesRepository(private val context: Context) {
                 windowScreenBrightness = preferences[WINDOW_SCREEN_BRIGHTNESS]?.coerceIn(0f, 1f),
                 cameraMenuTransparency = (
                     preferences[CAMERA_MENU_TRANSPARENCY_KEY] ?: DEFAULT_CAMERA_MENU_TRANSPARENCY
-                ).coerceIn(0f, 0.7f),
+                ).coerceIn(0f, 1f),
                 volumeKeyAction = VolumeKeyAction.valueOf(
                     preferences[VOLUME_KEY_ACTION] ?: VolumeKeyAction.CAPTURE.name
                 ),
@@ -1676,7 +1676,7 @@ class UserPreferencesRepository(private val context: Context) {
 
     suspend fun saveCameraMenuTransparency(value: Float) {
         context.dataStore.edit { preferences ->
-            preferences[CAMERA_MENU_TRANSPARENCY_KEY] = value.coerceIn(0f, 0.7f)
+            preferences[CAMERA_MENU_TRANSPARENCY_KEY] = value.coerceIn(0f, 1f)
         }
     }
 
