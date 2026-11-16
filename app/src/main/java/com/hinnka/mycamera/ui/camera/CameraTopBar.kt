@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.sp
 import com.hinnka.mycamera.ui.theme.AccentColor
 import com.hinnka.mycamera.R
 import com.hinnka.mycamera.ui.components.PhysicalButton
+import com.hinnka.mycamera.camera.CameraInfo
+import com.hinnka.mycamera.camera.LensType
 import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.video.VideoCapabilities
 import com.hinnka.mycamera.video.VideoConfig
@@ -34,6 +36,9 @@ import com.hinnka.mycamera.video.VideoLogProfile
 import com.hinnka.mycamera.video.VideoResolutionPreset
 import com.hinnka.mycamera.video.VideoStabilizationMode
 import com.hinnka.mycamera.ui.icons.AppIcons
+
+/** Additional vertical space reserved for the recording-time lens selector. */
+internal val VideoRecordingLensSwitcherExtraHeight = 32.dp
 
 @Composable
 fun CameraTopBar(
@@ -50,6 +55,9 @@ fun CameraTopBar(
     onLivePhotoToggle: () -> Unit,
     videoConfig: VideoConfig,
     videoCapabilities: VideoCapabilities,
+    availableCameras: List<CameraInfo>,
+    currentCameraId: String,
+    onLensSelect: (String) -> Unit,
     onVideoTorchToggle: () -> Unit,
     onVideoStabilizationModeChange: (VideoStabilizationMode) -> Unit,
     onVideoResolutionClick: () -> Unit,
@@ -63,6 +71,9 @@ fun CameraTopBar(
             recordingElapsedMs = recordingElapsedMs,
             videoConfig = videoConfig,
             videoCapabilities = videoCapabilities,
+            availableCameras = availableCameras,
+            currentCameraId = currentCameraId,
+            onLensSelect = onLensSelect,
             onVideoTorchToggle = onVideoTorchToggle,
             onVideoStabilizationModeChange = onVideoStabilizationModeChange,
             onVideoResolutionClick = onVideoResolutionClick,
@@ -163,6 +174,9 @@ private fun VideoTopBar(
     recordingElapsedMs: Long,
     videoConfig: VideoConfig,
     videoCapabilities: VideoCapabilities,
+    availableCameras: List<CameraInfo>,
+    currentCameraId: String,
+    onLensSelect: (String) -> Unit,
     onVideoTorchToggle: () -> Unit,
     onVideoStabilizationModeChange: (VideoStabilizationMode) -> Unit,
     onVideoResolutionClick: () -> Unit,
@@ -175,14 +189,25 @@ private fun VideoTopBar(
         modifier = modifier
             .fillMaxWidth()
             .padding(top = 24.dp, start = 8.dp, end = 8.dp)
-            .height(56.dp),
+            .height(56.dp + if (isRecording) VideoRecordingLensSwitcherExtraHeight else 0.dp),
         contentAlignment = Alignment.Center
     ) {
         if (isRecording) {
-            RecordingHud(
-                elapsedMs = recordingElapsedMs,
-                videoConfig = videoConfig
-            )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                RecordingHud(
+                    elapsedMs = recordingElapsedMs,
+                    videoConfig = videoConfig
+                )
+                VideoRecordingLensSwitcher(
+                    availableCameras = availableCameras,
+                    currentCameraId = currentCameraId,
+                    isLensLocked = videoConfig.lensLockEnabled,
+                    onLensSelect = onLensSelect
+                )
+            }
         } else {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -262,6 +287,66 @@ private fun VideoTopBar(
                             tint = Color.White
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun VideoRecordingLensSwitcher(
+    availableCameras: List<CameraInfo>,
+    currentCameraId: String,
+    isLensLocked: Boolean,
+    onLensSelect: (String) -> Unit
+) {
+    val options = remember(availableCameras) {
+        listOf(
+            LensType.BACK_MAIN to R.string.video_lens_main,
+            LensType.BACK_ULTRA_WIDE to R.string.video_lens_ultra_wide,
+            LensType.FRONT to R.string.video_lens_front
+        ).mapNotNull { (lensType, labelResource) ->
+            availableCameras.firstOrNull { it.lensType == lensType }
+                ?.let { camera -> camera.cameraId to labelResource }
+        }
+    }
+
+    if (options.size < 2) return
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        options.forEach { (cameraId, labelResource) ->
+            val selected = cameraId == currentCameraId
+            Surface(
+                shape = CircleShape,
+                color = if (selected) AccentColor else Color.Black.copy(alpha = 0.48f),
+                contentColor = Color.White,
+                border = BorderStroke(
+                    1.dp,
+                    if (selected) AccentColor else Color.White.copy(alpha = 0.24f)
+                ),
+                modifier = Modifier
+                    .height(28.dp)
+                    .defaultMinSize(minWidth = 48.dp)
+                    .clickable(enabled = !selected && !isLensLocked) {
+                        onLensSelect(cameraId)
+                    }
+            ) {
+                Box(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = stringResource(labelResource),
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold
+                        ),
+                        maxLines = 1
+                    )
                 }
             }
         }

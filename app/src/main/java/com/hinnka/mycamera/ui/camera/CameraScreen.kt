@@ -893,7 +893,11 @@ fun CameraScreen(
         val topSafePadding = cameraTopSafePadding()
         val topBarOffset = 0.dp
         val topBarBaseHeight = if (isVideoMode) {
-            VideoTopBarBaseHeight
+            VideoTopBarBaseHeight + if (state.videoRecordingState.isRecording) {
+                VideoRecordingLensSwitcherExtraHeight
+            } else {
+                0.dp
+            }
         } else {
             CameraTopBarBaseHeight
         }
@@ -957,6 +961,9 @@ fun CameraScreen(
                 onLivePhotoToggle = { viewModel.setUseLivePhoto(!state.useLivePhoto) },
                 videoConfig = state.videoConfig,
                 videoCapabilities = state.videoCapabilities,
+                availableCameras = state.availableCameras,
+                currentCameraId = state.currentCameraId,
+                onLensSelect = ::switchToLensWithPreviewTransition,
                 onVideoTorchToggle = { videoTorchEnabled = !state.videoConfig.torchEnabled },
                 onVideoStabilizationModeChange = viewModel::setVideoStabilizationMode,
                 onVideoResolutionClick = {
