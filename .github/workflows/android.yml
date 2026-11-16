@@ -4,10 +4,14 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout source
@@ -18,18 +22,28 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+          cache: gradle
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Do not request the removed legacy "tools" SDK package.
+          packages: |
+            platform-tools
+            platforms;android-36
+            build-tools;36.0.0
+            ndk;29.0.14206865
+            cmake;3.22.1
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build Debug APK
-        run: gradle assembleDebug --stacktrace
+      - name: Build default-flavor Debug APK
+        run: ./gradlew --no-daemon :app:assembleDefaultDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: PhotonCamera-debug-apk
+          path: app/build/outputs/apk/default/debug/*.apk
+          if-no-files-found: error
