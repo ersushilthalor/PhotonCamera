@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feature/front-eis-recording-switch-zoom-controls
   workflow_dispatch:
 
 permissions:
