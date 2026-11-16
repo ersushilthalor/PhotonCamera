@@ -1,6 +1,10 @@
 <resources>
     <string name="camera_video_fps_unavailable">Recording is unavailable because the camera did not provide valid frame rate ranges.</string>
     <string name="app_name">Photon Camera</string>
+    <string name="crash_report_title">PhotonCamera crashed</string>
+    <string name="crash_report_copy">Copy log</string>
+    <string name="crash_report_close">Close</string>
+    <string name="crash_report_copied">Crash log copied to clipboard</string>
 
     <!-- Camera Controls -->
     <string name="switch_camera">Switch Camera</string>
