@@ -276,6 +276,7 @@ fun CameraScreen(
     var showHistogram by rememberPreference(UserPreferences::showHistogram)
     var videoTorchEnabled by rememberPreference(UserPreferences::videoTorchEnabled)
     var videoAudioInputId by rememberPreference(UserPreferences::videoAudioInputId)
+    var videoProControlsEnabled by rememberPreference(UserPreferences::videoProControlsEnabled)
     val developAnimationStyle by preferenceValue { it.developAnimationStyle }
     val phantomMode by preferenceValue { it.phantomMode }
     val topSheetAspectRatios by preferenceValue { it.topSheetAspectRatios }
@@ -876,13 +877,19 @@ fun CameraScreen(
 
         val isVideoMode = state.captureMode == CaptureMode.VIDEO
         val isPhotoStyleMode = state.captureMode != CaptureMode.VIDEO
+        val isProfessionalMode = !isVideoMode && state.useRaw && state.isRawSupported
+        val showManualControls = isProfessionalMode || (
+            isVideoMode && videoProControlsEnabled &&
+                !state.videoRecordingState.isRecording &&
+                !state.videoRecordingState.isProcessing
+        )
         val onParameterClick: (CameraParameter) -> Unit = { parameter ->
             val wasSelected = selectedParameter == parameter
             selectedParameter = parameter
             showParameterRuler = !wasSelected || !showParameterRuler
         }
-        LaunchedEffect(showParameterRuler) {
-            if (!showParameterRuler) {
+        LaunchedEffect(showParameterRuler, showManualControls) {
+            if (!showParameterRuler || !showManualControls) {
                 parameterRulerBounds = null
             }
         }
@@ -982,6 +989,7 @@ fun CameraScreen(
                     availableCameras = state.availableCameras,
                     currentCameraId = state.getCurrentCameraInfo()?.cameraId ?: "0",
                     onZoomChange = { setZoomWithPreviewTransition(it) },
+                    onPreviewZoomChange = viewModel::setZoomRatio,
                     onZoomStopClick = { animateZoomStopWithPreviewTransition(it) },
                     onLensSwitch = { lensId -> switchToLensWithPreviewTransition(lensId) },
                     onFilterClick = {
@@ -1593,13 +1601,15 @@ fun CameraScreen(
                             .width(xpanSideWidth),
                         contentAlignment = Alignment.Center
                     ) {
-                        CameraParameterBarVerticel(
-                            state = state,
-                            selectedParameter = selectedParameter.takeIf {
-                                showParameterRuler
-                            },
-                            onParameterClick = onParameterClick,
-                        )
+                        if (showManualControls) {
+                            CameraParameterBarVerticel(
+                                state = state,
+                                selectedParameter = selectedParameter.takeIf {
+                                    showParameterRuler
+                                },
+                                onParameterClick = onParameterClick,
+                            )
+                        }
                     }
                 }
             }
@@ -1703,7 +1713,7 @@ fun CameraScreen(
                 },
                 parameterRuler = {
                     AnimatedVisibility(
-                        visible = showParameterRuler,
+                        visible = showManualControls && showParameterRuler,
                         enter = expandVertically(
                             animationSpec = tween(220, easing = FastOutSlowInEasing),
                             expandFrom = Alignment.Bottom
@@ -1723,7 +1733,7 @@ fun CameraScreen(
                     }
                 },
                 parameterBar = {
-                    if (!isXpan) {
+                    if (showManualControls && !isXpan) {
                         parameterBar(selectedParameter.takeIf { showParameterRuler }, onParameterClick)
                     }
                 },

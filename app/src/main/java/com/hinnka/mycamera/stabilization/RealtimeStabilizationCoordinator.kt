@@ -191,6 +191,10 @@ private class BufferedStabilizationImage(
  * look-ahead. Preview and recording sessions share the feeder, source image and
  * result stream.
  */
+internal fun isMgcStabilizationLensFacingSupported(lensFacing: Int?): Boolean =
+    lensFacing == CameraCharacteristics.LENS_FACING_BACK ||
+        lensFacing == CameraCharacteristics.LENS_FACING_FRONT
+
 class RealtimeStabilizationCoordinator(context: Context) {
     companion object {
         private const val TAG = "RealtimeStabilization"
@@ -294,7 +298,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
             val current = calibration
             return !halStabilizationConflictDetected &&
                 isGyroscopeAvailable && current != null &&
-                current.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+                isMgcStabilizationLensFacingSupported(current.lensFacing) &&
                 current.timestampSource ==
                 CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
         }
@@ -311,7 +315,7 @@ class RealtimeStabilizationCoordinator(context: Context) {
         val activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
         val physicalSize = characteristics.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
         return isGyroscopeAvailable && activeArray != null && physicalSize != null &&
-            lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+            isMgcStabilizationLensFacingSupported(lensFacing) &&
             timestampSource == CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
     }
 

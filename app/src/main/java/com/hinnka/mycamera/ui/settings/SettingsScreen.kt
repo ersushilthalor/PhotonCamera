@@ -397,6 +397,7 @@ fun SettingsScreen(
     val separateVideoLutEnabled by preferenceValue { it.separateVideoLutEnabled }
     val videoLutId by preferenceValue { it.videoLutId }
     var videoLensLockEnabled by rememberPreference(UserPreferences::videoLensLockEnabled)
+    var videoProControlsEnabled by rememberPreference(UserPreferences::videoProControlsEnabled)
     var videoWhiteBalanceLockEnabled by rememberPreference(UserPreferences::videoWhiteBalanceLockEnabled)
     var phantomSaveAsNew by rememberPreference(UserPreferences::phantomSaveAsNew)
     val phantomFrameId by preferenceValue { it.phantomFrameId }
@@ -1629,6 +1630,18 @@ fun SettingsScreen(
                         title = stringResource(R.string.settings_section_video),
                         showTitle = false
                     ) {
+                        SwitchSettingItem(
+                            title = stringResource(R.string.settings_video_pro_controls),
+                            description = stringResource(R.string.settings_video_pro_controls_description),
+                            checked = videoProControlsEnabled,
+                            onCheckedChange = { videoProControlsEnabled = it }
+                        )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+
                         DropdownSettingItem(
                             title = stringResource(R.string.settings_video_input_mode),
                             description = stringResource(

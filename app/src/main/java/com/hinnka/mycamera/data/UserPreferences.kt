@@ -185,6 +185,7 @@ class UserPreferences internal constructor(
     var videoTorchEnabled by bool("video_torch_enabled", false)
     var videoLensLockEnabled by bool("video_lens_lock_enabled", false)
     var videoWhiteBalanceLockEnabled by bool("video_white_balance_lock_enabled", false)
+    var videoProControlsEnabled by bool("video_pro_controls_enabled", false)
     var phantomButtonHidden by bool("phantom_button_hidden", false)
     var launchCameraOnPhantomMode by bool("launch_camera_on_phantom_mode", false)
     var phantomPipPreview by bool("phantom_pip_preview", false)
