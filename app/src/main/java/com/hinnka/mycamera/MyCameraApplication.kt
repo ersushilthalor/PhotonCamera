@@ -37,6 +37,7 @@ class MyCameraApplication : Application() {
         StartupTrace.measure("BuglyHelper.init") {
             BuglyHelper.init(this)
         }
+        CrashLogger.install(this)
         val contentRepository = ContentRepository.getInstance(this)
         StartupTrace.measure("ContentRepository.initialize") {
             contentRepository.initialize()
