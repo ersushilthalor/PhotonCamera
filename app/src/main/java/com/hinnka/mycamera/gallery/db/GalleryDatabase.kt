@@ -373,7 +373,7 @@ abstract class GalleryDatabase : RoomDatabase() {
                         columns += quotedName
                         definitions += buildString {
                             append(quotedName).append(' ').append(cursor.getString(typeIndex))
-                            if (cursor.getInt(notNullIndex) != 0) append(" NOT NULL")
+                            if (cursor.getInt(notNullIndex) != 0 || cursor.getInt(primaryKeyIndex) != 0) append(" NOT NULL")
                             if (!cursor.isNull(defaultIndex)) {
                                 append(" DEFAULT ").append(cursor.getString(defaultIndex))
                             }
@@ -424,7 +424,7 @@ abstract class GalleryDatabase : RoomDatabase() {
                         columns += name
                         definitions += buildString {
                             append(quote(name)).append(' ').append(cursor.getString(typeIndex))
-                            if (cursor.getInt(notNullIndex) != 0) append(" NOT NULL")
+                            if (cursor.getInt(notNullIndex) != 0 || cursor.getInt(primaryKeyIndex) != 0) append(" NOT NULL")
                             if (!cursor.isNull(defaultIndex)) append(" DEFAULT ").append(cursor.getString(defaultIndex))
                             if (cursor.getInt(primaryKeyIndex) != 0) append(" PRIMARY KEY")
                         }
@@ -851,7 +851,7 @@ abstract class GalleryDatabase : RoomDatabase() {
                         columns += quotedName
                         definitions += buildString {
                             append(quotedName).append(' ').append(cursor.getString(typeIndex))
-                            if (cursor.getInt(notNullIndex) != 0) append(" NOT NULL")
+                            if (cursor.getInt(notNullIndex) != 0 || cursor.getInt(primaryKeyIndex) != 0) append(" NOT NULL")
                             if (!cursor.isNull(defaultIndex)) append(" DEFAULT ").append(cursor.getString(defaultIndex))
                             if (cursor.getInt(primaryKeyIndex) != 0) append(" PRIMARY KEY")
                         }
