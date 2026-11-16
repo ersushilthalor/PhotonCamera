@@ -8,7 +8,7 @@ import com.hinnka.mycamera.raw.RawToneMappingParameters
 
 @Database(
     entities = [GalleryMediaEntity::class],
-    version = 52,
+    version = 53,
     exportSchema = false
 )
 @androidx.room.TypeConverters(GalleryConverters::class)
@@ -933,6 +933,58 @@ abstract class GalleryDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_52_53 = object : androidx.room.migration.Migration(52, 53) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                val columns = mutableListOf<String>()
+                val definitions = mutableListOf<String>()
+                db.query("PRAGMA table_info(`gallery_media`)").use { cursor ->
+                    val nameIndex = cursor.getColumnIndexOrThrow("name")
+                    val typeIndex = cursor.getColumnIndexOrThrow("type")
+                    val notNullIndex = cursor.getColumnIndexOrThrow("notnull")
+                    val defaultIndex = cursor.getColumnIndexOrThrow("dflt_value")
+                    val primaryKeyIndex = cursor.getColumnIndexOrThrow("pk")
+                    while (cursor.moveToNext()) {
+                        val name = cursor.getString(nameIndex)
+                        val quotedName = "`${name.replace("`", "``")}`"
+                        val isPrimaryKey = cursor.getInt(primaryKeyIndex) != 0
+                        columns += quotedName
+                        definitions += buildString {
+                            append(quotedName).append(' ').append(cursor.getString(typeIndex))
+                            if (cursor.getInt(notNullIndex) != 0 || isPrimaryKey) append(" NOT NULL")
+                            if (!cursor.isNull(defaultIndex)) {
+                                append(" DEFAULT ").append(cursor.getString(defaultIndex))
+                            }
+                            if (isPrimaryKey) append(" PRIMARY KEY")
+                        }
+                    }
+                }
+                check(columns.any { it == "`id`" }) {
+                    "Cannot repair gallery_media: id column is missing"
+                }
+
+                val indices = mutableListOf<String>()
+                db.query(
+                    "SELECT sql FROM sqlite_master " +
+                        "WHERE type = 'index' AND tbl_name = 'gallery_media' AND sql IS NOT NULL"
+                ).use { cursor ->
+                    while (cursor.moveToNext()) indices += cursor.getString(0)
+                }
+
+                db.execSQL(
+                    "CREATE TABLE `gallery_media_new` (${definitions.joinToString(", ")})"
+                )
+                val columnList = columns.joinToString(", ")
+                db.execSQL(
+                    "INSERT INTO `gallery_media_new` ($columnList) " +
+                        "SELECT $columnList FROM `gallery_media`"
+                )
+                db.execSQL("DROP TABLE `gallery_media`")
+                db.execSQL("ALTER TABLE `gallery_media_new` RENAME TO `gallery_media`")
+                indices.forEach(db::execSQL)
+            }
+        }
+
+
         fun getInstance(context: Context): GalleryDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -991,7 +1043,8 @@ abstract class GalleryDatabase : RoomDatabase() {
                         MIGRATION_48_49,
                         MIGRATION_49_50,
                         MIGRATION_50_51,
-                        MIGRATION_51_52
+                        MIGRATION_51_52,
+                        MIGRATION_52_53
                     )
                     .fallbackToDestructiveMigrationOnDowngrade(false)
                     .fallbackToDestructiveMigration(false)
