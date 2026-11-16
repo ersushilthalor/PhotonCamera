@@ -8,7 +8,7 @@ import com.hinnka.mycamera.raw.RawToneMappingParameters
 
 @Database(
     entities = [GalleryMediaEntity::class],
-    version = 54,
+    version = 55,
     exportSchema = false
 )
 @androidx.room.TypeConverters(GalleryConverters::class)
@@ -1054,6 +1054,83 @@ abstract class GalleryDatabase : RoomDatabase() {
             }
         }
 
+
+        /**
+         * Removes two legacy recipe columns that are no longer part of ColorRecipeParams.
+         * Room rejects a table with undeclared columns even when every declared column matches.
+         * Keep every active column, its Room default, the existing rows, and all indices.
+         */
+        private val MIGRATION_54_55 = object : androidx.room.migration.Migration(54, 55) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                val obsoleteColumns = setOf(
+                    "recipe_washedOutRecovery",
+                    "baseline_recipe_washedOutRecovery"
+                )
+                val roomDefaults = mapOf(
+                    "rawOutputUpscaleMode" to "'LANCZOS3'",
+                    "rawLumixPhotoStyle" to "'standard'",
+                    "rawCanonPictureStyle" to "'standard'",
+                    "rawCanonExposureCompensationEv" to "-0.5",
+                    "rawLumixColorMatchingEnabled" to "1",
+                    "rawHncsColorMatchingEnabled" to "1",
+                    "rawCanonUseR5ColorMatrix" to "0",
+                    "rawLeicaUseM9ColorMatrix" to "0",
+                    "rawProfileToneMap" to "1"
+                )
+
+                val columns = mutableListOf<String>()
+                val definitions = mutableListOf<String>()
+                db.query("PRAGMA table_info(\`gallery_media\`)").use { cursor ->
+                    val nameIndex = cursor.getColumnIndexOrThrow("name")
+                    val typeIndex = cursor.getColumnIndexOrThrow("type")
+                    val notNullIndex = cursor.getColumnIndexOrThrow("notnull")
+                    val primaryKeyIndex = cursor.getColumnIndexOrThrow("pk")
+                    while (cursor.moveToNext()) {
+                        val name = cursor.getString(nameIndex)
+                        if (name in obsoleteColumns) continue
+
+                        val quotedName = "\`" + name.replace("\`", "\`\`") + "\`"
+                        val isPrimaryKey = cursor.getInt(primaryKeyIndex) != 0
+                        columns += quotedName
+                        definitions += buildString {
+                            append(quotedName).append(' ').append(cursor.getString(typeIndex))
+                            if (cursor.getInt(notNullIndex) != 0 || isPrimaryKey) {
+                                append(" NOT NULL")
+                            }
+                            roomDefaults[name]?.let { append(" DEFAULT ").append(it) }
+                            if (isPrimaryKey) append(" PRIMARY KEY")
+                        }
+                    }
+                }
+                check(columns.any { it == "\`id\`" }) {
+                    "Cannot remove legacy recipe columns: gallery_media.id is missing"
+                }
+
+                val indices = mutableListOf<String>()
+                db.query(
+                    "SELECT sql FROM sqlite_master " +
+                        "WHERE type = 'index' AND tbl_name = 'gallery_media' AND sql IS NOT NULL"
+                ).use { cursor ->
+                    while (cursor.moveToNext()) indices += cursor.getString(0)
+                }
+
+                db.execSQL(
+                    "CREATE TABLE \`gallery_media_schema_55\` (" +
+                        definitions.joinToString(", ") + ")"
+                )
+                val columnList = columns.joinToString(", ")
+                db.execSQL(
+                    "INSERT INTO \`gallery_media_schema_55\` ($columnList) " +
+                        "SELECT $columnList FROM \`gallery_media\`"
+                )
+                db.execSQL("DROP TABLE \`gallery_media\`")
+                db.execSQL(
+                    "ALTER TABLE \`gallery_media_schema_55\` RENAME TO \`gallery_media\`"
+                )
+                indices.forEach(db::execSQL)
+            }
+        }
+
         fun getInstance(context: Context): GalleryDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -1114,7 +1191,8 @@ abstract class GalleryDatabase : RoomDatabase() {
                         MIGRATION_50_51,
                         MIGRATION_51_52,
                         MIGRATION_52_53,
-                        MIGRATION_53_54
+                        MIGRATION_53_54,
+                        MIGRATION_54_55
                     )
                     .fallbackToDestructiveMigrationOnDowngrade(false)
                     .fallbackToDestructiveMigration(false)
