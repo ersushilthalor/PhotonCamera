@@ -186,6 +186,14 @@
         </activity>
 
         <activity
+                android:name=".CrashReportActivity"
+                android:process=":crash_report"
+                android:taskAffinity="${applicationId}.crash"
+                android:excludeFromRecents="true"
+                android:exported="false"
+                android:theme="@style/Theme.MyCamera" />
+
+        <activity
                 android:name=".mgc.MgcFilterSelectionActivity"
                 android:excludeFromRecents="true"
                 android:exported="true"
