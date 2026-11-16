@@ -28,8 +28,9 @@ class MyCameraApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        StartupTrace.mark("Application.onCreate start")
         instance = this
+        if (Application.getProcessName() != packageName) return
+        StartupTrace.mark("Application.onCreate start")
         applicationScope.launch(Dispatchers.Default) {
             RawSceneExposureEstimator.warmUp(this@MyCameraApplication)
         }
