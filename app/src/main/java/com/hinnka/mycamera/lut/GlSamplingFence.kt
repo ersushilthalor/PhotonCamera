@@ -14,6 +14,17 @@ internal class GlSamplingFence private constructor(
 ) : AutoCloseable {
     private val closed = AtomicBoolean(false)
 
+    /** Non-blocking poll for same-display resource retirement. */
+    fun isSignaled(): Boolean {
+        check(!closed.get())
+        if (sync == EGL15.EGL_NO_SYNC) return true
+        return when (EGL15.eglClientWaitSync(display, sync, 0, 0L)) {
+            EGL15.EGL_CONDITION_SATISFIED -> true
+            EGL15.EGL_TIMEOUT_EXPIRED -> false
+            else -> error("GPU sampling fence poll failed: " + EGL15.eglGetError())
+        }
+    }
+
     fun await() {
         check(!closed.get())
         if (sync == EGL15.EGL_NO_SYNC) return
