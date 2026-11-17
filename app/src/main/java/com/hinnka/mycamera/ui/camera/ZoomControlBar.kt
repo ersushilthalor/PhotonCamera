@@ -72,6 +72,7 @@ fun ZoomControlBar(
     availableCameras: List<CameraInfo>,
     currentCameraId: String,
     onZoomChange: (Float) -> Unit,
+    onPreviewZoomChange: (Float) -> Unit = onZoomChange,
     onZoomStopClick: (Float) -> Unit,
     onLensSwitch: (String) -> Unit,
     onFilterClick: () -> Unit,
@@ -84,6 +85,10 @@ fun ZoomControlBar(
 
     val currentCamera = availableCameras.find { it.cameraId == currentCameraId }
     val isCameraReady = currentCamera != null
+    val currentCameraZoomScale =
+        currentCamera?.displayIntrinsicZoomRatio?.takeIf { it > 0f } ?: 1f
+    val currentCameraMinZoom = (currentCamera?.minZoom ?: 1f) * currentCameraZoomScale
+    val currentCameraMaxZoom = (currentCamera?.maxZoom ?: 20f) * currentCameraZoomScale
 
     // 获取当前相机信息
     val mainCamera =
@@ -124,6 +129,19 @@ fun ZoomControlBar(
         }
 
         isContinuousZooming = false
+
+        // A preview-only drag clamps to the active lens range. On release, hand control
+        // back to the normal lens-selection transition when the requested ratio exceeded
+        // that range, including arbitrary (non-stop) zoom values.
+        if (
+            currentCamera != null &&
+            (internalZoomRatio < currentCameraMinZoom || internalZoomRatio > currentCameraMaxZoom)
+        ) {
+            customZoomStop = null
+            replacedStopIndex = -1
+            onZoomChange(internalZoomRatio)
+            return
+        }
 
         val settlement = settleContinuousZoomStop(
             zoomStops = zoomStops,
@@ -196,11 +214,11 @@ fun ZoomControlBar(
                             change.consume()
                             lastInteractionTime = System.currentTimeMillis()
                             // 使用指数变焦公式计算新倍率
-                            val sensitivity = 0.002f
+                            val sensitivity = 0.0027f
                             val newZoom = (internalZoomRatio * exp(-dragAmount.toDouble() * sensitivity).toFloat()).coerceIn(minZoom, maxZoom)
                             internalZoomRatio = newZoom
                             
-                            onZoomChange(newZoom)
+                            onPreviewZoomChange(newZoom)
                         }
                     },
                     onDragEnd = {
