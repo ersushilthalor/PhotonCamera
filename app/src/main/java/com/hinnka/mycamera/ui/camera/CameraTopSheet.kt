@@ -146,7 +146,7 @@ fun CameraTopSheet(
                 .fillMaxWidth()
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
-                .background(Color.Black.copy(alpha = 0.8f))
+                .background(Color.Black)
                 // Keep the screen's top inset fixed, but measure content and side padding
                 // in the rotated viewport so landscape controls stay inside the sheet.
                 .padding(top = contentTopPadding)
@@ -173,9 +173,7 @@ fun CameraTopSheet(
                                     .heightIn(min = 40.dp)
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(
-                                        if (isSelected) AccentColor else Color.White.copy(
-                                            alpha = 0.12f
-                                        )
+                                        if (isSelected) AccentColor else Color.Black
                                     )
                                     .clickable { onAspectRatioChange(ratio) }
                                     .padding(vertical = 8.dp),
@@ -272,9 +270,7 @@ fun CameraTopSheet(
                                     .heightIn(min = 40.dp)
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(
-                                        if (isSelected) AccentColor else Color.White.copy(
-                                            alpha = 0.12f
-                                        )
+                                        if (isSelected) AccentColor else Color.Black
                                     )
                                     .clickable { onVideoAspectRatioChange(ratio) }
                                     .padding(vertical = 8.dp),
@@ -451,7 +447,7 @@ fun CameraTopSheet(
                         modifier = Modifier
                             .clickable(onClick = onMoreSettingsClick)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(color = Color.White.copy(alpha = 0.15f))
+                            .background(color = Color.Black)
                             .padding(16.dp, 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -459,7 +455,7 @@ fun CameraTopSheet(
                             modifier = Modifier
                                 .size(32.dp)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(Color.White.copy(alpha = 0.1f)),
+                                .background(Color.Black),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -552,7 +548,7 @@ private fun VideoSettingTile(
             .height(40.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(
-                if (expanded) AccentColor else Color.White.copy(alpha = 0.14f)
+                if (expanded) AccentColor else Color.Black
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 4.dp),
@@ -595,7 +591,7 @@ private fun VideoSettingExpandedPanel(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .background(Color.White.copy(alpha = 0.08f))
+            .background(Color.Black)
             .padding(14.dp),
         content = content
     )
@@ -612,7 +608,7 @@ private fun VideoOptionChip(
             .heightIn(min = 36.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(
-                if (selected) AccentColor else Color.White.copy(alpha = 0.12f)
+                if (selected) AccentColor else Color.Black
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -838,7 +834,7 @@ fun QuickSettingValue(
         modifier = modifier
             .height(48.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = 0.15f))
+            .background(Color.Black)
             .clickable { onClick() }
             .padding(horizontal = 8.dp, vertical = 6.dp),
         contentAlignment = Alignment.CenterStart
@@ -872,7 +868,7 @@ fun QuickSettingButton(
         modifier = modifier
             .height(48.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = 0.15f))
+            .background(Color.Black)
             .clickable { onClick() }
             .padding(horizontal = 8.dp, vertical = 6.dp),
         contentAlignment = Alignment.CenterStart
@@ -912,9 +908,7 @@ fun QuickSettingButton2(
             .height(48.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(
-                if (checked) AccentColor else Color.White.copy(
-                    alpha = 0.15f
-                )
+                if (checked) AccentColor else Color.Black
             )
             .clickable { onClick() }
             .padding(horizontal = 8.dp, vertical = 6.dp),
@@ -955,9 +949,7 @@ fun QuickSettingToggle(
             .height(48.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(
-                if (checked) AccentColor.copy(alpha = contentAlpha) else Color.White.copy(
-                    alpha = 0.15f
-                )
+                if (checked) AccentColor.copy(alpha = contentAlpha) else Color.Black
             )
             .clickable(enabled = enabled) { onCheckedChange(!checked) }
             .padding(horizontal = 8.dp, vertical = 6.dp),
