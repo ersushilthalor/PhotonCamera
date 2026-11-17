@@ -3309,9 +3309,9 @@ class Camera2Controller(private val context: Context) {
                             createOutputConfiguration(
                                 surface,
                                 if (yuvRecordingInput) {
-                                    OutputConfiguration.STREAM_USE_CASE_VIDEO_RECORD
+                                    CameraMetadata.SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_RECORD.toLong()
                                 } else {
-                                    OutputConfiguration.STREAM_USE_CASE_PREVIEW
+                                    CameraMetadata.SCALER_AVAILABLE_STREAM_USE_CASES_PREVIEW.toLong()
                                 },
                             )
                         )
@@ -3319,7 +3319,7 @@ class Camera2Controller(private val context: Context) {
                             add(
                                 createOutputConfiguration(
                                     it,
-                                    OutputConfiguration.STREAM_USE_CASE_VIDEO_RECORD,
+                                    CameraMetadata.SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_RECORD.toLong(),
                                 )
                             )
                         }
