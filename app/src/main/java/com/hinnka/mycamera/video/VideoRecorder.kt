@@ -213,6 +213,9 @@ class VideoRecorder(
         get() = isRecording && cameraInputStarted && !stopRequested && !isPaused &&
             requestedInputMode == VideoInputMode.YUV && !requestedEnhancedStabilization
 
+    internal val usesEnhancedStabilizationInput: Boolean
+        get() = isRecording && !stopRequested && requestedEnhancedStabilization
+
     /** Takes ownership of a recording lease; preview has an independent latest-only lease. */
     internal fun submitYuvFrame(frame: StabilizationImageReader.AcquiredImage) {
         val shouldScheduleDrain = synchronized(realtimeFrameLock) {
@@ -323,6 +326,43 @@ class VideoRecorder(
         }
         PLog.d(TAG, "Camera2 recording input started: $requestedInputMode")
         return true
+    }
+
+    /**
+     * Rebind the camera-side input without recreating MediaCodec or MediaMuxer.
+     * Camera2 calls this between closing the old lens session and configuring the new one.
+     */
+    fun updateCameraInput(
+        size: Size,
+        sensorOrientationDegrees: Int,
+        flipEncodedFrame: Boolean,
+    ): Boolean {
+        if (!isRecording || stopRequested || size.width <= 0 || size.height <= 0) return false
+
+        return try {
+            val updated = runBlocking(renderDispatcher) {
+                if (!isRecording || stopRequested) {
+                    false
+                } else {
+                    renderer?.updateCameraInput(
+                        size = size,
+                        sensorOrientationDegrees = sensorOrientationDegrees,
+                        mirrorHorizontally = flipEncodedFrame && requestedOrientationHintDegrees % 180 == 0,
+                        mirrorVertically = flipEncodedFrame && requestedOrientationHintDegrees % 180 != 0,
+                    ) ?: false
+                }
+            }
+            if (updated) {
+                requestedCameraInputSize = size
+                requestedSensorOrientationDegrees = ((sensorOrientationDegrees % 360) + 360) % 360
+                requestedFlipEncodedFrame = flipEncodedFrame
+                PLog.i(TAG, "Camera input rebound during recording: ${size.width}x${size.height}")
+            }
+            updated
+        } catch (error: Exception) {
+            PLog.e(TAG, "Failed to rebind recording camera input", error)
+            false
+        }
     }
 
     fun stopRecording() {
