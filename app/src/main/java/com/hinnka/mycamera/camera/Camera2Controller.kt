@@ -2787,9 +2787,13 @@ class Camera2Controller(private val context: Context) {
                     val recordingSensorOrientation = capabilityCharacteristics.get(
                         CameraCharacteristics.SENSOR_ORIENTATION
                     ) ?: cachedSensorOrientation
+                    val recordingTimestampSource = capabilityCharacteristics.get(
+                        CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE
+                    ) ?: CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_UNKNOWN
                     val rebound = videoRecorder.updateCameraInput(
                         size = recordingInputSize,
                         sensorOrientationDegrees = recordingSensorOrientation,
+                        cameraTimestampSource = recordingTimestampSource,
                         flipEncodedFrame = isCurrentCameraFrontFacing() && mirrorFrontCameraEnabled,
                     )
                     PLog.i(
