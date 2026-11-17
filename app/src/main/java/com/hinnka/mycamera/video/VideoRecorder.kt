@@ -225,6 +225,9 @@ class VideoRecorder(
             val queueCapacity = PhotonPerformanceManager.maxPendingYuvFrames()
             while (pendingYuvFrames.size >= queueCapacity) {
                 pendingYuvFrames.removeFirst().close()
+                if (pendingRealtimeFrameCount > 0) {
+                    pendingRealtimeFrameCount -= 1
+                }
                 PhotonPerformanceManager.recordDroppedFrame()
             }
             pendingYuvFrames.addLast(frame)
