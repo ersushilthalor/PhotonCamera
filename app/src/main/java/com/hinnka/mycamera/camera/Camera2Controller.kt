@@ -2994,7 +2994,7 @@ class Camera2Controller(private val context: Context) {
                     }
                     PLog.d(TAG, "Camera opened: ${camera.id}")
                     cameraDeviceLifecycle = CameraDeviceLifecycle.OPEN
-                    cameraDevice = camera
+                cameraDevice = camera
                 if (dualCaptureEnabled && captureMode == CaptureMode.VIDEO) startDualCaptureCamera()
                     if (restartCameraForRawCaptureOutputMismatch("camera opened")) {
                         return
@@ -9183,7 +9183,7 @@ class Camera2Controller(private val context: Context) {
                 PLog.d(TAG, "Closing camera while video recording is finalizing")
             }
 
-            if (!keepVideoRecording && dualCaptureCameraDevice != null) stopDualCaptureCamera()
+            if (!keepVideoRecording && dualCaptureEnabled) stopDualCaptureCamera()
             clearCameraSessionState("closeCamera")
             val deviceToClose = cameraDevice
             cameraDevice = null
