@@ -235,13 +235,6 @@ class RealtimeVideoRenderer(
     }
 
     /**
-     * 消费一帧 OES、共享 YUV 或防抖输出并写入编码器。必须在录像 GL 线程调用。
-     *
-     * [mapPresentationTimeNs] 将相机时间轴映射到编码器使用的公共时间轴。
-     *
-     * @return 写入编码器的帧时间戳（纳秒）；没有有效帧时返回 null。
-     */
-    /**
      * A recording can span multiple physical cameras. Update only the encoder-side mirror
      * matrix; never recreate the EGL context or encoder surface during a lens switch.
      */
@@ -325,6 +318,13 @@ class RealtimeVideoRenderer(
         )
     }
 
+    /**
+     * 消费一帧 OES、共享 YUV 或防抖输出并写入编码器。必须在录像 GL 线程调用。
+     *
+     * [mapPresentationTimeNs] 将相机时间轴映射到编码器使用的公共时间轴。
+     *
+     * @return 写入编码器的帧时间戳（纳秒）；没有有效帧时返回 null。
+     */
     fun renderLatestFrame(
         mapPresentationTimeNs: (cameraTimestampNs: Long) -> Long,
         yuvImage: Image? = null,
@@ -546,7 +546,7 @@ class RealtimeVideoRenderer(
         val orientedInputSize = if (axesSwapped) {
             Size(currentCameraInputSize.height, currentCameraInputSize.width)
         } else {
-            cameraInputSize
+            currentCameraInputSize
         }
         cameraCropRect = resolveCenterCropRect(orientedInputSize, encoderOutputSize)
         PLog.i(
