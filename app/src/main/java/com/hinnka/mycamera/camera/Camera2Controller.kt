@@ -7381,22 +7381,25 @@ class Camera2Controller(private val context: Context) {
         }?.cameraId
     }
 
-    private fun resolveDualCaptureInputSize(cameraId: String): Size? = try {
-        val characteristics = cameraManager.getCameraCharacteristics(cameraId)
-        val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return null
-        val sizes = map.getOutputSizes(SurfaceTexture::class.java)?.toList().orEmpty()
-        if (sizes.isEmpty()) return null
-        val targetAspect = _state.value.currentPreviewSize.width.toFloat() /
-            _state.value.currentPreviewSize.height.coerceAtLeast(1)
-        sizes.filter { it.width <= 1920 && it.height <= 1920 }.maxWithOrNull(
-            compareBy<Size>(
-                { -kotlin.math.abs(it.width.toFloat() / it.height.coerceAtLeast(1) - targetAspect) },
-                { it.width.toLong() * it.height.toLong() },
-            )
-        ) ?: sizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
-    } catch (error: Exception) {
-        PLog.e(TAG, "Cannot resolve front-camera Dual Capture stream size", error)
-        null
+    private fun resolveDualCaptureInputSize(cameraId: String): Size? {
+        return try {
+            val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+            val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                ?: return null
+            val sizes = map.getOutputSizes(SurfaceTexture::class.java)?.toList().orEmpty()
+            if (sizes.isEmpty()) return null
+            val targetAspect = _state.value.currentPreviewSize.width.toFloat() /
+                _state.value.currentPreviewSize.height.coerceAtLeast(1)
+            sizes.filter { it.width <= 1920 && it.height <= 1920 }.maxWithOrNull(
+                compareBy<Size>(
+                    { -kotlin.math.abs(it.width.toFloat() / it.height.coerceAtLeast(1) - targetAspect) },
+                    { it.width.toLong() * it.height.toLong() },
+                )
+            ) ?: sizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+        } catch (error: Exception) {
+            PLog.e(TAG, "Cannot resolve front-camera Dual Capture stream size", error)
+            null
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -7674,6 +7677,11 @@ class Camera2Controller(private val context: Context) {
             recordingPath = _state.value.videoConfig.recordingPath,
             recordingTreeUri = _state.value.videoConfig.recordingTreeUri,
             dualCaptureInputSize = dualCaptureInputSize.takeIf { dualCaptureEnabled },
+            dualCaptureSensorOrientationDegrees = if (dualCaptureEnabled) {
+                _state.value.availableCameras.firstOrNull {
+                    it.lensFacing == CameraCharacteristics.LENS_FACING_FRONT
+                }?.sensorOrientation ?: 0
+            } else 0,
             dualCaptureLayout = dualCaptureLayout,
             dualCapturePositionX = dualCapturePositionX,
             dualCapturePositionY = dualCapturePositionY,

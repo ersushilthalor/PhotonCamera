@@ -146,6 +146,7 @@ class VideoRecorder(
     private var renderer: RealtimeVideoRenderer? = null
     private var requestedDualCaptureInputSize: Size? = null
     private var requestedDualCaptureLayout = DualCaptureLayout.PICTURE_IN_PICTURE
+    private var requestedDualCaptureSensorOrientationDegrees = 0
     private var requestedDualCapturePositionX = 0.66f
     private var requestedDualCapturePositionY = 0.05f
     val dualCaptureInputSurface: Surface?
@@ -251,6 +252,7 @@ class VideoRecorder(
         recordingPath: VideoRecordingPath = VideoRecordingPath.DCIM_PHOTON,
         recordingTreeUri: String? = null,
         dualCaptureInputSize: Size? = null,
+        dualCaptureSensorOrientationDegrees: Int = 0,
         dualCaptureLayout: DualCaptureLayout = DualCaptureLayout.PICTURE_IN_PICTURE,
         dualCapturePositionX: Float = 0.66f,
         dualCapturePositionY: Float = 0.05f,
@@ -263,6 +265,7 @@ class VideoRecorder(
         requestedOutputSize = Size(size.width.align16(), size.height.align16())
         requestedCameraInputSize = cameraInputSize
         requestedDualCaptureInputSize = dualCaptureInputSize
+        requestedDualCaptureSensorOrientationDegrees = dualCaptureSensorOrientationDegrees
         requestedDualCaptureLayout = dualCaptureLayout
         requestedDualCapturePositionX = dualCapturePositionX.coerceIn(0f, 1f)
         requestedDualCapturePositionY = dualCapturePositionY.coerceIn(0f, 1f)
@@ -444,6 +447,7 @@ class VideoRecorder(
             enhancedStabilizationStrength = requestedEnhancedStabilizationStrength,
             enhancedStabilizationLookahead = requestedEnhancedStabilizationLookahead,
             dualCaptureInputSize = requestedDualCaptureInputSize,
+            dualCaptureSensorOrientationDegrees = requestedDualCaptureSensorOrientationDegrees,
             dualCaptureLayout = requestedDualCaptureLayout,
             dualCapturePositionX = requestedDualCapturePositionX,
             dualCapturePositionY = requestedDualCapturePositionY,

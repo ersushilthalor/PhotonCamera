@@ -57,6 +57,7 @@ class RealtimeVideoRenderer(
     private val inputMode: VideoInputMode = VideoInputMode.YUV,
     private val sharedEisRgbFrames: SharedEisRgbFrameChannel? = null,
     dualCaptureInputSize: Size? = null,
+    dualCaptureSensorOrientationDegrees: Int = 0,
     dualCaptureLayout: DualCaptureLayout = DualCaptureLayout.PICTURE_IN_PICTURE,
     dualCapturePositionX: Float = 0.66f,
     dualCapturePositionY: Float = 0.05f,
@@ -152,12 +153,15 @@ class RealtimeVideoRenderer(
     private val dualCaptureFramePending = AtomicBoolean(false)
     private val dualCaptureStMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
     private val dualCaptureMvpMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
+    private val dualCapturePresentationMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
+    private val dualCapturePresentationTransform = MgcEisPresentationTransform()
     private var dualCaptureHasFrame = false
     private var dualCaptureProgramId = 0
     @Volatile private var currentDualCaptureLayout = dualCaptureLayout
     @Volatile private var currentDualCapturePositionX = dualCapturePositionX.coerceIn(0f, 1f)
     @Volatile private var currentDualCapturePositionY = dualCapturePositionY.coerceIn(0f, 1f)
     private val currentDualCaptureInputSize = dualCaptureInputSize
+    private val currentDualCaptureSensorOrientationDegrees = dualCaptureSensorOrientationDegrees
     val inputSurface: Surface? get() = cameraSurface
     val dualCaptureInputSurface: Surface? get() = dualCaptureSurface
 
@@ -329,6 +333,13 @@ class RealtimeVideoRenderer(
         if (presentationTimeNs <= 0L) return null
 
         val primaryViewport = resolveDualCapturePrimaryViewport()
+        val primaryCropRect = if (primaryViewport != null) {
+            val axesSwapped = isTextureTransformAxesSwapped(sourceStMatrix)
+            val sourceSize = if (axesSwapped) {
+                Size(cameraInputSize.height, cameraInputSize.width)
+            } else cameraInputSize
+            resolveCenterCropRect(sourceSize, Size(primaryViewport[2], primaryViewport[3]))
+        } else sourceCropRect
         timing.gpu("color.draw") {
             val firstLayer = layers.first()
             val postProcess = postProcessEnabled
@@ -340,7 +351,7 @@ class RealtimeVideoRenderer(
                 textureTarget = sourceTextureTarget,
                 textureId = sourceTextureId,
                 sourceStMatrix = sourceStMatrix,
-                cropRect = sourceCropRect,
+                cropRect = primaryCropRect,
                 mvpMatrix = firstPassMvpMatrix,
                 enableVideoLog = videoLogProfile.isEnabled,
                 presentationTimeNs = timestampNs,
@@ -365,7 +376,6 @@ class RealtimeVideoRenderer(
                         mvpMatrix = identityMatrix,
                         enableVideoLog = false,
                         presentationTimeNs = timestampNs,
-                        viewport = primaryViewport,
                     )
                 }
             }
@@ -437,6 +447,24 @@ class RealtimeVideoRenderer(
         }
         if (!dualCaptureHasFrame) return
         val sourceSize = currentDualCaptureInputSize ?: return
+        System.arraycopy(
+            dualCaptureStMatrix, 0, dualCapturePresentationMatrix, 0,
+            dualCapturePresentationMatrix.size,
+        )
+        val needsSensorRotation = sourceSize.width > sourceSize.height &&
+            currentDualCaptureSensorOrientationDegrees % 180 != 0 &&
+            currentDualCaptureSensorOrientationDegrees % 90 == 0 &&
+            !isTextureTransformAxesSwapped(dualCaptureStMatrix)
+        if (needsSensorRotation && dualCapturePresentationTransform.captureFromSensorOrientation(
+                currentDualCaptureSensorOrientationDegrees
+            )
+        ) {
+            Matrix.multiplyMM(
+                dualCapturePresentationMatrix, 0,
+                dualCaptureStMatrix, 0,
+                dualCapturePresentationTransform.matrix, 0,
+            )
+        }
         val outputWidth = encoderOutputSize.width
         val outputHeight = encoderOutputSize.height
         val viewport = when (currentDualCaptureLayout) {
@@ -460,7 +488,7 @@ class RealtimeVideoRenderer(
                 intArrayOf(left, outputHeight - top - height, width, height)
             }
         }
-        val orientedSize = if (isTextureTransformAxesSwapped(dualCaptureStMatrix)) {
+        val orientedSize = if (isTextureTransformAxesSwapped(dualCapturePresentationMatrix)) {
             Size(sourceSize.height, sourceSize.width)
         } else sourceSize
         val crop = resolveCenterCropRect(orientedSize, Size(viewport[2], viewport[3]))
@@ -476,7 +504,7 @@ class RealtimeVideoRenderer(
         )
         GLES30.glUniformMatrix4fv(
             GLES30.glGetUniformLocation(dualCaptureProgramId, "uSTMatrix"),
-            1, false, dualCaptureStMatrix, 0,
+            1, false, dualCapturePresentationMatrix, 0,
         )
         GLES30.glUniform4f(
             GLES30.glGetUniformLocation(dualCaptureProgramId, "uCropRect"),
