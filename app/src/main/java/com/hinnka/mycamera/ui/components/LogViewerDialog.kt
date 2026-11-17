@@ -37,7 +37,16 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val VIDEO_DEBUG_LOG_TAGS = setOf("VideoRecorder", "Camera2Controller")
+private val VIDEO_DEBUG_LOG_TAGS = setOf(
+    "VideoRecorder",
+    "Camera2Controller",
+    "VideoTiming",
+    "RealtimeVideoRenderer",
+    "PreviewYuvRenderer",
+    "MgcEisRenderer",
+    "RealtimeStabilization",
+    "MgcEisNativeEngine",
+)
 
 /**
  * 日志查看器弹窗
