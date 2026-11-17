@@ -72,6 +72,7 @@ fun ZoomControlBar(
     availableCameras: List<CameraInfo>,
     currentCameraId: String,
     onZoomChange: (Float) -> Unit,
+    onPreviewZoomChange: (Float) -> Unit = onZoomChange,
     onZoomStopClick: (Float) -> Unit,
     onLensSwitch: (String) -> Unit,
     onFilterClick: () -> Unit,
@@ -196,11 +197,11 @@ fun ZoomControlBar(
                             change.consume()
                             lastInteractionTime = System.currentTimeMillis()
                             // 使用指数变焦公式计算新倍率
-                            val sensitivity = 0.002f
+                            val sensitivity = 0.0027f
                             val newZoom = (internalZoomRatio * exp(-dragAmount.toDouble() * sensitivity).toFloat()).coerceIn(minZoom, maxZoom)
                             internalZoomRatio = newZoom
                             
-                            onZoomChange(newZoom)
+                            onPreviewZoomChange(newZoom)
                         }
                     },
                     onDragEnd = {
