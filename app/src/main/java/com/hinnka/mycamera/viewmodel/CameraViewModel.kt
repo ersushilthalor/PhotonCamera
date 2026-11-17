@@ -110,6 +110,7 @@ import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VideoBitratePreset
 import com.hinnka.mycamera.video.VideoFpsPreset
 import com.hinnka.mycamera.video.VideoLogProfile
+import com.hinnka.mycamera.video.DualCaptureLayout
 import com.hinnka.mycamera.video.VideoLogLutMode
 import com.hinnka.mycamera.video.VideoRecordingPath
 import com.hinnka.mycamera.video.VideoResolutionPreset
@@ -3022,6 +3023,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
     }
+
+    val dualCaptureStreamSize get() = cameraController.dualCaptureStreamSize
+
+    fun isDualCaptureSupported(): Boolean = cameraController.isDualCaptureSupported()
+
+    fun setDualCaptureEnabled(enabled: Boolean) = cameraController.setDualCaptureEnabled(enabled)
+
+    fun setDualCapturePreviewSurfaceTexture(surfaceTexture: SurfaceTexture?) =
+        cameraController.setDualCapturePreviewSurfaceTexture(surfaceTexture)
+
+    fun setDualCaptureLayout(layout: DualCaptureLayout) = cameraController.setDualCaptureLayout(layout)
+
+    fun setDualCapturePosition(x: Float, y: Float) = cameraController.setDualCapturePosition(x, y)
 
     fun pauseVideoRecording() {
         cameraController.pauseVideoRecording()
