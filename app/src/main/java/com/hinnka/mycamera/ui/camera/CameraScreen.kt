@@ -274,6 +274,7 @@ fun CameraScreen(
     val useLivePhoto by preferenceValue { it.useLivePhoto }
     val enableDevelopAnimation by preferenceValue { it.enableDevelopAnimation }
     var showHistogram by rememberPreference(UserPreferences::showHistogram)
+    val showManualControlsInPhotoVideo by preferenceValue { it.showManualControlsInPhotoVideo }
     var videoTorchEnabled by rememberPreference(UserPreferences::videoTorchEnabled)
     var videoAudioInputId by rememberPreference(UserPreferences::videoAudioInputId)
     val developAnimationStyle by preferenceValue { it.developAnimationStyle }
@@ -876,13 +877,15 @@ fun CameraScreen(
 
         val isVideoMode = state.captureMode == CaptureMode.VIDEO
         val isPhotoStyleMode = state.captureMode != CaptureMode.VIDEO
+        val professionalModeActive = isPhotoStyleMode && state.useRaw && state.isRawSupported
+        val shouldShowManualControls = professionalModeActive || showManualControlsInPhotoVideo
         val onParameterClick: (CameraParameter) -> Unit = { parameter ->
             val wasSelected = selectedParameter == parameter
             selectedParameter = parameter
             showParameterRuler = !wasSelected || !showParameterRuler
         }
-        LaunchedEffect(showParameterRuler) {
-            if (!showParameterRuler) {
+        LaunchedEffect(showParameterRuler, shouldShowManualControls) {
+            if (!showParameterRuler || !shouldShowManualControls) {
                 parameterRulerBounds = null
             }
         }
@@ -1600,13 +1603,15 @@ fun CameraScreen(
                             .width(xpanSideWidth),
                         contentAlignment = Alignment.Center
                     ) {
-                        CameraParameterBarVerticel(
-                            state = state,
-                            selectedParameter = selectedParameter.takeIf {
-                                showParameterRuler
-                            },
-                            onParameterClick = onParameterClick,
-                        )
+                        if (shouldShowManualControls) {
+                            CameraParameterBarVerticel(
+                                state = state,
+                                selectedParameter = selectedParameter.takeIf {
+                                    showParameterRuler
+                                },
+                                onParameterClick = onParameterClick,
+                            )
+                        }
                     }
                 }
             }
@@ -1710,7 +1715,7 @@ fun CameraScreen(
                 },
                 parameterRuler = {
                     AnimatedVisibility(
-                        visible = showParameterRuler,
+                        visible = showParameterRuler && shouldShowManualControls,
                         enter = expandVertically(
                             animationSpec = tween(220, easing = FastOutSlowInEasing),
                             expandFrom = Alignment.Bottom
@@ -1730,7 +1735,7 @@ fun CameraScreen(
                     }
                 },
                 parameterBar = {
-                    if (!isXpan) {
+                    if (!isXpan && shouldShowManualControls) {
                         parameterBar(selectedParameter.takeIf { showParameterRuler }, onParameterClick)
                     }
                 },

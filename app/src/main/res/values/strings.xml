@@ -205,6 +205,8 @@
     <string name="settings_focus_lens_group_camera2_extensions">Camera2 Extensions</string>
     <string name="settings_section_capture_storage">Capture &amp; Storage</string>
     <string name="settings_section_video">Video</string>
+    <string name="settings_video_show_manual_controls">Show manual controls in Photo &amp; Video</string>
+    <string name="settings_video_show_manual_controls_description">Show exposure, shutter speed, ISO, focus and white balance controls in Photo and Video modes. Professional mode always shows them.</string>
     <string name="settings_separate_video_lut">Separate Photo and Video LUTs</string>
     <string name="settings_separate_video_lut_description">Use and remember an independent LUT selection in video mode.</string>
     <string name="settings_video_lut">Video LUT</string>

@@ -398,6 +398,7 @@ fun SettingsScreen(
     val videoLutId by preferenceValue { it.videoLutId }
     var videoLensLockEnabled by rememberPreference(UserPreferences::videoLensLockEnabled)
     var videoWhiteBalanceLockEnabled by rememberPreference(UserPreferences::videoWhiteBalanceLockEnabled)
+    var showManualControlsInPhotoVideo by rememberPreference(UserPreferences::showManualControlsInPhotoVideo)
     var phantomSaveAsNew by rememberPreference(UserPreferences::phantomSaveAsNew)
     val phantomFrameId by preferenceValue { it.phantomFrameId }
     val defaultVirtualAperture by preferenceValue { it.defaultVirtualAperture }
@@ -1629,6 +1630,19 @@ fun SettingsScreen(
                         title = stringResource(R.string.settings_section_video),
                         showTitle = false
                     ) {
+                        SwitchSettingItem(
+                            title = stringResource(R.string.settings_video_show_manual_controls),
+                            description = stringResource(R.string.settings_video_show_manual_controls_description),
+                            checked = showManualControlsInPhotoVideo,
+                            onCheckedChange = { showManualControlsInPhotoVideo = it },
+                            enabled = videoSettingsEnabled,
+                        )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+
                         DropdownSettingItem(
                             title = stringResource(R.string.settings_video_input_mode),
                             description = stringResource(
@@ -3191,6 +3205,7 @@ private fun SettingsCategoryOverview(
                 stringResource(R.string.settings_nr_level),
                 stringResource(R.string.settings_edge_level),
                 stringResource(R.string.settings_separate_video_lut),
+                stringResource(R.string.settings_video_show_manual_controls),
                 stringResource(R.string.settings_video_lock_lens),
                 stringResource(R.string.settings_video_lock_white_balance),
                 stringResource(
