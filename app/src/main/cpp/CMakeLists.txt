@@ -19,6 +19,11 @@ add_library(my-native-lib SHARED
     mgc_eis_reconstruction/mgc_type18_projection.cpp
 )
 
+target_include_directories(
+    my-native-lib
+    PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/mgc_eis_reconstruction"
+)
 target_compile_features(my-native-lib PRIVATE cxx_std_17)
 target_compile_options(my-native-lib PRIVATE -O3 -fno-fast-math -ffp-contract=off)
 target_link_libraries(
