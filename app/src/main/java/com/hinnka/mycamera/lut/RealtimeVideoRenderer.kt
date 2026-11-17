@@ -415,40 +415,47 @@ class RealtimeVideoRenderer(
     private fun renderMgcEisFrame(
         frame: com.hinnka.mycamera.stabilization.StabilizationFrame,
     ): MgcEisRenderer.Frame? {
-        return frame.image.use { image ->
-            val textureId = timing.cpu("yuv.total") { previewYuvRenderer.render(image.image) }
-            if (textureId == 0) return null
-            val producer = sharedRgbProducer
-            val output = timing.cpu("geometry.target") {
-                val pool = if (producer != null) {
-                    sharedRgbPool ?: SharedEisRgbOutputPool(image.width, image.height).also {
-                        sharedRgbPool = it
-                        PLog.i(TAG, "Shared EIS RGB producer configured: ${image.width}x${image.height}, slots=3")
-                    }
-                } else null
-                var lease = pool?.acquire()
-                if (lease == null && pool != null) {
-                    producer?.discardPendingFrame()
-                    lease = pool.acquire()
+        val sourceImage = frame.image
+        val inputWidth = sourceImage.width
+        val inputHeight = sourceImage.height
+        // PreviewYuvRenderer now owns this lease until its HardwareBuffer sampling fence signals.
+        val textureId = timing.cpu("yuv.total") {
+            previewYuvRenderer.render(
+                sourceImage.image,
+                sourceLease = sourceImage,
+            )
+        }
+        if (textureId == 0) return null
+        val producer = sharedRgbProducer
+        val output = timing.cpu("geometry.target") {
+            val pool = if (producer != null) {
+                sharedRgbPool ?: SharedEisRgbOutputPool(inputWidth, inputHeight).also {
+                    sharedRgbPool = it
+                    PLog.i(TAG, "Shared EIS RGB producer configured: " + inputWidth + "x" + inputHeight + ", slots=3")
                 }
-                lease
+            } else null
+            var lease = pool?.acquire()
+            if (lease == null && pool != null) {
+                producer?.discardPendingFrame()
+                lease = pool.acquire()
             }
-            output.use { lease ->
-                val rendered = timing.cpu("geometry.total") {
-                    mgcEisRenderer.render(
-                        textureId = textureId,
-                        width = image.width,
-                        height = image.height,
-                        timestampNs = frame.timestampNs,
-                        rowHomographies = frame.transform?.rowHomographies,
-                        target = lease?.target,
-                    )
-                }
-                if (rendered != null && lease != null) {
-                    timing.cpu("shared.publish") { producer?.publish(lease.finish(frame.timestampNs)) }
-                }
-                rendered
+            lease
+        }
+        output.use { lease ->
+            val rendered = timing.cpu("geometry.total") {
+                mgcEisRenderer.render(
+                    textureId = textureId,
+                    width = inputWidth,
+                    height = inputHeight,
+                    timestampNs = frame.timestampNs,
+                    rowHomographies = frame.transform?.rowHomographies,
+                    target = lease?.target,
+                )
             }
+            if (rendered != null && lease != null) {
+                timing.cpu("shared.publish") { producer?.publish(lease.finish(frame.timestampNs)) }
+            }
+            rendered
         }
     }
 
