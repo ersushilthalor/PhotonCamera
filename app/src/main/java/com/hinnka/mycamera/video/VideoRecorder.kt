@@ -15,6 +15,10 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.media.MediaRecorder
 import android.net.Uri
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.Looper
+import android.os.Process
 import android.os.SystemClock
 import android.util.Size
 import android.view.Surface
@@ -41,7 +45,9 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
 import java.util.ArrayDeque
+import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 class VideoRecorder(
     private val context: Context,
@@ -94,8 +100,28 @@ class VideoRecorder(
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val audioManager = context.getSystemService(AudioManager::class.java)
+
+    // SurfaceTexture callbacks, EGL rendering and renderer teardown all stay on this Looper.
+    private val renderThread = HandlerThread(
+        "VideoRecordingGL",
+        Process.THREAD_PRIORITY_URGENT_DISPLAY,
+    ).apply { start() }
+    private val renderHandler = Handler(renderThread.looper)
     private val renderDispatcher: ExecutorCoroutineDispatcher =
-        Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+        Executor { command ->
+            if (!renderHandler.post(command)) {
+                throw RejectedExecutionException("Video recording GL thread is shutting down")
+            }
+        }.asCoroutineDispatcher()
+
+    // Keep the continuously polling MediaCodec drains off the shared Default dispatcher.
+    private val codecDrainDispatcher: ExecutorCoroutineDispatcher =
+        Executors.newFixedThreadPool(2) { runnable ->
+            Thread({
+                Process.setThreadPriority(Process.THREAD_PRIORITY_DISPLAY)
+                runnable.run()
+            }, "VideoCodecDrain")
+        }.asCoroutineDispatcher()
     private val muxerLock = Any()
     private val timelineLock = Any()
     private val realtimeFrameLock = Any()
@@ -188,7 +214,7 @@ class VideoRecorder(
 
     /** Takes ownership of a recording lease; preview has an independent latest-only lease. */
     internal fun submitYuvFrame(frame: StabilizationImageReader.AcquiredImage) {
-        synchronized(realtimeFrameLock) {
+        val shouldScheduleDrain = synchronized(realtimeFrameLock) {
             if (!acceptsYuvFrames) {
                 frame.close()
                 return
@@ -196,6 +222,7 @@ class VideoRecorder(
             pendingYuvFrames.addLast(frame)
             enqueueRealtimeFrameLocked()
         }
+        if (shouldScheduleDrain) dispatchRealtimeDrain()
     }
 
     fun startRecording(
@@ -394,6 +421,7 @@ class VideoRecorder(
         renderer = realtimeRenderer
         realtimeRenderer.initialize(
             encoderSurface = encoderSurface,
+            frameCallbackHandler = renderHandler,
             onFrameAvailable = ::onRealtimeFrameAvailable,
         )
         PLog.d(
@@ -403,23 +431,41 @@ class VideoRecorder(
     }
 
     private fun onRealtimeFrameAvailable() {
-        synchronized(realtimeFrameLock) {
+        val shouldScheduleDrain = synchronized(realtimeFrameLock) {
             if (!isRecording || stopRequested || isPaused) return
             enqueueRealtimeFrameLocked()
         }
+        if (shouldScheduleDrain) dispatchRealtimeDrain()
     }
 
-    private fun enqueueRealtimeFrameLocked() {
+    /**
+     * OES callbacks already arrive on the recording HandlerThread, so render them inline.
+     * YUV/EIS producers post one drain to that same thread; no coroutine dispatch is used
+     * for frame delivery or EGL work.
+     */
+    private fun dispatchRealtimeDrain() {
+        if (Looper.myLooper() == renderThread.looper) {
+            drainRealtimeFrames()
+        } else if (!renderHandler.post { drainRealtimeFrames() }) {
+            synchronized(realtimeFrameLock) {
+                pendingYuvFrames.forEach { it.close() }
+                pendingYuvFrames.clear()
+                pendingRealtimeFrameCount = 0
+                renderLoopRunning = false
+            }
+        }
+    }
+
+    private fun enqueueRealtimeFrameLocked(): Boolean {
         statsIncomingFrames += 1
-        // SurfaceTexture exposes only its newest frame; YUV leases and EIS results are FIFO.
+        // SurfaceTexture is latest-buffer-wins; coalesce wake-ups instead of rendering stale frames.
         pendingRealtimeFrameCount = if (requestedInputMode == VideoInputMode.OES) 1
             else pendingRealtimeFrameCount + 1
         if (!renderLoopRunning) {
             renderLoopRunning = true
-            scope.launch(renderDispatcher) {
-                drainRealtimeFrames()
-            }
+            return true
         }
+        return false
     }
 
     private fun prepareVideoEncoder() {
@@ -443,6 +489,7 @@ class VideoRecorder(
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
                 setInteger(MediaFormat.KEY_BIT_RATE, videoBitrate)
                 setInteger(MediaFormat.KEY_FRAME_RATE, requestedFps)
+                setFloat(MediaFormat.KEY_OPERATING_RATE, requestedFps.toFloat())
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL)
                 setInteger(MediaFormat.KEY_PRIORITY, 0)
                 setInteger(MediaFormat.KEY_BITRATE_MODE, bitrateMode)
@@ -976,7 +1023,7 @@ class VideoRecorder(
     }
 
     private fun startDrains() {
-        videoDrainJob = scope.launch {
+        videoDrainJob = scope.launch(codecDrainDispatcher) {
             val bufferInfo = MediaCodec.BufferInfo()
             while (isActive) {
                 if (!drainVideoEncoderOnce(bufferInfo)) {
@@ -986,7 +1033,7 @@ class VideoRecorder(
         }
 
         if (audioEnabled) {
-            audioDrainJob = scope.launch {
+            audioDrainJob = scope.launch(codecDrainDispatcher) {
                 val bufferInfo = MediaCodec.BufferInfo()
                 while (isActive) {
                     if (!drainAudioEncoderOnce(bufferInfo)) {
@@ -1507,7 +1554,17 @@ class VideoRecorder(
             }
         }
         scope.cancel()
+        codecDrainDispatcher.close()
         renderDispatcher.close()
+        renderThread.quitSafely()
+        if (Thread.currentThread() !== renderThread) {
+            try {
+                renderThread.join(1_000L)
+            } catch (error: InterruptedException) {
+                Thread.currentThread().interrupt()
+                PLog.w(TAG, "Interrupted while stopping recording GL thread", error)
+            }
+        }
     }
 }
 
