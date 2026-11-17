@@ -21,7 +21,7 @@ internal class GlSamplingFence private constructor(
         return when (EGL15.eglClientWaitSync(display, sync, 0, 0L)) {
             EGL15.EGL_CONDITION_SATISFIED -> true
             EGL15.EGL_TIMEOUT_EXPIRED -> false
-            else -> error("GPU sampling fence poll failed: " + EGL15.eglGetError())
+            else -> error("GPU sampling fence poll failed: " + EGL14.eglGetError())
         }
     }
 
