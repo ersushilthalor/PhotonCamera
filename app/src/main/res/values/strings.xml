@@ -1537,4 +1537,21 @@
     <string name="settings_video_input_yuv">App processing</string>
     <string name="settings_video_nr_yuv_description">App processing does not support High quality noise reduction. Fast is used instead when High quality is selected.</string>
     <string name="settings_oppo_super_stabilization_yuv_disabled">Unavailable with App processing. Switch to System processing to use Ultra Steady.</string>
+    <string name="settings_video_performance_mode">Performance engine</string>
+    <string name="settings_video_performance_mode_description">Balance recording responsiveness, frame continuity and processing quality. The selected recording resolution and FPS are never changed automatically.</string>
+    <string name="settings_video_performance_auto">Auto</string>
+    <string name="settings_video_performance_performance">Performance</string>
+    <string name="settings_video_performance_quality">Quality</string>
+    <string name="settings_video_performance_stats">CPU %1$.0f%% · App RAM %2$d MB · Thermal %3$s\nInput %4$.1f FPS · Rendered %5$.1f FPS · Dropped %6$d · Average render %7$.1f ms</string>
+    <string name="settings_video_performance_hint_active">Android performance scheduling hint: active</string>
+    <string name="settings_video_performance_hint_unavailable">Android performance scheduling hint: unavailable on this OS/device</string>
+    <string name="settings_video_performance_gpu_note">GPU utilization is not exposed through a portable public Android API. GPU work stays on the existing EGL pipeline; frame timing and scheduler hints are monitored where supported.</string>
+    <string name="settings_video_thermal_normal">Normal</string>
+    <string name="settings_video_thermal_light">Light</string>
+    <string name="settings_video_thermal_moderate">Moderate</string>
+    <string name="settings_video_thermal_severe">Severe</string>
+    <string name="settings_video_thermal_critical">Critical</string>
+    <string name="settings_video_thermal_emergency">Emergency</string>
+    <string name="settings_video_thermal_shutdown">Shutdown</string>
+    <string name="settings_video_thermal_unknown">Unknown</string>
 </resources>

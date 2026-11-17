@@ -25,6 +25,8 @@ import android.view.Surface
 import androidx.core.app.ActivityCompat
 import com.hinnka.mycamera.lut.RealtimeVideoRenderer
 import com.hinnka.mycamera.lut.VideoColorEffectLayer
+import com.hinnka.mycamera.data.UserPreferencesRepository
+import com.hinnka.mycamera.performance.PhotonPerformanceManager
 import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD
 import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_STRENGTH
 import com.hinnka.mycamera.stabilization.RealtimeStabilizationCoordinator
@@ -220,6 +222,11 @@ class VideoRecorder(
                 frame.close()
                 return
             }
+            val queueCapacity = PhotonPerformanceManager.maxPendingYuvFrames()
+            while (pendingYuvFrames.size >= queueCapacity) {
+                pendingYuvFrames.removeFirst().close()
+                PhotonPerformanceManager.recordDroppedFrame()
+            }
             pendingYuvFrames.addLast(frame)
             enqueueRealtimeFrameLocked()
         }
@@ -288,6 +295,11 @@ class VideoRecorder(
             prepareVideoEncoder()
             runBlocking(renderDispatcher) {
                 initializeRealtimeRenderer()
+                PhotonPerformanceManager.beginRecording(
+                    context = context.applicationContext,
+                    targetFps = requestedFps,
+                    mode = UserPreferencesRepository(context).current.performanceMode,
+                )
             }
             createMuxer()
             audioEnabled = initAudioEncoder(startLoop = false)
@@ -459,6 +471,7 @@ class VideoRecorder(
 
     private fun enqueueRealtimeFrameLocked(): Boolean {
         statsIncomingFrames += 1
+        PhotonPerformanceManager.recordInputFrame()
         // SurfaceTexture is latest-buffer-wins; coalesce wake-ups instead of rendering stale frames.
         pendingRealtimeFrameCount = if (requestedInputMode == VideoInputMode.OES) 1
             else pendingRealtimeFrameCount + 1
@@ -959,7 +972,7 @@ class VideoRecorder(
                     yuvFrame?.close()
                     continue
                 }
-                val renderStartMs = SystemClock.elapsedRealtime()
+                val renderStartNs = SystemClock.elapsedRealtimeNanos()
                 val presentationTimeNs = yuvFrame.use { frame ->
                     videoRenderer.renderLatestFrame(
                         mapPresentationTimeNs = ::mapCameraTimestampToBoottimeNs,
@@ -967,13 +980,15 @@ class VideoRecorder(
                     )
                 } ?: continue
                 establishTimelineOrigin(presentationTimeNs / 1_000L)
-                val renderCostMs = (SystemClock.elapsedRealtime() - renderStartMs).coerceAtLeast(0L)
+                val renderCostNs = (SystemClock.elapsedRealtimeNanos() - renderStartNs).coerceAtLeast(0L)
+                val renderCostMs = renderCostNs / 1_000_000L
                 statsAcceptedFrames += 1
                 statsRenderedFrames += 1
                 statsRenderTimeTotalMs += renderCostMs
                 if (renderCostMs > statsRenderTimeMaxMs) {
                     statsRenderTimeMaxMs = renderCostMs
                 }
+                PhotonPerformanceManager.recordRenderedFrame(renderCostNs)
                 logRenderStatsIfNeeded()
             } catch (e: Exception) {
                 val diagnostic = if (e is MediaCodec.CodecException) {
@@ -1439,6 +1454,9 @@ class VideoRecorder(
     }
 
     private suspend fun cleanup() {
+        withContext(renderDispatcher) {
+            PhotonPerformanceManager.stopRecording()
+        }
         releaseCaptureResources()
 
         resetMuxerState()
@@ -1490,6 +1508,7 @@ class VideoRecorder(
 
     private fun cleanupPreparedStart() {
         runBlocking(renderDispatcher) {
+            PhotonPerformanceManager.stopRecording()
             try {
                 renderer?.release()
             } catch (_: Exception) {

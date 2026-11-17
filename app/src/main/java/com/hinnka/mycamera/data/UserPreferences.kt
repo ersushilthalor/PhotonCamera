@@ -26,6 +26,7 @@ import com.hinnka.mycamera.model.AppAppearance
 import com.hinnka.mycamera.model.CameraPreset
 import com.hinnka.mycamera.model.EffectParams
 import com.hinnka.mycamera.model.LutSelectorMode
+import com.hinnka.mycamera.performance.PhotonPerformanceMode
 import com.hinnka.mycamera.processor.MgcRawMaxMode
 import com.hinnka.mycamera.raw.CanonPictureStyle
 import com.hinnka.mycamera.raw.ColorSpace
@@ -526,6 +527,7 @@ class UserPreferences internal constructor(
         p.remove(K.VIDEO_ENHANCED_STABILIZATION_ENABLED)
     }
     var videoInputMode by enum("video_input_mode", VideoInputMode.OES)
+    var performanceMode by enum("photon_performance_mode", PhotonPerformanceMode.AUTO)
     val effectiveVideoInputMode: VideoInputMode
         get() = videoInputMode.withStabilization(videoStabilizationMode)
     val effectiveVideoNrLevel: Int

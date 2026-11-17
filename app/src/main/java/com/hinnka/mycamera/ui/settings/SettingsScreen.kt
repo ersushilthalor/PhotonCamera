@@ -2,6 +2,8 @@ package com.hinnka.mycamera.ui.settings
 
 import com.hinnka.mycamera.ui.prefs.rememberUserPreferencesRepository
 import com.hinnka.mycamera.data.UserPreferences
+import com.hinnka.mycamera.performance.PhotonPerformanceManager
+import com.hinnka.mycamera.performance.PhotonPerformanceMode
 import com.hinnka.mycamera.ui.prefs.preferenceValue
 import com.hinnka.mycamera.ui.components.AppModalBottomSheet
 
@@ -9,6 +11,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.os.Environment
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
@@ -348,6 +351,11 @@ fun SettingsScreen(
     var videoNrLevel by rememberPreference(UserPreferences::videoNrLevel)
     var videoInputMode by rememberPreference(UserPreferences::videoInputMode)
     var videoEdgeLevel by rememberPreference(UserPreferences::videoEdgeLevel)
+    var performanceMode by rememberPreference(UserPreferences::performanceMode)
+    val performanceSnapshot by PhotonPerformanceManager.snapshot.collectAsState()
+    LaunchedEffect(performanceMode) {
+        PhotonPerformanceManager.setMode(performanceMode)
+    }
     val vendorCaptureSettingsByLens by preferenceValue { it.vendorCaptureSettingsByLens }
     val customVendorKeySettings by preferenceValue { it.customVendorKeySettings }
     val useRaw by preferenceValue { it.useRaw }
@@ -1627,6 +1635,21 @@ fun SettingsScreen(
                         .firstOrNull { it.first == state.videoConfig.stabilizationMode }
                         ?.second
                         ?: state.videoConfig.stabilizationMode.displayName
+                    val performanceModeLabels = listOf(
+                        PhotonPerformanceMode.AUTO to stringResource(R.string.settings_video_performance_auto),
+                        PhotonPerformanceMode.PERFORMANCE to stringResource(R.string.settings_video_performance_performance),
+                        PhotonPerformanceMode.QUALITY to stringResource(R.string.settings_video_performance_quality),
+                    )
+                    val thermalLabel = when (performanceSnapshot.thermalStatus) {
+                        PowerManager.THERMAL_STATUS_NONE -> stringResource(R.string.settings_video_thermal_normal)
+                        PowerManager.THERMAL_STATUS_LIGHT -> stringResource(R.string.settings_video_thermal_light)
+                        PowerManager.THERMAL_STATUS_MODERATE -> stringResource(R.string.settings_video_thermal_moderate)
+                        PowerManager.THERMAL_STATUS_SEVERE -> stringResource(R.string.settings_video_thermal_severe)
+                        PowerManager.THERMAL_STATUS_CRITICAL -> stringResource(R.string.settings_video_thermal_critical)
+                        PowerManager.THERMAL_STATUS_EMERGENCY -> stringResource(R.string.settings_video_thermal_emergency)
+                        PowerManager.THERMAL_STATUS_SHUTDOWN -> stringResource(R.string.settings_video_thermal_shutdown)
+                        else -> stringResource(R.string.settings_video_thermal_unknown)
+                    }
                     SettingsSection(
                         title = stringResource(R.string.settings_section_video),
                         showTitle = false
@@ -1637,6 +1660,58 @@ fun SettingsScreen(
                             checked = showManualControlsInPhotoVideo,
                             onCheckedChange = { showManualControlsInPhotoVideo = it },
                             enabled = videoSettingsEnabled,
+                        )
+
+                        DropdownSettingItem(
+                            title = stringResource(R.string.settings_video_performance_mode),
+                            description = stringResource(R.string.settings_video_performance_mode_description),
+                            value = performanceModeLabels.first { it.first == performanceMode }.second,
+                            options = performanceModeLabels.map { it.second },
+                            isLoading = false,
+                            onExpanded = {},
+                            onOptionSelected = { selectedLabel ->
+                                performanceModeLabels.firstOrNull { it.second == selectedLabel }
+                                    ?.first
+                                    ?.let {
+                                        performanceMode = it
+                                        PhotonPerformanceManager.setMode(it)
+                                    }
+                            },
+                            enabled = videoSettingsEnabled,
+                        )
+
+                        Text(
+                            text = stringResource(
+                                R.string.settings_video_performance_stats,
+                                performanceSnapshot.cpuUsagePercent,
+                                performanceSnapshot.appMemoryPssMb,
+                                thermalLabel,
+                                performanceSnapshot.inputFps,
+                                performanceSnapshot.renderedFps,
+                                performanceSnapshot.droppedFrames,
+                                performanceSnapshot.averageRenderMs,
+                            ),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = stringResource(
+                                if (performanceSnapshot.performanceHintActive) {
+                                    R.string.settings_video_performance_hint_active
+                                } else {
+                                    R.string.settings_video_performance_hint_unavailable
+                                }
+                            ),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = stringResource(R.string.settings_video_performance_gpu_note),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
 
                         HorizontalDivider(
@@ -3225,6 +3300,7 @@ private fun SettingsCategoryOverview(
                 stringResource(R.string.settings_edge_level),
                 stringResource(R.string.settings_separate_video_lut),
                 stringResource(R.string.settings_video_show_manual_controls),
+                stringResource(R.string.settings_video_performance_mode),
                 stringResource(R.string.settings_video_lock_lens),
                 stringResource(R.string.settings_video_lock_white_balance),
                 stringResource(
