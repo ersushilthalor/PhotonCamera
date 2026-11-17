@@ -61,6 +61,8 @@ private val CameraTopSheetContentTopPadding = 32.dp
 fun CameraTopSheet(
     visible: Boolean,
     captureMode: CaptureMode,
+    nightVisionEnabled: Boolean,
+    onNightVisionToggle: (Boolean) -> Unit,
     aspectRatio: AspectRatio,
     topSheetAspectRatios: List<AspectRatio>,
     onAspectRatioChange: (AspectRatio) -> Unit,
@@ -192,11 +194,19 @@ fun CameraTopSheet(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     QuickSettingGrid { itemModifier ->
-                        if (isProfessionalMode) {
-                            QuickSettingButton2(
-                                title = stringResource(R.string.settings_raw_color_engine),
-                                checked = true,
-                                onClick = { showRenderingEngineSheet = true },
+                        if (isProfessionalMode || nightVisionEnabled) {
+                            if (isProfessionalMode) {
+                                QuickSettingButton2(
+                                    title = stringResource(R.string.settings_raw_color_engine),
+                                    checked = true,
+                                    onClick = { showRenderingEngineSheet = true },
+                                    modifier = itemModifier
+                                )
+                            }
+                            QuickSettingToggle(
+                                title = stringResource(R.string.capture_mode_night_vision),
+                                checked = nightVisionEnabled,
+                                onCheckedChange = onNightVisionToggle,
                                 modifier = itemModifier
                             )
                         } else {

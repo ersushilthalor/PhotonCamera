@@ -96,6 +96,8 @@ internal object PreviewColorShader {
             ${PreviewColorShaderModules.SANITIZE}
             ${BasicToneLutShader.GLSL}
 
+            ${if (variant.includeNightVisionTone) NightVisionToneGl.GLSL else ""}
+
             float getLuma(vec3 color) {
                 return dot(color, W);
             }
@@ -154,6 +156,10 @@ internal object PreviewColorShader {
                 }
                 """ else "vec4 color = samplePreviewSource(uvCoord);"}
 
+                ${if (variant.includeNightVisionTone) """
+                color.rgb = applyNightVisionTone(color.rgb);
+                color.rgb = sanitizeColor(color.rgb);
+                """ else ""}
                 ${if (variant.includeLiteClarity) "float previewSourceLuma = getLuma(color.rgb);" else ""}
 
                 if (${if (variant.includeColorRecipe) "uColorRecipeEnabled" else "false"}) {

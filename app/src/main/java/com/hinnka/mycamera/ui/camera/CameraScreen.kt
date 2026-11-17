@@ -662,9 +662,13 @@ fun CameraScreen(
             CameraShootingMode.PHOTO -> false
             CameraShootingMode.VIDEO -> null
         }
+        // Video keeps the night vision preference so returning to photo restores it.
+        // Night Vision is a Pro-menu setting, never a mode-selector item.
+        val targetNightVision = state.nightVisionEnabled
         if (
             targetCaptureMode == state.captureMode &&
-            (targetUseRaw == null || targetUseRaw == state.useRaw)
+            (targetUseRaw == null || targetUseRaw == state.useRaw) &&
+            targetNightVision == state.nightVisionEnabled
         ) {
             return
         }
@@ -673,7 +677,7 @@ fun CameraScreen(
             if (targetCaptureMode == CaptureMode.VIDEO && state.aspectRatio == AspectRatio.XPAN) {
                 viewModel.setAspectRatio(AspectRatio.RATIO_4_3)
             }
-            viewModel.setShootingMode(targetCaptureMode, targetUseRaw)
+            viewModel.setShootingMode(targetCaptureMode, targetUseRaw, targetNightVision)
         }
     }
 
@@ -1343,6 +1347,7 @@ fun CameraScreen(
                             },
                             livePhotoRecorder = viewModel.livePhotoRecorder,
                             videoLogProfile = state.videoConfig.logProfile,
+                            nightVisionEnabled = state.isNightVisionActive,
                             isEyeFocusBusy = viewModel.isEyeFocusBusy,
                             isAutoFocus = state.isAutoFocus,
                             focusPeakingEnabled = focusPeakingEnabled && !state.isHyperfocalFocusEnabled,
@@ -1756,6 +1761,8 @@ fun CameraScreen(
         CameraTopSheet(
             visible = activePanel == ActivePanel.SETTINGS,
             captureMode = state.captureMode,
+            nightVisionEnabled = state.nightVisionEnabled,
+            onNightVisionToggle = viewModel::setNightVisionMode,
             aspectRatio = state.aspectRatio,
             topSheetAspectRatios = topSheetAspectRatios,
             onAspectRatioChange = { runPreviewTransition { viewModel.setAspectRatio(it) } },
