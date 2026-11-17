@@ -3,7 +3,6 @@ package com.hinnka.mycamera.lut
 import android.hardware.DataSpace
 import android.media.Image
 import android.opengl.EGL14
-import android.opengl.EGL15
 import android.opengl.GLES11Ext
 import android.opengl.GLES30
 import android.opengl.GLES31
@@ -12,6 +11,7 @@ import com.hinnka.mycamera.processor.GlesHardwareBufferImage
 import com.hinnka.mycamera.utils.PLog
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.ArrayDeque
 
 /**
  * Converts one YUV_420_888 preview image into an RGBA8 texture with the image's own YCbCr matrix
@@ -24,6 +24,16 @@ import java.nio.ByteOrder
  */
 internal class PreviewYuvRenderer(private val tag: String, private val timing: VideoRenderTiming? = null) {
     private enum class Path { RAW_YUV, PLANES }
+
+    private data class ImportedSample(val imageHandle: Long, val fence: GlSamplingFence)
+    private data class DeferredSourceRelease(
+        val sample: ImportedSample,
+        val sourceLease: AutoCloseable,
+    )
+
+    // Keep Camera2's ImageReader lease alive until the GPU has finished sampling its HardwareBuffer.
+    // Poll on the owning GL thread so ImageReader buffers can be returned without a per-frame glFinish.
+    private val deferredSourceReleases = ArrayDeque<DeferredSourceRelease>()
 
     private var y2yProgram: Program? = null
     private var planeProgram: Program? = null
@@ -44,35 +54,83 @@ internal class PreviewYuvRenderer(private val tag: String, private val timing: V
     private val conversion = FloatArray(9)
     private val offset = FloatArray(3)
 
-    /** Borrows [image] through GPU sampling completion; the caller retains ownership. */
-    fun render(image: Image, width: Int = image.width, height: Int = image.height): Int {
+    /**
+     * Converts one source image. When [sourceLease] is supplied, ownership transfers to this
+     * renderer: the lease is closed only after the imported HardwareBuffer's GPU sampling fence
+     * signals. Plane-upload fallback consumes the CPU planes synchronously and closes it on return.
+     */
+    fun render(
+        image: Image,
+        width: Int = image.width,
+        height: Int = image.height,
+        sourceLease: AutoCloseable? = null,
+    ): Int {
+        var leaseTransferred = false
         try {
+            pollCompletedSourceReleases()
             if (image.width <= 0 || image.height <= 0) return 0
             require(width > 0 && height > 0)
             if (!ensureTarget(width, height)) return 0
             resolveConversion(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) image.dataSpace else 0)
-            val drawn = (!importDisabled && drawImported(image)) || drawPlanes(image)
-            return if (drawn) outputTextureId else 0
+
+            val imported = if (importDisabled) null else drawImported(image)
+            if (imported != null) {
+                if (sourceLease != null) {
+                    deferredSourceReleases.addLast(DeferredSourceRelease(imported, sourceLease))
+                    leaseTransferred = true
+                } else {
+                    // Non-recording callers retain the original synchronous ownership contract.
+                    imported.fence.await()
+                    releaseImportedSample(imported)
+                }
+                return outputTextureId
+            }
+
+            return if (drawPlanes(image)) outputTextureId else 0
         } catch (error: IllegalStateException) {
             // The reader may be torn down while a frame is still queued for the GL thread.
             PLog.w(tag, "Preview YUV frame revoked: ${error.message}")
             return 0
+        } finally {
+            if (sourceLease != null && !leaseTransferred) {
+                runCatching { sourceLease.close() }
+                    .onFailure { PLog.w(tag, "Unable to release preview YUV source lease: " + it.message) }
+            }
         }
     }
 
-    private fun drawImported(image: Image): Boolean {
+    /**
+     * Returns an imported image and fence rather than blocking the recording GL thread.
+     * The ImageReader lease and EGLImage are retired together after the fence signals.
+     */
+    private fun drawImported(image: Image): ImportedSample? {
         val rawYuv = yuvTargetSupported ?: queryYuvTarget().also { yuvTargetSupported = it }
-        if (!rawYuv) return disableImport("GL_EXT_YUV_target unavailable")
-        val buffer = image.hardwareBuffer ?: return disableImport("Image has no HardwareBuffer")
+        if (!rawYuv) {
+            disableImport("GL_EXT_YUV_target unavailable")
+            return null
+        }
+        val buffer = image.hardwareBuffer
+        if (buffer == null) {
+            disableImport("Image has no HardwareBuffer")
+            return null
+        }
         val handle = timing.cpu("yuv.import") { buffer.use { GlesHardwareBufferImage.create(it) } }
-        if (handle == 0L) return disableImport("EGLImage import failed")
+        if (handle == 0L) {
+            disableImport("EGLImage import failed")
+            return null
+        }
+        var ownershipTransferred = false
         try {
             if (externalTextureId == 0) externalTextureId = GlUtils.createOESTexture()
             if (!timing.cpu("yuv.bind") { GlesHardwareBufferImage.bind(handle, externalTextureId) }) {
-                return disableImport("EGLImage bind failed")
+                disableImport("EGLImage bind failed")
+                return null
             }
             val program = y2yProgram ?: buildProgram(Y2Y_FRAGMENT_SHADER)?.also { y2yProgram = it }
-                ?: return disableImport("External program unavailable")
+            if (program == null) {
+                disableImport("External program unavailable")
+                return null
+            }
             timing.gpu("yuv.draw") {
                 beginDraw(program)
                 GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
@@ -80,14 +138,53 @@ internal class PreviewYuvRenderer(private val tag: String, private val timing: V
                 GLES30.glUniform1i(program.samplers[0], 0)
                 drawQuad(program)
             }
-            // The camera recycles the buffer once the Image is closed; sampling must complete first.
-            timing.cpu("yuv.wait") { awaitGpu() }
             GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
             endDraw()
+            val fence = GlSamplingFence.insert()
+            GLES30.glFlush()
+            ownershipTransferred = true
             reportPath(Path.RAW_YUV)
-            return true
+            return ImportedSample(handle, fence)
         } finally {
-            timing.cpu("yuv.release") { GlesHardwareBufferImage.destroy(handle) }
+            if (!ownershipTransferred) {
+                // An exceptional path after submitting sampling work must not release the camera
+                // buffer while the GPU can still read it.
+                GLES30.glFinish()
+                timing.cpu("yuv.release") { GlesHardwareBufferImage.destroy(handle) }
+            }
+        }
+    }
+
+    private fun pollCompletedSourceReleases() {
+        while (deferredSourceReleases.isNotEmpty()) {
+            val pending = deferredSourceReleases.first()
+            val signaled = try {
+                pending.sample.fence.isSignaled()
+            } catch (error: Exception) {
+                PLog.w(tag, "YUV sampling fence poll failed; draining the GL queue: " + error.message)
+                GLES30.glFinish()
+                true
+            }
+            if (!signaled) break
+            deferredSourceReleases.removeFirst()
+            releaseDeferredSource(pending)
+        }
+    }
+
+    private fun releaseDeferredSource(pending: DeferredSourceRelease) {
+        try {
+            releaseImportedSample(pending.sample)
+        } finally {
+            runCatching { pending.sourceLease.close() }
+                .onFailure { PLog.w(tag, "Unable to release sampled YUV source lease: " + it.message) }
+        }
+    }
+
+    private fun releaseImportedSample(sample: ImportedSample) {
+        try {
+            sample.fence.close()
+        } finally {
+            GlesHardwareBufferImage.destroy(sample.imageHandle)
         }
     }
 
@@ -267,26 +364,6 @@ internal class PreviewYuvRenderer(private val tag: String, private val timing: V
         return ids[0]
     }
 
-    /** EGL fence before the Image returns to Camera2; glFinish only when no fence can be created. */
-    private fun awaitGpu() {
-        val display = EGL14.eglGetCurrentDisplay()
-        val fence = if (display == EGL14.EGL_NO_DISPLAY) {
-            EGL15.EGL_NO_SYNC
-        } else {
-            EGL15.eglCreateSync(display, EGL15.EGL_SYNC_FENCE, longArrayOf(EGL14.EGL_NONE.toLong()), 0)
-        }
-        if (fence == EGL15.EGL_NO_SYNC) {
-            GLES30.glFinish()
-            return
-        }
-        try {
-            val result = EGL15.eglClientWaitSync(display, fence, EGL15.EGL_SYNC_FLUSH_COMMANDS_BIT, EGL15.EGL_FOREVER)
-            if (result != EGL15.EGL_CONDITION_SATISFIED) GLES30.glFinish()
-        } finally {
-            EGL15.eglDestroySync(display, fence)
-        }
-    }
-
     private fun queryYuvTarget(): Boolean {
         val count = IntArray(1)
         GLES30.glGetIntegerv(GLES30.GL_NUM_EXTENSIONS, count, 0)
@@ -352,6 +429,14 @@ internal class PreviewYuvRenderer(private val tag: String, private val timing: V
 
     /** Must run on the GL thread with the owning context current. */
     fun release() {
+        if (deferredSourceReleases.isNotEmpty()) {
+            // Teardown is the only synchronous drain: ensure the GL queue no longer samples
+            // Camera2 buffers before releasing their ImageReader leases and EGLImage imports.
+            GLES30.glFinish()
+            while (deferredSourceReleases.isNotEmpty()) {
+                releaseDeferredSource(deferredSourceReleases.removeFirst())
+            }
+        }
         releaseTarget()
         releasePlaneTextures()
         if (externalTextureId != 0) GlUtils.deleteTexture(externalTextureId)
