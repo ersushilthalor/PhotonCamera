@@ -314,6 +314,62 @@ class VideoRecorder(
         return true
     }
 
+    /**
+     * Refresh encoder-side camera presentation when recording continues on another lens.
+     * The encoder and muxer remain untouched, so the output stays one continuous recording.
+     */
+    fun onCameraSwitched(
+        sensorOrientationDegrees: Int,
+        frontFacing: Boolean,
+        mirrorFrontCameraEnabled: Boolean,
+        restartStabilization: Boolean,
+    ) {
+        if (!isRecording || stopRequested) return
+
+        val flipEncodedFrame = frontFacing && mirrorFrontCameraEnabled
+        requestedFlipEncodedFrame = flipEncodedFrame
+        val mirrorHorizontally = flipEncodedFrame && requestedOrientationHintDegrees % 180 == 0
+        val mirrorVertically = flipEncodedFrame && requestedOrientationHintDegrees % 180 != 0
+
+        scope.launch(renderDispatcher) {
+            if (!isRecording || stopRequested) return@launch
+            renderer?.updateMirrorTransform(mirrorHorizontally, mirrorVertically)
+            if (restartStabilization && !isPaused && requestedEnhancedStabilization) {
+                renderer?.restartStabilizationForCameraSwitch(sensorOrientationDegrees)
+            }
+        }
+    }
+
+    /**
+     * Refresh input dimensions/aspect ratio after a camera switch without restarting the encoder.
+     * Enhanced EIS keeps its configured input geometry while the new lens still supports EIS.
+     */
+    fun updateCameraInputSize(
+        size: Size,
+        currentCameraUsesEnhancedStabilization: Boolean,
+        sensorOrientationDegrees: Int = requestedSensorOrientationDegrees,
+    ) {
+        if (
+            !isRecording ||
+            stopRequested ||
+            (requestedEnhancedStabilization && currentCameraUsesEnhancedStabilization)
+        ) return
+        if (size.width <= 0 || size.height <= 0) return
+
+        requestedCameraInputSize = size
+        requestedSensorOrientationDegrees = sensorOrientationDegrees
+        runBlocking(renderDispatcher) {
+            renderer?.updateCameraInputSize(size, sensorOrientationDegrees)
+        }
+        PLog.i(
+            TAG,
+            "Recording input size refreshed after camera switch: ${size.width}x${size.height}, " +
+                "sensorOrientation=$sensorOrientationDegrees, " +
+                "recordingStartedWithEis=$requestedEnhancedStabilization, " +
+                "currentCameraUsesEis=$currentCameraUsesEnhancedStabilization",
+        )
+    }
+
     fun onCameraInputStarted(): Boolean {
         if (!isRecording || stopRequested || cameraInputStarted) return false
         cameraInputStarted = true
