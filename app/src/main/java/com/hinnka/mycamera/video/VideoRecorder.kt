@@ -32,6 +32,7 @@ import com.hinnka.mycamera.stabilization.StabilizationImageReader
 import com.hinnka.mycamera.stabilization.normalizeStabilizationLookahead
 import com.hinnka.mycamera.stabilization.normalizeStabilizationStrength
 import com.hinnka.mycamera.utils.PLog
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExecutorCoroutineDispatcher
@@ -107,7 +108,7 @@ class VideoRecorder(
         Process.THREAD_PRIORITY_URGENT_DISPLAY,
     ).apply { start() }
     private val renderHandler = Handler(renderThread.looper)
-    private val renderDispatcher: ExecutorCoroutineDispatcher =
+    private val renderDispatcher: CoroutineDispatcher =
         Executor { command ->
             if (!renderHandler.post(command)) {
                 throw RejectedExecutionException("Video recording GL thread is shutting down")
@@ -1555,7 +1556,6 @@ class VideoRecorder(
         }
         scope.cancel()
         codecDrainDispatcher.close()
-        renderDispatcher.close()
         renderThread.quitSafely()
         if (Thread.currentThread() !== renderThread) {
             try {
