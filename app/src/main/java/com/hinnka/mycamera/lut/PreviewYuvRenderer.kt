@@ -7,7 +7,6 @@ import android.opengl.EGL15
 import android.opengl.GLES11Ext
 import android.opengl.GLES30
 import android.opengl.GLES31
-import android.opengl.Matrix
 import android.os.Build
 import com.hinnka.mycamera.processor.GlesHardwareBufferImage
 import com.hinnka.mycamera.utils.PLog
@@ -454,20 +453,11 @@ internal class PreviewYuvRenderer(private val tag: String, private val timing: V
 }
 
 /**
- * Maps natural-orientation output coordinates to the camera-layout YUV texture: the sensor
- * rotation of [resolveMgcEisPresentationMatrix], plus the horizontal mirror Camera2 applies to
- * front-camera preview streams.
+ * Maps natural-orientation output coordinates to the camera-layout YUV texture.
+ *
+ * Keep the live viewfinder in the camera's native left/right orientation. Front-camera
+ * mirroring belongs to the saved/encoded output policy, not this preview presentation matrix.
  */
 internal fun resolvePreviewYuvPresentationMatrix(
     sensorOrientationDegrees: Int,
-    frontFacing: Boolean,
-): FloatArray? {
-    val rotation = resolveMgcEisPresentationMatrix(sensorOrientationDegrees) ?: return null
-    if (!frontFacing) return rotation
-    val mirror = FloatArray(16).also {
-        Matrix.setIdentityM(it, 0)
-        it[0] = -1f
-        it[12] = 1f
-    }
-    return FloatArray(16).also { Matrix.multiplyMM(it, 0, rotation, 0, mirror, 0) }
-}
+): FloatArray? = resolveMgcEisPresentationMatrix(sensorOrientationDegrees)

@@ -64,6 +64,17 @@ class RealtimeVideoRendererTransformTest {
     }
 
     @Test
+    fun previewYuvUsesSensorOrientationWithoutFrontCameraMirror() {
+        for (orientation in listOf(0, 90, 180, 270)) {
+            assertArrayEquals(
+                requireNotNull(resolveMgcEisPresentationMatrix(orientation)),
+                requireNotNull(resolvePreviewYuvPresentationMatrix(orientation)),
+                0f,
+            )
+        }
+    }
+
+    @Test
     fun sensorOrientationMustBeCardinal() {
         assertNull(resolveMgcEisPresentationMatrix(45))
     }

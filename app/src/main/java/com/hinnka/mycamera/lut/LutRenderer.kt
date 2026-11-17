@@ -1499,7 +1499,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             }
         }
         if (textureId == 0) return false
-        val matrix = resolvePreviewYuvPresentationMatrix(sensorOrientation, lensFacing == 0) ?: run {
+        val matrix = resolvePreviewYuvPresentationMatrix(sensorOrientation) ?: run {
             PLog.w(TAG, "Preview YUV frame has non-cardinal sensor orientation $sensorOrientation")
             return false
         }
