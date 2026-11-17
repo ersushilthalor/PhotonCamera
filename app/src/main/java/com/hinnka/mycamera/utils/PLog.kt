@@ -164,6 +164,15 @@ object PLog {
     }
 
     /**
+     * Clear only the requested log tags without removing unrelated application diagnostics.
+     */
+    fun clearLogs(tags: Set<String>) {
+        if (tags.isEmpty()) return
+        logQueue.removeIf { it.tag in tags }
+        Log.i(TAG, "Cleared logs for tags: ${tags.joinToString()}")
+    }
+
+    /**
      * 获取指定等级的日志
      */
     fun getLogsByLevel(level: LogLevel): List<LogEntry> {

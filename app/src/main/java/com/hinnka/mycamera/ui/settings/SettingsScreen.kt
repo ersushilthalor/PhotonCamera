@@ -786,6 +786,7 @@ fun SettingsScreen(
 
     // 日志查看器弹窗状态
     var showLogViewerDialog by remember { mutableStateOf(false) }
+    var showVideoDebugLogDialog by remember { mutableStateOf(false) }
     var showGhostPermissionDialog by remember { mutableStateOf(false) }
     var isGhostPermissionFlowActive by remember { mutableStateOf(false) }
     var isCheckingUpdate by remember { mutableStateOf(false) }
@@ -1955,6 +1956,17 @@ fun SettingsScreen(
                                 }
                             }
                         )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.1f),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+
+                        NavigationSettingItem(
+                            title = stringResource(R.string.settings_video_debug_log),
+                            description = stringResource(R.string.settings_video_debug_log_description),
+                            onClick = { showVideoDebugLogDialog = true }
+                        )
                     }
                 }
 
@@ -3086,6 +3098,13 @@ fun SettingsScreen(
     if (showLogViewerDialog) {
         LogViewerDialog(
             onDismiss = { showLogViewerDialog = false }
+        )
+    }
+
+    if (showVideoDebugLogDialog) {
+        LogViewerDialog(
+            videoOnly = true,
+            onDismiss = { showVideoDebugLogDialog = false }
         )
     }
 

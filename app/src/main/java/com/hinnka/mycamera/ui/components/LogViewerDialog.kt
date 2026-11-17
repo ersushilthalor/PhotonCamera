@@ -2,6 +2,7 @@ package com.hinnka.mycamera.ui.components
 
 import android.content.ContentValues
 import android.content.Context
+import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.widget.Toast
@@ -29,11 +30,14 @@ import com.hinnka.mycamera.R
 import com.hinnka.mycamera.utils.PLog
 import com.hinnka.mycamera.ui.icons.AppIcons
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+private val VIDEO_DEBUG_LOG_TAGS = setOf("VideoRecorder", "Camera2Controller")
 
 /**
  * 日志查看器弹窗
@@ -41,14 +45,33 @@ import java.util.Locale
 @Composable
 fun LogViewerDialog(
     onDismiss: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    videoOnly: Boolean = false
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    val logs = remember { PLog.getAllLogs() }
-    val logStats = remember { PLog.getLogStats() }
+    var logs by remember(videoOnly) {
+        mutableStateOf(
+            PLog.getAllLogs().filter { !videoOnly || it.tag in VIDEO_DEBUG_LOG_TAGS }
+        )
+    }
+    val logStats = remember(logs) {
+        PLog.LogLevel.entries.associateWith { level -> logs.count { it.level == level } }
+    }
     val downloadSuccessMessage = stringResource(R.string.log_download_success)
     val downloadFailedMessage = stringResource(R.string.log_download_failed)
+    val videoLogsClearedMessage = stringResource(R.string.video_debug_log_cleared)
+    val screenTitle = stringResource(
+        if (videoOnly) R.string.settings_video_debug_log else R.string.settings_log_viewer
+    )
+
+    LaunchedEffect(videoOnly) {
+        while (true) {
+            val latestLogs = PLog.getAllLogs()
+            logs = latestLogs.filter { !videoOnly || it.tag in VIDEO_DEBUG_LOG_TAGS }
+            delay(500)
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -70,12 +93,22 @@ fun LogViewerDialog(
             ) {
                 // 标题栏
                 LogViewerHeader(
+                    title = screenTitle,
                     logCount = logs.size,
+                    videoOnly = videoOnly,
                     onDownload = {
-                        val formattedLogs = PLog.getFormattedLogs()
+                        val formattedLogs = if (videoOnly) {
+                            formatVideoDebugLogs(context, logs)
+                        } else {
+                            PLog.getFormattedLogs()
+                        }
                         coroutineScope.launch {
                             val fileName = withContext(Dispatchers.IO) {
-                                downloadLogs(context, formattedLogs).getOrNull()
+                                downloadLogs(
+                                    context,
+                                    formattedLogs,
+                                    if (videoOnly) "Photon_video_debug" else "Photon_logs"
+                                ).getOrNull()
                             }
                             val message = if (fileName != null) {
                                 downloadSuccessMessage.format(fileName)
@@ -86,9 +119,14 @@ fun LogViewerDialog(
                         }
                     },
                     onClear = {
-                        PLog.clearLogs()
-                        Toast.makeText(context, "日志已清空", Toast.LENGTH_SHORT).show()
-                        onDismiss()
+                        if (videoOnly) {
+                            PLog.clearLogs(VIDEO_DEBUG_LOG_TAGS)
+                            Toast.makeText(context, videoLogsClearedMessage, Toast.LENGTH_SHORT).show()
+                        } else {
+                            PLog.clearLogs()
+                            Toast.makeText(context, "日志已清空", Toast.LENGTH_SHORT).show()
+                            onDismiss()
+                        }
                     },
                     onDismiss = onDismiss
                 )
@@ -103,7 +141,7 @@ fun LogViewerDialog(
 
                 // 日志内容区域
                 if (logs.isEmpty()) {
-                    EmptyLogsView()
+                    EmptyLogsView(videoOnly = videoOnly)
                 } else {
                     LogContentView(logs = logs, context = context)
                 }
@@ -117,7 +155,9 @@ fun LogViewerDialog(
  */
 @Composable
 private fun LogViewerHeader(
+    title: String,
     logCount: Int,
+    videoOnly: Boolean,
     onDownload: () -> Unit,
     onClear: () -> Unit,
     onDismiss: () -> Unit
@@ -131,13 +171,17 @@ private fun LogViewerHeader(
     ) {
         Column {
             Text(
-                text = "日志查看器",
+                text = title,
                 color = Color.White,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = "共 $logCount 条日志",
+                text = if (videoOnly) {
+                    stringResource(R.string.video_debug_log_count, logCount)
+                } else {
+                    "共 $logCount 条日志"
+                },
                 color = Color.White.copy(alpha = 0.6f),
                 fontSize = 12.sp
             )
@@ -244,7 +288,7 @@ private fun RowScope.LogLevelChip(
  * 空日志视图
  */
 @Composable
-private fun EmptyLogsView() {
+private fun EmptyLogsView(videoOnly: Boolean) {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
@@ -258,12 +302,16 @@ private fun EmptyLogsView() {
                 fontSize = 48.sp
             )
             Text(
-                text = "暂无日志记录",
+                text = if (videoOnly) stringResource(R.string.video_debug_log_empty) else "暂无日志记录",
                 color = Color.White.copy(alpha = 0.6f),
                 fontSize = 16.sp
             )
             Text(
-                text = "应用运行时的日志将显示在这里",
+                text = if (videoOnly) {
+                    stringResource(R.string.video_debug_log_empty_description)
+                } else {
+                    "应用运行时的日志将显示在这里"
+                },
                 color = Color.White.copy(alpha = 0.4f),
                 fontSize = 12.sp
             )
@@ -393,13 +441,28 @@ private fun LogEntryItem(
     }
 }
 
+private fun formatVideoDebugLogs(context: Context, logs: List<PLog.LogEntry>): String =
+    buildString {
+        appendLine("=== ${context.getString(R.string.settings_video_debug_log)} ===")
+        appendLine("Exported: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())}")
+        appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
+        appendLine("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+        appendLine("Entries: ${logs.size}")
+        appendLine("Included tags: ${VIDEO_DEBUG_LOG_TAGS.joinToString()}")
+        appendLine("=".repeat(60))
+        appendLine()
+        logs.asReversed().forEach { appendLine(it.getFormattedLog()) }
+    }
+
 /**
  * 将日志直接保存到系统下载目录。
  */
-private fun downloadLogs(context: Context, text: String): Result<String> = runCatching {
-    val fileName = "Photon_logs_${
-        SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-    }.txt"
+private fun downloadLogs(
+    context: Context,
+    text: String,
+    filePrefix: String = "Photon_logs"
+): Result<String> = runCatching {
+    val fileName = "${filePrefix}_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.txt"
     val resolver = context.contentResolver
     val values = ContentValues().apply {
         put(MediaStore.Downloads.DISPLAY_NAME, fileName)

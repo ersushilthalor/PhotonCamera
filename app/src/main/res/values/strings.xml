@@ -631,6 +631,12 @@
     <!-- Developer Options -->
     <string name="settings_log_viewer">Log Viewer</string>
     <string name="settings_log_viewer_description">View and export app logs for diagnostics</string>
+    <string name="settings_video_debug_log">Video Debug Log</string>
+    <string name="settings_video_debug_log_description">View live camera switching, video encoder, and muxer events. Reproduce the issue, then export the log.</string>
+    <string name="video_debug_log_count">%1$d video log entries</string>
+    <string name="video_debug_log_empty">No video debug logs yet</string>
+    <string name="video_debug_log_empty_description">Start recording, switch between rear, ultra-wide and front cameras, then return here to inspect the events.</string>
+    <string name="video_debug_log_cleared">Video debug logs cleared</string>
     <string name="logs">Logs</string>
     <string name="log_download">Download logs</string>
     <string name="log_download_success">Saved to Downloads as %1$s</string>
