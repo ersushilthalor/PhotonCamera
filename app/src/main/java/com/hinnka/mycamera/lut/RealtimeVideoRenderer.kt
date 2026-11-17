@@ -441,7 +441,7 @@ class RealtimeVideoRenderer(
             }
             lease
         }
-        output.use { lease ->
+        return output.use { lease ->
             val rendered = timing.cpu("geometry.total") {
                 mgcEisRenderer.render(
                     textureId = textureId,
