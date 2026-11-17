@@ -172,10 +172,14 @@ internal class VideoRenderTiming private constructor(private val role: String) {
 
     companion object {
         private const val TAG = "VideoTiming"
-        fun create(role: String): VideoRenderTiming? =
-            if (BuildConfig.DEBUG && SystemPropertiesUtil.get("debug.photon.video.timing") == "true") {
-                VideoRenderTiming(role)
-            } else null
+
+        fun create(role: String): VideoRenderTiming? {
+            // Record-path diagnostics are automatic in debug builds so 4K/30 FPS
+            // stutter can be profiled without requiring an ADB system-property toggle.
+            val enabled = BuildConfig.DEBUG &&
+                (role == "record" || SystemPropertiesUtil.get("debug.photon.video.timing") == "true")
+            return if (enabled) VideoRenderTiming(role) else null
+        }
     }
 }
 
