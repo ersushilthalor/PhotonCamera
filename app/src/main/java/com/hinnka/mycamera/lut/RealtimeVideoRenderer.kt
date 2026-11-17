@@ -335,7 +335,7 @@ class RealtimeVideoRenderer(
         val primaryViewport = resolveDualCapturePrimaryViewport()
         val primaryCropRect = if (primaryViewport != null) {
             val axesSwapped = isTextureTransformAxesSwapped(sourceStMatrix) ||
-                (inputMode != VideoInputMode.OES && sensorOrientationDegrees % 180 != 0)
+                sensorOrientationDegrees % 180 != 0
             val sourceSize = if (axesSwapped) {
                 Size(cameraInputSize.height, cameraInputSize.width)
             } else cameraInputSize
