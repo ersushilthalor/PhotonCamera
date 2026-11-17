@@ -68,6 +68,10 @@ fun ZoomControlBarVerticel(
 
     val currentCamera = availableCameras.find { it.cameraId == currentCameraId }
     val isCameraReady = currentCamera != null
+    val currentCameraZoomScale =
+        currentCamera?.displayIntrinsicZoomRatio?.takeIf { it > 0f } ?: 1f
+    val currentCameraMinZoom = (currentCamera?.minZoom ?: 1f) * currentCameraZoomScale
+    val currentCameraMaxZoom = (currentCamera?.maxZoom ?: 20f) * currentCameraZoomScale
 
     // 获取当前相机信息
     val mainCamera =
@@ -107,6 +111,19 @@ fun ZoomControlBarVerticel(
         }
 
         isContinuousZooming = false
+
+        // A preview-only drag clamps to the active lens range. On release, hand control
+        // back to the normal lens-selection transition when the requested ratio exceeded
+        // that range, including arbitrary (non-stop) zoom values.
+        if (
+            currentCamera != null &&
+            (internalZoomRatio < currentCameraMinZoom || internalZoomRatio > currentCameraMaxZoom)
+        ) {
+            customZoomStop = null
+            replacedStopIndex = -1
+            onZoomChange(internalZoomRatio)
+            return
+        }
 
         val settlement = settleContinuousZoomStop(
             zoomStops = zoomStops,
