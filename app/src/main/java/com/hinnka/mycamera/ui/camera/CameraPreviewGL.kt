@@ -182,7 +182,10 @@ fun CameraPreviewGL(
                 }
         ) {
             // GLSurfaceView 用于相机预览
-            key(previewSize.width, previewSize.height, captureMode) {
+            // Keep the SurfaceTexture stable when switching lenses changes their supported stream
+            // size. The renderer and Camera2 buffer size are updated in place below; recreating
+            // this view would destroy the active preview surface and can race with video recording.
+            key(captureMode) {
                 AndroidView(
                     factory = { ctx ->
                         CameraGLSurfaceView(ctx).apply {
@@ -278,8 +281,7 @@ fun CameraPreviewGL(
                         )
 
                         // 当 SurfaceTexture 准备好且尺寸已就绪时，通知外部打开相机。
-                        // 对 previewSize 变化使用 key 重建 GLSurfaceView，避免旧 SurfaceTexture
-                        // 的残留帧在新尺寸矩阵下继续显示几帧。
+                        // previewSize 变化只更新 renderer 和 Camera2 buffer，不销毁 SurfaceTexture。
                         
                         // 强制在所有的条件分支之外读取这几个 State，让 Compose 确保能监听到变化！
                         val currentSurfaceNotified = surfaceTextureNotified

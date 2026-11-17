@@ -3744,6 +3744,23 @@ class Camera2Controller(private val context: Context) {
         streamUseCase: Long? = null,
     ): OutputConfiguration {
         return OutputConfiguration(surface).apply {
+            // Camera2 defaults to MIRROR_MODE_AUTO on front-facing outputs. That transform is
+            // injected into SurfaceTexture's matrix, so manual OES preview/recording paths would
+            // otherwise mirror independently of the app's explicit front-camera mirror setting.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
+                        setMirrorMode(surface, OutputConfiguration.MIRROR_MODE_NONE)
+                    } else {
+                        // Before API 36 each OutputConfiguration contains only this one surface.
+                        setMirrorMode(OutputConfiguration.MIRROR_MODE_NONE)
+                    }
+                    PLog.d(TAG, "Disabled automatic Camera2 front-camera mirroring for output")
+                } catch (error: Exception) {
+                    PLog.w(TAG, "Unable to disable automatic Camera2 output mirroring: ${error.message}")
+                }
+            }
+
             activeOutputPhysicalCameraId?.let { physicalCameraId ->
                 setPhysicalCameraId(physicalCameraId)
                 PLog.i(
