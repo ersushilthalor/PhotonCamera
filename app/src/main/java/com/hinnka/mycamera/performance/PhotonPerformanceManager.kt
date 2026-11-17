@@ -1,5 +1,6 @@
 package com.hinnka.mycamera.performance
 
+import android.app.ActivityManager
 import android.content.Context
 import android.os.Build
 import android.os.Debug
@@ -23,6 +24,8 @@ data class PhotonPerformanceSnapshot(
     val isRecording: Boolean = false,
     val cpuUsagePercent: Float = 0f,
     val appMemoryPssMb: Int = 0,
+    val availableSystemRamMb: Int = 0,
+    val lowMemory: Boolean = false,
     val thermalStatus: Int? = null,
     val inputFps: Float = 0f,
     val renderedFps: Float = 0f,
@@ -55,6 +58,7 @@ object PhotonPerformanceManager {
     // Keep API-31 types isolated so Android 11 can load this manager safely.
     private var hintSession: Any? = null
     private var powerManager: PowerManager? = null
+    private var activityManager: ActivityManager? = null
     private var lastSampleElapsedMs = 0L
     private var lastProcessCpuTimeMs = 0L
     private var inputFramesInWindow = 0
@@ -80,6 +84,7 @@ object PhotonPerformanceManager {
             targetFrameDurationNs = (NANOS_PER_SECOND / this.targetFps).coerceAtLeast(1L)
             recording = true
             powerManager = context.getSystemService(PowerManager::class.java)
+            activityManager = context.getSystemService(ActivityManager::class.java)
             lastSampleElapsedMs = SystemClock.elapsedRealtime()
             lastProcessCpuTimeMs = Process.getElapsedCpuTime()
             inputFramesInWindow = 0
@@ -148,9 +153,12 @@ object PhotonPerformanceManager {
                 val thermal = mutableSnapshot.value.thermalStatus
                 val thermallyConstrained = thermal != null &&
                     thermal >= PowerManager.THERMAL_STATUS_MODERATE
+                val memory = mutableSnapshot.value
+                val memoryConstrained = memory.lowMemory ||
+                    (memory.availableSystemRamMb in 1..512)
                 val renderConstrained = averageRenderMs >=
                     targetFrameDurationNs / 1_000_000f * 0.90f
-                if (thermallyConstrained || renderConstrained) 2 else 4
+                if (thermallyConstrained || memoryConstrained || renderConstrained) 2 else 4
             }
         }
     }
@@ -166,6 +174,7 @@ object PhotonPerformanceManager {
                 droppedFrames = droppedFramesTotal,
             )
             powerManager = null
+            activityManager = null
         }
     }
 
@@ -187,6 +196,16 @@ object PhotonPerformanceManager {
             0f
         }
         val pssMb = runCatching { (Debug.getPss() / 1_024f).toInt() }.getOrDefault(0)
+        val memoryInfo = ActivityManager.MemoryInfo()
+        val hasMemoryInfo = activityManager?.let { manager ->
+            runCatching { manager.getMemoryInfo(memoryInfo); true }.getOrDefault(false)
+        } ?: false
+        val availableRamMb = if (hasMemoryInfo) {
+            (memoryInfo.availMem / (1_024L * 1_024L)).toInt()
+        } else {
+            0
+        }
+        val lowMemory = hasMemoryInfo && memoryInfo.lowMemory
         val thermal = currentThermalStatusLocked()
 
         mutableSnapshot.value = PhotonPerformanceSnapshot(
@@ -194,6 +213,8 @@ object PhotonPerformanceManager {
             isRecording = recording,
             cpuUsagePercent = cpuPercent,
             appMemoryPssMb = pssMb,
+            availableSystemRamMb = availableRamMb,
+            lowMemory = lowMemory,
             thermalStatus = thermal,
             inputFps = inputFps,
             renderedFps = renderedFps,

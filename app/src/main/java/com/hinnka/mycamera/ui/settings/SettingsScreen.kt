@@ -1685,6 +1685,7 @@ fun SettingsScreen(
                                 R.string.settings_video_performance_stats,
                                 performanceSnapshot.cpuUsagePercent,
                                 performanceSnapshot.appMemoryPssMb,
+                                performanceSnapshot.availableSystemRamMb,
                                 thermalLabel,
                                 performanceSnapshot.inputFps,
                                 performanceSnapshot.renderedFps,

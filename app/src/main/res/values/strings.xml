@@ -1542,7 +1542,7 @@
     <string name="settings_video_performance_auto">Auto</string>
     <string name="settings_video_performance_performance">Performance</string>
     <string name="settings_video_performance_quality">Quality</string>
-    <string name="settings_video_performance_stats">CPU %1$.0f%% · App RAM %2$d MB · Thermal %3$s\nInput %4$.1f FPS · Rendered %5$.1f FPS · Dropped %6$d · Average render %7$.1f ms</string>
+    <string name="settings_video_performance_stats">CPU %1$.0f%% · App RAM %2$d MB · Free RAM %3$d MB · Thermal %4$s\nInput %5$.1f FPS · Rendered %6$.1f FPS · Dropped %7$d · Average render %8$.1f ms</string>
     <string name="settings_video_performance_hint_active">Android performance scheduling hint: active</string>
     <string name="settings_video_performance_hint_unavailable">Android performance scheduling hint: unavailable on this OS/device</string>
     <string name="settings_video_performance_gpu_note">GPU utilization is not exposed through a portable public Android API. GPU work stays on the existing EGL pipeline; frame timing and scheduler hints are monitored where supported.</string>
