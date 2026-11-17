@@ -306,6 +306,10 @@ class Camera2Controller(private val context: Context) {
     private var cachedCharacteristicsCameraId: String = ""
     private var activeOpenCameraId: String = ""
     private var activeOutputPhysicalCameraId: String? = null
+    // Keep every output on the logical device so the HAL can hand off physical sensors
+    // from CONTROL_ZOOM_RATIO without rebuilding the active video recording session.
+    private var logicalMultiCameraAutoSwitchActive = false
+    private var lastLogicalMultiCameraStabilizationPhysicalId: String? = null
     private val failedPhysicalOutputProfiles = mutableSetOf<PhysicalOutputFailureKey>()
     // "streamCameraId:format" profiles whose high-resolution-only capture size failed session configuration
     private val failedHighResolutionCaptureProfiles = mutableSetOf<String>()
@@ -1171,6 +1175,9 @@ class Camera2Controller(private val context: Context) {
                 }
             }
 
+            if (session === captureSession) {
+                updateLogicalMultiCameraStabilizationCamera(result)
+            }
             submitCurrentStabilizationResult(session, request, result)
 
             lastCaptureResult = result
@@ -2097,6 +2104,8 @@ class Camera2Controller(private val context: Context) {
         cachedCharacteristicsCameraId = ""
         activeOpenCameraId = ""
         activeOutputPhysicalCameraId = null
+        logicalMultiCameraAutoSwitchActive = false
+        lastLogicalMultiCameraStabilizationPhysicalId = null
         cachedSensorOrientation = 0
         cachedLensFacing = CameraCharacteristics.LENS_FACING_BACK
         cachedHardwareLevel = CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED
@@ -2593,9 +2602,18 @@ class Camera2Controller(private val context: Context) {
         }
 
         activeOpenCameraId = openCameraId
+        logicalMultiCameraAutoSwitchActive = shouldUseLogicalMultiCameraZoom(_state.value, selectedCamera)
         val requestedPhysicalCameraId = resolveRequestedPhysicalCameraId(_state.value, selectedCamera)
-        var outputPhysicalCameraId = requestedPhysicalCameraId
+        var outputPhysicalCameraId = if (logicalMultiCameraAutoSwitchActive) null else requestedPhysicalCameraId
         activeOutputPhysicalCameraId = outputPhysicalCameraId
+        lastLogicalMultiCameraStabilizationPhysicalId = null
+        if (logicalMultiCameraAutoSwitchActive) {
+            PLog.i(
+                TAG,
+                "Logical multi-camera seamless zoom enabled: logical=${openCameraId}, " +
+                    "physicalIds=${getCameraCharacteristicsCached(openCameraId).physicalCameraIds}"
+            )
+        }
 
         PLog.i(
             TAG,
@@ -3866,6 +3884,95 @@ class Camera2Controller(private val context: Context) {
         camera: CameraInfo?
     ): Float {
         return camera?.let { it.intrinsicZoomRatio * state.zoomRatio } ?: state.zoomRatio
+    }
+
+    /**
+     * Use one logical CameraDevice for every physical lens in its logical multi-camera group.
+     * Binding outputs to one physical ID pins that stream, so all outputs stay on the logical
+     * device and the HAL performs lens selection from CONTROL_ZOOM_RATIO.
+     */
+    private fun shouldUseLogicalMultiCameraZoom(
+        state: CameraState = _state.value,
+        camera: CameraInfo? = state.getCurrentCameraInfo(),
+    ): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+        camera ?: return false
+        if (camera.isVirtualIszLens) return false
+        val logicalCameraId = camera.logicalCameraId?.takeIf { it.isNotBlank() } ?: return false
+        val openCameraId = runCatching { camera.getOpenCameraId() }.getOrNull() ?: return false
+        if (openCameraId != logicalCameraId) return false
+
+        val characteristics = getCameraCharacteristicsOrNull(
+            logicalCameraId,
+            "logical multi-camera seamless zoom",
+        ) ?: return false
+        val capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+            ?: return false
+        if (!capabilities.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)) {
+            return false
+        }
+        if (characteristics.physicalCameraIds.size < 2) return false
+
+        val zoomRange = characteristics.readMetadataOrNull(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+            ?: return false
+        if (zoomRange.lower <= 0f || zoomRange.upper <= zoomRange.lower) return false
+
+        // Preserve the existing per-physical-camera RAW path when the logical device cannot
+        // provide RAW output itself.
+        if (state.captureMode == CaptureMode.PHOTO && requestedRawCaptureEnabled &&
+            CameraUtils.getRawCaptureOutput(characteristics) == null
+        ) {
+            return false
+        }
+        return true
+    }
+
+    /**
+     * True only when the running logical CameraDevice and CaptureSession can service the target
+     * lens without closing the device or rebuilding any recording output surface.
+     */
+    fun canSwitchLensWithoutReopen(targetCameraId: String): Boolean {
+        val state = _state.value
+        val currentCamera = state.getCurrentCameraInfo() ?: return false
+        val targetCamera = state.availableCameras.firstOrNull { it.cameraId == targetCameraId } ?: return false
+        val logicalCameraId = currentCamera.logicalCameraId ?: return false
+        if (targetCamera.logicalCameraId != logicalCameraId) return false
+        if (runCatching { targetCamera.getOpenCameraId() }.getOrNull() != logicalCameraId) return false
+        if (activeOpenCameraId != logicalCameraId || cameraDevice == null || captureSession == null) return false
+        if (activeOutputPhysicalCameraId != null || !logicalMultiCameraAutoSwitchActive) return false
+        return shouldUseLogicalMultiCameraZoom(state, targetCamera)
+    }
+
+    /**
+     * Rebind stabilization calibration to the physical sensor selected by the logical HAL.
+     * This updates metadata only; it never changes the camera device or capture session.
+     */
+    private fun updateLogicalMultiCameraStabilizationCamera(result: TotalCaptureResult) {
+        if (!logicalMultiCameraAutoSwitchActive || activeOutputPhysicalCameraId != null) return
+        val physicalCameraId = result.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID)
+            ?: return
+        if (physicalCameraId == lastLogicalMultiCameraStabilizationPhysicalId) return
+
+        val physicalCharacteristics = getCameraCharacteristicsOrNull(
+            physicalCameraId,
+            "logical multi-camera active physical sensor",
+        ) ?: return
+        val timingCharacteristics = getActiveOpenCameraCharacteristics() ?: return
+        val cameraChanged = realtimeStabilizationCoordinator.configureCamera(
+            cameraId = physicalCameraId,
+            characteristics = physicalCharacteristics,
+            timingCharacteristics = timingCharacteristics,
+        )
+        lastLogicalMultiCameraStabilizationPhysicalId = physicalCameraId
+        PLog.i(TAG, "Logical HAL active physical camera changed: $physicalCameraId")
+        if (_state.value.videoRecordingState.isRecording) {
+            videoRecorder.onCameraSwitched(
+                sensorOrientationDegrees = physicalCharacteristics.get(CameraCharacteristics.SENSOR_ORIENTATION)
+                    ?: cachedSensorOrientation,
+                frontFacing = isCurrentCameraFrontFacing(),
+                restartStabilization = cameraChanged,
+            )
+        }
     }
 
     private fun resolveRequestedPhysicalCameraId(
