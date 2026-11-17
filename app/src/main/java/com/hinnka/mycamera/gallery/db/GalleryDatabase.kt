@@ -1080,7 +1080,7 @@ abstract class GalleryDatabase : RoomDatabase() {
 
                 val columns = mutableListOf<String>()
                 val definitions = mutableListOf<String>()
-                db.query("PRAGMA table_info(\`gallery_media\`)").use { cursor ->
+                db.query("PRAGMA table_info(\"gallery_media\")").use { cursor ->
                     val nameIndex = cursor.getColumnIndexOrThrow("name")
                     val typeIndex = cursor.getColumnIndexOrThrow("type")
                     val notNullIndex = cursor.getColumnIndexOrThrow("notnull")
@@ -1089,7 +1089,7 @@ abstract class GalleryDatabase : RoomDatabase() {
                         val name = cursor.getString(nameIndex)
                         if (name in obsoleteColumns) continue
 
-                        val quotedName = "\`" + name.replace("\`", "\`\`") + "\`"
+                        val quotedName = "\"" + name.replace("\"", "\"\"") + "\""
                         val isPrimaryKey = cursor.getInt(primaryKeyIndex) != 0
                         columns += quotedName
                         definitions += buildString {
@@ -1102,7 +1102,7 @@ abstract class GalleryDatabase : RoomDatabase() {
                         }
                     }
                 }
-                check(columns.any { it == "\`id\`" }) {
+                check(columns.any { it == "\"id\"" }) {
                     "Cannot remove legacy recipe columns: gallery_media.id is missing"
                 }
 
@@ -1115,17 +1115,17 @@ abstract class GalleryDatabase : RoomDatabase() {
                 }
 
                 db.execSQL(
-                    "CREATE TABLE \`gallery_media_schema_55\` (" +
+                    "CREATE TABLE \"gallery_media_schema_55\" (" +
                         definitions.joinToString(", ") + ")"
                 )
                 val columnList = columns.joinToString(", ")
                 db.execSQL(
-                    "INSERT INTO \`gallery_media_schema_55\` ($columnList) " +
-                        "SELECT $columnList FROM \`gallery_media\`"
+                    "INSERT INTO \"gallery_media_schema_55\" ($columnList) " +
+                        "SELECT $columnList FROM \"gallery_media\""
                 )
-                db.execSQL("DROP TABLE \`gallery_media\`")
+                db.execSQL("DROP TABLE \"gallery_media\"")
                 db.execSQL(
-                    "ALTER TABLE \`gallery_media_schema_55\` RENAME TO \`gallery_media\`"
+                    "ALTER TABLE \"gallery_media_schema_55\" RENAME TO \"gallery_media\""
                 )
                 indices.forEach(db::execSQL)
             }
