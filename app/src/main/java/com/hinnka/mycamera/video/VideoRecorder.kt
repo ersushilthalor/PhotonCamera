@@ -335,6 +335,7 @@ class VideoRecorder(
     fun updateCameraInput(
         size: Size,
         sensorOrientationDegrees: Int,
+        cameraTimestampSource: Int,
         flipEncodedFrame: Boolean,
     ): Boolean {
         if (!isRecording || stopRequested || size.width <= 0 || size.height <= 0) return false
@@ -355,8 +356,18 @@ class VideoRecorder(
             if (updated) {
                 requestedCameraInputSize = size
                 requestedSensorOrientationDegrees = ((sensorOrientationDegrees % 360) + 360) % 360
+                requestedCameraTimestampSource = cameraTimestampSource
+                synchronized(timelineLock) {
+                    // Each camera sensor can have its own timestamp offset when the HAL does not
+                    // advertise REALTIME timestamps. Recalibrate on the first frame from this lens.
+                    cameraTimestampToBoottimeOffsetNs = UNSET_TIMESTAMP
+                }
                 requestedFlipEncodedFrame = flipEncodedFrame
-                PLog.i(TAG, "Camera input rebound during recording: ${size.width}x${size.height}")
+                PLog.i(
+                    TAG,
+                    "Camera input rebound during recording: ${size.width}x${size.height}, " +
+                        "timestampSource=$cameraTimestampSource"
+                )
             }
             updated
         } catch (error: Exception) {
