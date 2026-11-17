@@ -144,6 +144,12 @@ class VideoRecorder(
     private var audioRecord: AudioRecord? = null
     private var inputSurface: Surface? = null
     private var renderer: RealtimeVideoRenderer? = null
+    private var requestedDualCaptureInputSize: Size? = null
+    private var requestedDualCaptureLayout = DualCaptureLayout.PICTURE_IN_PICTURE
+    private var requestedDualCapturePositionX = 0.66f
+    private var requestedDualCapturePositionY = 0.05f
+    val dualCaptureInputSurface: Surface?
+        get() = renderer?.dualCaptureInputSurface
     private var requestedBitrateMbps: Int = 30
     private var requestedCodecMime: String = MediaFormat.MIMETYPE_VIDEO_AVC
     private var requestedOrientationHintDegrees: Int = 0
@@ -244,6 +250,10 @@ class VideoRecorder(
         enhancedStabilizationLookahead: Int = DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD,
         recordingPath: VideoRecordingPath = VideoRecordingPath.DCIM_PHOTON,
         recordingTreeUri: String? = null,
+        dualCaptureInputSize: Size? = null,
+        dualCaptureLayout: DualCaptureLayout = DualCaptureLayout.PICTURE_IN_PICTURE,
+        dualCapturePositionX: Float = 0.66f,
+        dualCapturePositionY: Float = 0.05f,
         onError: ((String) -> Unit)? = null,
         onFinished: ((Uri?) -> Unit)? = null
     ): Boolean {
@@ -252,6 +262,10 @@ class VideoRecorder(
         requestedOrientationHintDegrees = normalizeOrientationHint(orientationHintDegrees)
         requestedOutputSize = Size(size.width.align16(), size.height.align16())
         requestedCameraInputSize = cameraInputSize
+        requestedDualCaptureInputSize = dualCaptureInputSize
+        requestedDualCaptureLayout = dualCaptureLayout
+        requestedDualCapturePositionX = dualCapturePositionX.coerceIn(0f, 1f)
+        requestedDualCapturePositionY = dualCapturePositionY.coerceIn(0f, 1f)
         // YUV 经传感器方向矩阵呈现到自然显示方向；编码画布使用解析后的显示尺寸。
         // 片门全开使用最大相机输入尺寸，设备横竖屏差异通过容器 rotation metadata 表达。
         requestedSize = requestedOutputSize
@@ -397,6 +411,17 @@ class VideoRecorder(
         preferredAudioInputId = audioInputId.ifBlank { VIDEO_AUDIO_INPUT_AUTO }
     }
 
+    fun updateDualCaptureLayout(layout: DualCaptureLayout) {
+        requestedDualCaptureLayout = layout
+        renderer?.updateDualCaptureLayout(layout)
+    }
+
+    fun updateDualCapturePosition(x: Float, y: Float) {
+        requestedDualCapturePositionX = x.coerceIn(0f, 1f)
+        requestedDualCapturePositionY = y.coerceIn(0f, 1f)
+        renderer?.updateDualCapturePosition(requestedDualCapturePositionX, requestedDualCapturePositionY)
+    }
+
     private fun initializeRealtimeRenderer() {
         val encoderSurface = inputSurface ?: throw IllegalStateException("Video encoder input surface is not prepared")
         val encoderColorConfig = preparedEncoderColorConfig ?: VideoEncoderColorConfig.sdrDisplay()
@@ -418,6 +443,10 @@ class VideoRecorder(
             enhancedStabilizationEnabled = requestedEnhancedStabilization,
             enhancedStabilizationStrength = requestedEnhancedStabilizationStrength,
             enhancedStabilizationLookahead = requestedEnhancedStabilizationLookahead,
+            dualCaptureInputSize = requestedDualCaptureInputSize,
+            dualCaptureLayout = requestedDualCaptureLayout,
+            dualCapturePositionX = requestedDualCapturePositionX,
+            dualCapturePositionY = requestedDualCapturePositionY,
         )
         renderer = realtimeRenderer
         realtimeRenderer.initialize(

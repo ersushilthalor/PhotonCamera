@@ -20,6 +20,7 @@ import com.hinnka.mycamera.stabilization.DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD
 import com.hinnka.mycamera.stabilization.RealtimeStabilizationCoordinator
 import com.hinnka.mycamera.stabilization.StabilizationUseCase
 import com.hinnka.mycamera.utils.PLog
+import com.hinnka.mycamera.video.DualCaptureLayout
 import com.hinnka.mycamera.video.VideoEncoderColorConfig
 import com.hinnka.mycamera.video.VideoEncodedColorPipeline
 import com.hinnka.mycamera.video.VideoInputMode
@@ -55,6 +56,10 @@ class RealtimeVideoRenderer(
     private val enhancedStabilizationLookahead: Int = DEFAULT_VIDEO_STABILIZATION_LOOKAHEAD,
     private val inputMode: VideoInputMode = VideoInputMode.YUV,
     private val sharedEisRgbFrames: SharedEisRgbFrameChannel? = null,
+    dualCaptureInputSize: Size? = null,
+    dualCaptureLayout: DualCaptureLayout = DualCaptureLayout.PICTURE_IN_PICTURE,
+    dualCapturePositionX: Float = 0.66f,
+    dualCapturePositionY: Float = 0.05f,
 ) {
     companion object {
         private const val TAG = "RealtimeVideoRenderer"
@@ -141,7 +146,26 @@ class RealtimeVideoRenderer(
     private var cameraSurfaceTexture: SurfaceTexture? = null
     private var cameraSurface: Surface? = null
     private val cameraFramePending = AtomicBoolean(false)
+    private var dualCaptureTextureId = 0
+    private var dualCaptureSurfaceTexture: SurfaceTexture? = null
+    private var dualCaptureSurface: Surface? = null
+    private val dualCaptureFramePending = AtomicBoolean(false)
+    private val dualCaptureStMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
+    private val dualCaptureMvpMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
+    private var dualCaptureHasFrame = false
+    private var dualCaptureProgramId = 0
+    @Volatile private var currentDualCaptureLayout = dualCaptureLayout
+    @Volatile private var currentDualCapturePositionX = dualCapturePositionX.coerceIn(0f, 1f)
+    @Volatile private var currentDualCapturePositionY = dualCapturePositionY.coerceIn(0f, 1f)
+    private val currentDualCaptureInputSize = dualCaptureInputSize
     val inputSurface: Surface? get() = cameraSurface
+    val dualCaptureInputSurface: Surface? get() = dualCaptureSurface
+
+    fun updateDualCaptureLayout(layout: DualCaptureLayout) { currentDualCaptureLayout = layout }
+    fun updateDualCapturePosition(x: Float, y: Float) {
+        currentDualCapturePositionX = x.coerceIn(0f, 1f)
+        currentDualCapturePositionY = y.coerceIn(0f, 1f)
+    }
     private var intermediateTextureId = 0
     private var intermediateFboId = 0
     private var finalColorTextureId = 0
@@ -208,6 +232,7 @@ class RealtimeVideoRenderer(
             }
             updateCameraTransformGeometry(mgcEisPresentationTransform.matrix)
         }
+        currentDualCaptureInputSize?.let(::initializeDualCaptureInput)
         if (enhancedStabilizationEnabled) {
             stabilizationSession = stabilizationCoordinator?.createSession(
                 useCase = StabilizationUseCase.VIDEO,
@@ -303,6 +328,7 @@ class RealtimeVideoRenderer(
         val presentationTimeNs = mapPresentationTimeNs(timestampNs)
         if (presentationTimeNs <= 0L) return null
 
+        val primaryViewport = resolveDualCapturePrimaryViewport()
         timing.gpu("color.draw") {
             val firstLayer = layers.first()
             val postProcess = postProcessEnabled
@@ -318,6 +344,7 @@ class RealtimeVideoRenderer(
                 mvpMatrix = firstPassMvpMatrix,
                 enableVideoLog = videoLogProfile.isEnabled,
                 presentationTimeNs = timestampNs,
+                viewport = primaryViewport,
             )
 
             if (layers.size > 1) {
@@ -338,6 +365,7 @@ class RealtimeVideoRenderer(
                         mvpMatrix = identityMatrix,
                         enableVideoLog = false,
                         presentationTimeNs = timestampNs,
+                        viewport = primaryViewport,
                     )
                 }
             }
@@ -352,6 +380,8 @@ class RealtimeVideoRenderer(
 
         }
 
+        drawDualCaptureOverlay()
+        GLES30.glViewport(0, 0, encoderOutputSize.width, encoderOutputSize.height)
         timing.cpu("encoder.submit") {
             EGLExt.eglPresentationTimeANDROID(eglDisplay, encoderEglSurface, presentationTimeNs)
             if (!EGL14.eglSwapBuffers(eglDisplay, encoderEglSurface)) {
@@ -364,6 +394,98 @@ class RealtimeVideoRenderer(
     }
 
     /** 与预览一致的顺序：色彩 -> 柔光 -> Halation -> Bloom -> 颗粒，最后写入编码器 Surface。 */
+    private fun initializeDualCaptureInput(size: Size) {
+        dualCaptureTextureId = GlUtils.createOESTexture()
+        check(dualCaptureTextureId != 0) { "Cannot create Dual Capture OES texture" }
+        dualCaptureProgramId = GlUtils.linkProgram(
+            GlUtils.compileShader(GLES30.GL_VERTEX_SHADER, Shaders.VERTEX_SHADER),
+            GlUtils.compileShader(GLES30.GL_FRAGMENT_SHADER, Shaders.FRAGMENT_SHADER_PASSTHROUGH),
+        )
+        check(dualCaptureProgramId != 0) { "Cannot create Dual Capture GL program" }
+        dualCaptureSurfaceTexture = SurfaceTexture(dualCaptureTextureId).apply {
+            setDefaultBufferSize(size.width, size.height)
+            setOnFrameAvailableListener { dualCaptureFramePending.set(true) }
+        }
+        dualCaptureSurface = Surface(dualCaptureSurfaceTexture)
+        PLog.i(TAG, "Dual Capture encoder input ready: ${size.width}x${size.height}")
+    }
+
+    private fun resolveDualCapturePrimaryViewport(): IntArray? = when (
+        currentDualCaptureLayout.takeIf { dualCaptureSurface != null }
+    ) {
+        DualCaptureLayout.TOP_BOTTOM -> intArrayOf(
+            0, encoderOutputSize.height / 2, encoderOutputSize.width,
+            encoderOutputSize.height - encoderOutputSize.height / 2,
+        )
+        DualCaptureLayout.SIDE_BY_SIDE -> intArrayOf(
+            0, 0, encoderOutputSize.width / 2, encoderOutputSize.height,
+        )
+        else -> null
+    }
+
+    private fun drawDualCaptureOverlay() {
+        val surfaceTexture = dualCaptureSurfaceTexture ?: return
+        if (dualCaptureProgramId == 0) return
+        if (dualCaptureFramePending.getAndSet(false)) {
+            try {
+                surfaceTexture.updateTexImage()
+                surfaceTexture.getTransformMatrix(dualCaptureStMatrix)
+                dualCaptureHasFrame = true
+            } catch (error: RuntimeException) {
+                PLog.e(TAG, "Unable to acquire Dual Capture frame", error)
+            }
+        }
+        if (!dualCaptureHasFrame) return
+        val sourceSize = currentDualCaptureInputSize ?: return
+        val outputWidth = encoderOutputSize.width
+        val outputHeight = encoderOutputSize.height
+        val viewport = when (currentDualCaptureLayout) {
+            DualCaptureLayout.TOP_BOTTOM -> intArrayOf(0, 0, outputWidth, outputHeight / 2)
+            DualCaptureLayout.SIDE_BY_SIDE -> intArrayOf(
+                outputWidth / 2, 0, outputWidth - outputWidth / 2, outputHeight,
+            )
+            DualCaptureLayout.PICTURE_IN_PICTURE -> {
+                val aspect = 9f / 16f
+                var width = (outputWidth * 0.32f).toInt().coerceAtLeast(1)
+                var height = (width / aspect).toInt().coerceAtLeast(1)
+                val maxHeight = (outputHeight * 0.30f).toInt().coerceAtLeast(1)
+                if (height > maxHeight) {
+                    height = maxHeight
+                    width = (height * aspect).toInt().coerceAtLeast(1)
+                }
+                val left = (currentDualCapturePositionX * outputWidth).toInt()
+                    .coerceIn(0, (outputWidth - width).coerceAtLeast(0))
+                val top = (currentDualCapturePositionY * outputHeight).toInt()
+                    .coerceIn(0, (outputHeight - height).coerceAtLeast(0))
+                intArrayOf(left, outputHeight - top - height, width, height)
+            }
+        }
+        val orientedSize = if (isTextureTransformAxesSwapped(dualCaptureStMatrix)) {
+            Size(sourceSize.height, sourceSize.width)
+        } else sourceSize
+        val crop = resolveCenterCropRect(orientedSize, Size(viewport[2], viewport[3]))
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        GLES30.glViewport(viewport[0], viewport[1], viewport[2], viewport[3])
+        GLES30.glUseProgram(dualCaptureProgramId)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+        GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, dualCaptureTextureId)
+        GLES30.glUniform1i(GLES30.glGetUniformLocation(dualCaptureProgramId, "uCameraTexture"), 0)
+        GLES30.glUniformMatrix4fv(
+            GLES30.glGetUniformLocation(dualCaptureProgramId, "uMVPMatrix"),
+            1, false, dualCaptureMvpMatrix, 0,
+        )
+        GLES30.glUniformMatrix4fv(
+            GLES30.glGetUniformLocation(dualCaptureProgramId, "uSTMatrix"),
+            1, false, dualCaptureStMatrix, 0,
+        )
+        GLES30.glUniform4f(
+            GLES30.glGetUniformLocation(dualCaptureProgramId, "uCropRect"),
+            crop[0], crop[1], crop[2], crop[3],
+        )
+        drawSimpleQuad(dualCaptureProgramId)
+        GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0)
+    }
+
     private fun drawPostProcess(colorTextureId: Int, colorFramebufferId: Int, timestampNs: Long) {
         val width = encoderOutputSize.width
         val height = encoderOutputSize.height
@@ -484,6 +606,7 @@ class RealtimeVideoRenderer(
         enableVideoLog: Boolean,
         presentationTimeNs: Long,
         toneBaseOnly: Boolean = false,
+        viewport: IntArray? = null,
     ) {
         val lutEnabled = layer.lutConfig != null && layer.lutTextureId != 0
         val variant = PreviewColorShaderVariant.forPass(
@@ -514,13 +637,18 @@ class RealtimeVideoRenderer(
                 enableVideoLog = enableVideoLog,
                 presentationTimeNs = presentationTimeNs,
                 toneBaseOnly = true,
+                viewport = viewport,
             )
             toneBase.buildLevels(::drawSimpleQuad)
         }
 
         if (!toneBaseOnly) {
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, targetFboId)
-            GLES30.glViewport(0, 0, encoderOutputSize.width, encoderOutputSize.height)
+            if (viewport == null) {
+                GLES30.glViewport(0, 0, encoderOutputSize.width, encoderOutputSize.height)
+            } else {
+                GLES30.glViewport(viewport[0], viewport[1], viewport[2], viewport[3])
+            }
             GLES30.glClearColor(0f, 0f, 0f, 1f)
             GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
         }
@@ -1015,6 +1143,20 @@ class RealtimeVideoRenderer(
             makeCurrent()
         }
         cameraSurfaceTexture?.setOnFrameAvailableListener(null)
+        dualCaptureSurfaceTexture?.setOnFrameAvailableListener(null)
+        dualCaptureSurface?.release()
+        dualCaptureSurface = null
+        dualCaptureSurfaceTexture?.release()
+        dualCaptureSurfaceTexture = null
+        if (dualCaptureTextureId != 0) {
+            GLES30.glDeleteTextures(1, intArrayOf(dualCaptureTextureId), 0)
+            dualCaptureTextureId = 0
+        }
+        if (dualCaptureProgramId != 0) {
+            GLES30.glDeleteProgram(dualCaptureProgramId)
+            dualCaptureProgramId = 0
+        }
+        dualCaptureFramePending.set(false)
         cameraSurface?.release()
         cameraSurface = null
         cameraSurfaceTexture?.release()
