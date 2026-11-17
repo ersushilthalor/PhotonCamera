@@ -197,6 +197,21 @@ data class VideoCapabilities(
     val supportsTorch: Boolean = false
 )
 
+fun VideoCapabilities.resolveCameraInputSize(
+    requestedResolution: VideoResolutionPreset,
+    enhancedStabilization: Boolean,
+    fallback: Size,
+): Size {
+    val sizes = if (enhancedStabilization) {
+        enhancedStabilizationInputSizesByResolution
+    } else {
+        cameraInputSizesByResolution
+    }
+    return sizes[requestedResolution]
+        ?: sizes.values.maxByOrNull { it.width.toLong() * it.height.toLong() }
+        ?: fallback
+}
+
 data class VideoRecordingState(
     val isRecording: Boolean = false,
     val isPaused: Boolean = false,
