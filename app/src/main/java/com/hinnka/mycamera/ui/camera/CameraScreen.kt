@@ -28,6 +28,8 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.SurfaceTexture
+import android.view.TextureView
+import android.hardware.camera2.CameraCharacteristics
 import android.os.Environment
 import android.os.SystemClock
 import android.provider.Settings
@@ -56,6 +58,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import android.util.Size
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -70,6 +73,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -106,6 +110,7 @@ import com.hinnka.mycamera.video.CaptureMode
 import com.hinnka.mycamera.video.VideoAspectRatio
 import com.hinnka.mycamera.video.VideoFpsPreset
 import com.hinnka.mycamera.video.VideoLogProfile
+import com.hinnka.mycamera.video.DualCaptureLayout
 import com.hinnka.mycamera.video.VideoResolutionPreset
 import com.hinnka.mycamera.video.VideoStabilizationMode
 import kotlinx.coroutines.Job
@@ -277,6 +282,15 @@ fun CameraScreen(
     val showManualControlsInPhotoVideo by preferenceValue { it.showManualControlsInPhotoVideo }
     var videoTorchEnabled by rememberPreference(UserPreferences::videoTorchEnabled)
     var videoAudioInputId by rememberPreference(UserPreferences::videoAudioInputId)
+    var dualCaptureEnabled by remember { mutableStateOf(false) }
+    var dualCaptureLayout by remember { mutableStateOf(DualCaptureLayout.PICTURE_IN_PICTURE) }
+    var dualCaptureDragOffset by remember { mutableStateOf(Offset.Zero) }
+    val dualCaptureStreamSize by viewModel.dualCaptureStreamSize.collectAsState()
+    val dualCaptureSensorOrientationDegrees = state.availableCameras.firstOrNull {
+        it.lensFacing == CameraCharacteristics.LENS_FACING_FRONT
+    }?.sensorOrientation ?: 0
+    val latestDualCaptureStreamSize = rememberUpdatedState(dualCaptureStreamSize)
+    val latestDualCaptureSensorOrientation = rememberUpdatedState(dualCaptureSensorOrientationDegrees)
     val developAnimationStyle by preferenceValue { it.developAnimationStyle }
     val phantomMode by preferenceValue { it.phantomMode }
     val topSheetAspectRatios by preferenceValue { it.topSheetAspectRatios }
@@ -318,6 +332,13 @@ fun CameraScreen(
     var rawCaptureTapLocked by remember { mutableStateOf(false) }
     var zoomStopAnimationJob by remember { mutableStateOf<Job?>(null) }
     val lensSwitchTransition = remember(viewModel, scope) { LensSwitchTransitionState(scope, viewModel) }
+
+    LaunchedEffect(state.captureMode) {
+        if (state.captureMode != CaptureMode.VIDEO && dualCaptureEnabled) {
+            dualCaptureEnabled = false
+            viewModel.setDualCaptureEnabled(false)
+        }
+    }
 
     DisposableEffect(lensSwitchTransition) {
         onDispose { lensSwitchTransition.cancel() }
@@ -1480,6 +1501,161 @@ fun CameraScreen(
                             )
                         }
 
+                        if (state.captureMode == CaptureMode.VIDEO && dualCaptureEnabled) {
+                            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                                val insetPadding = 12.dp
+                                val insetWidth = maxWidth * 0.34f - insetPadding * 2
+                                val insetHeight = insetWidth / (9f / 16f)
+                                val insetOuterWidth = insetWidth + insetPadding * 2
+                                val insetOuterHeight = insetHeight + insetPadding * 2
+                                val density = LocalDensity.current
+                                val maxWidthPx = with(density) { maxWidth.toPx() }
+                                val maxHeightPx = with(density) { maxHeight.toPx() }
+                                val insetOuterWidthPx = with(density) { insetOuterWidth.toPx() }
+                                val insetOuterHeightPx = with(density) { insetOuterHeight.toPx() }
+                                val pipModifier = Modifier
+                                    .padding(insetPadding)
+                                    .width(insetWidth)
+                                    .aspectRatio(9f / 16f)
+                                    .align(Alignment.TopEnd)
+                                    .offset {
+                                        IntOffset(
+                                            dualCaptureDragOffset.x.roundToInt(),
+                                            dualCaptureDragOffset.y.roundToInt(),
+                                        )
+                                    }
+                                    .pointerInput(dualCaptureLayout, maxWidth, maxHeight) {
+                                        if (dualCaptureLayout == DualCaptureLayout.PICTURE_IN_PICTURE) {
+                                            detectDragGestures { change, dragAmount ->
+                                                change.consume()
+                                                val maxX = -(maxWidthPx - insetOuterWidthPx).coerceAtLeast(0f)
+                                                val maxY = (maxHeightPx - insetOuterHeightPx).coerceAtLeast(0f)
+                                                val next = Offset(
+                                                    (dualCaptureDragOffset.x + dragAmount.x).coerceIn(maxX, 0f),
+                                                    (dualCaptureDragOffset.y + dragAmount.y).coerceIn(0f, maxY),
+                                                )
+                                                dualCaptureDragOffset = next
+                                                val normalizedX =
+                                                    (maxWidthPx - insetOuterWidthPx + next.x) / maxWidthPx.coerceAtLeast(1f)
+                                                val normalizedY =
+                                                    (with(density) { insetPadding.toPx() } + next.y) / maxHeightPx.coerceAtLeast(1f)
+                                                viewModel.setDualCapturePosition(normalizedX, normalizedY)
+                                            }
+                                        }
+                                    }
+                                val frontPreviewModifier = when (dualCaptureLayout) {
+                                    DualCaptureLayout.PICTURE_IN_PICTURE -> pipModifier
+                                    DualCaptureLayout.TOP_BOTTOM -> Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .fillMaxWidth()
+                                        .fillMaxHeight(0.5f)
+                                    DualCaptureLayout.SIDE_BY_SIDE -> Modifier
+                                        .align(Alignment.CenterEnd)
+                                        .fillMaxWidth(0.5f)
+                                        .fillMaxHeight()
+                                }
+                                val previewShape = RoundedCornerShape(
+                                    if (dualCaptureLayout == DualCaptureLayout.PICTURE_IN_PICTURE) 12.dp else 0.dp
+                                )
+                                Box(
+                                    modifier = frontPreviewModifier
+                                        .clip(previewShape)
+                                        .border(
+                                            width = if (dualCaptureLayout == DualCaptureLayout.PICTURE_IN_PICTURE) 1.dp else 0.dp,
+                                            color = Color.White.copy(alpha = 0.85f),
+                                            shape = previewShape,
+                                        ),
+                                ) {
+                                    AndroidView(
+                                        modifier = Modifier.fillMaxSize(),
+                                        factory = { androidContext ->
+                                            TextureView(androidContext).apply {
+                                                surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                                                    private var producerTransformApplied = false
+                                                    override fun onSurfaceTextureAvailable(
+                                                        surface: SurfaceTexture,
+                                                        width: Int,
+                                                        height: Int,
+                                                    ) {
+                                                        viewModel.setDualCapturePreviewSurfaceTexture(surface)
+                                                        post {
+                                                            updateDualCaptureTextureTransform(
+                                                                latestDualCaptureStreamSize.value,
+                                                                latestDualCaptureSensorOrientation.value,
+                                                            )
+                                                        }
+                                                    }
+
+                                                    override fun onSurfaceTextureSizeChanged(
+                                                        surface: SurfaceTexture,
+                                                        width: Int,
+                                                        height: Int,
+                                                    ) {
+                                                        viewModel.setDualCapturePreviewSurfaceTexture(surface)
+                                                        post {
+                                                            updateDualCaptureTextureTransform(
+                                                                latestDualCaptureStreamSize.value,
+                                                                latestDualCaptureSensorOrientation.value,
+                                                            )
+                                                        }
+                                                    }
+
+                                                    override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                                                        viewModel.setDualCapturePreviewSurfaceTexture(null)
+                                                        return true
+                                                    }
+
+                                                    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
+                                                        if (!producerTransformApplied) {
+                                                            producerTransformApplied = true
+                                                            updateDualCaptureTextureTransform(
+                                                                latestDualCaptureStreamSize.value,
+                                                                latestDualCaptureSensorOrientation.value,
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        update = { textureView ->
+                                            textureView.updateDualCaptureTextureTransform(
+                                                dualCaptureStreamSize,
+                                                dualCaptureSensorOrientationDegrees,
+                                            )
+                                        },
+                                    )
+                                }
+                                Surface(
+                                    modifier = Modifier
+                                        .align(Alignment.TopStart)
+                                        .padding(10.dp)
+                                        .clickable {
+                                            dualCaptureLayout = when (dualCaptureLayout) {
+                                                DualCaptureLayout.PICTURE_IN_PICTURE -> DualCaptureLayout.TOP_BOTTOM
+                                                DualCaptureLayout.TOP_BOTTOM -> DualCaptureLayout.SIDE_BY_SIDE
+                                                DualCaptureLayout.SIDE_BY_SIDE -> DualCaptureLayout.PICTURE_IN_PICTURE
+                                            }
+                                            dualCaptureDragOffset = Offset.Zero
+                                            viewModel.setDualCaptureLayout(dualCaptureLayout)
+                                        },
+                                    color = Color.Black.copy(alpha = 0.82f),
+                                    shape = RoundedCornerShape(8.dp),
+                                ) {
+                                    Text(
+                                        text = when (dualCaptureLayout) {
+                                            DualCaptureLayout.PICTURE_IN_PICTURE -> "PiP · Change layout"
+                                            DualCaptureLayout.TOP_BOTTOM -> "Top / Bottom · Change layout"
+                                            DualCaptureLayout.SIDE_BY_SIDE -> "Side by side · Change layout"
+                                        },
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                    )
+                                }
+                            }
+                        }
+
                         // 实时直方图 (Overlaid on preview if enabled)
                         if (isPhotoStyleMode && state.histogram != null && showHistogram) {
                             HistogramView(
@@ -1778,6 +1954,29 @@ fun CameraScreen(
             videoAudioInputId = state.videoConfig.audioInputId,
             videoAudioInputOptions = videoAudioInputOptions,
             onVideoAudioInputChange = { videoAudioInputId = it },
+            dualCaptureEnabled = dualCaptureEnabled,
+            dualCaptureSupported = viewModel.isDualCaptureSupported(),
+            onDualCaptureToggle = { enabled ->
+                if (state.videoRecordingState.isRecording || state.videoRecordingState.isProcessing) {
+                    android.widget.Toast.makeText(
+                        context,
+                        R.string.dual_capture_stop_recording_to_change,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                } else if (enabled && !viewModel.isDualCaptureSupported()) {
+                    android.widget.Toast.makeText(
+                        context,
+                        R.string.dual_capture_not_supported,
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                } else {
+                    dualCaptureEnabled = enabled
+                    dualCaptureDragOffset = Offset.Zero
+                    viewModel.setDualCaptureLayout(dualCaptureLayout)
+                    viewModel.setDualCaptureEnabled(enabled)
+                    activePanel = ActivePanel.NONE
+                }
+            },
             useRaw = useRaw && state.isRawSupported,
             isRawSupported = state.isRawSupported,
             rawDcpId = rawDcpId,
@@ -2891,4 +3090,33 @@ private fun Context.findActivity(): Activity? {
         context = context.baseContext
     }
     return null
+}
+
+/** Keeps the concurrent front-camera preview proportional inside every Dual Capture layout. */
+private fun TextureView.updateDualCaptureTextureTransform(
+    streamSize: Size?,
+    sensorOrientationDegrees: Int,
+) {
+    val input = streamSize ?: return
+    val viewWidth = width
+    val viewHeight = height
+    if (input.width <= 0 || input.height <= 0 || viewWidth <= 0 || viewHeight <= 0) return
+    val producer = surfaceTexture ?: return
+    val producerMatrix = FloatArray(16)
+    runCatching { producer.getTransformMatrix(producerMatrix) }.getOrElse { return }
+    val producerAxesSwapped =
+        kotlin.math.abs(producerMatrix[1]) > kotlin.math.abs(producerMatrix[0]) &&
+            kotlin.math.abs(producerMatrix[4]) > kotlin.math.abs(producerMatrix[5])
+    val sensorAxesSwapped = sensorOrientationDegrees % 180 != 0
+    val displayedWidth = if (producerAxesSwapped || sensorAxesSwapped) input.height else input.width
+    val displayedHeight = if (producerAxesSwapped || sensorAxesSwapped) input.width else input.height
+    val scale = maxOf(
+        viewWidth.toFloat() / displayedWidth.coerceAtLeast(1),
+        viewHeight.toFloat() / displayedHeight.coerceAtLeast(1),
+    )
+    val scaleX = scale * displayedWidth / viewWidth.toFloat()
+    val scaleY = scale * displayedHeight / viewHeight.toFloat()
+    setTransform(android.graphics.Matrix().apply {
+        setScale(scaleX, scaleY, viewWidth / 2f, viewHeight / 2f)
+    })
 }

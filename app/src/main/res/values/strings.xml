@@ -68,6 +68,12 @@
     <string name="video_log_off">OFF</string>
     <string name="video_codec_chip">Encoding</string>
     <string name="video_microphone_title">Microphone</string>
+    <string name="dual_capture_title">Dual Capture</string>
+    <string name="dual_capture_on">On · Front + Rear</string>
+    <string name="dual_capture_off">Off</string>
+    <string name="dual_capture_unavailable">Not supported</string>
+    <string name="dual_capture_not_supported">This camera pair does not support concurrent Dual Capture.</string>
+    <string name="dual_capture_stop_recording_to_change">Stop recording before changing Dual Capture.</string>
     <string name="video_microphone_auto">Auto</string>
     <string name="video_microphone_disconnected">Disconnected</string>
     <string name="video_microphone_builtin">Built-in</string>

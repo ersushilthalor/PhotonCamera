@@ -43,6 +43,7 @@ import com.hinnka.mycamera.ui.components.AppModalBottomSheet
 import com.hinnka.mycamera.ui.components.RawDcpLensOption
 import com.hinnka.mycamera.ui.components.RawRenderingEngineSettingsPanel
 import com.hinnka.mycamera.video.*
+import com.hinnka.mycamera.video.DualCaptureLayout
 import com.hinnka.mycamera.video.VideoCodec
 import com.hinnka.mycamera.ui.icons.AppIcons
 
@@ -78,6 +79,9 @@ fun CameraTopSheet(
     videoAudioInputId: String,
     videoAudioInputOptions: List<VideoAudioInputOption>,
     onVideoAudioInputChange: (String) -> Unit,
+    dualCaptureEnabled: Boolean,
+    dualCaptureSupported: Boolean,
+    onDualCaptureToggle: (Boolean) -> Unit,
     useRaw: Boolean,
     isRawSupported: Boolean,
     rawDcpId: String?,
@@ -327,15 +331,14 @@ fun CameraTopSheet(
                             modifier = itemModifier
                         )
                         VideoSettingTile(
-                            title = stringResource(R.string.video_microphone_title),
-                            summary = selectedVideoAudioInputLabel(
-                                selectedAudioInputId = videoAudioInputId,
-                                options = videoAudioInputOptions
-                            ),
-                            expanded = expandedVideoPanel == VideoSettingPanel.MICROPHONE,
-                            onClick = {
-                                expandedVideoPanel = if (expandedVideoPanel == VideoSettingPanel.MICROPHONE) null else VideoSettingPanel.MICROPHONE
+                            title = stringResource(R.string.dual_capture_title),
+                            summary = when {
+                                dualCaptureEnabled -> stringResource(R.string.dual_capture_on)
+                                dualCaptureSupported -> stringResource(R.string.dual_capture_off)
+                                else -> stringResource(R.string.dual_capture_unavailable)
                             },
+                            expanded = dualCaptureEnabled,
+                            onClick = { onDualCaptureToggle(!dualCaptureEnabled) },
                             modifier = itemModifier
                         )
                     }
