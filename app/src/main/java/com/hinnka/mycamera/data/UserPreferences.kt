@@ -116,7 +116,7 @@ class UserPreferences internal constructor(
 
     override fun toString(): String = "UserPreferences($raw)"
 
-    var captureMode by enum("capture_mode", CaptureMode.PHOTO)
+    var captureMode by enum("capture_mode", CaptureMode.VIDEO)
     var aspectRatio by string("aspect_ratio", "RATIO_4_3")
     var videoLutId by nullableString("video_lut_id")
     var rawBaselineLutId by nullableString("raw_baseline_lut_id")

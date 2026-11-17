@@ -129,8 +129,6 @@ enum class ActivePanel {
 }
 
 private enum class CameraShootingMode {
-    PROFESSIONAL,
-    PHOTO,
     VIDEO
 }
 
@@ -650,34 +648,12 @@ fun CameraScreen(
     }
 
     fun setShootingModeWithPreviewTransition(mode: CameraShootingMode) {
-        if (mode == CameraShootingMode.PROFESSIONAL && !state.isRawSupported) return
-
-        val targetCaptureMode = when (mode) {
-            CameraShootingMode.PROFESSIONAL,
-            CameraShootingMode.PHOTO -> CaptureMode.PHOTO
-            CameraShootingMode.VIDEO -> CaptureMode.VIDEO
-        }
-        val targetUseRaw = when (mode) {
-            CameraShootingMode.PROFESSIONAL -> true
-            CameraShootingMode.PHOTO -> false
-            CameraShootingMode.VIDEO -> null
-        }
-        // Video keeps the night vision preference so returning to photo restores it.
-        // Night Vision is a Pro-menu setting, never a mode-selector item.
-        val targetNightVision = state.nightVisionEnabled
-        if (
-            targetCaptureMode == state.captureMode &&
-            (targetUseRaw == null || targetUseRaw == state.useRaw) &&
-            targetNightVision == state.nightVisionEnabled
-        ) {
-            return
-        }
-
+        if (mode != CameraShootingMode.VIDEO || state.captureMode == CaptureMode.VIDEO) return
         runPreviewTransition {
-            if (targetCaptureMode == CaptureMode.VIDEO && state.aspectRatio == AspectRatio.XPAN) {
+            if (state.aspectRatio == AspectRatio.XPAN) {
                 viewModel.setAspectRatio(AspectRatio.RATIO_4_3)
             }
-            viewModel.setShootingMode(targetCaptureMode, targetUseRaw, targetNightVision)
+            viewModel.setShootingMode(CaptureMode.VIDEO, false, false)
         }
     }
 
@@ -2239,11 +2215,7 @@ private fun Controls(
             Spacer(modifier = Modifier.height(CameraControlsLayoutDefaults.ModeSwitcherSpacing))
 
             CaptureModeSwitcher(
-                shootingMode = when {
-                    state.captureMode == CaptureMode.VIDEO -> CameraShootingMode.VIDEO
-                    state.useRaw && state.isRawSupported -> CameraShootingMode.PROFESSIONAL
-                    else -> CameraShootingMode.PHOTO
-                },
+                shootingMode = CameraShootingMode.VIDEO,
                 professionalModeEnabled = state.isRawSupported,
                 enabled = modeSwitchEnabled &&
                     !state.videoRecordingState.isRecording &&
@@ -2599,8 +2571,7 @@ private fun CaptureModeSwitcher(
     val rowOffset = remember { Animatable(0f) }
     var positioned by remember { mutableStateOf(false) }
 
-    fun isSelectable(mode: CameraShootingMode): Boolean =
-        enabled && (mode != CameraShootingMode.PROFESSIONAL || professionalModeEnabled)
+    fun isSelectable(mode: CameraShootingMode): Boolean = enabled
 
     BoxWithConstraints(
         modifier = Modifier
@@ -2697,11 +2668,7 @@ private val ModeSwitcherItemSpacing = 8.dp
 private const val ModeSwitcherSettleTimeoutMillis = 1500L
 
 private val CameraShootingMode.labelRes: Int
-    get() = when (this) {
-        CameraShootingMode.PROFESSIONAL -> R.string.capture_mode_professional
-        CameraShootingMode.PHOTO -> R.string.capture_mode_photo
-        CameraShootingMode.VIDEO -> R.string.capture_mode_video
-    }
+    get() = R.string.capture_mode_video
 
 @Composable
 private fun ModeSwitcherItem(
