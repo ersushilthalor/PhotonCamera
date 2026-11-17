@@ -2667,6 +2667,20 @@ class Camera2Controller(private val context: Context) {
                     characteristics = capabilityCharacteristics,
                     timingCharacteristics = openCharacteristics,
                 )
+                // Keep the MediaCodec/muxer session alive while the camera device is replaced.
+                // Refresh mirror and EIS presentation against the newly active lens.
+                if (
+                    preserveVideoRecording &&
+                    captureMode == CaptureMode.VIDEO &&
+                    _state.value.videoRecordingState.isRecording
+                ) {
+                    videoRecorder.onCameraSwitched(
+                        sensorOrientationDegrees = cachedSensorOrientation,
+                        frontFacing = isCurrentCameraFrontFacing(),
+                        mirrorFrontCameraEnabled = mirrorFrontCameraEnabled,
+                        restartStabilization = true,
+                    )
+                }
                 if (_state.value.captureMode == CaptureMode.PHOTO &&
                     _state.value.photoPreviewStabilizationEnabled &&
                     (isCurrentCameraFrontFacing() ||
@@ -2763,6 +2777,31 @@ class Camera2Controller(private val context: Context) {
                     CaptureMode.PHOTO -> CameraUtils.getFixedPreviewSize(openCharacteristics, _state.value.aspectRatio)
                 }
                 surfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height)
+
+                // A front/rear lens can expose a different stream size. Update the recorder's
+                // SurfaceTexture/crop geometry before the replacement Camera2 session is built.
+                if (
+                    preserveVideoRecording &&
+                    captureMode == CaptureMode.VIDEO &&
+                    _state.value.videoRecordingState.isRecording
+                ) {
+                    val switchedVideoState = _state.value
+                    val currentCameraUsesEnhancedStabilization = shouldUseVideoEnhancedStabilization()
+                    val switchedInputSize = if (currentCameraUsesEnhancedStabilization) {
+                        switchedVideoState.videoCapabilities.enhancedStabilizationInputSizesByResolution[
+                            switchedVideoState.videoConfig.resolution
+                        ]
+                    } else {
+                        switchedVideoState.videoCapabilities.cameraInputSizesByResolution[
+                            switchedVideoState.videoConfig.resolution
+                        ]
+                    } ?: resolvedVideoPreviewSize
+                    videoRecorder.updateCameraInputSize(
+                        size = switchedInputSize,
+                        currentCameraUsesEnhancedStabilization = currentCameraUsesEnhancedStabilization,
+                        sensorOrientationDegrees = cachedSensorOrientation,
+                    )
+                }
 
                 if (_state.value.useLivePhoto && captureMode == CaptureMode.PHOTO) {
                     livePhotoRecorder.startRecording()
