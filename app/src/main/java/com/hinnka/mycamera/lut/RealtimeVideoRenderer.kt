@@ -12,6 +12,7 @@ import android.opengl.EGLExt
 import android.opengl.EGLSurface
 import android.opengl.GLES30
 import android.opengl.Matrix
+import android.os.Handler
 import android.util.Size
 import android.view.Surface
 import com.hinnka.mycamera.model.ColorRecipeParams
@@ -97,7 +98,8 @@ class RealtimeVideoRenderer(
         get() = filmGrainAmount > 0.001f &&
             encoderColorConfig.pipeline != VideoEncodedColorPipeline.CUSTOM_LOG
     // Log 录制保留后期空间：柔光与高光扩散只作用于监看画面，不烘焙进编码。
-    private val spatialEffectsAllowed = !videoLogProfile.isEnabled
+    // This renderer is the real-time encoder path: avoid extra full-resolution spatial passes.
+    private val spatialEffectsAllowed = false
     private val softLightAmount = spatialEffectAmount { it.softLight }
     private val bloomAmount = spatialEffectAmount { it.bloom }
     private val redHalationAmount = spatialEffectAmount { it.redHalation }
@@ -158,6 +160,7 @@ class RealtimeVideoRenderer(
 
     fun initialize(
         encoderSurface: Surface,
+        frameCallbackHandler: Handler,
         onFrameAvailable: () -> Unit,
     ) {
         check(!initialized) { "Realtime video renderer is already initialized" }
@@ -189,10 +192,13 @@ class RealtimeVideoRenderer(
             check(cameraTextureId != 0) { "Cannot create realtime video OES texture" }
             cameraSurfaceTexture = SurfaceTexture(cameraTextureId).apply {
                 setDefaultBufferSize(cameraInputSize.width, cameraInputSize.height)
-                setOnFrameAvailableListener {
-                    cameraFramePending.set(true)
-                    onFrameAvailable()
-                }
+                setOnFrameAvailableListener(
+                    {
+                        cameraFramePending.set(true)
+                        onFrameAvailable()
+                    },
+                    frameCallbackHandler,
+                )
             }
             cameraSurface = Surface(cameraSurfaceTexture)
         } else {
