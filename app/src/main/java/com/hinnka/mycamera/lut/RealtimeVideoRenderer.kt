@@ -41,13 +41,13 @@ import kotlin.math.max
  */
 class RealtimeVideoRenderer(
     context: Context,
-    private val cameraInputSize: Size,
+    private var cameraInputSize: Size,
     private val encoderOutputSize: Size,
-    private val sensorOrientationDegrees: Int,
+    private var sensorOrientationDegrees: Int,
     colorLayers: List<VideoColorEffectLayer>,
     private val videoLogProfile: VideoLogProfile,
-    private val mirrorHorizontally: Boolean,
-    private val mirrorVertically: Boolean,
+    private var mirrorHorizontally: Boolean,
+    private var mirrorVertically: Boolean,
     private val encoderColorConfig: VideoEncoderColorConfig,
     private val stabilizationCoordinator: RealtimeStabilizationCoordinator?,
     private val enhancedStabilizationEnabled: Boolean,
@@ -140,6 +140,7 @@ class RealtimeVideoRenderer(
     private var cameraTextureId = 0
     private var cameraSurfaceTexture: SurfaceTexture? = null
     private var cameraSurface: Surface? = null
+    private var frameAvailableCallback: (() -> Unit)? = null
     private val cameraFramePending = AtomicBoolean(false)
     val inputSurface: Surface? get() = cameraSurface
     private var intermediateTextureId = 0
@@ -165,6 +166,7 @@ class RealtimeVideoRenderer(
         onFrameAvailable: () -> Unit,
     ) {
         check(!initialized) { "Realtime video renderer is already initialized" }
+        frameAvailableCallback = onFrameAvailable
         initializeEgl(encoderSurface)
         check(makeCurrent()) { "Cannot make realtime video EGL context current" }
         initializeGeometry()
@@ -233,7 +235,76 @@ class RealtimeVideoRenderer(
     }
 
     /**
-     * 消费一帧 OES、共享 YUV 或防抖输出并写入编码器。必须在录像 GL 线程调用。
+     * Rebind the camera-side input while keeping the encoder and muxer alive.
+     * This must run on the recording GL thread between Camera2 sessions.
+     */
+    fun updateCameraInput(
+        size: Size,
+        sensorOrientationDegrees: Int,
+        mirrorHorizontally: Boolean,
+        mirrorVertically: Boolean,
+    ): Boolean {
+        if (!initialized || !makeCurrent() || size.width <= 0 || size.height <= 0) return false
+
+        val normalizedOrientation = ((sensorOrientationDegrees % 360) + 360) % 360
+        if (inputMode == VideoInputMode.OES) {
+            val surfaceTexture = cameraSurfaceTexture ?: return false
+            surfaceTexture.setDefaultBufferSize(size.width, size.height)
+            cameraFramePending.set(false)
+        } else if (!mgcEisPresentationTransform.captureFromSensorOrientation(normalizedOrientation)) {
+            PLog.e(TAG, "Cannot update recording input: unsupported sensor orientation=$normalizedOrientation")
+            return false
+        }
+
+        cameraInputSize = size
+        this.sensorOrientationDegrees = normalizedOrientation
+        this.mirrorHorizontally = mirrorHorizontally
+        this.mirrorVertically = mirrorVertically
+        Matrix.setIdentityM(firstPassMvpMatrix, 0)
+        if (mirrorHorizontally || mirrorVertically) {
+            Matrix.scaleM(
+                firstPassMvpMatrix,
+                0,
+                if (mirrorHorizontally) -1f else 1f,
+                if (mirrorVertically) -1f else 1f,
+                1f,
+            )
+        }
+        updateCameraTransformGeometry(
+            if (inputMode == VideoInputMode.OES) stMatrix else mgcEisPresentationTransform.matrix,
+            force = true,
+        )
+
+        if (enhancedStabilizationEnabled) {
+            val callback = frameAvailableCallback ?: return false
+            val wasStarted = stabilizationSessionStarted
+            stabilizationSession?.stop()
+            val newSession = stabilizationCoordinator?.createSession(
+                useCase = StabilizationUseCase.VIDEO,
+                strength = enhancedStabilizationStrength,
+                frameWidth = size.width,
+                frameHeight = size.height,
+                lookaheadFrames = enhancedStabilizationLookahead,
+                onFrameAvailable = callback,
+            ) ?: return false
+            stabilizationSession = newSession
+            stabilizationSessionStarted = wasStarted && newSession.start()
+            if (wasStarted && !stabilizationSessionStarted) {
+                PLog.e(TAG, "Failed to restart enhanced stabilization for camera input ${size.width}x${size.height}")
+                return false
+            }
+        }
+
+        PLog.i(
+            TAG,
+            "Recording camera input updated: ${size.width}x${size.height}, " +
+                "sensorOrientation=$normalizedOrientation, mirrorH=$mirrorHorizontally, mirrorV=$mirrorVertically"
+        )
+        return true
+    }
+
+    /**
+     * 消费一帧 OES、共享 YUV 或防抖输出并写入编码器。必须在录像 GL 线程调用.
      *
      * [mapPresentationTimeNs] 将相机时间轴映射到编码器使用的公共时间轴。
      *
@@ -452,9 +523,12 @@ class RealtimeVideoRenderer(
         }
     }
 
-    private fun updateCameraTransformGeometry(presentationMatrix: FloatArray) {
+    private fun updateCameraTransformGeometry(
+        presentationMatrix: FloatArray,
+        force: Boolean = false,
+    ) {
         val axesSwapped = isTextureTransformAxesSwapped(presentationMatrix)
-        if (cameraTransformAxesSwapped == axesSwapped) return
+        if (!force && cameraTransformAxesSwapped == axesSwapped) return
 
         cameraTransformAxesSwapped = axesSwapped
         val orientedInputSize = if (axesSwapped) {

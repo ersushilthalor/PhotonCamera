@@ -66,6 +66,7 @@ import com.hinnka.mycamera.video.VideoLogLutMode
 import com.hinnka.mycamera.video.VideoRecorder
 import com.hinnka.mycamera.video.VideoRecordingPath
 import com.hinnka.mycamera.video.VideoResolutionPreset
+import com.hinnka.mycamera.video.resolveCameraInputSize
 import com.hinnka.mycamera.video.VideoRecordingState
 import com.hinnka.mycamera.video.VideoStabilizationMode
 import com.hinnka.mycamera.video.resolveSurfaceTextureVideoOrientationDegrees
@@ -343,6 +344,7 @@ class Camera2Controller(private val context: Context) {
     private var isP010Supported = false
     private var isStreamUseCaseSupported = false
     private var availableStreamUseCases: LongArray = longArrayOf()
+    private var forceDisableStreamUseCasesForCurrentOpen = false
     private var isZslControlSupported: Boolean? = null
     private var availableCaptureRequestKeyNames: Set<String>? = null
     private var availableAeModes: IntArray = intArrayOf()
@@ -2558,6 +2560,7 @@ class Camera2Controller(private val context: Context) {
     private fun openCameraNow(request: CameraOpenRequest) {
         val surfaceTexture = request.surfaceTexture
         val preserveVideoRecording = request.preserveVideoRecording
+        forceDisableStreamUseCasesForCurrentOpen = false
         clearPointFocusState()
         val openGeneration = ++cameraOpenGeneration
 
@@ -2632,17 +2635,11 @@ class Camera2Controller(private val context: Context) {
                 // 更新硬件能力缓存
                 val capabilities =
                     openCharacteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    isStreamUseCaseSupported = capabilities.contains(
-                        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_STREAM_USE_CASE
-                    )
-                    availableStreamUseCases = openCharacteristics.get(
-                        CameraCharacteristics.SCALER_AVAILABLE_STREAM_USE_CASES
-                    ) ?: longArrayOf()
-                } else {
-                    isStreamUseCaseSupported = false
-                    availableStreamUseCases = longArrayOf()
-                }
+                // Stream-use-case support is resolved after the selected physical output camera
+                // is known. A logical camera's capabilities must not be applied to a physical
+                // ultra-wide output.
+                isStreamUseCaseSupported = false
+                availableStreamUseCases = longArrayOf()
                 var capabilityCameraId = outputPhysicalCameraId ?: openCameraId
                 val capabilityCharacteristics = if (capabilityCameraId == openCameraId) {
                     openCharacteristics
@@ -2662,6 +2659,21 @@ class Camera2Controller(private val context: Context) {
                         openCharacteristics
                     }
                 }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    val outputCapabilities = capabilityCharacteristics.get(
+                        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES
+                    ) ?: intArrayOf()
+                    isStreamUseCaseSupported = outputCapabilities.contains(
+                        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_STREAM_USE_CASE
+                    )
+                    availableStreamUseCases = capabilityCharacteristics.get(
+                        CameraCharacteristics.SCALER_AVAILABLE_STREAM_USE_CASES
+                    ) ?: longArrayOf()
+                } else {
+                    isStreamUseCaseSupported = false
+                    availableStreamUseCases = longArrayOf()
+                }
+
                 realtimeStabilizationCoordinator.configureCamera(
                     cameraId = capabilityCameraId,
                     characteristics = capabilityCharacteristics,
@@ -2757,10 +2769,39 @@ class Camera2Controller(private val context: Context) {
                         (outputPhysicalCameraId?.let {
                             !isPhysicalOutputProfileFailed(it, ImageFormat.YCBCR_P010)
                         } ?: true)
-                val resolvedVideoPreviewSize = refreshVideoCapabilities(openCharacteristics)
+                val resolvedVideoPreviewSize = refreshVideoCapabilities(
+                    if (captureMode == CaptureMode.VIDEO) capabilityCharacteristics else openCharacteristics
+                )
                 previewSize = when (captureMode) {
                     CaptureMode.VIDEO -> resolvedVideoPreviewSize
                     CaptureMode.PHOTO -> CameraUtils.getFixedPreviewSize(openCharacteristics, _state.value.aspectRatio)
+                }
+
+                if (captureMode == CaptureMode.VIDEO && preserveVideoRecording && videoRecorder.isRecording()) {
+                    val currentVideoState = _state.value
+                    val recordingInputSize = currentVideoState.videoCapabilities.resolveCameraInputSize(
+                        requestedResolution = currentVideoState.videoConfig.resolution,
+                        enhancedStabilization = videoRecorder.usesEnhancedStabilizationInput,
+                        fallback = previewSize,
+                    )
+                    val recordingSensorOrientation = capabilityCharacteristics.get(
+                        CameraCharacteristics.SENSOR_ORIENTATION
+                    ) ?: cachedSensorOrientation
+                    val recordingTimestampSource = capabilityCharacteristics.get(
+                        CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE
+                    ) ?: CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_UNKNOWN
+                    val rebound = videoRecorder.updateCameraInput(
+                        size = recordingInputSize,
+                        sensorOrientationDegrees = recordingSensorOrientation,
+                        cameraTimestampSource = recordingTimestampSource,
+                        flipEncodedFrame = isCurrentCameraFrontFacing() && mirrorFrontCameraEnabled,
+                    )
+                    PLog.i(
+                        TAG,
+                        "Lens-switch recording input: size=${recordingInputSize.width}x${recordingInputSize.height}, " +
+                            "sensorOrientation=$recordingSensorOrientation, rebound=$rebound, " +
+                            "physicalOutput=$outputPhysicalCameraId",
+                    )
                 }
                 surfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height)
 
@@ -3308,7 +3349,9 @@ class Camera2Controller(private val context: Context) {
                         add(
                             createOutputConfiguration(
                                 surface,
-                                if (yuvRecordingInput) {
+                                if (forceDisableStreamUseCasesForCurrentOpen) {
+                                    null
+                                } else if (yuvRecordingInput) {
                                     CameraMetadata.SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_RECORD.toLong()
                                 } else {
                                     CameraMetadata.SCALER_AVAILABLE_STREAM_USE_CASES_PREVIEW.toLong()
@@ -3319,7 +3362,8 @@ class Camera2Controller(private val context: Context) {
                             add(
                                 createOutputConfiguration(
                                     it,
-                                    CameraMetadata.SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_RECORD.toLong(),
+                                    if (forceDisableStreamUseCasesForCurrentOpen) null else
+                                        CameraMetadata.SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_RECORD.toLong(),
                                 )
                             )
                         }
@@ -3355,6 +3399,9 @@ class Camera2Controller(private val context: Context) {
                                 return
                             }
                             if (retryPreviewSessionWithoutPhysicalOutput("video configure failed", openGeneration)) {
+                                return
+                            }
+                            if (retryPreviewSessionWithoutStreamUseCases("video configure failed", openGeneration)) {
                                 return
                             }
                             handlePreviewSessionFailure("video configure failed", openGeneration)
@@ -3460,6 +3507,11 @@ class Camera2Controller(private val context: Context) {
             ) {
                 return
             }
+            if (captureMode == CaptureMode.VIDEO &&
+                retryPreviewSessionWithoutStreamUseCases("create session illegal state: ${e.message}", openGeneration)
+            ) {
+                return
+            }
             handlePreviewSessionFailure("create session illegal state", openGeneration, e)
         } catch (e: Exception) {
             PLog.w(TAG, "Failed to create preview session", e)
@@ -3475,6 +3527,11 @@ class Camera2Controller(private val context: Context) {
                     "create session exception: ${e.message}",
                     openGeneration
                 )
+            ) {
+                return
+            }
+            if (captureMode == CaptureMode.VIDEO &&
+                retryPreviewSessionWithoutStreamUseCases("create session exception: ${e.message}", openGeneration)
             ) {
                 return
             }
@@ -3671,6 +3728,28 @@ class Camera2Controller(private val context: Context) {
         }
     }
 
+    private fun retryPreviewSessionWithoutStreamUseCases(
+        reason: String,
+        openGeneration: Long,
+    ): Boolean {
+        if (openGeneration != cameraOpenGeneration ||
+            forceDisableStreamUseCasesForCurrentOpen ||
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            !isStreamUseCaseSupported
+        ) {
+            return false
+        }
+        val hasApplicableUseCase =
+            availableStreamUseCases.contains(CameraMetadata.SCALER_AVAILABLE_STREAM_USE_CASES_PREVIEW.toLong()) ||
+                availableStreamUseCases.contains(CameraMetadata.SCALER_AVAILABLE_STREAM_USE_CASES_VIDEO_RECORD.toLong())
+        if (!hasApplicableUseCase) return false
+
+        forceDisableStreamUseCasesForCurrentOpen = true
+        PLog.w(TAG, "Retrying video capture session without stream-use-case metadata: $reason")
+        createPreviewSession(openGeneration = openGeneration)
+        return true
+    }
+
     private fun retryPreviewSessionWithoutVendorSessionParameters(
         reason: String,
         openGeneration: Long
@@ -3735,6 +3814,9 @@ class Camera2Controller(private val context: Context) {
                     "reason=$reason"
         )
         activeOutputPhysicalCameraId = null
+        // The previously selected physical sensor's stream-use-case list no longer applies
+        // to the logical output. Use plain OutputConfigurations for this retry.
+        forceDisableStreamUseCasesForCurrentOpen = true
         createPreviewSession(openGeneration = openGeneration)
         return true
     }
