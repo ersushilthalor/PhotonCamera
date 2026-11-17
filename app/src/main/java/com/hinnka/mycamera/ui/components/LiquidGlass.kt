@@ -68,12 +68,12 @@ data class LiquidGlassStyle(
     val refractionAmount: Dp = 48.dp,
     val saturation: Float = 1.5f,
     // Upstream glass surface treatment: black at 5%.
-    val tint: Color = Color(0x0D000000),
+    val tint: Color = Color.Black,
     // Highlight.Default: .5dp inner stroke, .25dp mask blur, white at .5 alpha, additive.
     val highlightWidth: Dp = 0.5.dp,
     val highlightBlur: Dp = 0.25.dp,
-    val highlightAlpha: Float = 0.5f,
-    val fallbackColor: Color = Color(0xF0141414),
+    val highlightAlpha: Float = 0f,
+    val fallbackColor: Color = Color.Black,
 )
 
 /** Backdrop captured by [liquidGlassBackdropSource] and sampled by [LiquidGlassSurface]. */
