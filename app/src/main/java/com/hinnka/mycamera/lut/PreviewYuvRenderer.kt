@@ -2,7 +2,6 @@ package com.hinnka.mycamera.lut
 
 import android.hardware.DataSpace
 import android.media.Image
-import android.opengl.EGL14
 import android.opengl.GLES11Ext
 import android.opengl.GLES30
 import android.opengl.GLES31
@@ -80,8 +79,11 @@ internal class PreviewYuvRenderer(private val tag: String, private val timing: V
                     leaseTransferred = true
                 } else {
                     // Non-recording callers retain the original synchronous ownership contract.
-                    imported.fence.await()
-                    releaseImportedSample(imported)
+                    try {
+                        imported.fence.await()
+                    } finally {
+                        releaseImportedSample(imported)
+                    }
                 }
                 return outputTextureId
             }
