@@ -7580,7 +7580,7 @@ class Camera2Controller(private val context: Context) {
         dualCaptureRecordSurface = videoRecorder.dualCaptureInputSurface
         if (dualCaptureRecordSurface == null) {
             onCameraError?.invoke(-1, "Dual Capture encoder input could not be created.", false)
-            stopVideoRecording()
+            videoRecorder.forceStop()
             return
         }
         createDualCaptureSession()
@@ -7709,7 +7709,13 @@ class Camera2Controller(private val context: Context) {
             videoRecordingState = VideoRecordingState(isRecording = true, elapsedMs = 0L)
         )
         videoRecordingPausedMs = 0L
-        if (dualCaptureEnabled) refreshDualCaptureRecordingTarget()
+        if (dualCaptureEnabled) {
+            refreshDualCaptureRecordingTarget()
+            if (dualCaptureRecordSurface == null) {
+                videoRecorder.forceStop()
+                return
+            }
+        }
         createPreviewSession(openGeneration = cameraOpenGeneration)
     }
 

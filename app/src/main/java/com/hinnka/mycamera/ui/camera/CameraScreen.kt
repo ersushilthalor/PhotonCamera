@@ -1571,6 +1571,7 @@ fun CameraScreen(
                                         factory = { androidContext ->
                                             TextureView(androidContext).apply {
                                                 surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                                                    private var producerTransformApplied = false
                                                     override fun onSurfaceTextureAvailable(
                                                         surface: SurfaceTexture,
                                                         width: Int,
@@ -1605,10 +1606,13 @@ fun CameraScreen(
                                                     }
 
                                                     override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
-                                                        updateDualCaptureTextureTransform(
-                                                            latestDualCaptureStreamSize.value,
-                                                            latestDualCaptureSensorOrientation.value,
-                                                        )
+                                                        if (!producerTransformApplied) {
+                                                            producerTransformApplied = true
+                                                            updateDualCaptureTextureTransform(
+                                                                latestDualCaptureStreamSize.value,
+                                                                latestDualCaptureSensorOrientation.value,
+                                                            )
+                                                        }
                                                     }
                                                 }
                                             }
