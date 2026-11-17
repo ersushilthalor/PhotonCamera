@@ -2484,7 +2484,8 @@ class Camera2Controller(private val context: Context) {
                 snapshot.config.resolution
             ]
             if (enhancedFallbackMode == null) {
-                PLog.i(TAG, "EIS+ capability accepted: resolution=${resolvedConfig.resolution.displayName}, " +
+                PLog.i(TAG, "EIS+ capability accepted: facing=${resolvedCharacteristics.get(CameraCharacteristics.LENS_FACING)}, " +
+                    "resolution=${resolvedConfig.resolution.displayName}, " +
                     "fps=${resolvedConfig.fps.fps}, yuvInput=$enhancedInput")
             } else {
                 val reason = when {
@@ -2493,7 +2494,8 @@ class Camera2Controller(private val context: Context) {
                     enhancedInput == null -> "missing YUV output for the selected resolution"
                     else -> "requested stabilization mode unavailable"
                 }
-                PLog.e(TAG, "EIS+ capability rejected: resolution=${resolvedConfig.resolution.displayName}, " +
+                PLog.e(TAG, "EIS+ capability rejected: facing=${resolvedCharacteristics.get(CameraCharacteristics.LENS_FACING)}, " +
+                    "resolution=${resolvedConfig.resolution.displayName}, " +
                     "fps=${resolvedConfig.fps.fps}, yuvInput=$enhancedInput, reason=$reason")
             }
         }
@@ -2667,7 +2669,8 @@ class Camera2Controller(private val context: Context) {
                 )
                 if (_state.value.captureMode == CaptureMode.PHOTO &&
                     _state.value.photoPreviewStabilizationEnabled &&
-                    !realtimeStabilizationCoordinator.isCurrentCameraSupported
+                    (isCurrentCameraFrontFacing() ||
+                        !realtimeStabilizationCoordinator.isCurrentCameraSupported)
                 ) {
                     PLog.e(
                         TAG,
@@ -7157,7 +7160,8 @@ class Camera2Controller(private val context: Context) {
 
     fun setPhotoPreviewStabilizationEnabled(enabled: Boolean) {
         if (enabled && cameraDevice != null &&
-            !realtimeStabilizationCoordinator.isCurrentCameraSupported
+            (isCurrentCameraFrontFacing() ||
+                !realtimeStabilizationCoordinator.isCurrentCameraSupported)
         ) {
             if (_state.value.photoPreviewStabilizationEnabled) {
                 _state.value = _state.value.copy(
@@ -7364,7 +7368,6 @@ class Camera2Controller(private val context: Context) {
             state.captureMode == CaptureMode.VIDEO &&
             VideoStabilizationMode.ENHANCED in
                 state.videoCapabilities.availableStabilizationModes &&
-            !isCurrentCameraFrontFacing() &&
             realtimeStabilizationCoordinator.isCurrentCameraSupported
     }
 
@@ -7372,6 +7375,7 @@ class Camera2Controller(private val context: Context) {
         val state = _state.value
         return when (state.captureMode) {
             CaptureMode.PHOTO -> state.photoPreviewStabilizationEnabled &&
+                !isCurrentCameraFrontFacing() &&
                 realtimeStabilizationCoordinator.isCurrentCameraSupported
             CaptureMode.VIDEO -> shouldUseVideoEnhancedStabilization()
         }

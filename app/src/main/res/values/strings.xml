@@ -214,7 +214,7 @@
     <string name="settings_video_lock_lens">Lock Lens</string>
     <string name="settings_video_lock_lens_description">Prevent zooming from switching cameras while video is recording.</string>
     <string name="settings_video_stabilization_default">Default Video Stabilization</string>
-    <string name="settings_video_stabilization_default_description">Choose the stabilization mode used when video mode starts. EIS+ uses gyro-driven rolling-shutter correction on rear cameras.</string>
+    <string name="settings_video_stabilization_default_description">Choose the stabilization mode used when video mode starts. EIS+ uses gyro-driven rolling-shutter correction on supported front and rear cameras.</string>
     <string name="settings_video_stabilization_mode_off">Off</string>
     <string name="settings_video_stabilization_mode_eis">Electronic (EIS)</string>
     <string name="settings_video_stabilization_mode_ois">Optical (OIS)</string>

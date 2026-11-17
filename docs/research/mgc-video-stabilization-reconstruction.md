@@ -786,7 +786,7 @@ Photon 正式路径只编译 clean-room 重建源码，构建产物中不存在 
 
 启用条件分成两个互不依赖的开关：
 
-- **视频增强防抖**：视频防抖模式选择 `EIS+`、普通视频录制、后置相机、1080p、30 fps、存在 Gyro，且 Camera2 时间戳源为 `REALTIME`。`EIS+` 与顶栏的 `OFF/EIS/OIS` 共用同一模式状态，设置页用于选择默认模式；选择 `EIS+` 会同步切换到 1080p/30 fps。HAL EIS 和 OIS 始终先请求关闭；只有 HAL 忽略 OIS OFF 时才融合逐时刻镜头内参或 OIS 位移。OIS 无法关闭且又没有连续校正数据时，EIS+退出并提示不可用。独立 `OIS` 模式仍由 HAL 控制。
+- **视频增强防抖**：视频防抖模式选择 `EIS+`、普通视频录制、前置或后置相机、1080p、30 fps、存在 Gyro、有效镜头标定，且 Camera2 时间戳源为 `REALTIME`。前置相机使用 Native engine 的 front-facing 坐标模式及传感器方向映射；两种镜头方向都必须通过运行时 HAL 冲突检测。 `EIS+` 与顶栏的 `OFF/EIS/OIS` 共用同一模式状态，设置页用于选择默认模式；选择 `EIS+` 会同步切换到 1080p/30 fps。HAL EIS 和 OIS 始终先请求关闭；只有 HAL 忽略 OIS OFF 时才融合逐时刻镜头内参或 OIS 位移。若 HAL 持续报告硬件稳定仍在运行，或 OIS 无法关闭且没有连续校正数据，EIS+退出并提示不可用。独立 `OIS` 模式仍由 HAL 控制。
 - **强度与裁切**：默认值按 `oeq.l()` 恢复为 `1.0`。profile 7 同样走 method-4 look-ahead 与 outer full-grid 可行性约束；用户强度只进入该已恢复的滤波状态，不改 Camera2 zoom、焦距矩阵，也不另造 `safeStrength`。
 - **照片预览防抖**：开关开启、照片模式、后置相机、存在 Gyro，且 Camera2 时间戳源为 `REALTIME`。它只进入 `LutRenderer` 的首个 OES pass，不参与静态照片请求或照片编码。
 

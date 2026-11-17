@@ -294,7 +294,8 @@ class RealtimeStabilizationCoordinator(context: Context) {
             val current = calibration
             return !halStabilizationConflictDetected &&
                 isGyroscopeAvailable && current != null &&
-                current.lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+                (current.lensFacing == CameraCharacteristics.LENS_FACING_BACK ||
+                    current.lensFacing == CameraCharacteristics.LENS_FACING_FRONT) &&
                 current.timestampSource ==
                 CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
         }
@@ -311,7 +312,8 @@ class RealtimeStabilizationCoordinator(context: Context) {
         val activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
         val physicalSize = characteristics.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
         return isGyroscopeAvailable && activeArray != null && physicalSize != null &&
-            lensFacing == CameraCharacteristics.LENS_FACING_BACK &&
+            (lensFacing == CameraCharacteristics.LENS_FACING_BACK ||
+                lensFacing == CameraCharacteristics.LENS_FACING_FRONT) &&
             timestampSource == CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
     }
 
