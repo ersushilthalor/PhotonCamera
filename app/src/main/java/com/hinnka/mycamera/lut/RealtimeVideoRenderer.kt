@@ -95,7 +95,8 @@ class RealtimeVideoRenderer(
     private val filmGrainAmount: Float
         get() = layers.lastOrNull { it.params.filmGrain > 0.001f }?.params?.filmGrain ?: 0f
     private val finalFilmGrainEnabled: Boolean
-        get() = filmGrainAmount > 0.001f &&
+        get() = spatialEffectsAllowed &&
+            filmGrainAmount > 0.001f &&
             encoderColorConfig.pipeline != VideoEncodedColorPipeline.CUSTOM_LOG
     // Log 录制保留后期空间：柔光与高光扩散只作用于监看画面，不烘焙进编码。
     // This renderer is the real-time encoder path: avoid extra full-resolution spatial passes.
