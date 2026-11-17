@@ -3400,9 +3400,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         targetCamera?.let { camera ->
             setZoomRatioForCamera(camera.defaultVisibleZoomRatio(), camera.cameraId)
         }
-        reopenCamera(
-            preserveVideoRecording = true
-        )
+        if (!cameraController.canSwitchLensWithoutReopen(cameraId)) {
+            reopenCamera(preserveVideoRecording = true)
+        } else {
+            PLog.i(TAG, "Video-safe logical lens handoff without reopening camera: $cameraId")
+        }
     }
 
     fun switchToLensAndSetZoomRatio(cameraId: String, ratio: Float) {
@@ -3413,9 +3415,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         syncVendorCaptureSettingsToController()
         cameraController.switchToCameraId(cameraId)
         setZoomRatioForCamera(ratio, cameraId)
-        reopenCamera(
-            preserveVideoRecording = true
-        )
+        if (!cameraController.canSwitchLensWithoutReopen(cameraId)) {
+            reopenCamera(preserveVideoRecording = true)
+        } else {
+            PLog.i(TAG, "Video-safe logical zoom-stop handoff without reopening camera: $cameraId")
+        }
     }
 
     /**
