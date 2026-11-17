@@ -1538,7 +1538,7 @@
     <string name="settings_video_nr_yuv_description">App processing does not support High quality noise reduction. Fast is used instead when High quality is selected.</string>
     <string name="settings_oppo_super_stabilization_yuv_disabled">Unavailable with App processing. Switch to System processing to use Ultra Steady.</string>
     <string name="settings_video_performance_mode">Performance engine</string>
-    <string name="settings_video_performance_mode_description">Balance recording responsiveness, frame continuity and processing quality. The selected recording resolution and FPS are never changed automatically.</string>
+    <string name="settings_video_performance_mode_description">Choose how recording handles sustained processing load. Performance favors low latency; Quality retains a deeper frame queue. The selected recording resolution and FPS are never changed automatically.</string>
     <string name="settings_video_performance_auto">Auto</string>
     <string name="settings_video_performance_performance">Performance</string>
     <string name="settings_video_performance_quality">Quality</string>

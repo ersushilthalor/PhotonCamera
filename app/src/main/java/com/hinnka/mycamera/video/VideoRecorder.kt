@@ -972,7 +972,7 @@ class VideoRecorder(
                     yuvFrame?.close()
                     continue
                 }
-                val renderStartNs = SystemClock.elapsedRealtimeNanos()
+                val renderStartNs = SystemClock.uptimeNanos()
                 val presentationTimeNs = yuvFrame.use { frame ->
                     videoRenderer.renderLatestFrame(
                         mapPresentationTimeNs = ::mapCameraTimestampToBoottimeNs,
@@ -980,7 +980,7 @@ class VideoRecorder(
                     )
                 } ?: continue
                 establishTimelineOrigin(presentationTimeNs / 1_000L)
-                val renderCostNs = (SystemClock.elapsedRealtimeNanos() - renderStartNs).coerceAtLeast(0L)
+                val renderCostNs = (SystemClock.uptimeNanos() - renderStartNs).coerceAtLeast(0L)
                 val renderCostMs = renderCostNs / 1_000_000L
                 statsAcceptedFrames += 1
                 statsRenderedFrames += 1

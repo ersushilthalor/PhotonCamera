@@ -52,14 +52,14 @@ object PhotonPerformanceManager {
     private var recording = false
     private var targetFps = 30
     private var targetFrameDurationNs = NANOS_PER_SECOND / 30L
-    private var hintSession: PerformanceHintManager.Session? = null
+    // Keep API-31 types isolated so Android 11 can load this manager safely.
+    private var hintSession: Any? = null
     private var powerManager: PowerManager? = null
     private var lastSampleElapsedMs = 0L
     private var lastProcessCpuTimeMs = 0L
     private var inputFramesInWindow = 0
     private var renderedFramesInWindow = 0
     private var droppedFramesTotal = 0L
-    private var droppedFramesInWindow = 0L
     private var renderTimeTotalNs = 0L
     private var averageRenderMs = 0f
 
@@ -85,12 +85,15 @@ object PhotonPerformanceManager {
             inputFramesInWindow = 0
             renderedFramesInWindow = 0
             droppedFramesTotal = 0L
-            droppedFramesInWindow = 0L
             renderTimeTotalNs = 0L
             averageRenderMs = 0f
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                hintSession = createHintSession(context)
+                hintSession = Api31.createHintSession(
+                    context = context,
+                    threadId = Process.myTid(),
+                    targetDurationNs = resolveTargetWorkDurationLocked(),
+                )
             }
             val thermal = currentThermalStatusLocked()
             mutableSnapshot.value = PhotonPerformanceSnapshot(
@@ -100,18 +103,6 @@ object PhotonPerformanceManager {
                 performanceHintActive = hintSession != null,
             )
         }
-    }
-
-    @RequiresApi(Build.VERSION_CODES.S)
-    private fun createHintSession(context: Context): PerformanceHintManager.Session? {
-        return runCatching {
-            val manager = context.getSystemService(PerformanceHintManager::class.java)
-                ?: return null
-            manager.createHintSession(
-                intArrayOf(Process.myTid()),
-                resolveTargetWorkDurationLocked(),
-            )
-        }.getOrNull()
     }
 
     fun recordInputFrame() {
@@ -127,7 +118,9 @@ object PhotonPerformanceManager {
         synchronized(lock) {
             if (!recording) return
             val durationNs = actualWorkDurationNs.coerceAtLeast(1L)
-            runCatching { hintSession?.reportActualWorkDuration(durationNs) }
+            hintSession?.let { session ->
+                runCatching { Api31.reportActualWorkDuration(session, durationNs) }
+            }
             renderedFramesInWindow += 1
             renderTimeTotalNs += durationNs
             publishSampleIfDueLocked()
@@ -138,7 +131,6 @@ object PhotonPerformanceManager {
         synchronized(lock) {
             if (!recording) return
             droppedFramesTotal += 1L
-            droppedFramesInWindow += 1L
             mutableSnapshot.value = mutableSnapshot.value.copy(droppedFrames = droppedFramesTotal)
         }
     }
@@ -211,7 +203,6 @@ object PhotonPerformanceManager {
 
         inputFramesInWindow = 0
         renderedFramesInWindow = 0
-        droppedFramesInWindow = 0L
         renderTimeTotalNs = 0L
         lastProcessCpuTimeMs = processCpuNowMs
         lastSampleElapsedMs = nowMs
@@ -237,12 +228,37 @@ object PhotonPerformanceManager {
 
     private fun updateHintTargetLocked() {
         val session = hintSession ?: return
-        runCatching { session.updateTargetWorkDuration(resolveTargetWorkDurationLocked()) }
-            .onFailure { closeHintSessionLocked() }
+        runCatching {
+            Api31.updateTargetWorkDuration(session, resolveTargetWorkDurationLocked())
+        }.onFailure { closeHintSessionLocked() }
     }
 
     private fun closeHintSessionLocked() {
-        runCatching { hintSession?.close() }
+        hintSession?.let { session ->
+            runCatching { Api31.close(session) }
+        }
         hintSession = null
     }
+
+    /** API 31+ calls live here to keep the outer singleton loadable on API 30. */
+    @RequiresApi(Build.VERSION_CODES.S)
+    private object Api31 {
+        fun createHintSession(context: Context, threadId: Int, targetDurationNs: Long): Any? {
+            val manager = context.getSystemService(PerformanceHintManager::class.java) ?: return null
+            return manager.createHintSession(intArrayOf(threadId), targetDurationNs)
+        }
+
+        fun reportActualWorkDuration(session: Any, durationNs: Long) {
+            (session as PerformanceHintManager.Session).reportActualWorkDuration(durationNs)
+        }
+
+        fun updateTargetWorkDuration(session: Any, targetDurationNs: Long) {
+            (session as PerformanceHintManager.Session).updateTargetWorkDuration(targetDurationNs)
+        }
+
+        fun close(session: Any) {
+            (session as PerformanceHintManager.Session).close()
+        }
+    }
+
 }
