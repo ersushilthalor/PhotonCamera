@@ -2124,6 +2124,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         // 加载用户偏好设置
         viewModelScope.launch {
+            // Video-only build: normalize settings saved by older photo-capable versions before
+            // Camera2 starts, so a previous RAW/night/Live Photo selection cannot be restored.
+            userPreferencesRepository.update {
+                captureMode = CaptureMode.VIDEO
+                useRaw = false
+                nightVisionMode = false
+                useLivePhoto = false
+                useMultipleExposure = false
+                phantomMode = false
+                phantomButtonHidden = true
+            }
             val prefs = userPreferencesRepository.userPreferences.firstOrNull()
             if (prefs != null) {
                 cameraController.setCaptureSettingsRetention(
