@@ -3303,8 +3303,26 @@ class Camera2Controller(private val context: Context) {
                 val sessionConfig = SessionConfiguration(
                     sessionOperatingMode,
                     buildList {
-                        add(createOutputConfiguration(surface))
-                        videoSurface?.let { add(createOutputConfiguration(it)) }
+                        val yuvRecordingInput =
+                            _state.value.videoConfig.effectiveInputMode == VideoInputMode.YUV
+                        add(
+                            createOutputConfiguration(
+                                surface,
+                                if (yuvRecordingInput) {
+                                    OutputConfiguration.STREAM_USE_CASE_VIDEO_RECORD
+                                } else {
+                                    OutputConfiguration.STREAM_USE_CASE_PREVIEW
+                                },
+                            )
+                        )
+                        videoSurface?.let {
+                            add(
+                                createOutputConfiguration(
+                                    it,
+                                    OutputConfiguration.STREAM_USE_CASE_VIDEO_RECORD,
+                                )
+                            )
+                        }
                     },
                     Executor { handler.post(it) },
                     object : CameraCaptureSession.StateCallback() {
@@ -3721,7 +3739,10 @@ class Camera2Controller(private val context: Context) {
         return true
     }
 
-    private fun createOutputConfiguration(surface: Surface): OutputConfiguration {
+    private fun createOutputConfiguration(
+        surface: Surface,
+        streamUseCase: Long? = null,
+    ): OutputConfiguration {
         return OutputConfiguration(surface).apply {
             activeOutputPhysicalCameraId?.let { physicalCameraId ->
                 setPhysicalCameraId(physicalCameraId)
@@ -3730,6 +3751,31 @@ class Camera2Controller(private val context: Context) {
                     "OutputConfiguration bound to physicalCameraId=$physicalCameraId " +
                             "(openCameraId=$activeOpenCameraId)"
                 )
+            }
+
+            if (streamUseCase != null) {
+                if (
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    isStreamUseCaseSupported &&
+                    availableStreamUseCases.contains(streamUseCase)
+                ) {
+                    try {
+                        setStreamUseCase(streamUseCase)
+                        PLog.d(TAG, "Applied Camera2 stream use case=$streamUseCase")
+                    } catch (error: Exception) {
+                        // Some HALs advertise StreamUseCase but reject a particular output.
+                        // Keep the regular OutputConfiguration as a safe fallback.
+                        PLog.w(
+                            TAG,
+                            "Stream use case=$streamUseCase rejected; using default: ${error.message}",
+                        )
+                    }
+                } else {
+                    PLog.d(
+                        TAG,
+                        "Stream use case=$streamUseCase unavailable; using default OutputConfiguration",
+                    )
+                }
             }
         }
     }
