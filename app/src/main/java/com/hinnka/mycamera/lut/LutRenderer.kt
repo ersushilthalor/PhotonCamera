@@ -1471,6 +1471,7 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
                 fboId = 0,
                 width = viewportWidth,
                 height = viewportHeight,
+                targetMvpMatrix = buildPreviewDisplayMvpMatrix(mvpMatrix),
                 suppressBaselineLayer = suppressBaselineLayerForVideoLog
             )
             capturePendingPreviewFrames(
@@ -1583,7 +1584,15 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
         // 或者需要 Identity
         val identity = FloatArray(16)
         Matrix.setIdentityM(identity, 0)
-        GLES30.glUniformMatrix4fv(uCopyMVPMatrixLoc, 1, false, targetMvpMatrix ?: identity, 0)
+        val baseMvpMatrix = targetMvpMatrix ?: identity
+        val screenMvpMatrix = if (fboId == 0) {
+            // Framebuffer 0 is the actual viewfinder surface. Never mirror offscreen
+            // capture, metering, stabilization, or recording render targets.
+            buildPreviewDisplayMvpMatrix(baseMvpMatrix)
+        } else {
+            baseMvpMatrix
+        }
+        GLES30.glUniformMatrix4fv(uCopyMVPMatrixLoc, 1, false, screenMvpMatrix, 0)
 
         // stMatrix 也设为 Identity，因为 FBO 纹理坐标是标准的
         GLES30.glUniformMatrix4fv(uCopySTMatrixLoc, 1, false, identity, 0)
@@ -2279,7 +2288,19 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
             val output = highlightDiffusionGl.renderToTexture(source, width, height, bloom, redHalation, ::drawSimpleQuad)
             drawFboToScreen(targetFboId, width, height, output?.textureId ?: source)
         } else if (compositeEnabled) {
-            drawPostProcessComposite(targetFboId, width, height, sourceTextureId)
+            if (targetFboId == 0 && lensFacing == 0 /* CameraCharacteristics.LENS_FACING_FRONT */) {
+                // Keep the color/effect composition unmirrored, then mirror only its final
+                // presentation to the viewfinder. Capture and recording consumers stay unchanged.
+                setupPostProcessScratchFbo(width, height)
+                if (postProcessScratchFboId != 0 && postProcessScratchTextureId != 0) {
+                    drawPostProcessComposite(postProcessScratchFboId, width, height, sourceTextureId)
+                    drawFboToScreen(targetFboId, width, height, postProcessScratchTextureId)
+                } else {
+                    drawPostProcessComposite(targetFboId, width, height, sourceTextureId)
+                }
+            } else {
+                drawPostProcessComposite(targetFboId, width, height, sourceTextureId)
+            }
         } else {
             drawFboToScreen(targetFboId, width, height, sourceTextureId)
         }
@@ -2815,6 +2836,26 @@ class LutRenderer(context: Context) : GLSurfaceView.Renderer {
 //            TAG,
 //            "MVP matrix updated: viewport=${viewportWidth}x${viewportHeight}, preview=${previewWidth}x${previewHeight}"
 //        )
+    }
+
+    /**
+     * Applies the front-camera selfie mirror in final viewfinder clip space.
+     * The source matrix and all offscreen/capture render paths remain unmodified.
+     */
+    private fun buildPreviewDisplayMvpMatrix(baseMatrix: FloatArray): FloatArray {
+        if (lensFacing != 0 /* CameraCharacteristics.LENS_FACING_FRONT */) {
+            return baseMatrix
+        }
+
+        val horizontalMirror = FloatArray(16).also {
+            Matrix.setIdentityM(it, 0)
+            Matrix.scaleM(it, 0, -1f, 1f, 1f)
+        }
+        return FloatArray(16).also {
+            // Left-multiply so the reflection is always horizontal in display space,
+            // regardless of the camera's sensor/calibration rotation.
+            Matrix.multiplyMM(it, 0, horizontalMirror, 0, baseMatrix, 0)
+        }
     }
 
     private fun buildMvpMatrix(targetWidth: Int, targetHeight: Int): FloatArray {
