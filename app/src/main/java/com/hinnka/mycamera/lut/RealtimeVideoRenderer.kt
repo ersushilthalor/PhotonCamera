@@ -41,13 +41,13 @@ import kotlin.math.max
  */
 class RealtimeVideoRenderer(
     context: Context,
-    private val cameraInputSize: Size,
+    cameraInputSize: Size,
     private val encoderOutputSize: Size,
-    private val sensorOrientationDegrees: Int,
+    sensorOrientationDegrees: Int,
     colorLayers: List<VideoColorEffectLayer>,
     private val videoLogProfile: VideoLogProfile,
-    private val mirrorHorizontally: Boolean,
-    private val mirrorVertically: Boolean,
+    @Volatile private var mirrorHorizontally: Boolean,
+    @Volatile private var mirrorVertically: Boolean,
     private val encoderColorConfig: VideoEncoderColorConfig,
     private val stabilizationCoordinator: RealtimeStabilizationCoordinator?,
     private val enhancedStabilizationEnabled: Boolean,
@@ -131,6 +131,8 @@ class RealtimeVideoRenderer(
     private val fullCropRect = floatArrayOf(0f, 0f, 1f, 1f)
     private var cameraCropRect = fullCropRect
     private var cameraTransformAxesSwapped: Boolean? = null
+    @Volatile private var currentCameraInputSize: Size = cameraInputSize
+    @Volatile private var currentCameraSensorOrientationDegrees: Int = sensorOrientationDegrees
     private val mgcEisPresentationTransform = MgcEisPresentationTransform()
 
     private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
@@ -192,7 +194,7 @@ class RealtimeVideoRenderer(
             cameraTextureId = GlUtils.createOESTexture()
             check(cameraTextureId != 0) { "Cannot create realtime video OES texture" }
             cameraSurfaceTexture = SurfaceTexture(cameraTextureId).apply {
-                setDefaultBufferSize(cameraInputSize.width, cameraInputSize.height)
+                setDefaultBufferSize(currentCameraInputSize.width, currentCameraInputSize.height)
                 setOnFrameAvailableListener(
                     {
                         cameraFramePending.set(true)
@@ -203,8 +205,8 @@ class RealtimeVideoRenderer(
             }
             cameraSurface = Surface(cameraSurfaceTexture)
         } else {
-            check(mgcEisPresentationTransform.captureFromSensorOrientation(sensorOrientationDegrees)) {
-                "Camera reported non-cardinal sensor orientation $sensorOrientationDegrees"
+            check(mgcEisPresentationTransform.captureFromSensorOrientation(currentCameraSensorOrientationDegrees)) {
+                "Camera reported non-cardinal sensor orientation $currentCameraSensorOrientationDegrees"
             }
             updateCameraTransformGeometry(mgcEisPresentationTransform.matrix)
         }
@@ -212,8 +214,8 @@ class RealtimeVideoRenderer(
             stabilizationSession = stabilizationCoordinator?.createSession(
                 useCase = StabilizationUseCase.VIDEO,
                 strength = enhancedStabilizationStrength,
-                frameWidth = cameraInputSize.width,
-                frameHeight = cameraInputSize.height,
+                frameWidth = currentCameraInputSize.width,
+                frameHeight = currentCameraInputSize.height,
                 lookaheadFrames = enhancedStabilizationLookahead,
                 onFrameAvailable = onFrameAvailable,
             )
@@ -221,9 +223,9 @@ class RealtimeVideoRenderer(
         initialized = true
         PLog.i(
             TAG,
-            "Initialized: camera=${cameraInputSize.width}x${cameraInputSize.height}, " +
+            "Initialized: camera=${currentCameraInputSize.width}x${currentCameraInputSize.height}, " +
                 "encoder=${encoderOutputSize.width}x${encoderOutputSize.height}, " +
-                "sensorOrientation=$sensorOrientationDegrees, " +
+                "sensorOrientation=$currentCameraSensorOrientationDegrees, " +
                 "layers=${layers.size}, log=${videoLogProfile.name}, " +
                 "enhancedStabilization=$enhancedStabilizationEnabled, " +
                 "stabilizationStrength=$enhancedStabilizationStrength, " +
@@ -239,6 +241,90 @@ class RealtimeVideoRenderer(
      *
      * @return 写入编码器的帧时间戳（纳秒）；没有有效帧时返回 null。
      */
+    /**
+     * A recording can span multiple physical cameras. Update only the encoder-side mirror
+     * matrix; never recreate the EGL context or encoder surface during a lens switch.
+     */
+    fun updateMirrorTransform(mirrorHorizontally: Boolean, mirrorVertically: Boolean) {
+        if (this.mirrorHorizontally == mirrorHorizontally &&
+            this.mirrorVertically == mirrorVertically
+        ) return
+
+        this.mirrorHorizontally = mirrorHorizontally
+        this.mirrorVertically = mirrorVertically
+        Matrix.setIdentityM(firstPassMvpMatrix, 0)
+        if (mirrorHorizontally || mirrorVertically) {
+            Matrix.scaleM(
+                firstPassMvpMatrix,
+                0,
+                if (mirrorHorizontally) -1f else 1f,
+                if (mirrorVertically) -1f else 1f,
+                1f,
+            )
+        }
+        PLog.i(
+            TAG,
+            "Recording mirror transform updated: mirrorH=$mirrorHorizontally, " +
+                "mirrorV=$mirrorVertically",
+        )
+    }
+
+    /**
+     * Keep the encoder output size fixed while refreshing the active camera stream geometry.
+     * Called on the renderer dispatcher so it cannot race a frame being rendered.
+     */
+    fun updateCameraInputSize(
+        size: Size,
+        sensorOrientationDegrees: Int = currentCameraSensorOrientationDegrees,
+    ) {
+        if (size.width <= 0 || size.height <= 0) return
+        currentCameraInputSize = size
+        currentCameraSensorOrientationDegrees = sensorOrientationDegrees
+        cameraSurfaceTexture?.setDefaultBufferSize(size.width, size.height)
+        // Force crop geometry to be recomputed even if the next camera reports the same axis
+        // orientation; its input dimensions or aspect ratio may have changed.
+        cameraTransformAxesSwapped = null
+        PLog.i(
+            TAG,
+            "Camera input geometry refreshed: input=${size.width}x${size.height}, " +
+                "encoder=${encoderOutputSize.width}x${encoderOutputSize.height}, " +
+                "sensorOrientation=$sensorOrientationDegrees",
+        )
+    }
+
+    /**
+     * A camera session replacement can invalidate the active EIS input stream. Rebind the
+     * presentation orientation and restart the existing stabilization session without touching
+     * the encoder lifecycle.
+     */
+    @Synchronized
+    fun restartStabilizationForCameraSwitch(sensorOrientationDegrees: Int) {
+        if (!initialized || !enhancedStabilizationEnabled) return
+
+        currentCameraSensorOrientationDegrees = sensorOrientationDegrees
+        mgcEisPresentationTransform.reset()
+        if (mgcEisPresentationTransform.captureFromSensorOrientation(sensorOrientationDegrees)) {
+            cameraTransformAxesSwapped = null
+            updateCameraTransformGeometry(mgcEisPresentationTransform.matrix)
+        } else {
+            PLog.w(TAG, "Cannot refresh EIS presentation orientation: $sensorOrientationDegrees")
+        }
+
+        sharedRgbProducer?.close()
+        sharedRgbProducer = null
+        val session = stabilizationSession ?: return
+        session.stop()
+        stabilizationSessionStarted = false
+        stabilizationSessionStarted = session.start()
+        if (stabilizationSessionStarted) sharedRgbProducer = sharedEisRgbFrames?.openProducer()
+        PLog.i(
+            TAG,
+            "EIS recording session refreshed after camera switch: " +
+                "sensorOrientation=$sensorOrientationDegrees, started=$stabilizationSessionStarted, " +
+                "cameraSupported=${stabilizationCoordinator?.isCurrentCameraSupported}",
+        )
+    }
+
     fun renderLatestFrame(
         mapPresentationTimeNs: (cameraTimestampNs: Long) -> Long,
         yuvImage: Image? = null,
@@ -458,7 +544,7 @@ class RealtimeVideoRenderer(
 
         cameraTransformAxesSwapped = axesSwapped
         val orientedInputSize = if (axesSwapped) {
-            Size(cameraInputSize.height, cameraInputSize.width)
+            Size(currentCameraInputSize.height, currentCameraInputSize.width)
         } else {
             cameraInputSize
         }
