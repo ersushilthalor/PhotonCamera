@@ -896,11 +896,7 @@ fun CameraScreen(
         val topSafePadding = cameraTopSafePadding()
         val topBarOffset = 0.dp
         val topBarBaseHeight = if (isVideoMode) {
-            VideoTopBarBaseHeight + if (state.videoRecordingState.isRecording) {
-                VideoRecordingLensSwitcherExtraHeight
-            } else {
-                0.dp
-            }
+            VideoTopBarBaseHeight
         } else {
             CameraTopBarBaseHeight
         }
@@ -964,9 +960,6 @@ fun CameraScreen(
                 onLivePhotoToggle = { viewModel.setUseLivePhoto(!state.useLivePhoto) },
                 videoConfig = state.videoConfig,
                 videoCapabilities = state.videoCapabilities,
-                availableCameras = state.availableCameras,
-                currentCameraId = state.currentCameraId,
-                onLensSelect = ::switchToLensWithPreviewTransition,
                 onVideoTorchToggle = { videoTorchEnabled = !state.videoConfig.torchEnabled },
                 onVideoStabilizationModeChange = viewModel::setVideoStabilizationMode,
                 onVideoResolutionClick = {
@@ -2166,23 +2159,52 @@ private fun Controls(
                     },
                 )
 
-                if (state.videoRecordingState.isRecording) {
-                    IconButton(
-                        onClick = { viewModel.captureVideoFrame() },
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = sideControlInset ?: 40.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    PhysicalButton(
+                        onClick = {
+                            if (!state.videoRecordingState.isProcessing) {
+                                onSwitchCameraClick()
+                            }
+                        },
                         modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = sideControlInset ?: 40.dp)
                             .size(CameraControlsLayoutDefaults.SideButtonSize)
-                            .autoRotate()
+                            .autoRotate(),
+                        shape = CircleShape
                     ) {
                         Icon(
-                            imageVector = AppIcons.CameraAlt,
-                            contentDescription = stringResource(R.string.take_photo),
-                            tint = Color.White,
-                            modifier = Modifier.size(32.dp)
+                            imageVector = AppIcons.Cameraswitch,
+                            contentDescription = stringResource(R.string.switch_camera),
+                            tint = Color.White.copy(
+                                alpha = if (state.videoRecordingState.isProcessing) 0.35f else 1f
+                            ),
+                            modifier = Modifier.size(24.dp)
                         )
                     }
 
+                    if (state.videoRecordingState.isRecording) {
+                        IconButton(
+                            onClick = { viewModel.captureVideoFrame() },
+                            modifier = Modifier
+                                .size(CameraControlsLayoutDefaults.SideButtonSize)
+                                .autoRotate()
+                        ) {
+                            Icon(
+                                imageVector = AppIcons.CameraAlt,
+                                contentDescription = stringResource(R.string.take_photo),
+                                tint = Color.White,
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+                    }
+                }
+
+                if (state.videoRecordingState.isRecording) {
                     IconButton(
                         onClick = {
                             if (state.videoRecordingState.isPaused) {
@@ -2202,29 +2224,6 @@ private fun Controls(
                             contentDescription = null,
                             tint = Color.White,
                             modifier = Modifier.size(32.dp)
-                        )
-                    }
-                } else {
-                    PhysicalButton(
-                        onClick = {
-                            if (!state.videoRecordingState.isProcessing) {
-                                onSwitchCameraClick()
-                            }
-                        },
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = sideControlInset ?: 40.dp)
-                            .size(CameraControlsLayoutDefaults.SideButtonSize)
-                            .autoRotate(),
-                        shape = CircleShape
-                    ) {
-                        Icon(
-                            imageVector = AppIcons.Cameraswitch,
-                            contentDescription = stringResource(R.string.switch_camera),
-                            tint = Color.White.copy(
-                                alpha = if (state.videoRecordingState.isProcessing) 0.35f else 1f
-                            ),
-                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
