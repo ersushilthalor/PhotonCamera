@@ -39,7 +39,7 @@ data class PhotonPerformanceSnapshot(
  * PerformanceHintManager when the platform supports it.
  */
 object PhotonPerformanceManager {
-    private const val SAMPLE_INTERVAL_MS = 1_000L
+    private const val SAMPLE_INTERVAL_MS = 2_000L
     private const val NANOS_PER_SECOND = 1_000_000_000L
 
     private val lock = Any()
@@ -89,11 +89,13 @@ object PhotonPerformanceManager {
             averageRenderMs = 0f
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                hintSession = Api31.createHintSession(
-                    context = context,
-                    threadId = Process.myTid(),
-                    targetDurationNs = resolveTargetWorkDurationLocked(),
-                )
+                hintSession = runCatching {
+                    Api31.createHintSession(
+                        context = context,
+                        threadId = Process.myTid(),
+                        targetDurationNs = resolveTargetWorkDurationLocked(),
+                    )
+                }.getOrNull()
             }
             val thermal = currentThermalStatusLocked()
             mutableSnapshot.value = PhotonPerformanceSnapshot(
@@ -109,7 +111,6 @@ object PhotonPerformanceManager {
         synchronized(lock) {
             if (!recording) return
             inputFramesInWindow += 1
-            publishSampleIfDueLocked()
         }
     }
 
