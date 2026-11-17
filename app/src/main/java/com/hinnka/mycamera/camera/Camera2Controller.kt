@@ -3251,10 +3251,10 @@ class Camera2Controller(private val context: Context) {
         }
         val sessionGeneration = ++previewSessionGeneration
         pendingVendorSessionParameterRestart = false
-        val templateType = if (
-            captureMode == CaptureMode.VIDEO &&
-            !useEnhancedStabilization
-        ) {
+        // EIS+ still records a video stream. Keep Camera2 on the RECORD template so
+        // the HAL selects its video-oriented sensor/ISP path for the shared YUV ImageReader.
+        // Algorithmic stabilization explicitly leaves the hardware video/OIS request modes off.
+        val templateType = if (captureMode == CaptureMode.VIDEO) {
             CameraDevice.TEMPLATE_RECORD
         } else {
             CameraDevice.TEMPLATE_PREVIEW
